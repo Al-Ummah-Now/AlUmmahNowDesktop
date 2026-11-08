@@ -24,7 +24,7 @@ try
     for (var page = 0; page < 10 && hls.Length == 0; page++)
     {
         var url = "https://videos.api.qa.alummahnow.net/api/videos?limit=50" + (cursor == null ? "" : "&cursor=" + Uri.EscapeDataString(cursor));
-        using var doc = JsonDocument.Parse(await http.GetStringAsync(url));
+        using var doc = JsonDocument.Parse(await GetWithRetryAsync(http, url));
         foreach (var v in doc.RootElement.GetProperty("data").EnumerateArray())
         {
             if (v.GetProperty("uploadStatus").GetString() == "ready" && v.TryGetProperty("playUrl", out var u) && v.TryGetProperty("duration", out var d) && d.ValueKind == JsonValueKind.Number && d.GetDouble() >= 60)
@@ -226,6 +226,21 @@ app.OnActivate += (_, _) =>
         return false;
     });
 };
+
+static async Task<string> GetWithRetryAsync(HttpClient client, string url)
+{
+    for (var attempt = 1; ; attempt++)
+    {
+        try
+        {
+            return await client.GetStringAsync(url);
+        }
+        catch (HttpRequestException) when (attempt < 4)
+        {
+            await Task.Delay(2000 * attempt);
+        }
+    }
+}
 
 var rc = app.RunWithSynchronizationContext(null);
 return rc != 0 ? rc : Environment.ExitCode;

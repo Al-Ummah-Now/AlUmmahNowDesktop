@@ -11,7 +11,10 @@ Viewer and Studio share one application layer. See `docs/PLAN.md`.
 - Every UI story is bilingual (Arabic default, English equal) with RTL verified. Strings live in
   `src/AlUmmahNow.App/I18n/{en,ar}.json`; a test enforces matching keys.
 - Tests for everything in the shared layer. No UI framework types in shared projects.
-- Small PRs into `main` with green CI; squash merge. Never publish to a store by hand.
+- Small PRs into `main` with green CI. `main` needs the owner's approval: agents never merge and never use `--admin`.
+- Never publish to a store by hand.
+- Commit as `meywd` with the GitHub noreply address; never put a personal email in a command.
+- Each platform has its own workflow file, so parallel branches do not conflict in CI.
 - Out-of-scope findings become GitHub issues labelled `queue`.
 
 ## Commands
