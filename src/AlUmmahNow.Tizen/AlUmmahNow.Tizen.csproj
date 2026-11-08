@@ -1,0 +1,16 @@
+<Project Sdk="Tizen.NET.Sdk/1.1.9">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>tizen50</TargetFramework>
+    <AssemblyName>AlUmmahNow.Tizen</AssemblyName>
+    <RootNamespace>AlUmmahNow.TizenTv</RootNamespace>
+    <!-- Warnings come from the old API surface; shared projects keep warnings as errors. -->
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <TizenCreateTpkOnBuild>true</TizenCreateTpkOnBuild>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Tizen.NET" />
+    <ProjectReference Include="..\AlUmmahNow.App\AlUmmahNow.App.csproj" />
+    <ProjectReference Include="..\AlUmmahNow.CoreBridge\AlUmmahNow.CoreBridge.csproj" />
+  </ItemGroup>
+</Project>
