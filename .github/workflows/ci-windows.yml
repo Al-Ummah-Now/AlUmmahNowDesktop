@@ -1,0 +1,55 @@
+name: CI Windows
+on:
+  push:
+  workflow_dispatch:
+concurrency:
+  group: ci-windows-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Enable Media Foundation (optional feature on Windows Server)
+        continue-on-error: true
+        run: |
+          Install-WindowsFeature Server-Media-Foundation | Format-List
+      - name: Build unpackaged app
+        run: dotnet build src/AlUmmahNow.Windows -c Release -p:Platform=x64
+      - name: Run viewer scenarios (ar and en, home and watch)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force artifacts/windows | Out-Null
+          $exe = Resolve-Path "src/AlUmmahNow.Windows/bin/x64/Release/net9.0-windows10.0.22621.0/win-x64/AlUmmahNow.exe"
+          $video = "ddd1c77b-4833-4d75-b1ce-105a4d083480"
+          $out = (Resolve-Path artifacts/windows).Path
+          ./scripts/windows-scenario.ps1 $exe ar dark home home-ar-dark $out
+          ./scripts/windows-scenario.ps1 $exe en light home home-en-light $out
+          ./scripts/windows-scenario.ps1 $exe ar dark "watch:$video" watch-ar-dark $out
+          ./scripts/windows-scenario.ps1 $exe en light "watch:$video" watch-en-light $out
+          Get-Content artifacts/windows/*.txt
+      - name: Check scenario results and clean exit
+        shell: pwsh
+        run: |
+          foreach ($n in "home-ar-dark","home-en-light","watch-ar-dark","watch-en-light") {
+            if (-not (Select-String -Quiet "RESULT PASS" "artifacts/windows/$n.txt")) { throw "$n failed" }
+            if (Test-Path "artifacts/windows/$n.txt.hang.txt") { throw "$n did not exit" }
+          }
+      - name: Build unsigned MSIX
+        run: dotnet build src/AlUmmahNow.Windows -c Release -p:Platform=x64 -p:BuildMsix=true -p:AppxPackageDir=${{ github.workspace }}/artifacts/msix/
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-screenshots
+          path: artifacts/windows
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-msix
+          path: artifacts/msix
