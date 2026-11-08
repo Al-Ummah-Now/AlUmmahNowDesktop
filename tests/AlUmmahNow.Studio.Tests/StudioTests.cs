@@ -232,6 +232,7 @@ public class EncodeTests
         var req = new EncodeRequest("/tmp/my clip.mov", "/tmp/out.mp4", EncodePreset.Lecture);
         var p = GstPipeline.Build(req, new EncoderChoice("x264enc", EncoderKind.Software));
         Assert.Contains("x264enc bitrate=4000", p);
+        Assert.Contains("format=I420", p);
         Assert.Contains("my%20clip.mov", p);
         Assert.Contains("location=\"/tmp/out.mp4\"", p);
     }

@@ -43,6 +43,7 @@ jobs:
           test "$(cat artifacts/studio/*.log | grep -c 'RESULT PASS')" = 5
           gst-discoverer-1.0 source.mp4.out.mp4 | tee artifacts/studio/discover.txt
           grep -qi 'h.264' artifacts/studio/discover.txt
+          ! grep -qi '4:4:4' artifacts/studio/discover.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:

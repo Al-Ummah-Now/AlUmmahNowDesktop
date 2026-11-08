@@ -199,7 +199,9 @@ public static class GstPipeline
         }
 
         var height = request.Preset.MaxHeight.ToString(CultureInfo.InvariantCulture);
-        var video = $"queue ! videoconvert ! videoscale ! video/x-raw,height=[1,{height}] ! {EncoderElement(encoder, request.Preset.VideoKbps)} ! h264parse";
+        // Mezzanines must be 4:2:0: without this x264 negotiates 4:4:4, which many decoders refuse.
+        var format = encoder.Kind == EncoderKind.Software ? "I420" : "NV12";
+        var video = $"queue ! videoconvert ! videoscale ! video/x-raw,format={format},height=[1,{height}] ! {EncoderElement(encoder, request.Preset.VideoKbps)} ! h264parse";
         return $"uridecodebin uri={src} name=d d. ! {video} ! mp4mux name=m ! filesink location={sink} d. ! {audio} ! m.";
     }
 
