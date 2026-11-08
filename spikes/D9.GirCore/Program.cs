@@ -27,7 +27,7 @@ try
         using var doc = JsonDocument.Parse(await http.GetStringAsync(url));
         foreach (var v in doc.RootElement.GetProperty("data").EnumerateArray())
         {
-            if (v.GetProperty("uploadStatus").GetString() == "ready" && v.TryGetProperty("playUrl", out var u) && v.GetProperty("title").GetString()!.StartsWith("QA "))
+            if (v.GetProperty("uploadStatus").GetString() == "ready" && v.TryGetProperty("playUrl", out var u) && v.TryGetProperty("duration", out var d) && d.ValueKind == JsonValueKind.Number && d.GetDouble() >= 60)
             {
                 hls = u.GetString()!;
                 break;
@@ -202,8 +202,8 @@ app.OnActivate += (_, _) =>
     // Seek and rate change: both are core to a scrubbing editor.
     GLib.Functions.TimeoutAdd(0, 9000, () =>
     {
-        var ok = playbin?.Seek(1.5, Gst.Format.Time, Gst.SeekFlags.Flush | Gst.SeekFlags.Accurate, Gst.SeekType.Set, 30_000_000_000L, Gst.SeekType.None, -1) ?? false;
-        Log("seek to 30s at 1.5x accepted: " + ok);
+        var ok = playbin?.Seek(1.5, Gst.Format.Time, Gst.SeekFlags.Flush | Gst.SeekFlags.Accurate, Gst.SeekType.Set, 20_000_000_000L, Gst.SeekType.None, -1) ?? false;
+        Log("seek to 20s at 1.5x accepted: " + ok);
         return false;
     });
 
@@ -217,7 +217,7 @@ app.OnActivate += (_, _) =>
         Log($"cairo timeline: {cairoCalls} draws, avg {(cairoCalls > 0 ? cairoMs / cairoCalls : 0):F2} ms (2000 clips)");
         Log($"snapshot timeline: {snapshotCalls} draws, avg {(snapshotCalls > 0 ? snapshotMs / snapshotCalls : 0):F2} ms (2000 clips)");
         Log("direction: " + Gtk.Widget.GetDefaultDirection());
-        var advanced = hasPos && position > 30_000_000_000L && frames > 0;
+        var advanced = hasPos && position > 30_000_000_000L && frames > 0 && last == Gst.State.Playing;
         Log("VIDEO VERDICT: " + (advanced ? "PASS" : "FAIL"));
         File.WriteAllLines(reportPath, report);
         Environment.ExitCode = advanced ? 0 : 3;

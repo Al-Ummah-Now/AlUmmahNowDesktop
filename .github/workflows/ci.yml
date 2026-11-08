@@ -53,13 +53,19 @@ jobs:
         run: |
           mkdir -p artifacts/d9
           for l in ar en; do
-            xvfb-run -a -s "-screen 0 1280x800x24" bash -c "
-              openbox & sleep 2;
-              dotnet spikes/D9.GirCore/bin/Release/net9.0/D9.GirCore.dll --lang $l --seconds 25 --report artifacts/d9/report-$l.txt & p=\$!;
-              sleep 18; import -window root artifacts/d9/$l.png; wait \$p; rc=\$?; echo exit=\$rc; exit \$rc" 2>&1 | tee artifacts/d9/log-$l.txt; test ${PIPESTATUS[0]} -eq 0 || failed=1
+            cat > run-$l.sh <<EOF
+          openbox & sleep 2
+          dotnet spikes/D9.GirCore/bin/Release/net9.0/D9.GirCore.dll --lang $l --seconds 25 --report artifacts/d9/report-$l.txt &
+          p=\$!
+          sleep 18
+          import -window root artifacts/d9/$l.png
+          wait \$p
+          EOF
+            xvfb-run -a -s "-screen 0 1280x800x24" bash run-$l.sh 2>&1 | tee artifacts/d9/log-$l.txt || true
           done
           cat artifacts/d9/report-*.txt
-          test -z "$failed"
+          # The report, not the launcher's exit status, is the gate.
+          test "$(grep -c 'VIDEO VERDICT: PASS' artifacts/d9/report-ar.txt artifacts/d9/report-en.txt | grep -c ':1$')" = 2
       - uses: actions/upload-artifact@v4
         if: always()
         with:
