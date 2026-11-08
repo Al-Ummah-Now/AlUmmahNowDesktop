@@ -1,0 +1,23 @@
+bin/
+obj/
+artifacts/
+.vs/
+.idea/
+*.user
+*.DotSettings.user
+# Never commit signing material or secrets (public repo).
+*.pfx
+*.p12
+*.snk
+*.cer
+*.pem
+*.key
+*.keystore
+*.tizen-profile
+author.p12
+distributor.p12
+profiles.xml
+.env
+.env.*
+.flatpak-builder/
+flatpak-repo/
