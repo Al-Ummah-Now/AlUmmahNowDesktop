@@ -9,6 +9,7 @@ namespace AlUmmahNow.App.ViewModels
     public sealed partial class AuthViewModel : ObservableObject
     {
         private readonly IAuthSession _session;
+        private SynchronizationContext? _ui;
 
         [ObservableProperty] private bool _isBusy;
         [ObservableProperty] private bool _failed;
@@ -16,21 +17,22 @@ namespace AlUmmahNow.App.ViewModels
         public AuthViewModel(IAuthSession session)
         {
             _session = session;
-            _session.AccountChanged += (s, e) =>
-            {
-                OnPropertyChanged(nameof(IsSignedIn));
-                OnPropertyChanged(nameof(AccountName));
-            };
+            _session.AccountChanged += (s, e) => RaiseOnUi();
         }
 
         public bool IsSignedIn => _session.Account != null;
         public string AccountName => _session.Account?.Email ?? "";
 
-        public void Restore() => _session.Restore();
+        public void Restore()
+        {
+            _ui = SynchronizationContext.Current;
+            _session.Restore();
+        }
 
         public async Task SignInAsync(CancellationToken cancellationToken = default)
         {
             if (IsBusy) return;
+            _ui = SynchronizationContext.Current ?? _ui;
             IsBusy = true;
             Failed = false;
             try
@@ -52,5 +54,19 @@ namespace AlUmmahNow.App.ViewModels
         }
 
         public void SignOut() => _session.SignOut();
+
+        // Token refresh runs on worker threads, and views must only change on the UI thread.
+        private void RaiseOnUi()
+        {
+            var ui = _ui;
+            if (ui == null || ReferenceEquals(ui, SynchronizationContext.Current)) RaiseAccount();
+            else ui.Post(_ => RaiseAccount(), null);
+        }
+
+        private void RaiseAccount()
+        {
+            OnPropertyChanged(nameof(IsSignedIn));
+            OnPropertyChanged(nameof(AccountName));
+        }
     }
 }

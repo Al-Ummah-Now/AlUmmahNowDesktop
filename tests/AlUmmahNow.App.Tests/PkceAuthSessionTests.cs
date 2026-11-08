@@ -222,6 +222,37 @@ public class PkceAuthSessionTests
         Assert.NotNull(s.Account);
     }
 
+    private sealed class RecordingContext : SynchronizationContext
+    {
+        public int Posts;
+        public override void Post(SendOrPostCallback d, object? state) { Posts++; d(state); }
+    }
+
+    [Fact]
+    public async Task Account_changes_from_worker_threads_reach_the_ui_context()
+    {
+        var (s, server, _, _) = Make();
+        server.ExpiresIn = 1;
+        await s.SignInAsync();
+        server.Status = HttpStatusCode.BadRequest;
+
+        var vm = new AuthViewModel(s);
+        var ui = new RecordingContext();
+        SynchronizationContext.SetSynchronizationContext(ui);
+        try
+        {
+            vm.Restore();
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(null);
+        }
+
+        await Task.Run(() => Assert.ThrowsAsync<AuthRequiredException>(() => s.GetAccessTokenAsync()));
+        Assert.Equal(1, ui.Posts);
+        Assert.False(vm.IsSignedIn);
+    }
+
     [Fact]
     public async Task View_model_tracks_account_and_failure()
     {
