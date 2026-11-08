@@ -22,7 +22,7 @@ var exitAfter = int.TryParse(Environment.GetEnvironmentVariable("AUN_EXIT_AFTER"
 
 var configHome = Environment.GetEnvironmentVariable("XDG_CONFIG_HOME");
 if (string.IsNullOrEmpty(configHome)) configHome = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config");
-var environment = AppEnvironment.Resolve(Environment.GetEnvironmentVariable("AUN_ENV"), AppEnvironment.Qa);
+var environment = AppEnvironment.Resolve(Environment.GetEnvironmentVariable("AUN_ENV"), AppEnvironment.BuildDefault);
 var settingsStore = new SettingsStore(Path.Combine(configHome, "alummahnow-studio", "settings.json"));
 var settings = settingsStore.Load();
 var http = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };

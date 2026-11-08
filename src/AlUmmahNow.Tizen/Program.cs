@@ -44,7 +44,7 @@ namespace AlUmmahNow.TizenTv
             window.KeyEvent += OnKey;
 
             var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
-            _catalog = new HttpCatalogClient(http, AppEnvironment.Qa.VideosApi);
+            _catalog = new HttpCatalogClient(http, AppEnvironment.BuildDefault.VideosApi);
             _localizer = new Localizer("ar");
             _navigator = new Navigator();
             _home = new HomeViewModel(_catalog, _localizer, _navigator);

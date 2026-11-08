@@ -27,6 +27,13 @@ namespace AlUmmahNow.App.Services
             StudioClientId = studioClientId;
         }
 
+        /// <summary>QA for development and CI; production for tagged releases.</summary>
+#if AUN_PROD
+        public static AppEnvironment BuildDefault => Production;
+#else
+        public static AppEnvironment BuildDefault => Qa;
+#endif
+
         public string Name { get; }
         public Uri VideosApi { get; }
         public Uri AuthIssuer { get; }

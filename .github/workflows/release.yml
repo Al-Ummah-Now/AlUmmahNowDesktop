@@ -1,0 +1,165 @@
+name: Release
+# A v1.2.3 tag on main builds every package and creates a draft GitHub release.
+# Run it by hand on main for a dry run: same builds, no release.
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to stamp on the dry-run packages
+        required: true
+        default: 0.0.1
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Only release from main
+        run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+      - id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = push ]; then v="${GITHUB_REF_NAME#v}"; else v="$INPUT_VERSION"; fi
+          echo "$v" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Fetch AlUmmahNow.Core
+        run: ./scripts/fetch-core.sh
+      - name: Test shared layers
+        run: |
+          dotnet test tests/AlUmmahNow.App.Tests -c Release
+          dotnet test tests/AlUmmahNow.Studio.Tests -c Release
+
+  windows:
+    needs: verify
+    runs-on: windows-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - project: AlUmmahNow.Windows
+            package: AlUmmahNow-Windows
+          - project: AlUmmahNow.Studio.Windows
+            package: AlUmmahNow-Studio-Windows
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Fetch AlUmmahNow.Core
+        shell: bash
+        run: ./scripts/fetch-core.sh
+      - name: Stamp version
+        run: python scripts/stamp-version.py ${{ needs.verify.outputs.version }}
+      - name: Build unsigned MSIX
+        run: dotnet build src/${{ matrix.project }} -c Release -p:Platform=x64 -p:BuildMsix=true -p:AunProd=true -p:Version=${{ needs.verify.outputs.version }} -p:AppxPackageDir=${{ github.workspace }}/artifacts/msix/
+      - name: Collect
+        shell: pwsh
+        run: |
+          $msix = Get-ChildItem -Recurse artifacts/msix -Filter *.msix | Select-Object -First 1
+          if (-not $msix) { throw "no MSIX produced" }
+          New-Item -ItemType Directory -Force out | Out-Null
+          Copy-Item $msix.FullName "out/${{ matrix.package }}-${{ needs.verify.outputs.version }}-x64-unsigned.msix"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.package }}
+          path: out/*
+          if-no-files-found: error
+
+  linux:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - project: AlUmmahNow.Linux
+            appid: net.alummahnow.AlUmmahNow
+            package: AlUmmahNow-Linux
+          - project: AlUmmahNow.Studio.Linux
+            appid: net.alummahnow.Studio
+            package: AlUmmahNow-Studio-Linux
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Fetch AlUmmahNow.Core
+        run: ./scripts/fetch-core.sh
+      - run: sudo apt-get update && sudo apt-get install -y flatpak flatpak-builder
+      - name: Publish production build
+        run: dotnet publish src/${{ matrix.project }} -c Release -r linux-x64 --self-contained -p:AunProd=true -p:Version=${{ needs.verify.outputs.version }} -o artifacts/flatpak-input/publish
+      - name: Build Flatpak bundle
+        run: |
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak-builder --user --force-clean --install-deps-from=flathub --repo=flatpak-repo build-dir packaging/flatpak/${{ matrix.appid }}.yml
+          mkdir -p out
+          flatpak build-bundle flatpak-repo "out/${{ matrix.package }}-${{ needs.verify.outputs.version }}-x86_64.flatpak" ${{ matrix.appid }} --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.package }}
+          path: out/*
+          if-no-files-found: error
+
+  tizen:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Stamp version
+        run: python3 scripts/stamp-version.py ${{ needs.verify.outputs.version }}
+      - name: Build unsigned TPK
+        run: dotnet build src/AlUmmahNow.Tizen -c Release -p:AunProd=true -p:Version=${{ needs.verify.outputs.version }}
+      - name: Collect
+        run: |
+          mkdir -p out
+          tpk=$(find src/AlUmmahNow.Tizen/bin -name '*.tpk' | head -1)
+          test -n "$tpk"
+          cp "$tpk" "out/AlUmmahNow-Tizen-${{ needs.verify.outputs.version }}-unsigned.tpk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-AlUmmahNow-Tizen
+          path: out/*
+          if-no-files-found: error
+
+  draft-release:
+    # Dry runs stop after the builds above.
+    if: github.event_name == 'push'
+    needs: [verify, windows, linux, tizen]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: cd dist && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --draft --verify-tag --generate-notes --title "$GITHUB_REF_NAME"

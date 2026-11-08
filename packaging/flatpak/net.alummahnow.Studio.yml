@@ -1,0 +1,25 @@
+# CI bundle: packages a self-contained publish produced by the workflow.
+app-id: net.alummahnow.Studio
+runtime: org.gnome.Platform
+runtime-version: '49'
+sdk: org.gnome.Sdk
+command: alummahnow-studio
+finish-args:
+  - --share=network
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+modules:
+  - name: alummahnow-studio
+    buildsystem: simple
+    build-commands:
+      - mkdir -p /app/lib/alummahnow-studio /app/bin
+      - cp -r publish/. /app/lib/alummahnow-studio/
+      - ln -s /app/lib/alummahnow-studio/alummahnow-studio /app/bin/alummahnow-studio
+      - install -Dm644 net.alummahnow.Studio.desktop /app/share/applications/net.alummahnow.Studio.desktop
+    sources:
+      - type: dir
+        path: ../../artifacts/flatpak-input
+      - type: file
+        path: net.alummahnow.Studio.desktop
