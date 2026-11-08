@@ -1,0 +1,48 @@
+name: CI Studio Windows
+on:
+  push:
+  workflow_dispatch:
+concurrency:
+  group: ci-studio-windows-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  studio-windows:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Enable Media Foundation (optional feature on Windows Server)
+        run: Install-WindowsFeature Server-Media-Foundation | Format-List
+      - name: Install ffmpeg to generate a source clip
+        run: choco install ffmpeg -y --no-progress
+      - name: Build Studio
+        run: dotnet build src/AlUmmahNow.Studio.Windows -c Release -p:Platform=x64
+      - name: Run Studio scenarios
+        shell: pwsh
+        run: |
+          $out = (New-Item -ItemType Directory -Force artifacts/studio).FullName
+          $watch = (New-Item -ItemType Directory -Force watched).FullName
+          [IO.File]::WriteAllBytes("$watch/lecture-one.mp4", (New-Object byte[] 2000000))
+          ffmpeg -hide_banner -loglevel error -y -f lavfi -i testsrc=duration=5:size=640x360:rate=30 -f lavfi -i sine=frequency=440:duration=5 -c:v libx264 -pix_fmt yuv420p -c:a aac source.mp4
+          $source = (Resolve-Path source.mp4).Path
+          $exe = (Resolve-Path "src/AlUmmahNow.Studio.Windows/bin/x64/Release/net9.0-windows10.0.22621.0/win-x64/AlUmmahNowStudio.exe").Path
+          ./scripts/windows-studio-scenario.ps1 $exe ar uploads "" uploads-ar $out $watch
+          ./scripts/windows-studio-scenario.ps1 $exe ar timeline "" timeline-ar $out
+          ./scripts/windows-studio-scenario.ps1 $exe en timeline "" timeline-en $out
+          ./scripts/windows-studio-scenario.ps1 $exe en encode "encode:$source" encode-en $out
+          foreach ($n in "uploads-ar","timeline-ar","timeline-en","encode-en") {
+            if (-not (Select-String -Quiet "RESULT PASS" "artifacts/studio/$n.txt")) { throw "$n failed" }
+            if (Test-Path "artifacts/studio/$n.txt.hang.txt") { throw "$n did not exit" }
+          }
+          ffmpeg -hide_banner -i "$source.out.mp4" 2>&1 | Select-String "Video:|Duration" | Tee-Object artifacts/studio/discover.txt
+          if (-not (Select-String -Quiet "h264" artifacts/studio/discover.txt)) { throw "output is not H.264" }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: studio-windows
+          path: artifacts/studio
