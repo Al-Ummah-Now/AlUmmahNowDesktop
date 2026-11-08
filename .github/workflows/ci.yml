@@ -75,6 +75,10 @@ jobs:
   linux:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+
+  tizen:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -134,3 +138,12 @@ jobs:
         with:
           name: flatpak-bundle
           path: artifacts/AlUmmahNow-unsigned.flatpak
+
+      - name: Build unsigned Tizen TV package
+        run: dotnet build src/AlUmmahNow.Tizen -c Release
+      - name: Check a TPK was produced
+        run: find src/AlUmmahNow.Tizen/bin -name '*.tpk' | tee tpk.txt && test -s tpk.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tizen-tpk
+          path: src/AlUmmahNow.Tizen/bin/**/*.tpk

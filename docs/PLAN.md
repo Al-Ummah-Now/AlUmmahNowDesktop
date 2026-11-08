@@ -28,6 +28,10 @@ desktop apps. Do not use net9-only APIs in `App` or `CoreBridge`.
 - **Dependencies not yet available** sit behind interfaces: the core (`ICatalogClient`, upload engine),
   sign-in (needs a registered native client from Epic 9), and Fanous tokens (placeholders from spec §3).
 
+- **Tizen playback** uses `Tizen.Multimedia.Player`. "AVPlay" in the spec is the Web API name; the .NET
+  equivalent is this player. `tizen50` keeps Samsung's 2019+ TVs in range (Epic 15.9). The viewer compiles
+  and packages in CI but has not run on a TV or emulator.
+
 ## Environments
 
 `AUN_ENV=qa|prod` overrides the build default. Debug and CI builds default to QA
