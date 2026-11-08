@@ -1,5 +1,10 @@
 using AlUmmahNow.App.I18n;
+using AlUmmahNow.App.Services;
+using AlUmmahNow.App.ViewModels;
+using AlUmmahNow.CoreBridge;
+using AlUmmahNow.CoreBridge.Native;
 using AlUmmahNow.CoreBridge.Temporary;
+using AlUmmahNow.Platform.Linux;
 using AlUmmahNow.Studio.Encode;
 using AlUmmahNow.Studio.Linux;
 using AlUmmahNow.Studio.Timeline;
@@ -17,7 +22,20 @@ var exitAfter = int.TryParse(Environment.GetEnvironmentVariable("AUN_EXIT_AFTER"
 
 var configHome = Environment.GetEnvironmentVariable("XDG_CONFIG_HOME");
 if (string.IsNullOrEmpty(configHome)) configHome = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config");
-var queue = new UploadQueue(new SimulatedUploadEngine(TimeSpan.FromMilliseconds(250)), Path.Combine(configHome, "alummahnow-studio", "uploads.json"));
+var environment = AppEnvironment.Resolve(Environment.GetEnvironmentVariable("AUN_ENV"), AppEnvironment.Qa);
+var settingsStore = new SettingsStore(Path.Combine(configHome, "alummahnow-studio", "settings.json"));
+var settings = settingsStore.Load();
+var http = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
+http.DefaultRequestHeaders.UserAgent.ParseAdd("AlUmmahNowStudioLinux/0.1");
+var authSession = new PkceAuthSession(http, environment.AuthIssuer, environment.StudioClientId, new LibSecretStore("alummahnow-studio"), new ShellBrowserLauncher(), localizer["auth.browser.done"]);
+var auth = new AuthViewModel(authSession);
+var uploadContext = new UploadContext(new HttpChannelClient(http, environment.VideosApi, authSession));
+// CI only: there is no account to sign in with on a runner.
+var simulateUploads = Environment.GetEnvironmentVariable("AUN_SIMULATE_UPLOADS") == "1";
+IUploadEngine uploadEngine = simulateUploads
+    ? new SimulatedUploadEngine(TimeSpan.FromMilliseconds(250))
+    : new TusUploadEngine(http, environment.VideosApi, authSession, uploadContext.ChannelIdAsync);
+var queue = new UploadQueue(uploadEngine, Path.Combine(configHome, "alummahnow-studio", "uploads.json"));
 var encode = new EncodeQueue(new GStreamerEncodeBackend());
 
 var project = new TimelineProject();
@@ -50,10 +68,58 @@ app.OnActivate += (_, _) =>
     // Uploads
     var uploads = Gtk.Box.New(Gtk.Orientation.Vertical, 10);
     uploads.SetMarginStart(20); uploads.SetMarginEnd(20); uploads.SetMarginTop(16);
-    var notice = Gtk.Label.New(localizer["studio.upload.simulated"]);
+    var notice = Gtk.Label.New("");
     notice.SetHalign(Gtk.Align.Start);
+    notice.SetHexpand(true);
     notice.AddCssClass("dim-label");
-    uploads.Append(notice);
+    var signButton = Gtk.Button.NewWithLabel(localizer["auth.signIn"]);
+    var watchButton = Gtk.Button.NewWithLabel(localizer["studio.upload.watch"]);
+    var accountRow = Gtk.Box.New(Gtk.Orientation.Horizontal, 8);
+    accountRow.Append(notice);
+    accountRow.Append(watchButton);
+    accountRow.Append(signButton);
+    uploads.Append(accountRow);
+
+    void RenderAccount()
+    {
+        signButton.SetLabel(localizer[auth.IsBusy ? "auth.signingIn" : auth.IsSignedIn ? "auth.signOut" : "auth.signIn"]);
+        signButton.SetSensitive(!auth.IsBusy);
+        if (simulateUploads) notice.SetText(localizer["studio.upload.simulated"]);
+        else if (auth.Failed) notice.SetText(localizer["auth.failed"]);
+        else if (!auth.IsSignedIn) notice.SetText(localizer["studio.upload.signIn"]);
+        else notice.SetText(uploadContext.Channel is { } c ? localizer.Format("studio.upload.channel", Localizer.Isolate(c.Name)) : Localizer.Isolate(auth.AccountName));
+    }
+
+    async Task RefreshChannelAsync()
+    {
+        uploadContext.Reset();
+        if (auth.IsSignedIn && !simulateUploads)
+        {
+            try
+            {
+                if (await uploadContext.LoadAsync() == null) notice.SetText(localizer["studio.upload.noChannel"]);
+            }
+            catch (Exception ex) when (ex is CatalogException || ex is AuthRequiredException || ex is HttpRequestException)
+            {
+                Console.Error.WriteLine("channels: " + ex.Message);
+            }
+
+            queue.Pump();
+        }
+
+        RenderAccount();
+    }
+
+    auth.PropertyChanged += (_, e) =>
+    {
+        RenderAccount();
+        if (e.PropertyName == nameof(AuthViewModel.IsSignedIn)) _ = RefreshChannelAsync();
+    };
+    signButton.OnClicked += async (_, _) =>
+    {
+        if (auth.IsSignedIn) auth.SignOut();
+        else await auth.SignInAsync();
+    };
     var uploadRows = Gtk.Box.New(Gtk.Orientation.Vertical, 8);
     uploads.Append(uploadRows);
 
@@ -206,16 +272,47 @@ app.OnActivate += (_, _) =>
         return true;
     });
 
-    // Folder watch: AUN_WATCH_DIR names the folder until the folder picker lands.
-    if (Environment.GetEnvironmentVariable("AUN_WATCH_DIR") is { Length: > 0 } watchDir)
+    var watchDir = Environment.GetEnvironmentVariable("AUN_WATCH_DIR");
+    if (string.IsNullOrEmpty(watchDir)) watchDir = settings.WatchFolder;
+    var watch = string.IsNullOrEmpty(watchDir) ? null : new FolderWatch(watchDir);
+    GLib.Functions.TimeoutAdd(0, 1000, () =>
     {
-        var watch = new FolderWatch(watchDir);
-        GLib.Functions.TimeoutAdd(0, 1000, () =>
+        if (watch != null && (simulateUploads || auth.IsSignedIn))
         {
             foreach (var (path, size) in watch.Scan()) queue.Enqueue(path, size);
-            return true;
-        });
+        }
+
+        return true;
+    });
+
+    watchButton.OnClicked += async (_, _) =>
+    {
+        try
+        {
+            var folder = await Gtk.FileDialog.New().SelectFolderAsync(window);
+            var path = folder?.GetPath();
+            if (string.IsNullOrEmpty(path)) return;
+            settings.WatchFolder = path;
+            settingsStore.Save(settings);
+            watch = new FolderWatch(path);
+        }
+        catch (GLib.GException)
+        {
+            // The user dismissed the dialog.
+        }
+    };
+
+    try
+    {
+        auth.Restore();
     }
+    catch (IOException ex)
+    {
+        Console.Error.WriteLine("keyring: " + ex.Message);
+    }
+
+    _ = RefreshChannelAsync();
+    Console.WriteLine("core " + CoreRuntime.VersionOrNone());
 
     EncodeJob? automationJob = null;
     if (automation.StartsWith("encode:", StringComparison.Ordinal))

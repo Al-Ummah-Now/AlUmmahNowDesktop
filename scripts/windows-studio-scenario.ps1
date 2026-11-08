@@ -1,7 +1,7 @@
 # Runs one Studio scenario on a CI desktop session and captures the screen.
 param([string]$Exe, [string]$Lang, [string]$Tab, [string]$Automation, [string]$Name, [string]$Out, [string]$WatchDir = "")
 Add-Type -AssemblyName System.Drawing, System.Windows.Forms
-$env:AUN_LANG = $Lang; $env:AUN_TAB = $Tab; $env:AUN_AUTOMATION = $Automation; $env:AUN_EXIT_AFTER = "24"; $env:AUN_WATCH_DIR = $WatchDir
+$env:AUN_LANG = $Lang; $env:AUN_TAB = $Tab; $env:AUN_AUTOMATION = $Automation; $env:AUN_EXIT_AFTER = "24"; $env:AUN_SIMULATE_UPLOADS = "1"; $env:AUN_WATCH_DIR = $WatchDir
 $env:AUN_RESULT = Join-Path $Out "$Name.txt"
 $p = Start-Process -FilePath $Exe -PassThru
 Start-Sleep -Seconds 18

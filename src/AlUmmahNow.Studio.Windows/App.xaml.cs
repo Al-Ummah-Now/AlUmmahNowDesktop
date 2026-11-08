@@ -1,5 +1,9 @@
 using Path = System.IO.Path;
 using AlUmmahNow.App.I18n;
+using AlUmmahNow.App.Services;
+using AlUmmahNow.App.ViewModels;
+using AlUmmahNow.CoreBridge;
+using AlUmmahNow.CoreBridge.Native;
 using AlUmmahNow.CoreBridge.Temporary;
 using AlUmmahNow.Studio.Encode;
 using AlUmmahNow.Studio.Timeline;
@@ -37,8 +41,23 @@ public sealed partial class App : Application
         var exitAfter = int.TryParse(Environment.GetEnvironmentVariable("AUN_EXIT_AFTER"), out var s) ? s : 0;
         var ui = DispatcherQueue.GetForCurrentThread();
 
-        var statePath = Path.Combine(Path.GetTempPath(), "aun-studio-" + Guid.NewGuid().ToString("N"), "uploads.json");
-        var uploads = new UploadQueue(new SimulatedUploadEngine(TimeSpan.FromMilliseconds(250)), statePath);
+        var environment = AppEnvironment.Resolve(Environment.GetEnvironmentVariable("AUN_ENV"), AppEnvironment.Qa);
+        // CI only: there is no account to sign in with on a runner, and each scenario starts clean.
+        var simulateUploads = Environment.GetEnvironmentVariable("AUN_SIMULATE_UPLOADS") == "1";
+        var dataRoot = simulateUploads
+            ? Path.Combine(Path.GetTempPath(), "aun-studio-" + Guid.NewGuid().ToString("N"))
+            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AlUmmahNowStudio");
+        var settingsStore = new SettingsStore(Path.Combine(dataRoot, "settings.json"));
+        var settings = settingsStore.Load();
+        var http = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
+        http.DefaultRequestHeaders.UserAgent.ParseAdd("AlUmmahNowStudioWindows/0.1");
+        var authSession = new PkceAuthSession(http, environment.AuthIssuer, environment.StudioClientId, new DpapiSecureStore(Path.Combine(dataRoot, "secure")), new ShellBrowserLauncher(), localizer["auth.browser.done"]);
+        var auth = new AuthViewModel(authSession);
+        var uploadContext = new UploadContext(new HttpChannelClient(http, environment.VideosApi, authSession));
+        IUploadEngine uploadEngine = simulateUploads
+            ? new SimulatedUploadEngine(TimeSpan.FromMilliseconds(250))
+            : new TusUploadEngine(http, environment.VideosApi, authSession, uploadContext.ChannelIdAsync);
+        var uploads = new UploadQueue(uploadEngine, Path.Combine(dataRoot, "uploads.json"));
         var encode = new EncodeQueue(new MediaFoundationEncodeBackend());
 
         var project = new TimelineProject();
@@ -55,7 +74,61 @@ public sealed partial class App : Application
 
         var pivot = new Pivot { FlowDirection = localizer.IsRtl ? FlowDirection.RightToLeft : FlowDirection.LeftToRight };
         var uploadsPage = new StackPanel { Spacing = 10, Padding = new Thickness(12) };
-        uploadsPage.Children.Add(new TextBlock { Text = localizer["studio.upload.simulated"], Opacity = 0.7 });
+        var notice = new TextBlock { Opacity = 0.7, VerticalAlignment = VerticalAlignment.Center };
+        var signButton = new Button { Content = localizer["auth.signIn"] };
+        var watchButton = new Button { Content = localizer["studio.upload.watch"] };
+        var accountRow = new Grid { ColumnSpacing = 8 };
+        accountRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        accountRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        accountRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        accountRow.Children.Add(notice);
+        Grid.SetColumn(watchButton, 1);
+        accountRow.Children.Add(watchButton);
+        Grid.SetColumn(signButton, 2);
+        accountRow.Children.Add(signButton);
+        uploadsPage.Children.Add(accountRow);
+
+        void RenderAccount()
+        {
+            signButton.Content = localizer[auth.IsBusy ? "auth.signingIn" : auth.IsSignedIn ? "auth.signOut" : "auth.signIn"];
+            signButton.IsEnabled = !auth.IsBusy;
+            notice.Text = simulateUploads ? localizer["studio.upload.simulated"]
+                : auth.Failed ? localizer["auth.failed"]
+                : !auth.IsSignedIn ? localizer["studio.upload.signIn"]
+                : uploadContext.Channel is { } c ? localizer.Format("studio.upload.channel", Localizer.Isolate(c.Name))
+                : Localizer.Isolate(auth.AccountName);
+        }
+
+        async Task RefreshChannelAsync()
+        {
+            uploadContext.Reset();
+            if (auth.IsSignedIn && !simulateUploads)
+            {
+                try
+                {
+                    if (await uploadContext.LoadAsync() == null) notice.Text = localizer["studio.upload.noChannel"];
+                }
+                catch (Exception ex) when (ex is CatalogException || ex is AuthRequiredException || ex is HttpRequestException)
+                {
+                    File.AppendAllText(ResultPath + ".crash.txt", "channels: " + ex.Message + "\n");
+                }
+
+                uploads.Pump();
+            }
+
+            RenderAccount();
+        }
+
+        auth.PropertyChanged += (_, e) =>
+        {
+            RenderAccount();
+            if (e.PropertyName == nameof(AuthViewModel.IsSignedIn)) _ = RefreshChannelAsync();
+        };
+        signButton.Click += async (_, _) =>
+        {
+            if (auth.IsSignedIn) auth.SignOut();
+            else await auth.SignInAsync();
+        };
         uploadsPage.Children.Add(uploadRows);
         pivot.Items.Add(new PivotItem { Header = localizer["studio.tab.uploads"], Content = uploadsPage, Tag = "uploads" });
         var encodePage = new StackPanel { Padding = new Thickness(12) };
@@ -158,17 +231,32 @@ public sealed partial class App : Application
         };
         _refresh.Start();
 
-        if (Environment.GetEnvironmentVariable("AUN_WATCH_DIR") is { Length: > 0 } dir)
+        var dir = Environment.GetEnvironmentVariable("AUN_WATCH_DIR");
+        if (string.IsNullOrEmpty(dir)) dir = settings.WatchFolder;
+        var watch = string.IsNullOrEmpty(dir) ? null : new FolderWatch(dir);
+        _watchTimer = ui.CreateTimer();
+        _watchTimer.Interval = TimeSpan.FromSeconds(1);
+        _watchTimer.Tick += (_, _) =>
         {
-            var watch = new FolderWatch(dir);
-            _watchTimer = ui.CreateTimer();
-            _watchTimer.Interval = TimeSpan.FromSeconds(1);
-            _watchTimer.Tick += (_, _) =>
-            {
-                foreach (var (path, size) in watch.Scan()) uploads.Enqueue(path, size);
-            };
-            _watchTimer.Start();
-        }
+            if (watch == null || (!simulateUploads && !auth.IsSignedIn)) return;
+            foreach (var (path, size) in watch.Scan()) uploads.Enqueue(path, size);
+        };
+        _watchTimer.Start();
+
+        watchButton.Click += async (_, _) =>
+        {
+            var picker = new global::Windows.Storage.Pickers.FolderPicker();
+            picker.FileTypeFilter.Add("*");
+            WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(_window));
+            var folder = await picker.PickSingleFolderAsync();
+            if (folder == null) return;
+            settings.WatchFolder = folder.Path;
+            settingsStore.Save(settings);
+            watch = new FolderWatch(folder.Path);
+        };
+
+        auth.Restore();
+        _ = RefreshChannelAsync();
 
         EncodeJob? job = null;
         if (automation.StartsWith("encode:", StringComparison.Ordinal))
