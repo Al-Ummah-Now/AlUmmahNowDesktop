@@ -41,6 +41,8 @@ jobs:
           }
           ffmpeg -hide_banner -i "$source.out.mp4" 2>&1 | Select-String "Video:|Duration" | Tee-Object artifacts/studio/discover.txt
           if (-not (Select-String -Quiet "h264" artifacts/studio/discover.txt)) { throw "output is not H.264" }
+          # ffmpeg -i with no output file always exits 1; the checks above are the gate.
+          exit 0
       - uses: actions/upload-artifact@v4
         if: always()
         with:
