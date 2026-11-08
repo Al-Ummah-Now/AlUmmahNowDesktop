@@ -75,8 +75,9 @@ app.OnActivate += async (_, _) =>
         });
     }
 
-    await window.StartAsync();
+    var started = window.StartAsync();
     if (automation.StartsWith("watch:", StringComparison.Ordinal)) navigator.Push(new Route.Watch(automation.Substring(6)));
+    await started;
 };
 
 var rc = app.RunWithSynchronizationContext(null);

@@ -46,7 +46,7 @@ namespace AlUmmahNow.App.ViewModels
         };
 
         private const int RailSize = 20;
-        private const int MaxRailPages = 5;
+        private const int MaxRailPages = 3;
 
         private readonly ICatalogClient _catalog;
         private readonly Localizer _localizer;

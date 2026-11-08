@@ -290,6 +290,7 @@ public sealed class MainWindow
 
         var caption = Gtk.Label.New(vm.Caption);
         caption.SetValign(Gtk.Align.End);
+        caption.SetHalign(Gtk.Align.Center);
         caption.SetMarginBottom(24);
         caption.SetWrap(true);
         caption.SetJustify(Gtk.Justification.Center);
@@ -325,10 +326,10 @@ public sealed class MainWindow
         var play = Gtk.Button.NewFromIconName(vm.IsPlaying ? "media-playback-pause-symbolic" : "media-playback-start-symbolic");
         play.SetTooltipText(_localizer[vm.IsPlaying ? "player.pause" : "player.play"]);
         play.OnClicked += (_, _) => vm.TogglePlay();
-        var back10 = Gtk.Button.NewFromIconName("media-seek-backward-symbolic");
+        var back10 = Gtk.Button.NewFromIconName(_localizer.IsRtl ? "media-seek-forward-symbolic" : "media-seek-backward-symbolic");
         back10.SetTooltipText(_localizer["player.seekBack"]);
         back10.OnClicked += (_, _) => vm.SkipBack();
-        var forward10 = Gtk.Button.NewFromIconName("media-seek-forward-symbolic");
+        var forward10 = Gtk.Button.NewFromIconName(_localizer.IsRtl ? "media-seek-backward-symbolic" : "media-seek-forward-symbolic");
         forward10.SetTooltipText(_localizer["player.seekForward"]);
         forward10.OnClicked += (_, _) => vm.SkipForward();
         controls.Append(back10);
