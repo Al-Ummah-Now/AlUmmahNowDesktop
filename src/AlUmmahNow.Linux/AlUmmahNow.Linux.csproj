@@ -13,5 +13,7 @@
     <PackageReference Include="Tmds.DBus.Protocol" />
     <ProjectReference Include="..\AlUmmahNow.App\AlUmmahNow.App.csproj" />
     <ProjectReference Include="..\AlUmmahNow.CoreBridge\AlUmmahNow.CoreBridge.csproj" />
+    <ProjectReference Include="..\AlUmmahNow.CoreBridge.Native\AlUmmahNow.CoreBridge.Native.csproj" />
+    <ProjectReference Include="..\AlUmmahNow.Platform.Linux\AlUmmahNow.Platform.Linux.csproj" />
   </ItemGroup>
 </Project>

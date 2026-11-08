@@ -21,3 +21,5 @@ profiles.xml
 .env.*
 .flatpak-builder/
 flatpak-repo/
+.nuget-local/*
+!.nuget-local/.gitkeep

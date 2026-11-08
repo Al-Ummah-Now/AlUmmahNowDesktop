@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- Separate from CoreBridge: the Rust core has no Tizen build. -->
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="AlUmmahNow.Core" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" />
+    <ProjectReference Include="..\AlUmmahNow.CoreBridge\AlUmmahNow.CoreBridge.csproj" />
+  </ItemGroup>
+</Project>

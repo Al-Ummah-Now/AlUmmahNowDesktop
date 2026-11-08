@@ -24,6 +24,7 @@
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" />
     <ProjectReference Include="..\AlUmmahNow.App\AlUmmahNow.App.csproj" />
     <ProjectReference Include="..\AlUmmahNow.CoreBridge\AlUmmahNow.CoreBridge.csproj" />
+    <ProjectReference Include="..\AlUmmahNow.CoreBridge.Native\AlUmmahNow.CoreBridge.Native.csproj" />
     <AppxManifest Include="Package.appxmanifest" Condition="'$(BuildMsix)' == 'true'" />
     <Content Include="Assets\*.png" Condition="'$(BuildMsix)' == 'true'" />
   </ItemGroup>

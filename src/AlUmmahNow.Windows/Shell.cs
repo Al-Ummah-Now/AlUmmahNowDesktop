@@ -29,13 +29,16 @@ public sealed class Shell
     private readonly SmtcSession _session;
     private readonly AppSettings _settings;
     private readonly SettingsStore _store;
+    private readonly AuthViewModel _auth;
     private readonly Grid _root = new();
     private WatchViewModel? _watch;
     private string? _watchId;
     private Action? _unbind;
 
-    public Shell(ICatalogClient catalog, Localizer localizer, Navigator navigator, WindowsMediaPlayer player, SmtcSession session, AppSettings settings, SettingsStore store)
+    public Shell(ICatalogClient catalog, Localizer localizer, Navigator navigator, WindowsMediaPlayer player, SmtcSession session, AppSettings settings, SettingsStore store, AuthViewModel auth)
     {
+        _auth = auth;
+        auth.PropertyChanged += (_, _) => Render();
         _catalog = catalog;
         _localizer = localizer;
         _navigator = navigator;
@@ -156,6 +159,7 @@ public sealed class Shell
         bar.Children.Add(start);
 
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        actions.Children.Add(BuildAccount());
         var theme = new Button { Content = _localizer[IsDark ? "settings.theme.light" : "settings.theme.dark"] };
         AutomationName(theme, _localizer["settings.theme"]);
         theme.Click += (_, _) =>
@@ -178,6 +182,21 @@ public sealed class Shell
         Grid.SetColumn(actions, 2);
         bar.Children.Add(actions);
         return bar;
+    }
+
+    private FrameworkElement BuildAccount()
+    {
+        if (_auth.IsBusy) return new TextBlock { Text = _localizer["auth.signingIn"], Opacity = 0.7, VerticalAlignment = VerticalAlignment.Center };
+
+        var button = new Button { Content = _localizer[_auth.IsSignedIn ? "auth.signOut" : "auth.signIn"] };
+        var tip = _auth.Failed ? _localizer["auth.failed"] : Localizer.Isolate(_auth.AccountName);
+        if (tip.Length > 2) ToolTipService.SetToolTip(button, tip);
+        button.Click += async (_, _) =>
+        {
+            if (_auth.IsSignedIn) _auth.SignOut();
+            else await _auth.SignInAsync();
+        };
+        return button;
     }
 
     private static void AutomationName(DependencyObject element, string name) =>

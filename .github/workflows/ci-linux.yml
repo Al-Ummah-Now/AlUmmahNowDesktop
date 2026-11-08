@@ -16,12 +16,15 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
+      - name: Fetch AlUmmahNow.Core
+        shell: bash
+        run: ./scripts/fetch-core.sh
       - name: Install GTK, libadwaita, GStreamer
         run: |
           sudo apt-get update
           sudo apt-get install -y libgtk-4-1 libadwaita-1-0 xvfb imagemagick openbox dbus-x11 libglib2.0-bin \
             gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad \
-            gstreamer1.0-libav gstreamer1.0-gtk4 fonts-noto-core libgl1-mesa-dri adwaita-icon-theme
+            gstreamer1.0-libav gstreamer1.0-gtk4 fonts-noto-core libgl1-mesa-dri adwaita-icon-theme libsecret-1-0
       - run: dotnet build src/AlUmmahNow.Linux -c Release
       - name: Run viewer scenarios (ar and en, home and watch)
         env:
@@ -41,6 +44,7 @@ jobs:
           grep -h -E 'AUTOMATION|MPRIS' artifacts/linux/*.log
           # The automation result, not the launcher exit status, is the gate.
           test "$(cat artifacts/linux/*.log | grep -c 'RESULT PASS')" = 4
+          test "$(cat artifacts/linux/*.log | grep -c 'core=0.1.0')" = 4
           grep -q "MPRIS before: ('<'Playing'>',)\|MPRIS before: (<'Playing'>,)" artifacts/linux/watch-ar-dark.log
           grep -q "MPRIS after: (<'Paused'>,)" artifacts/linux/watch-ar-dark.log
       - uses: actions/upload-artifact@v4
@@ -57,6 +61,9 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
+      - name: Fetch AlUmmahNow.Core
+        shell: bash
+        run: ./scripts/fetch-core.sh
       - run: sudo apt-get update && sudo apt-get install -y flatpak flatpak-builder
       - name: Publish self-contained app
         run: dotnet publish src/AlUmmahNow.Linux -c Release -r linux-x64 --self-contained -o artifacts/flatpak-input/publish
