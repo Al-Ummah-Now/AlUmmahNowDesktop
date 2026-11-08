@@ -74,7 +74,11 @@ app.OnActivate += (_, _) =>
         }
         else if (obj != null)
         {
-            var wrapped = new Gdk.PaintableHelper(obj.Handle);
+            // The generated PaintableHelper constructor is not public, so an unknown GType needs reflection.
+            var wrapped = (Gdk.PaintableHelper)Activator.CreateInstance(
+                typeof(Gdk.PaintableHelper),
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance,
+                null, new object[] { obj.Handle }, null)!;
             picture.SetPaintable(wrapped);
             Log("paintable cast to Gdk.Paintable: needed PaintableHelper workaround");
             wrapped.OnInvalidateContents += (_, _) => frames++;
