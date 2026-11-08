@@ -15,6 +15,7 @@ public sealed class UploadItem
     public UploadStatus Status { get; set; }
     public int Attempts { get; set; }
     public string? Error { get; set; }
+    public UploadSession? Session { get; set; }
 
     [JsonIgnore]
     public double Fraction => Size > 0 ? (double)BytesSent / Size : 0;
@@ -134,7 +135,14 @@ public sealed class UploadQueue
         var retry = false;
         try
         {
-            var request = new UploadRequest(item.FilePath, item.Size, item.BytesSent);
+            var request = new UploadRequest(item.FilePath, item.Size, item.BytesSent, item.Session, session =>
+            {
+                lock (_gate)
+                {
+                    item.Session = session;
+                    Save();
+                }
+            });
             var progress = new SynchronousProgress(sent =>
             {
                 lock (_gate) item.BytesSent = sent;
@@ -150,6 +158,15 @@ public sealed class UploadQueue
         catch (OperationCanceledException) when (cts.IsCancellationRequested)
         {
             // Pause set the status; progress so far is kept for resume.
+        }
+        catch (AuthRequiredException ex)
+        {
+            // Retrying cannot help until the user signs in again.
+            lock (_gate)
+            {
+                item.Error = ex.Message;
+                item.Status = UploadStatus.Failed;
+            }
         }
 #pragma warning disable CA1031 // Any engine failure must fail this item, never the queue.
         catch (Exception ex)

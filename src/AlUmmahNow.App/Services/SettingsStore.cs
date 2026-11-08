@@ -11,6 +11,7 @@ namespace AlUmmahNow.App.Services
         public string Language { get; set; } = "ar";
         public ThemePreference Theme { get; set; } = ThemePreference.Dark;
         public bool EasternNumerals { get; set; }
+        public string? WatchFolder { get; set; }
     }
 
     /// <summary>Stores settings as JSON. A corrupt or missing file yields defaults.</summary>
