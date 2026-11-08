@@ -242,7 +242,7 @@ public sealed class MainWindow
         title.AddCssClass("heading");
         box.Append(title);
 
-        var meta = Gtk.Label.New(string.Join(" · ", new[] { card.Channel, card.Views, card.Duration }.Where(s => s.Length > 0)));
+        var meta = Gtk.Label.New(card.Meta);
         meta.SetHalign(Gtk.Align.Start);
         meta.SetEllipsize(Pango.EllipsizeMode.End);
         meta.SetMaxWidthChars(36);

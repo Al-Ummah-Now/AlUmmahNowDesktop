@@ -10,6 +10,18 @@ namespace AlUmmahNow.App.Tests;
 public class HomeViewModelTests
 {
     [Fact]
+    public void Card_meta_isolates_every_segment()
+    {
+        var v = FakeCatalog.Ready("a");
+        v.ChannelName = "QA Nasheeds";
+        v.Views = 258;
+        v.DurationSeconds = 20;
+        var meta = new VideoCardViewModel(v, new Localizer("ar")).Meta;
+        Assert.Equal(3, meta.Count(c => c == '\u2068') - 1);
+        Assert.StartsWith("\u2068QA Nasheeds\u2069 · \u2068", meta);
+    }
+
+    [Fact]
     public async Task Hides_empty_rails_and_unplayable_videos()
     {
         var c = new FakeCatalog();
