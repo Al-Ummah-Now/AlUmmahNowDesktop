@@ -8,5 +8,6 @@
     <PackageVersion Include="GirCore.Gtk-4.0" Version="0.8.1" />
     <PackageVersion Include="GirCore.Adw-1" Version="0.8.1" />
     <PackageVersion Include="GirCore.Gst-1.0" Version="0.8.1" />
+    <PackageVersion Include="Tmds.DBus.Protocol" Version="0.95.2" />
   </ItemGroup>
 </Project>

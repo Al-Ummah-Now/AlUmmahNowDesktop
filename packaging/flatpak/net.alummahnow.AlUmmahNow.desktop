@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Al Ummah Now
+Name[ar]=الأمة الآن
+Exec=alummahnow
+Icon=net.alummahnow.AlUmmahNow
+Categories=AudioVideo;Video;Player;
+Terminal=false
