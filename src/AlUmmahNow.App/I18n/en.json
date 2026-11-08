@@ -58,5 +58,10 @@
   "studio.preset.recitation": "Recitation (audio)",
   "studio.timeline.split": "Split",
   "studio.timeline.delete": "Ripple delete",
-  "studio.timeline.hint": "Drag to move the playhead."
+  "studio.timeline.hint": "Drag to move the playhead.",
+  "auth.signIn": "Sign in",
+  "auth.signOut": "Sign out",
+  "auth.signingIn": "Continue in your browser…",
+  "auth.failed": "Sign-in didn't finish. Please try again.",
+  "auth.browser.done": "You're signed in. You can close this window and return to the app."
 }

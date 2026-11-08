@@ -22,12 +22,14 @@ public sealed class MainWindow
     private readonly HttpClient _http;
     private readonly AppSettings _settings;
     private readonly SettingsStore _store;
+    private readonly AuthViewModel _auth;
     private WatchViewModel? _watch;
     private string? _watchId;
     private Action? _unbindWatch;
 
-    public MainWindow(Adw.Application app, ICatalogClient catalog, Localizer localizer, Navigator navigator, GstMediaPlayer player, IMediaSession session, HttpClient http, AppSettings settings, SettingsStore store)
+    public MainWindow(Adw.Application app, ICatalogClient catalog, Localizer localizer, Navigator navigator, GstMediaPlayer player, IMediaSession session, HttpClient http, AppSettings settings, SettingsStore store, AuthViewModel auth)
     {
+        _auth = auth;
         _catalog = catalog;
         _localizer = localizer;
         _navigator = navigator;
@@ -46,6 +48,7 @@ public sealed class MainWindow
 
         navigator.Changed += (_, _) => Render();
         localizer.LanguageChanged += (_, _) => Render();
+        auth.PropertyChanged += (_, _) => Render();
     }
 
     public HomeViewModel Home => _home;
@@ -152,6 +155,8 @@ public sealed class MainWindow
         };
         header.PackEnd(language);
 
+        header.PackEnd(BuildAccount());
+
         var dark = _settings.Theme != ThemePreference.Light;
         var theme = Gtk.Button.NewFromIconName(dark ? "weather-clear-symbolic" : "weather-clear-night-symbolic");
         theme.SetTooltipText(_localizer["settings.theme"] + ": " + _localizer[dark ? "settings.theme.light" : "settings.theme.dark"]);
@@ -164,6 +169,27 @@ public sealed class MainWindow
         };
         header.PackEnd(theme);
         return header;
+    }
+
+    private Gtk.Widget BuildAccount()
+    {
+        if (_auth.IsBusy)
+        {
+            var waiting = Gtk.Label.New(_localizer["auth.signingIn"]);
+            waiting.AddCssClass("dim-label");
+            return waiting;
+        }
+
+        var label = _auth.IsSignedIn ? "auth.signOut" : "auth.signIn";
+        var button = Gtk.Button.NewWithLabel(_localizer[label]);
+        button.SetTooltipText(_auth.Failed ? _localizer["auth.failed"] : Localizer.Isolate(_auth.AccountName));
+        if (!_auth.IsSignedIn) button.AddCssClass("suggested-action");
+        button.OnClicked += async (_, _) =>
+        {
+            if (_auth.IsSignedIn) _auth.SignOut();
+            else await _auth.SignInAsync();
+        };
+        return button;
     }
 
     private Gtk.Widget StateMessage(string key, bool retry)

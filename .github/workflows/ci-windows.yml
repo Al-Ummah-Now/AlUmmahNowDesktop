@@ -16,6 +16,9 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
+      - name: Fetch AlUmmahNow.Core
+        shell: bash
+        run: ./scripts/fetch-core.sh
       - name: Enable Media Foundation (optional feature on Windows Server)
         continue-on-error: true
         run: |
@@ -39,6 +42,7 @@ jobs:
         run: |
           foreach ($n in "home-ar-dark","home-en-light","watch-ar-dark","watch-en-light") {
             if (-not (Select-String -Quiet "RESULT PASS" "artifacts/windows/$n.txt")) { throw "$n failed" }
+            if (-not (Select-String -Quiet "core=0.1.0" "artifacts/windows/$n.txt")) { throw "$n did not load the Rust core" }
             if (Test-Path "artifacts/windows/$n.txt.hang.txt") { throw "$n did not exit" }
           }
       - name: Build unsigned MSIX

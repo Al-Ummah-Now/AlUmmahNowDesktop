@@ -2,7 +2,10 @@ using AlUmmahNow.App.I18n;
 using AlUmmahNow.App.Media;
 using AlUmmahNow.App.Navigation;
 using AlUmmahNow.App.Services;
+using AlUmmahNow.App.ViewModels;
+using AlUmmahNow.CoreBridge.Native;
 using AlUmmahNow.CoreBridge.Temporary;
+using AlUmmahNow.Platform.Linux;
 using AlUmmahNow.Linux;
 
 Adw.Module.Initialize();
@@ -33,6 +36,9 @@ http.DefaultRequestHeaders.UserAgent.ParseAdd("AlUmmahNowLinux/0.1");
 var catalog = new HttpCatalogClient(http, environment.VideosApi);
 var localizer = new Localizer(settings.Language) { EasternNumerals = settings.EasternNumerals };
 var navigator = new Navigator();
+var authSession = new PkceAuthSession(http, environment.AuthIssuer, environment.ViewerClientId, new LibSecretStore("alummahnow"), new ShellBrowserLauncher(), localizer["auth.browser.done"]);
+var auth = new AuthViewModel(authSession);
+var coreVersion = CoreRuntime.VersionOrNone();
 var app = Adw.Application.New("net.alummahnow.AlUmmahNow", Gio.ApplicationFlags.NonUnique);
 var exitCode = 0;
 
@@ -47,7 +53,16 @@ app.OnActivate += async (_, _) =>
     _ = mpris.StartAsync();
 
     var player = new GstMediaPlayer();
-    var window = new MainWindow(app, catalog, localizer, navigator, player, session, http, settings, store);
+    var window = new MainWindow(app, catalog, localizer, navigator, player, session, http, settings, store, auth);
+    try
+    {
+        auth.Restore();
+    }
+    catch (IOException ex)
+    {
+        Console.Error.WriteLine("keyring: " + ex.Message);
+    }
+
 
     var sawCaption = false;
     double furthest = 0;
@@ -68,7 +83,7 @@ app.OnActivate += async (_, _) =>
             var pass = automation.StartsWith("watch:", StringComparison.Ordinal)
                 ? furthest > 2 && sawCaption && window.Watch?.PlaybackFailed == false
                 : window.Home.Rails.Count > 0;
-            Console.WriteLine($"AUTOMATION {automation} rails={window.Home.Rails.Count} furthest={furthest:F1} caption={sawCaption} RESULT {(pass ? "PASS" : "FAIL")}");
+            Console.WriteLine($"AUTOMATION {automation} core={coreVersion} rails={window.Home.Rails.Count} furthest={furthest:F1} caption={sawCaption} RESULT {(pass ? "PASS" : "FAIL")}");
             exitCode = pass ? 0 : 3;
             app.Quit();
             return false;

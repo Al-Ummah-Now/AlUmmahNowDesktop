@@ -58,5 +58,10 @@
   "studio.preset.recitation": "تلاوة (صوت)",
   "studio.timeline.split": "تقسيم",
   "studio.timeline.delete": "حذف وسدّ الفراغ",
-  "studio.timeline.hint": "اسحب لتحريك مؤشر التشغيل."
+  "studio.timeline.hint": "اسحب لتحريك مؤشر التشغيل.",
+  "auth.signIn": "تسجيل الدخول",
+  "auth.signOut": "تسجيل الخروج",
+  "auth.signingIn": "تابع في المتصفح…",
+  "auth.failed": "لم يكتمل تسجيل الدخول. حاول مرة أخرى.",
+  "auth.browser.done": "تم تسجيل دخولك. يمكنك إغلاق هذه النافذة والعودة إلى التطبيق."
 }

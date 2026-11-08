@@ -16,6 +16,9 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
+      - name: Fetch AlUmmahNow.Core
+        shell: bash
+        run: ./scripts/fetch-core.sh
       - name: Build shared layer (all target frameworks)
         run: |
           dotnet build src/AlUmmahNow.CoreBridge -c Release
@@ -24,6 +27,12 @@ jobs:
         run: |
           dotnet test tests/AlUmmahNow.App.Tests -c Release --logger trx --results-directory artifacts/test
           dotnet test tests/AlUmmahNow.Studio.Tests -c Release --logger trx --results-directory artifacts/test
+      - name: Test the Rust core bridge against a real keyring
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gnome-keyring libsecret-1-0 dbus-x11
+          export AUN_KEYRING_TEST=1
+          dbus-run-session -- bash -c 'echo -n ci | gnome-keyring-daemon --unlock --components=secrets >/dev/null; dotnet test tests/AlUmmahNow.CoreBridge.Native.Tests -c Release --logger trx --results-directory artifacts/test'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
