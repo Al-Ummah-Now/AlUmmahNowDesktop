@@ -39,6 +39,33 @@ public class HomeViewModelTests
         Assert.Equal(LoadState.Error, vm.State);
     }
 
+    private sealed class PagedCatalog : ICatalogClient
+    {
+        public int Calls;
+        public Task<VideoPage> ListVideosAsync(VideoQuery q, CancellationToken ct = default)
+        {
+            if (q.Category != null || q.Sort != VideoSort.Date) return Task.FromResult(new VideoPage(Array.Empty<Video>(), null));
+            Calls++;
+            return Task.FromResult(q.Cursor == null
+                ? new VideoPage(new[] { new Video { Id = "pending", IsPublic = true, UploadStatus = "uploading" } }, "next")
+                : new VideoPage(new[] { FakeCatalog.Ready("second-page") }, null));
+        }
+
+        public Task<Video> GetVideoAsync(string id, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<IReadOnlyList<SubtitleTrack>> GetSubtitleTracksAsync(string id, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<string> GetTextAsync(string url, CancellationToken ct = default) => throw new NotSupportedException();
+    }
+
+    [Fact]
+    public async Task Short_page_follows_cursor()
+    {
+        var c = new PagedCatalog();
+        var vm = new HomeViewModel(c, new Localizer("en"), new Navigator());
+        await vm.LoadAsync();
+        Assert.Equal(2, c.Calls);
+        Assert.Equal("second-page", vm.Featured!.Id);
+    }
+
     [Fact]
     public async Task No_content_is_empty_state()
     {
