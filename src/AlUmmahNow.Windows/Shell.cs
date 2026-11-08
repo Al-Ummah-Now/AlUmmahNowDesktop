@@ -285,9 +285,9 @@ public sealed class Shell
         controls.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
         var transport = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
-        var back = Icon("", "player.seekBack", () => vm.SkipBack());
+        var back = Icon("", "player.seekBack", () => vm.SkipBack());
         var play = Icon(vm.IsPlaying ? "" : "", vm.IsPlaying ? "player.pause" : "player.play", () => vm.TogglePlay());
-        var forward = Icon("", "player.seekForward", () => vm.SkipForward());
+        var forward = Icon("", "player.seekForward", () => vm.SkipForward());
         transport.Children.Add(back);
         transport.Children.Add(play);
         transport.Children.Add(forward);
