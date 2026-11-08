@@ -63,5 +63,8 @@
   "auth.signOut": "Sign out",
   "auth.signingIn": "Continue in your browser…",
   "auth.failed": "Sign-in didn't finish. Please try again.",
-  "auth.browser.done": "You're signed in. You can close this window and return to the app."
+  "auth.browser.done": "You're signed in. You can close this window and return to the app.",
+  "studio.upload.signIn": "Sign in to upload to your channel.",
+  "studio.upload.noChannel": "This account has no channel yet.",
+  "studio.upload.channel": "Uploading to {0}"
 }
