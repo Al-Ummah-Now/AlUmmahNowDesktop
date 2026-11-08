@@ -45,6 +45,9 @@ namespace AlUmmahNow.App.ViewModels
             ("home.rail.ramadan", VideoSort.Date, "ramadan"),
         };
 
+        private const int RailSize = 20;
+        private const int MaxRailPages = 5;
+
         private readonly ICatalogClient _catalog;
         private readonly Localizer _localizer;
         private readonly Navigator _navigator;
@@ -92,8 +95,18 @@ namespace AlUmmahNow.App.ViewModels
         {
             try
             {
-                var page = await _catalog.ListVideosAsync(new VideoQuery { Limit = 50, Sort = sort, Category = category }, cancellationToken);
-                var cards = page.Items.Where(v => v.IsPlayable).Take(20).Select(v => new VideoCardViewModel(v, _localizer)).ToList();
+                // The list endpoint filters after paging, so a page can be short while more remain.
+                var cards = new List<VideoCardViewModel>();
+                string? cursor = null;
+                for (var page = 0; page < MaxRailPages && cards.Count < RailSize; page++)
+                {
+                    var result = await _catalog.ListVideosAsync(new VideoQuery { Limit = 50, Sort = sort, Category = category, Cursor = cursor }, cancellationToken);
+                    cards.AddRange(result.Items.Where(v => v.IsPlayable).Select(v => new VideoCardViewModel(v, _localizer)));
+                    cursor = result.Cursor;
+                    if (string.IsNullOrEmpty(cursor)) break;
+                }
+
+                if (cards.Count > RailSize) cards.RemoveRange(RailSize, cards.Count - RailSize);
                 return new RailViewModel(key, cards, _localizer);
             }
             catch (CatalogException)
