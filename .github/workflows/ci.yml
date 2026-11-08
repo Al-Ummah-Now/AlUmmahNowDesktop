@@ -39,7 +39,7 @@ jobs:
       - name: Install GTK, libadwaita, GStreamer
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-4-1 libadwaita-1-0 xvfb imagemagick x11-apps \
+          sudo apt-get install -y libgtk-4-1 libadwaita-1-0 xvfb imagemagick x11-apps openbox \
             gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad \
             gstreamer1.0-libav gstreamer1.0-gtk4 fonts-noto-core libgl1-mesa-dri
           lsb_release -ds; pkg-config --modversion gtk4 || dpkg -l | grep -E 'libgtk-4-1|libadwaita-1-0|gstreamer1.0-gtk4' | awk '{print $2,$3}'
@@ -54,10 +54,12 @@ jobs:
           mkdir -p artifacts/d9
           for l in ar en; do
             xvfb-run -a -s "-screen 0 1280x800x24" bash -c "
+              openbox & sleep 2;
               dotnet spikes/D9.GirCore/bin/Release/net9.0/D9.GirCore.dll --lang $l --seconds 25 --report artifacts/d9/report-$l.txt & p=\$!;
-              sleep 18; import -window root artifacts/d9/$l.png; wait \$p; echo exit=\$?" 2>&1 | tee artifacts/d9/log-$l.txt
+              sleep 18; import -window root artifacts/d9/$l.png; wait \$p; rc=\$?; echo exit=\$rc; exit \$rc" 2>&1 | tee artifacts/d9/log-$l.txt; test ${PIPESTATUS[0]} -eq 0 || failed=1
           done
           cat artifacts/d9/report-*.txt
+          test -z "$failed"
       - uses: actions/upload-artifact@v4
         if: always()
         with:

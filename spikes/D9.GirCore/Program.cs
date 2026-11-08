@@ -19,10 +19,26 @@ var hls = "";
 try
 {
     using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
-    using var doc = JsonDocument.Parse(await http.GetStringAsync("https://videos.api.qa.alummahnow.net/api/videos?limit=50"));
-    hls = doc.RootElement.GetProperty("data").EnumerateArray()
-        .First(v => v.GetProperty("uploadStatus").GetString() == "ready" && v.GetProperty("title").GetString()!.StartsWith("QA Lecture 1"))
-        .GetProperty("playUrl").GetString()!;
+    // The list endpoint filters after paging, so a page can be short: follow the cursor.
+    string? cursor = null;
+    for (var page = 0; page < 10 && hls.Length == 0; page++)
+    {
+        var url = "https://videos.api.qa.alummahnow.net/api/videos?limit=50" + (cursor == null ? "" : "&cursor=" + Uri.EscapeDataString(cursor));
+        using var doc = JsonDocument.Parse(await http.GetStringAsync(url));
+        foreach (var v in doc.RootElement.GetProperty("data").EnumerateArray())
+        {
+            if (v.GetProperty("uploadStatus").GetString() == "ready" && v.TryGetProperty("playUrl", out var u) && v.GetProperty("title").GetString()!.StartsWith("QA "))
+            {
+                hls = u.GetString()!;
+                break;
+            }
+        }
+
+        cursor = doc.RootElement.TryGetProperty("cursor", out var c) && c.ValueKind == JsonValueKind.String ? c.GetString() : null;
+        if (cursor == null) break;
+    }
+
+    if (hls.Length == 0) throw new InvalidOperationException("no ready QA video found");
     Log("QA HLS url: resolved");
 }
 catch (Exception ex) { Log("QA HLS url: FAILED " + ex.Message); }
@@ -88,11 +104,16 @@ app.OnActivate += (_, _) =>
         if (playbin != null)
         {
             playbin.SetProperty("video-sink", new GObject.Value(sink));
-            playbin.SetProperty("uri", new GObject.Value(hls.Length > 0 ? hls : "testsrc://"));
+            playbin.SetProperty("uri", new GObject.Value(hls));
             var bus = playbin.GetBus()!;
             bus.AddWatch(0, (busObj, msg) =>
             {
-                if (msg.Type == Gst.MessageType.Error) Log("gst error message received");
+                if (msg.Type == Gst.MessageType.Error)
+                {
+                    msg.ParseError(out var error, out var debug);
+                    Log("gst error: " + error?.Message + " | " + debug);
+                }
+
                 if (msg.Type == Gst.MessageType.StateChanged)
                 {
                     msg.ParseStateChanged(out _, out var now, out _);
@@ -176,6 +197,14 @@ app.OnActivate += (_, _) =>
         return true;
     });
 
+    // Seek and rate change: both are core to a scrubbing editor.
+    GLib.Functions.TimeoutAdd(0, 9000, () =>
+    {
+        var ok = playbin?.Seek(1.5, Gst.Format.Time, Gst.SeekFlags.Flush | Gst.SeekFlags.Accurate, Gst.SeekType.Set, 30_000_000_000L, Gst.SeekType.None, -1) ?? false;
+        Log("seek to 30s at 1.5x accepted: " + ok);
+        return false;
+    });
+
     GLib.Functions.TimeoutAdd(0, (uint)seconds * 1000, () =>
     {
         long position = 0;
@@ -186,14 +215,18 @@ app.OnActivate += (_, _) =>
         Log($"cairo timeline: {cairoCalls} draws, avg {(cairoCalls > 0 ? cairoMs / cairoCalls : 0):F2} ms (2000 clips)");
         Log($"snapshot timeline: {snapshotCalls} draws, avg {(snapshotCalls > 0 ? snapshotMs / snapshotCalls : 0):F2} ms (2000 clips)");
         Log("direction: " + Gtk.Widget.GetDefaultDirection());
+        var advanced = hasPos && position > 30_000_000_000L && frames > 0;
+        Log("VIDEO VERDICT: " + (advanced ? "PASS" : "FAIL"));
         File.WriteAllLines(reportPath, report);
+        Environment.ExitCode = advanced ? 0 : 3;
         playbin?.SetState(Gst.State.Null);
         app.Quit();
         return false;
     });
 };
 
-return app.RunWithSynchronizationContext(null);
+var rc = app.RunWithSynchronizationContext(null);
+return rc != 0 ? rc : Environment.ExitCode;
 
 namespace D9
 {
