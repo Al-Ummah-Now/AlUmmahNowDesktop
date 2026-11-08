@@ -41,7 +41,7 @@ public sealed partial class App : Application
         var exitAfter = int.TryParse(Environment.GetEnvironmentVariable("AUN_EXIT_AFTER"), out var s) ? s : 0;
         var ui = DispatcherQueue.GetForCurrentThread();
 
-        var environment = AppEnvironment.Resolve(Environment.GetEnvironmentVariable("AUN_ENV"), AppEnvironment.Qa);
+        var environment = AppEnvironment.Resolve(Environment.GetEnvironmentVariable("AUN_ENV"), AppEnvironment.BuildDefault);
         // CI only: there is no account to sign in with on a runner, and each scenario starts clean.
         var simulateUploads = Environment.GetEnvironmentVariable("AUN_SIMULATE_UPLOADS") == "1";
         var dataRoot = simulateUploads

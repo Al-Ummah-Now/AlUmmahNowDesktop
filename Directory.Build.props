@@ -7,5 +7,7 @@
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
     <Company>Al Ummah Now</Company>
     <Product>Al Ummah Now</Product>
+    <!-- Tagged release builds pass AunProd=true so they default to production. -->
+    <DefineConstants Condition="'$(AunProd)' == 'true'">$(DefineConstants);AUN_PROD</DefineConstants>
   </PropertyGroup>
 </Project>

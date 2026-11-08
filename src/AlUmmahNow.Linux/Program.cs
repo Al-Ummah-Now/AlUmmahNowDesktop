@@ -20,7 +20,7 @@ const string Css = """
     @define-color accent_fg_color #093041;
     """;
 
-var environment = AppEnvironment.Resolve(Environment.GetEnvironmentVariable("AUN_ENV"), AppEnvironment.Qa);
+var environment = AppEnvironment.Resolve(Environment.GetEnvironmentVariable("AUN_ENV"), AppEnvironment.BuildDefault);
 var configHome = Environment.GetEnvironmentVariable("XDG_CONFIG_HOME");
 if (string.IsNullOrEmpty(configHome)) configHome = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config");
 var store = new SettingsStore(Path.Combine(configHome, "alummahnow", "settings.json"));

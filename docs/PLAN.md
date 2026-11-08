@@ -35,7 +35,7 @@ desktop apps. Do not use net9-only APIs in `App` or `CoreBridge`.
 ## Environments
 
 `AUN_ENV=qa|prod` overrides the build default. Debug and CI builds default to QA
-(`videos.api.qa.alummahnow.net`); tagged release builds default to prod (`videos.api.alummahnow.net`).
+(`videos.api.qa.alummahnow.net`); builds with `-p:AunProd=true`, which only the release workflow sets, default to prod (`videos.api.alummahnow.net`).
 
 ## Testing
 
@@ -51,8 +51,11 @@ Every UI story ships in Arabic and English with RTL verified by a screenshot.
 
 ## Release
 
-Tag-triggered from `main` only, never by hand:
+`.github/workflows/release.yml` is the only release path:
 
-- `v*` tag: MSIX for Microsoft Store and winget, Flatpak for Flathub, TPK for Samsung Seller Office.
-- CI currently produces **unsigned** MSIX and Flatpak artifacts. Store submission stays disabled until
-  the owner provides the inputs in `docs/OWNER_INPUTS.md`.
+- Push a `v1.2.3` tag on a commit already on `main`. The workflow tests, stamps the version, builds
+  production-configured packages for both Windows and Linux apps and for Tizen, then creates a
+  **draft** GitHub release with SHA-256 checksums. A person publishes the draft.
+- Running the workflow by hand on `main` is a dry run: the same builds and no release.
+- Packages are unsigned, and store submission is not automated yet. Both wait for the owner inputs in
+  `docs/OWNER_INPUTS.md` (tracked in #15).
