@@ -110,8 +110,10 @@ app.OnActivate += (_, _) =>
             {
                 if (msg.Type == Gst.MessageType.Error)
                 {
-                    msg.ParseError(out var error, out var debug);
-                    Log("gst error: " + error?.Message + " | " + debug);
+                    // Gir.Core 0.8.1 does not bind gst_message_parse_error.
+                    D9.GstNative.gst_message_parse_error(msg.Handle.DangerousGetHandle(), out var error, out var debug);
+                    var text = error != IntPtr.Zero ? Marshal.PtrToStringUTF8(Marshal.ReadIntPtr(error, 8)) : "";
+                    Log("gst error: " + text + " | " + Marshal.PtrToStringUTF8(debug));
                 }
 
                 if (msg.Type == Gst.MessageType.StateChanged)
@@ -230,6 +232,12 @@ return rc != 0 ? rc : Environment.ExitCode;
 
 namespace D9
 {
+    internal static class GstNative
+    {
+        [DllImport("libgstreamer-1.0.so.0")]
+        internal static extern void gst_message_parse_error(IntPtr message, out IntPtr error, out IntPtr debug);
+    }
+
     [GObject.Subclass<GObject.Object>]
     public partial class Row
     {
