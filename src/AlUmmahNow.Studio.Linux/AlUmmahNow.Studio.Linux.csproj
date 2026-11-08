@@ -11,5 +11,7 @@
     <PackageReference Include="GirCore.Gst-1.0" />
     <ProjectReference Include="..\AlUmmahNow.App\AlUmmahNow.App.csproj" />
     <ProjectReference Include="..\AlUmmahNow.Studio\AlUmmahNow.Studio.csproj" />
+    <ProjectReference Include="..\AlUmmahNow.CoreBridge.Native\AlUmmahNow.CoreBridge.Native.csproj" />
+    <ProjectReference Include="..\AlUmmahNow.Platform.Linux\AlUmmahNow.Platform.Linux.csproj" />
   </ItemGroup>
 </Project>

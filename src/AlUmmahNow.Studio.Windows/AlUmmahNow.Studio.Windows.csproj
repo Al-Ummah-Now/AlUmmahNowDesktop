@@ -20,5 +20,6 @@
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" />
     <ProjectReference Include="..\AlUmmahNow.App\AlUmmahNow.App.csproj" />
     <ProjectReference Include="..\AlUmmahNow.Studio\AlUmmahNow.Studio.csproj" />
+    <ProjectReference Include="..\AlUmmahNow.CoreBridge.Native\AlUmmahNow.CoreBridge.Native.csproj" />
   </ItemGroup>
 </Project>
