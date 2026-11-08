@@ -1,0 +1,28 @@
+# CI bundle: packages a self-contained publish produced by the workflow.
+# Flathub submission must instead build from source with generated NuGet sources (see docs/OWNER_INPUTS.md).
+app-id: net.alummahnow.AlUmmahNow
+runtime: org.gnome.Platform
+runtime-version: '49'
+sdk: org.gnome.Sdk
+command: alummahnow
+finish-args:
+  - --share=network
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --socket=pulseaudio
+  - --device=dri
+  - --own-name=org.mpris.MediaPlayer2.alummahnow
+modules:
+  - name: alummahnow
+    buildsystem: simple
+    build-commands:
+      - mkdir -p /app/lib/alummahnow /app/bin
+      - cp -r publish/. /app/lib/alummahnow/
+      - ln -s /app/lib/alummahnow/alummahnow /app/bin/alummahnow
+      - install -Dm644 net.alummahnow.AlUmmahNow.desktop /app/share/applications/net.alummahnow.AlUmmahNow.desktop
+    sources:
+      - type: dir
+        path: ../../artifacts/flatpak-input
+      - type: file
+        path: net.alummahnow.AlUmmahNow.desktop
