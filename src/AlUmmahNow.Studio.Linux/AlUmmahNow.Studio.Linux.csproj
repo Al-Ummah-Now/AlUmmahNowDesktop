@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>alummahnow-studio</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="GirCore.Gtk-4.0" />
+    <PackageReference Include="GirCore.Adw-1" />
+    <PackageReference Include="GirCore.Gst-1.0" />
+    <ProjectReference Include="..\AlUmmahNow.App\AlUmmahNow.App.csproj" />
+    <ProjectReference Include="..\AlUmmahNow.Studio\AlUmmahNow.Studio.csproj" />
+  </ItemGroup>
+</Project>

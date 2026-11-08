@@ -21,7 +21,9 @@ jobs:
           dotnet build src/AlUmmahNow.CoreBridge -c Release
           dotnet build src/AlUmmahNow.App -c Release
       - name: Test shared layer
-        run: dotnet test tests/AlUmmahNow.App.Tests -c Release --logger trx --results-directory artifacts/test
+        run: |
+          dotnet test tests/AlUmmahNow.App.Tests -c Release --logger trx --results-directory artifacts/test
+          dotnet test tests/AlUmmahNow.Studio.Tests -c Release --logger trx --results-directory artifacts/test
       - uses: actions/upload-artifact@v4
         if: always()
         with:
