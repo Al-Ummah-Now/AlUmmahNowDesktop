@@ -38,12 +38,18 @@ jobs:
             audiotestsrc num-buffers=220 ! audioconvert ! avenc_aac ! m.
           run() { xvfb-run -a -s "-screen 0 1280x800x24" scripts/studio-scenario.sh "$@" 2>&1 | tee artifacts/studio/$4.log || true; }
           run ar uploads "" uploads-ar artifacts/studio $PWD/watched
+          run ar timeline "" signin-ar artifacts/studio "" "" 0
+          run en timeline "" signin-en artifacts/studio "" "" 0
+          run ar uploads shell shell-ar artifacts/studio
+          run en uploads shell shell-en artifacts/studio
+          run en uploads shell accounts-en artifacts/studio "" accounts
+          run ar uploads shell signout-ar artifacts/studio "" signout
           run en timeline "" timeline-en artifacts/studio
           run ar timeline "" timeline-ar artifacts/studio
           run ar encode encode:$PWD/source.mp4 encode-ar artifacts/studio
           run en encode encode:$PWD/source.mp4 encode-en artifacts/studio
           grep -h AUTOMATION artifacts/studio/*.log
-          test "$(cat artifacts/studio/*.log | grep -c 'RESULT PASS')" = 5
+          test "$(cat artifacts/studio/*.log | grep -c 'RESULT PASS')" = 11
           gst-discoverer-1.0 source.mp4.out.mp4 | tee artifacts/studio/discover.txt
           grep -qi 'h.264' artifacts/studio/discover.txt
           ! grep -qi '4:4:4' artifacts/studio/discover.txt

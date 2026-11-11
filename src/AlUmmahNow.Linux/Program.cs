@@ -1,3 +1,4 @@
+using AlUmmahNow.CoreBridge.Logging;
 using AlUmmahNow.App.I18n;
 using AlUmmahNow.App.Media;
 using AlUmmahNow.App.Navigation;
@@ -8,6 +9,7 @@ using AlUmmahNow.CoreBridge.Temporary;
 using AlUmmahNow.Platform.Linux;
 using AlUmmahNow.Linux;
 
+Log.AddSink(TextWriterLogSink.StandardError());
 Adw.Module.Initialize();
 Gst.Module.Initialize();
 var gstArgs = Array.Empty<string>();
@@ -60,7 +62,7 @@ app.OnActivate += async (_, _) =>
     }
     catch (IOException ex)
     {
-        Console.Error.WriteLine("keyring: " + ex.Message);
+        Log.For("app").Warn("keyring unavailable", ex);
     }
 
 
@@ -83,7 +85,7 @@ app.OnActivate += async (_, _) =>
             var pass = automation.StartsWith("watch:", StringComparison.Ordinal)
                 ? furthest > 2 && sawCaption && window.Watch?.PlaybackFailed == false
                 : window.Home.Rails.Count > 0;
-            Console.WriteLine($"AUTOMATION {automation} core={coreVersion} rails={window.Home.Rails.Count} furthest={furthest:F1} caption={sawCaption} RESULT {(pass ? "PASS" : "FAIL")}");
+            Log.For("automation").Info($"AUTOMATION {automation} core={coreVersion} rails={window.Home.Rails.Count} furthest={furthest:F1} caption={sawCaption} RESULT {(pass ? "PASS" : "FAIL")}");
             exitCode = pass ? 0 : 3;
             app.Quit();
             return false;

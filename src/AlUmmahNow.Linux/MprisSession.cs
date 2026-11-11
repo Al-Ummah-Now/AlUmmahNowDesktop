@@ -1,3 +1,4 @@
+using AlUmmahNow.CoreBridge.Logging;
 using System.Globalization;
 using AlUmmahNow.App.Media;
 using Tmds.DBus.Protocol;
@@ -41,11 +42,11 @@ public sealed class MprisSession : IMediaSession, IPathMethodHandler
             connection.AddMethodHandler(this);
             await connection.RequestNameAsync("org.mpris.MediaPlayer2.alummahnow", RequestNameOptions.None);
             _connection = connection;
-            Console.WriteLine("mpris: registered");
+            Log.For("mpris").Info("registered");
         }
         catch (Exception ex) when (ex is DBusConnectionException || ex is InvalidOperationException || ex is IOException)
         {
-            Console.WriteLine("mpris: unavailable: " + ex.Message);
+            Log.For("mpris").Warn("unavailable", ex);
         }
     }
 
