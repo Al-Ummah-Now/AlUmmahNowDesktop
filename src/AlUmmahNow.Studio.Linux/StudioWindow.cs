@@ -56,7 +56,7 @@ public sealed class StudioWindow
         _accountMenu.SetMarginBottom(6);
         _accountPopover.SetChild(_accountMenu);
         _accountButton.SetPopover(_accountPopover);
-        _accountButton.SetIconName("avatar-default-symbolic");
+
         header.PackEnd(_accountButton);
 
         var root = Gtk.Box.New(Gtk.Orientation.Vertical, 0);
@@ -185,7 +185,8 @@ public sealed class StudioWindow
     {
         var active = _shell.ActiveAccount;
         _accountButton.SetVisible(_shell.AccountList.Count > 0);
-        _accountButton.SetTooltipText(active == null ? _l["studio.shell.account"] : _l.Format("studio.shell.accountMenu", active.Label));
+        _accountButton.SetLabel(active?.Label ?? _l["studio.shell.account"]);
+        Ui.Named(_accountButton, active == null ? _l["studio.shell.account"] : _l.Format("studio.shell.accountMenu", active.Label));
         Ui.Clear(_accountMenu);
         foreach (var account in _shell.AccountList)
         {
@@ -195,15 +196,15 @@ public sealed class StudioWindow
             var pick = Gtk.Button.NewWithLabel(isActive ? "✓ " + text : text);
             pick.SetHexpand(true);
             pick.AddCssClass("flat");
-            pick.SetTooltipText(_l.Format("studio.shell.switchTo", account.Label));
+            Ui.Named(pick, _l.Format("studio.shell.switchTo", account.Label));
             pick.OnClicked += (_, _) =>
             {
                 _accountPopover.Popdown();
                 _ = _shell.SwitchAccountAsync(account.UserId);
             };
-            var signOut = Gtk.Button.NewFromIconName("system-log-out-symbolic");
+            var signOut = Gtk.Button.NewWithLabel(_l["auth.signOut"]);
             signOut.AddCssClass("flat");
-            signOut.SetTooltipText(_l.Format("studio.shell.signOutOf", account.Label));
+            Ui.Named(signOut, _l.Format("studio.shell.signOutOf", account.Label));
             signOut.OnClicked += (_, _) =>
             {
                 _accountPopover.Popdown();

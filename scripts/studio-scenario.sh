@@ -9,6 +9,10 @@ openbox &
 sleep 2
 dotnet src/AlUmmahNow.Studio.Linux/bin/Release/net9.0/alummahnow-studio.dll &
 app=$!
-sleep 17
+sleep 15
+if command -v python3 >/dev/null && python3 -c "import pyatspi" 2>/dev/null; then
+  python3 scripts/atspi-dump.py alummahnow-studio "$out/$name.atspi.txt" || true
+fi
+sleep 2
 import -window root "$out/$name.png"
 wait $app

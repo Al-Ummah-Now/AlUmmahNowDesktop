@@ -36,6 +36,13 @@ public static class Ui
         while (box.GetFirstChild() is { } child) box.Remove(child);
     }
 
+    /// <summary>Tooltip with the full action ("Edit <title>"); the control's own label is what screen readers announce.</summary>
+    public static T Named<T>(T widget, string name) where T : Gtk.Widget
+    {
+        widget.SetTooltipText(name);
+        return widget;
+    }
+
     /// <summary>Labels a control for screen readers through a visible label (AT-SPI labelled-by).</summary>
     public static Gtk.Box Labelled(string text, Gtk.Widget control)
     {
