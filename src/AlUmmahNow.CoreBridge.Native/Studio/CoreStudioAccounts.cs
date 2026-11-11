@@ -50,8 +50,21 @@ public sealed class CoreStudioAccounts : IStudioAccounts, IDisposable
 
     public void Reload()
     {
-        var accounts = Manager.Accounts().Select(ToAccount).ToList();
-        var active = Manager.ActiveAccount() is { } a ? ToAccount(a) : null;
+        List<StudioAccount> accounts;
+        StudioAccount? active;
+        try
+        {
+            accounts = Manager.Accounts().Select(ToAccount).ToList();
+            active = Manager.ActiveAccount() is { } a ? ToAccount(a) : null;
+        }
+        catch (AunException ex)
+        {
+            // No keyring (headless session): behave as signed out rather than crash.
+            Logger.Warn("saved accounts unreadable", ex);
+            accounts = new List<StudioAccount>();
+            active = null;
+        }
+
         lock (_gate)
         {
             _accounts = accounts;
