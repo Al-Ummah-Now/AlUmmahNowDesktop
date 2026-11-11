@@ -1,7 +1,6 @@
 using AlUmmahNow.App.I18n;
 using AlUmmahNow.Studio.Encode;
 using AlUmmahNow.Studio.Timeline;
-using AlUmmahNow.Studio.Upload;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
@@ -27,39 +26,6 @@ internal static class Rows
         Grid.SetColumn(text, 2);
         grid.Children.Add(text);
         return grid;
-    }
-}
-
-/// <summary>The upload queue with a watched folder.</summary>
-internal sealed class UploadsPage
-{
-    private readonly Localizer _l;
-    private readonly UploadQueue _queue;
-    private readonly StackPanel _rows = new() { Spacing = 8 };
-    private int _dirty = 1;
-
-    public UploadsPage(Localizer l, UploadQueue queue, Func<Task> pickWatchFolder)
-    {
-        _l = l;
-        _queue = queue;
-        var watch = new Button { Content = l["studio.upload.watch"] };
-        watch.Click += async (_, _) => await pickWatchFolder();
-        Root = new StackPanel { Spacing = 10, Padding = new Thickness(16) };
-        Root.Children.Add(watch);
-        Root.Children.Add(_rows);
-        queue.Changed += (_, _) => Interlocked.Exchange(ref _dirty, 1);
-    }
-
-    public StackPanel Root { get; }
-
-    public void Tick()
-    {
-        if (Interlocked.Exchange(ref _dirty, 0) == 0) return;
-        _rows.Children.Clear();
-        foreach (var item in _queue.Snapshot())
-        {
-            _rows.Children.Add(Rows.Progress(Path.GetFileName(item.FilePath), item.Fraction, _l["studio.status." + item.Status.ToString().ToLowerInvariant()]));
-        }
     }
 }
 

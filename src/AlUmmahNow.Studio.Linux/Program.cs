@@ -5,7 +5,6 @@ using AlUmmahNow.CoreBridge.Logging;
 using AlUmmahNow.CoreBridge.Native;
 using AlUmmahNow.CoreBridge.Native.Studio;
 using AlUmmahNow.CoreBridge.Studio;
-using AlUmmahNow.CoreBridge.Temporary;
 using AlUmmahNow.Platform.Linux;
 using AlUmmahNow.Studio.Demo;
 using AlUmmahNow.Studio.Encode;
@@ -38,7 +37,6 @@ var scene = Environment.GetEnvironmentVariable("AUN_SCENE") ?? "";
 var exitAfter = int.TryParse(Environment.GetEnvironmentVariable("AUN_EXIT_AFTER"), out var s) ? s : 0;
 // CI and screenshots only: canned accounts and data, nothing sent to a server.
 var demo = Environment.GetEnvironmentVariable("AUN_DEMO") == "1";
-var simulateUploads = demo || Environment.GetEnvironmentVariable("AUN_SIMULATE_UPLOADS") == "1";
 
 var environment = AppEnvironment.Resolve(Environment.GetEnvironmentVariable("AUN_ENV"), AppEnvironment.BuildDefault);
 var version = typeof(StudioWindow).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
@@ -46,32 +44,27 @@ log.Info($"Al Ummah Now Studio {version} for Linux, environment {environment.Nam
 
 var settingsStore = new SettingsStore(Path.Combine(configDir, "settings.json"));
 var settings = settingsStore.Load();
-var http = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
-http.DefaultRequestHeaders.UserAgent.ParseAdd("AlUmmahNowStudioLinux/" + version);
 
+var userAgent = "AlUmmahNowStudioLinux/" + version;
 IStudioAccounts accounts;
 IApiTransport transport;
-IAuthSession? authSession = null;
+Func<string, IUploadService> uploadServiceFor;
 if (demo)
 {
     accounts = new DemoAccounts();
     transport = new DemoTransport();
+    uploadServiceFor = account => new SimulatedUploadService(account, TimeSpan.FromMilliseconds(250));
 }
 else
 {
     var core = new CoreStudioAccounts(environment.AuthIssuer, environment.StudioClientId, new LibSecretStore("alummahnow-studio"), new ShellBrowserLauncher(), localizer["auth.browser.done"]);
     accounts = core;
-    transport = new CoreApiTransport(core, environment.VideosApi, "AlUmmahNowStudioLinux/" + version, localizer.Language);
-    authSession = new AccountsAuthSession(core);
+    transport = new CoreApiTransport(core, environment.VideosApi, userAgent, localizer.Language);
+    uploadServiceFor = account => new CoreUploadService(core, environment.VideosApi, userAgent, Path.Combine(stateDir, "uploads"), account);
 }
 
 var api = new StudioApiClient(transport);
 var encode = new EncodeQueue(new GStreamerEncodeBackend());
-StudioShellViewModel? shell = null;
-IUploadEngine uploadEngine = simulateUploads || authSession == null
-    ? new SimulatedUploadEngine(TimeSpan.FromMilliseconds(250))
-    : new TusUploadEngine(http, environment.VideosApi, authSession, _ => Task.FromResult(shell?.ActiveChannel?.Id ?? throw new InvalidOperationException("No channel selected")));
-var queue = new UploadQueue(uploadEngine, Path.Combine(configDir, demo ? "uploads-demo.json" : "uploads.json"));
 
 var app = Adw.Application.New("net.alummahnow.Studio", Gio.ApplicationFlags.NonUnique);
 var exitCode = 0;
@@ -80,56 +73,32 @@ app.OnActivate += (_, _) =>
 {
     Gtk.Widget.SetDefaultDirection(localizer.IsRtl ? Gtk.TextDirection.Rtl : Gtk.TextDirection.Ltr);
     // The view-model posts its updates to the GTK main loop's synchronization context.
-    shell = new StudioShellViewModel(accounts, api);
+    var shell = new StudioShellViewModel(accounts, api);
+    var uploadsVm = new UploadsViewModel(shell, api, uploadServiceFor, Path.Combine(stateDir, demo ? "demo" : "studio"));
     var banner = demo ? localizer["studio.shell.demo"] : environment.Name != "prod" ? localizer.Format("studio.shell.environment", environment.Name.ToUpperInvariant()) : null;
     var window = new StudioWindow(app, localizer, shell, banner);
 
-    var watch = string.IsNullOrEmpty(settings.WatchFolder) ? null : new FolderWatch(settings.WatchFolder!);
-    if (Environment.GetEnvironmentVariable("AUN_WATCH_DIR") is { Length: > 0 } dir) watch = new FolderWatch(dir);
-
-    async Task<string?> PickFolderAsync()
-    {
-        try
-        {
-            var folder = await Gtk.FileDialog.New().SelectFolderAsync(window.Window);
-            return folder?.GetPath();
-        }
-        catch (GLib.GException)
-        {
-            return null; // dismissed
-        }
-    }
-
-    var uploads = new UploadsPage(localizer, queue, PickFolderAsync, path =>
+    uploadsVm.Watch(Environment.GetEnvironmentVariable("AUN_WATCH_DIR") is { Length: > 0 } dir ? dir : settings.WatchFolder);
+    var uploads = new UploadPage(localizer, uploadsVm, shell, window.Window, path =>
     {
         settings.WatchFolder = path;
         settingsStore.Save(settings);
-        watch = new FolderWatch(path);
     });
     var encodePage = new EncodePage(localizer, encode);
     var timeline = new TimelinePage(localizer);
-    window.AddPage("uploads", localizer["studio.tab.uploads"], "document-send-symbolic", uploads.Root);
+    window.AddPage("uploads", localizer["studio.tab.upload"], "document-send-symbolic", uploads.Root);
     window.AddPage("encode", localizer["studio.tab.encode"], "media-record-symbolic", encodePage.Root);
     window.AddPage("timeline", localizer["studio.tab.timeline"], "video-x-generic-symbolic", timeline.Root);
     window.ShowPage(tabName);
     window.Window.Present();
 
-    shell.ChannelChanged += (_, _) => queue.Pump();
     GLib.Functions.TimeoutAdd(0, 300, () =>
     {
-        uploads.Tick();
+        uploadsVm.Tick();
         encodePage.Tick();
         return true;
     });
-    GLib.Functions.TimeoutAdd(0, 1000, () =>
-    {
-        if (watch != null && (simulateUploads || shell.State == ShellState.Ready))
-        {
-            foreach (var (path, size) in watch.Scan()) queue.Enqueue(path, size);
-        }
-
-        return true;
-    });
+    app.OnShutdown += (_, _) => uploadsVm.Dispose();
 
     _ = shell.InitializeAsync();
 
@@ -154,8 +123,8 @@ app.OnActivate += (_, _) =>
     {
         GLib.Functions.TimeoutAdd(0, (uint)exitAfter * 1000, () =>
         {
-            var items = queue.Snapshot();
-            var uploadsDone = items.Count > 0 && items.All(i => i.Status == UploadStatus.Completed);
+            var items = uploadsVm.Items;
+            var uploadsDone = items.Count > 0 && items.All(i => i.Phase == UploadPhase.Done);
             var encoded = automationJob == null || automationJob.Status == EncodeStatus.Completed;
             var pass = automation.StartsWith("encode:", StringComparison.Ordinal) ? encoded
                 : automation == "shell" ? shell.State == ShellState.Ready && shell.ActiveChannel != null
