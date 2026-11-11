@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 
@@ -12,6 +13,9 @@ namespace AlUmmahNow.App.Services
         public ThemePreference Theme { get; set; } = ThemePreference.Dark;
         public bool EasternNumerals { get; set; }
         public string? WatchFolder { get; set; }
+
+        /// <summary>Studio search history, newest first (local only).</summary>
+        public List<string>? RecentSearches { get; set; }
     }
 
     /// <summary>Stores settings as JSON. A corrupt or missing file yields defaults.</summary>

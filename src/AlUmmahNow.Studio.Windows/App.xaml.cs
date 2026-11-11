@@ -10,6 +10,8 @@ using AlUmmahNow.Studio.Demo;
 using AlUmmahNow.Studio.Encode;
 using AlUmmahNow.Studio.Shell;
 using AlUmmahNow.Studio.Upload;
+using AlUmmahNow.Studio.Videos;
+using AlUmmahNow.Studio.Analytics;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -116,9 +118,22 @@ public sealed partial class App : Application
             settings.WatchFolder = path;
             settingsStore.Save(settings);
         });
+        var videosVm = new VideosViewModel(shell, api,
+            account => new RecentlyDeleted(Path.Combine(dataRoot, demo ? "demo" : "studio", "deleted-" + Convert.ToHexString(System.Text.Encoding.UTF8.GetBytes(account)) + ".json")),
+            () => settings.RecentSearches ?? new List<string>(),
+            recents =>
+            {
+                settings.RecentSearches = recents.ToList();
+                settingsStore.Save(settings);
+            });
+        var analyticsVm = new AnalyticsViewModel(shell, api);
+        var videos = new VideosPage(localizer, videosVm, uploadsVm, () => window.Window.Content?.XamlRoot);
+        var analytics = new AnalyticsPage(localizer, analyticsVm);
         var encodePage = new EncodePage(localizer, encode);
         var timeline = new TimelinePage(localizer);
         window.AddPage("uploads", localizer["studio.tab.upload"], Symbol.Upload, uploads.Root);
+        window.AddPage("videos", localizer["studio.tab.videos"], Symbol.List, videos.Root);
+        window.AddPage("analytics", localizer["studio.tab.analytics"], Symbol.Calculator, analytics.Root);
         window.AddPage("encode", localizer["studio.tab.encode"], Symbol.Video, encodePage.Root);
         window.AddPage("timeline", localizer["studio.tab.timeline"], Symbol.Edit, timeline.Root);
         window.ShowPage(tabName);
@@ -135,6 +150,8 @@ public sealed partial class App : Application
         _refresh.Start();
 
         _ = shell.InitializeAsync();
+        // CI screenshots: stage a folder on the Upload page.
+        if (Environment.GetEnvironmentVariable("AUN_STAGE_DIR") is { Length: > 0 } stageDir) uploadsVm.AddFolder(stageDir, recursive: false);
 
         EncodeJob? job = null;
         if (automation.StartsWith("encode:", StringComparison.Ordinal))
@@ -152,6 +169,7 @@ public sealed partial class App : Application
             {
                 if (scene == "accounts") window.OpenAccountMenu();
                 else if (scene == "signout") window.AskSignOut();
+                else videos.RunScene(scene);
             };
             _sceneTimer.Start();
         }

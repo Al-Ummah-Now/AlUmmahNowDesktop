@@ -10,7 +10,7 @@ permissions:
 jobs:
   studio-windows:
     runs-on: windows-latest
-    timeout-minutes: 35
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -41,9 +41,23 @@ jobs:
           ./scripts/windows-studio-scenario.ps1 $exe en uploads shell shell-en $out
           ./scripts/windows-studio-scenario.ps1 $exe en uploads shell accounts-en $out "" accounts
           ./scripts/windows-studio-scenario.ps1 $exe ar uploads shell signout-ar $out "" signout
+          $stage = (New-Item -ItemType Directory -Force staged).FullName
+          foreach ($n in "درس 1.mp4","درس 2.mp4","lesson 10.mp4") { [IO.File]::WriteAllBytes("$stage/$n", (New-Object byte[] 1500000)) }
+          $env:AUN_STAGE_DIR = $stage
+          ./scripts/windows-studio-scenario.ps1 $exe ar uploads shell upload-staged-ar $out
+          ./scripts/windows-studio-scenario.ps1 $exe en uploads shell upload-staged-en $out
+          $env:AUN_STAGE_DIR = ""
+          ./scripts/windows-studio-scenario.ps1 $exe ar videos shell videos-ar $out
+          ./scripts/windows-studio-scenario.ps1 $exe en videos shell videos-en $out
+          ./scripts/windows-studio-scenario.ps1 $exe ar videos shell search-ar $out "" search
+          ./scripts/windows-studio-scenario.ps1 $exe en videos shell edit-en $out "" edit
+          ./scripts/windows-studio-scenario.ps1 $exe ar videos shell bulk-ar $out "" bulk
+          ./scripts/windows-studio-scenario.ps1 $exe en videos shell delete-en $out "" delete
+          ./scripts/windows-studio-scenario.ps1 $exe ar analytics shell analytics-ar $out
+          ./scripts/windows-studio-scenario.ps1 $exe en analytics shell analytics-en $out
           ./scripts/windows-studio-scenario.ps1 $exe ar timeline "" timeline-ar $out
           ./scripts/windows-studio-scenario.ps1 $exe en encode "encode:$source" encode-en $out
-          foreach ($n in "uploads-ar","signin-ar","signin-en","shell-ar","shell-en","accounts-en","signout-ar","timeline-ar","encode-en") {
+          foreach ($n in "uploads-ar","signin-ar","signin-en","shell-ar","shell-en","accounts-en","signout-ar","upload-staged-ar","upload-staged-en","videos-ar","videos-en","search-ar","edit-en","bulk-ar","delete-en","analytics-ar","analytics-en","timeline-ar","encode-en") {
             if (-not (Select-String -Quiet "RESULT PASS" "artifacts/studio/$n.txt")) { throw "$n failed" }
             if (Test-Path "artifacts/studio/$n.txt.hang.txt") { throw "$n did not exit" }
           }
@@ -52,6 +66,9 @@ jobs:
           if (-not (Select-String -Quiet "`tChannelPicker`tChannel" artifacts/studio/shell-en.uia.txt)) { throw "channel picker has no accessible name" }
           if (-not (Select-String -Quiet "`tAccountMenu`tAccount: Amina Studio" artifacts/studio/shell-en.uia.txt)) { throw "account menu has no accessible name" }
           if (-not (Select-String -Quiet "Sign out of" artifacts/studio/accounts-en.uia.txt)) { throw "account menu items not exposed" }
+          if (-not (Select-String -Quiet "`tVideoSearch`tSearch your videos" artifacts/studio/videos-en.uia.txt)) { throw "video search has no accessible name" }
+          if (-not (Select-String -Quiet "Select Seerah" artifacts/studio/videos-en.uia.txt)) { throw "row checkboxes have no accessible names" }
+          if (-not (Select-String -Quiet "`tStartUpload`tUpload 3 videos" artifacts/studio/upload-staged-en.uia.txt)) { throw "upload button not exposed" }
           ffmpeg -hide_banner -i "$source.out.mp4" 2>&1 | Select-String "Video:|Duration" | Tee-Object artifacts/studio/discover.txt
           if (-not (Select-String -Quiet "h264" artifacts/studio/discover.txt)) { throw "output is not H.264" }
           # ffmpeg -i with no output file always exits 1; the checks above are the gate.

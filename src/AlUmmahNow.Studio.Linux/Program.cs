@@ -11,6 +11,8 @@ using AlUmmahNow.Studio.Encode;
 using AlUmmahNow.Studio.Linux;
 using AlUmmahNow.Studio.Shell;
 using AlUmmahNow.Studio.Upload;
+using AlUmmahNow.Studio.Videos;
+using AlUmmahNow.Studio.Analytics;
 
 // Settings and logs follow the XDG base directories.
 string XdgDir(string variable, string fallback)
@@ -84,9 +86,22 @@ app.OnActivate += (_, _) =>
         settings.WatchFolder = path;
         settingsStore.Save(settings);
     });
+    var videosVm = new VideosViewModel(shell, api,
+        account => new RecentlyDeleted(Path.Combine(stateDir, demo ? "demo" : "studio", "deleted-" + Convert.ToHexString(System.Text.Encoding.UTF8.GetBytes(account)) + ".json")),
+        () => settings.RecentSearches ?? new List<string>(),
+        recents =>
+        {
+            settings.RecentSearches = recents.ToList();
+            settingsStore.Save(settings);
+        });
+    var analyticsVm = new AnalyticsViewModel(shell, api);
+    var videos = new VideosPage(localizer, videosVm, uploadsVm, window.Window);
+    var analytics = new AnalyticsPage(localizer, analyticsVm);
     var encodePage = new EncodePage(localizer, encode);
     var timeline = new TimelinePage(localizer);
     window.AddPage("uploads", localizer["studio.tab.upload"], "document-send-symbolic", uploads.Root);
+    window.AddPage("videos", localizer["studio.tab.videos"], "view-list-symbolic", videos.Root);
+    window.AddPage("analytics", localizer["studio.tab.analytics"], "power-profile-performance-symbolic", analytics.Root);
     window.AddPage("encode", localizer["studio.tab.encode"], "media-record-symbolic", encodePage.Root);
     window.AddPage("timeline", localizer["studio.tab.timeline"], "video-x-generic-symbolic", timeline.Root);
     window.ShowPage(tabName);
@@ -101,6 +116,8 @@ app.OnActivate += (_, _) =>
     app.OnShutdown += (_, _) => uploadsVm.Dispose();
 
     _ = shell.InitializeAsync();
+    // CI screenshots: stage a folder on the Upload page.
+    if (Environment.GetEnvironmentVariable("AUN_STAGE_DIR") is { Length: > 0 } stageDir) uploadsVm.AddFolder(stageDir, recursive: false);
 
     EncodeJob? automationJob = null;
     if (automation.StartsWith("encode:", StringComparison.Ordinal))
@@ -115,6 +132,7 @@ app.OnActivate += (_, _) =>
         {
             if (scene == "accounts") window.OpenAccountMenu();
             else if (scene == "signout") window.AskSignOut();
+            else videos.RunScene(scene);
             return false;
         });
     }

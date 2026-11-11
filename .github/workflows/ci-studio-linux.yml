@@ -10,7 +10,7 @@ permissions:
 jobs:
   studio-linux:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -44,12 +44,23 @@ jobs:
           run en uploads shell shell-en artifacts/studio
           run en uploads shell accounts-en artifacts/studio "" accounts
           run ar uploads shell signout-ar artifacts/studio "" signout
+          mkdir -p staged && truncate -s 1500K "staged/درس 1.mp4" "staged/درس 2.mp4" "staged/lesson 10.mp4"
+          AUN_STAGE_DIR=$PWD/staged run ar uploads shell upload-staged-ar artifacts/studio
+          AUN_STAGE_DIR=$PWD/staged run en uploads shell upload-staged-en artifacts/studio
+          run ar videos shell videos-ar artifacts/studio
+          run en videos shell videos-en artifacts/studio
+          run ar videos shell search-ar artifacts/studio "" search
+          run en videos shell edit-en artifacts/studio "" edit
+          run ar videos shell bulk-ar artifacts/studio "" bulk
+          run en videos shell delete-en artifacts/studio "" delete
+          run ar analytics shell analytics-ar artifacts/studio
+          run en analytics shell analytics-en artifacts/studio
           run en timeline "" timeline-en artifacts/studio
           run ar timeline "" timeline-ar artifacts/studio
           run ar encode encode:$PWD/source.mp4 encode-ar artifacts/studio
           run en encode encode:$PWD/source.mp4 encode-en artifacts/studio
           grep -h AUTOMATION artifacts/studio/*.log
-          test "$(cat artifacts/studio/*.log | grep -c 'RESULT PASS')" = 11
+          test "$(cat artifacts/studio/*.log | grep -c 'RESULT PASS')" = 21
           gst-discoverer-1.0 source.mp4.out.mp4 | tee artifacts/studio/discover.txt
           grep -qi 'h.264' artifacts/studio/discover.txt
           ! grep -qi '4:4:4' artifacts/studio/discover.txt
