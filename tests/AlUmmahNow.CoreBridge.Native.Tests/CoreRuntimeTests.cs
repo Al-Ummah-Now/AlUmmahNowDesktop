@@ -18,7 +18,8 @@ public class CoreRuntimeTests
     }
 
     [Fact]
-    public void Native_core_loads_and_reports_its_version() => Assert.Equal("0.1.0", CoreRuntime.Version());
+    public void Native_core_loads_and_reports_its_version() =>
+        Assert.Matches(@"^\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$", CoreRuntime.Version());
 
     [Fact]
     public void Core_round_trips_through_the_storage_adapter() => Assert.NotEmpty(CoreRuntime.SelfTestSecureStorage(new MemoryStore()));

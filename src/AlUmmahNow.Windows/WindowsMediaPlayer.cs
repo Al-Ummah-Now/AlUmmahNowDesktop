@@ -1,3 +1,4 @@
+using AlUmmahNow.CoreBridge.Logging;
 using AlUmmahNow.App.Media;
 using Microsoft.UI.Dispatching;
 using Windows.Media.Core;
@@ -22,7 +23,7 @@ public sealed class WindowsMediaPlayer : IMediaPlayer
         Player.MediaOpened += (_, _) => _ui.TryEnqueue(OnOpened);
         Player.MediaFailed += (_, e) => _ui.TryEnqueue(() =>
         {
-            Console.Error.WriteLine("playback error: " + e.Error + " " + e.ErrorMessage);
+            Log.For("player").Error("playback error: " + e.Error + " " + e.ErrorMessage);
             SetState(PlayerState.Failed);
         });
         Player.MediaEnded += (_, _) => _ui.TryEnqueue(() => SetState(PlayerState.Ended));

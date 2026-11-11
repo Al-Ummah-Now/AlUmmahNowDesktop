@@ -1,3 +1,4 @@
+using AlUmmahNow.CoreBridge.Logging;
 using System.Runtime.InteropServices;
 using AlUmmahNow.App.Media;
 
@@ -112,7 +113,7 @@ public sealed class GstMediaPlayer : IMediaPlayer
                 SetState(PlayerState.Ended);
                 break;
             case Gst.MessageType.Error:
-                Console.Error.WriteLine("playback error: " + ReadError(message));
+                Log.For("player").Error("playback error: " + ReadError(message));
                 _open = false;
                 SetState(PlayerState.Failed);
                 break;

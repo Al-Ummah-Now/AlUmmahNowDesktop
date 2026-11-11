@@ -35,13 +35,23 @@ jobs:
           $source = (Resolve-Path source.mp4).Path
           $exe = (Resolve-Path "src/AlUmmahNow.Studio.Windows/bin/x64/Release/net9.0-windows10.0.22621.0/win-x64/AlUmmahNowStudio.exe").Path
           ./scripts/windows-studio-scenario.ps1 $exe ar uploads "" uploads-ar $out $watch
+          ./scripts/windows-studio-scenario.ps1 $exe ar timeline "" signin-ar $out "" "" 0
+          ./scripts/windows-studio-scenario.ps1 $exe en timeline "" signin-en $out "" "" 0
+          ./scripts/windows-studio-scenario.ps1 $exe ar uploads shell shell-ar $out
+          ./scripts/windows-studio-scenario.ps1 $exe en uploads shell shell-en $out
+          ./scripts/windows-studio-scenario.ps1 $exe en uploads shell accounts-en $out "" accounts
+          ./scripts/windows-studio-scenario.ps1 $exe ar uploads shell signout-ar $out "" signout
           ./scripts/windows-studio-scenario.ps1 $exe ar timeline "" timeline-ar $out
-          ./scripts/windows-studio-scenario.ps1 $exe en timeline "" timeline-en $out
           ./scripts/windows-studio-scenario.ps1 $exe en encode "encode:$source" encode-en $out
-          foreach ($n in "uploads-ar","timeline-ar","timeline-en","encode-en") {
+          foreach ($n in "uploads-ar","signin-ar","signin-en","shell-ar","shell-en","accounts-en","signout-ar","timeline-ar","encode-en") {
             if (-not (Select-String -Quiet "RESULT PASS" "artifacts/studio/$n.txt")) { throw "$n failed" }
             if (Test-Path "artifacts/studio/$n.txt.hang.txt") { throw "$n did not exit" }
           }
+          # Screen readers: the sign-in button, channel picker and account menu are named.
+          if (-not (Select-String -Quiet "`tSignIn`t" artifacts/studio/signin-en.uia.txt)) { throw "sign-in button not exposed to UI Automation" }
+          if (-not (Select-String -Quiet "`tChannelPicker`tChannel" artifacts/studio/shell-en.uia.txt)) { throw "channel picker has no accessible name" }
+          if (-not (Select-String -Quiet "`tAccountMenu`tAccount: Amina Studio" artifacts/studio/shell-en.uia.txt)) { throw "account menu has no accessible name" }
+          if (-not (Select-String -Quiet "Sign out of" artifacts/studio/accounts-en.uia.txt)) { throw "account menu items not exposed" }
           ffmpeg -hide_banner -i "$source.out.mp4" 2>&1 | Select-String "Video:|Duration" | Tee-Object artifacts/studio/discover.txt
           if (-not (Select-String -Quiet "h264" artifacts/studio/discover.txt)) { throw "output is not H.264" }
           # ffmpeg -i with no output file always exits 1; the checks above are the gate.
