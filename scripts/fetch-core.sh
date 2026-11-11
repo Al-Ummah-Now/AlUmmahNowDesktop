@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Downloads the pinned AlUmmahNow.Core package from its public release and verifies it.
 set -euo pipefail
-version=0.1.0
-sha256=2e2e609c050ea3ed6ab5d28d11850e7b995c0e801b4df526e8711d59e94f1ab9
+version=0.3.0-rc.1
+sha256=d619fcda838b90cfbb2de6f5c0d3b4ef56532a7a2f90a27605c5107619207128
 root="$(cd "$(dirname "$0")/.." && pwd)"
 file="$root/.nuget-local/AlUmmahNow.Core.$version.nupkg"
 if [ ! -f "$file" ]; then
