@@ -20,10 +20,11 @@ jobs:
         shell: bash
         run: ./scripts/fetch-core.sh
       - name: Install GTK, libadwaita, GStreamer
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libgtk-4-1 libadwaita-1-0 xvfb imagemagick openbox dbus-x11 libglib2.0-bin \
-            gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad \
+        uses: ./.github/actions/apt-install
+        with:
+          packages: >-
+            libgtk-4-1 libadwaita-1-0 xvfb imagemagick openbox dbus-x11 libglib2.0-bin
+            gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad
             gstreamer1.0-libav gstreamer1.0-gtk4 fonts-noto-core libgl1-mesa-dri adwaita-icon-theme libsecret-1-0
       - run: dotnet build src/AlUmmahNow.Linux -c Release
       - name: Run viewer scenarios (ar and en, home and watch)
@@ -66,7 +67,9 @@ jobs:
       - name: Fetch AlUmmahNow.Core
         shell: bash
         run: ./scripts/fetch-core.sh
-      - run: sudo apt-get update && sudo apt-get install -y flatpak flatpak-builder
+      - uses: ./.github/actions/apt-install
+        with:
+          packages: flatpak flatpak-builder
       - name: Publish self-contained app
         run: dotnet publish src/AlUmmahNow.Linux -c Release -r linux-x64 --self-contained -o artifacts/flatpak-input/publish
       - name: Build unsigned Flatpak bundle

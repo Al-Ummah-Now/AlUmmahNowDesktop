@@ -20,11 +20,9 @@ jobs:
         shell: bash
         run: ./scripts/fetch-core.sh
       - name: Install GTK, libadwaita, GStreamer
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libgtk-4-1 libadwaita-1-0 xvfb imagemagick openbox \
-            gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad \
-            gstreamer1.0-plugins-ugly gstreamer1.0-plugins-base-apps gstreamer1.0-libav libsecret-1-0 fonts-noto-core python3-pyatspi at-spi2-core dbus-x11 libgl1-mesa-dri adwaita-icon-theme
+        uses: ./.github/actions/apt-install
+        with:
+          packages: libgtk-4-1 libadwaita-1-0 xvfb imagemagick openbox gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-plugins-base-apps gstreamer1.0-libav libsecret-1-0 fonts-noto-core python3-pyatspi at-spi2-core dbus-x11 libgl1-mesa-dri adwaita-icon-theme
       - run: dotnet build src/AlUmmahNow.Studio.Linux -c Release
       - name: Run Studio scenarios
         env:

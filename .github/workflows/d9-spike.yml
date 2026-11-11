@@ -21,11 +21,11 @@ jobs:
         with:
           global-json-file: global.json
       - name: Install GTK, libadwaita, GStreamer
+        uses: ./.github/actions/apt-install
+        with:
+          packages: libgtk-4-1 libadwaita-1-0 xvfb imagemagick x11-apps openbox gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-libav gstreamer1.0-gtk4 fonts-noto-core libgl1-mesa-dri
+      - name: GTK, libadwaita and GStreamer versions
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libgtk-4-1 libadwaita-1-0 xvfb imagemagick x11-apps openbox \
-            gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad \
-            gstreamer1.0-libav gstreamer1.0-gtk4 fonts-noto-core libgl1-mesa-dri
           lsb_release -ds; pkg-config --modversion gtk4 || dpkg -l | grep -E 'libgtk-4-1|libadwaita-1-0|gstreamer1.0-gtk4' | awk '{print $2,$3}'
           gst-inspect-1.0 gtk4paintablesink | head -5
       - run: dotnet build spikes/D9.GirCore -c Release
