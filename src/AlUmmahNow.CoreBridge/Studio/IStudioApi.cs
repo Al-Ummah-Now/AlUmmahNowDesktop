@@ -23,8 +23,16 @@ namespace AlUmmahNow.CoreBridge.Studio
         /// <summary>Applies visibility, category and tag changes to up to 50 videos in one call.</summary>
         Task BulkUpdateAsync(string channelId, IReadOnlyList<string> videoIds, BulkVideoChanges changes, CancellationToken cancellationToken = default);
 
-        /// <summary>Permanently deletes the video on the server.</summary>
-        Task DeleteVideoAsync(string channelId, string videoId, CancellationToken cancellationToken = default);
+        /// <summary>Soft delete: the videos leave the channel at once and stay restorable for 30 days.</summary>
+        Task<BulkOutcome> DeleteVideosAsync(string channelId, IReadOnlyList<string> videoIds, CancellationToken cancellationToken = default);
+
+        /// <summary>The channel's Recently deleted list, newest first.</summary>
+        Task<IReadOnlyList<DeletedVideo>> ListDeletedAsync(string channelId, CancellationToken cancellationToken = default);
+
+        Task<BulkOutcome> RestoreVideosAsync(string channelId, IReadOnlyList<string> videoIds, CancellationToken cancellationToken = default);
+
+        /// <summary>"Delete permanently": queues deleted videos for the hourly cleanup. Can't be undone.</summary>
+        Task<BulkOutcome> PurgeVideosAsync(string channelId, IReadOnlyList<string> videoIds, CancellationToken cancellationToken = default);
 
         /// <summary>Schedules a private video to publish at <paramref name="at"/> (UTC on the wire).</summary>
         Task ScheduleAsync(string channelId, string videoId, DateTimeOffset at, string timeZone, CancellationToken cancellationToken = default);

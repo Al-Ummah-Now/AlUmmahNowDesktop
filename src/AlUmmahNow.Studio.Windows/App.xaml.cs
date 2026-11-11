@@ -119,7 +119,6 @@ public sealed partial class App : Application
             settingsStore.Save(settings);
         });
         var videosVm = new VideosViewModel(shell, api,
-            account => new RecentlyDeleted(Path.Combine(dataRoot, demo ? "demo" : "studio", "deleted-" + Convert.ToHexString(System.Text.Encoding.UTF8.GetBytes(account)) + ".json")),
             () => settings.RecentSearches ?? new List<string>(),
             recents =>
             {

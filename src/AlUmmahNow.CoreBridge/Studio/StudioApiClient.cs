@@ -109,12 +109,87 @@ namespace AlUmmahNow.CoreBridge.Studio
             }
         }
 
-        public async Task DeleteVideoAsync(string channelId, string videoId, CancellationToken cancellationToken = default)
+        public Task<BulkOutcome> DeleteVideosAsync(string channelId, IReadOnlyList<string> videoIds, CancellationToken cancellationToken = default) =>
+            BulkAsync(() => new ApiRequest("post_VideoBulkDelete"), channelId, videoIds, cancellationToken);
+
+        public Task<BulkOutcome> RestoreVideosAsync(string channelId, IReadOnlyList<string> videoIds, CancellationToken cancellationToken = default) =>
+            BulkAsync(() => ApiRequest.Path("POST", "/api/videos/bulk-restore"), channelId, videoIds, cancellationToken);
+
+        public Task<BulkOutcome> PurgeVideosAsync(string channelId, IReadOnlyList<string> videoIds, CancellationToken cancellationToken = default) =>
+            BulkAsync(() => ApiRequest.Path("POST", "/api/videos/bulk-purge"), channelId, videoIds, cancellationToken);
+
+        public async Task<IReadOnlyList<DeletedVideo>> ListDeletedAsync(string channelId, CancellationToken cancellationToken = default)
         {
-            var r = new ApiRequest("delete_VideoDelete");
-            r.PathParams["id"] = videoId;
-            r.Headers["channelId"] = channelId;
-            (await SendAsync(r, cancellationToken).ConfigureAwait(false)).Dispose();
+            var list = new List<DeletedVideo>();
+            string? cursor = null;
+            // Up to 10 pages of 50: the list only holds the last 30 days.
+            for (var page = 0; page < 10; page++)
+            {
+                var r = ApiRequest.Path("GET", "/api/channels/{id}/content/deleted");
+                r.PathParams["id"] = channelId;
+                r.Headers["channelId"] = channelId;
+                r.Query["limit"] = "50";
+                if (cursor != null) r.Query["cursor"] = cursor;
+                using var doc = await SendAsync(r, cancellationToken).ConfigureAwait(false);
+                var result = Unwrap(doc.RootElement);
+                foreach (var e in Array(result, "items"))
+                {
+                    var id = Str(e, "id");
+                    if (string.IsNullOrEmpty(id)) continue;
+                    var status = Str(e, "status") switch
+                    {
+                        "queued" => DeletionStatus.Queued,
+                        "purging" => DeletionStatus.Purging,
+                        "purged" => DeletionStatus.Purged,
+                        _ => DeletionStatus.Deleted,
+                    };
+                    if (status == DeletionStatus.Purged) continue;
+                    list.Add(new DeletedVideo
+                    {
+                        Id = id!,
+                        Title = Str(e, "title") ?? "",
+                        DeletedAt = DateTimeOffsetOrNull(Str(e, "deletedAt")) ?? DateTimeOffset.MinValue,
+                        PurgeAfter = DateTimeOffsetOrNull(Str(e, "purgeAfter")),
+                        Status = status,
+                    });
+                }
+
+                cursor = Str(result, "cursor");
+                if (string.IsNullOrEmpty(cursor)) break;
+            }
+
+            return list.OrderByDescending(d => d.DeletedAt).ToList();
+        }
+
+        private async Task<BulkOutcome> BulkAsync(Func<ApiRequest> make, string channelId, IReadOnlyList<string> videoIds, CancellationToken cancellationToken)
+        {
+            var ok = new List<string>();
+            var failed = new Dictionary<string, string>();
+            for (var i = 0; i < videoIds.Count; i += BulkLimit)
+            {
+                var batch = videoIds.Skip(i).Take(BulkLimit).ToList();
+                var r = make();
+                r.BodyJson = JsonSerializer.Serialize(new Dictionary<string, object> { ["videoIds"] = batch });
+                r.IdempotencyKey = Guid.NewGuid().ToString("N");
+                r.Headers["channelId"] = channelId;
+                using var doc = await SendAsync(r, cancellationToken).ConfigureAwait(false);
+                var results = Array(doc.RootElement, "results").ToList();
+                if (results.Count == 0)
+                {
+                    ok.AddRange(batch);
+                    continue;
+                }
+
+                foreach (var x in results)
+                {
+                    var id = Str(x, "videoId");
+                    if (id == null) continue;
+                    if (Bool(x, "success")) ok.Add(id);
+                    else failed[id] = Str(x, "error") ?? "failed";
+                }
+            }
+
+            return new BulkOutcome(ok, failed);
         }
 
         public async Task ScheduleAsync(string channelId, string videoId, DateTimeOffset at, string timeZone, CancellationToken cancellationToken = default)
