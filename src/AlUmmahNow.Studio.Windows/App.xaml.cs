@@ -6,7 +6,6 @@ using AlUmmahNow.CoreBridge.Logging;
 using AlUmmahNow.CoreBridge.Native;
 using AlUmmahNow.CoreBridge.Native.Studio;
 using AlUmmahNow.CoreBridge.Studio;
-using AlUmmahNow.CoreBridge.Temporary;
 using AlUmmahNow.Studio.Demo;
 using AlUmmahNow.Studio.Encode;
 using AlUmmahNow.Studio.Shell;
@@ -21,7 +20,7 @@ public sealed partial class App : Application
 {
     // Held in fields: a DispatcherQueueTimer referenced only locally can be garbage collected.
     private DispatcherQueueTimer? _refresh;
-    private DispatcherQueueTimer? _watchTimer;
+    private UploadsViewModel? _uploads;
     private DispatcherQueueTimer? _sceneTimer;
     private DispatcherQueueTimer? _endTimer;
     private StudioWindow? _window;
@@ -48,11 +47,10 @@ public sealed partial class App : Application
         var ui = DispatcherQueue.GetForCurrentThread();
         // CI and screenshots only: canned accounts and data, nothing sent to a server.
         var demo = Environment.GetEnvironmentVariable("AUN_DEMO") == "1";
-        var simulateUploads = demo || Environment.GetEnvironmentVariable("AUN_SIMULATE_UPLOADS") == "1";
 
         var environment = AppEnvironment.Resolve(Environment.GetEnvironmentVariable("AUN_ENV"), AppEnvironment.BuildDefault);
         // Each CI scenario starts clean.
-        var dataRoot = simulateUploads
+        var dataRoot = demo || Environment.GetEnvironmentVariable("AUN_SIMULATE_UPLOADS") == "1"
             ? Path.Combine(Path.GetTempPath(), "aun-studio-" + Guid.NewGuid().ToString("N"))
             : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AlUmmahNowStudio");
         Log.AddSink(new FileLogSink(Path.Combine(dataRoot, "logs", "studio.log")));
@@ -63,31 +61,29 @@ public sealed partial class App : Application
 
         var settingsStore = new SettingsStore(Path.Combine(dataRoot, "settings.json"));
         var settings = settingsStore.Load();
-        var http = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
-        http.DefaultRequestHeaders.UserAgent.ParseAdd("AlUmmahNowStudioWindows/" + version);
+        var userAgent = "AlUmmahNowStudioWindows/" + version;
 
         IStudioAccounts accounts;
         IApiTransport transport;
-        IAuthSession? authSession = null;
+        Func<string, IUploadService> uploadServiceFor;
         if (demo)
         {
             accounts = new DemoAccounts();
             transport = new DemoTransport();
+            uploadServiceFor = account => new SimulatedUploadService(account, TimeSpan.FromMilliseconds(250));
         }
         else
         {
             var core = new CoreStudioAccounts(environment.AuthIssuer, environment.StudioClientId, new DpapiSecureStore(Path.Combine(dataRoot, "secure")), new ShellBrowserLauncher(), localizer["auth.browser.done"]);
             accounts = core;
-            transport = new CoreApiTransport(core, environment.VideosApi, "AlUmmahNowStudioWindows/" + version, localizer.Language);
-            authSession = new AccountsAuthSession(core);
+            transport = new CoreApiTransport(core, environment.VideosApi, userAgent, localizer.Language);
+            uploadServiceFor = account => new CoreUploadService(core, environment.VideosApi, userAgent, Path.Combine(dataRoot, "uploads"), account);
         }
 
         var api = new StudioApiClient(transport);
         var shell = new StudioShellViewModel(accounts, api);
-        IUploadEngine uploadEngine = simulateUploads || authSession == null
-            ? new SimulatedUploadEngine(TimeSpan.FromMilliseconds(250))
-            : new TusUploadEngine(http, environment.VideosApi, authSession, _ => Task.FromResult(shell.ActiveChannel?.Id ?? throw new InvalidOperationException("No channel selected")));
-        var queue = new UploadQueue(uploadEngine, Path.Combine(dataRoot, "uploads.json"));
+        _uploads = new UploadsViewModel(shell, api, uploadServiceFor, Path.Combine(dataRoot, demo ? "demo" : "studio"));
+        var uploadsVm = _uploads;
         var encode = new EncodeQueue(new MediaFoundationEncodeBackend());
 
         var banner = demo ? localizer["studio.shell.demo"] : environment.Name != "prod" ? localizer.Format("studio.shell.environment", environment.Name.ToUpperInvariant()) : null;
@@ -95,48 +91,48 @@ public sealed partial class App : Application
         var window = _window;
 
         var watchDir = Environment.GetEnvironmentVariable("AUN_WATCH_DIR");
-        if (string.IsNullOrEmpty(watchDir)) watchDir = settings.WatchFolder;
-        var watch = string.IsNullOrEmpty(watchDir) ? null : new FolderWatch(watchDir);
+        uploadsVm.Watch(string.IsNullOrEmpty(watchDir) ? settings.WatchFolder : watchDir);
 
-        async Task PickWatchFolderAsync()
+        async Task<string?> PickFolderAsync()
         {
             var picker = new global::Windows.Storage.Pickers.FolderPicker();
             picker.FileTypeFilter.Add("*");
             WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(window.Window));
             var folder = await picker.PickSingleFolderAsync();
-            if (folder == null) return;
-            settings.WatchFolder = folder.Path;
-            settingsStore.Save(settings);
-            watch = new FolderWatch(folder.Path);
+            return folder?.Path;
         }
 
-        var uploads = new UploadsPage(localizer, queue, PickWatchFolderAsync);
+        async Task<IReadOnlyList<string>> PickFilesAsync()
+        {
+            var picker = new global::Windows.Storage.Pickers.FileOpenPicker();
+            foreach (var ext in UploadPlanner.VideoExtensions) picker.FileTypeFilter.Add(ext);
+            WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(window.Window));
+            var files = await picker.PickMultipleFilesAsync();
+            return files.Select(f => f.Path).ToList();
+        }
+
+        var uploads = new UploadPage(localizer, uploadsVm, shell, () => window.Window.Content?.XamlRoot, PickFilesAsync, PickFolderAsync, path =>
+        {
+            settings.WatchFolder = path;
+            settingsStore.Save(settings);
+        });
         var encodePage = new EncodePage(localizer, encode);
         var timeline = new TimelinePage(localizer);
-        window.AddPage("uploads", localizer["studio.tab.uploads"], Symbol.Upload, uploads.Root);
+        window.AddPage("uploads", localizer["studio.tab.upload"], Symbol.Upload, uploads.Root);
         window.AddPage("encode", localizer["studio.tab.encode"], Symbol.Video, encodePage.Root);
         window.AddPage("timeline", localizer["studio.tab.timeline"], Symbol.Edit, timeline.Root);
         window.ShowPage(tabName);
         window.Window.Activate();
-        shell.ChannelChanged += (_, _) => queue.Pump();
+        window.Window.Closed += (_, _) => uploadsVm.Dispose();
 
         _refresh = ui.CreateTimer();
         _refresh.Interval = TimeSpan.FromMilliseconds(300);
         _refresh.Tick += (_, _) =>
         {
-            uploads.Tick();
+            uploadsVm.Tick();
             encodePage.Tick();
         };
         _refresh.Start();
-
-        _watchTimer = ui.CreateTimer();
-        _watchTimer.Interval = TimeSpan.FromSeconds(1);
-        _watchTimer.Tick += (_, _) =>
-        {
-            if (watch == null || (!simulateUploads && shell.State != ShellState.Ready)) return;
-            foreach (var (path, size) in watch.Scan()) queue.Enqueue(path, size);
-        };
-        _watchTimer.Start();
 
         _ = shell.InitializeAsync();
 
@@ -167,8 +163,8 @@ public sealed partial class App : Application
             _endTimer.IsRepeating = false;
             _endTimer.Tick += (_, _) =>
             {
-                var snapshot = queue.Snapshot();
-                var uploadsDone = snapshot.Count > 0 && snapshot.All(i => i.Status == UploadStatus.Completed);
+                var snapshot = uploadsVm.Items;
+                var uploadsDone = snapshot.Count > 0 && snapshot.All(i => i.Phase == UploadPhase.Done);
                 var pass = job != null ? job.Status == EncodeStatus.Completed
                     : automation == "shell" ? shell.State == ShellState.Ready && shell.ActiveChannel != null
                     : uploadsDone || tabName != "uploads";

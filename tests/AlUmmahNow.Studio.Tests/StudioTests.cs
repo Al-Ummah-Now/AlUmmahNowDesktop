@@ -1,4 +1,3 @@
-using AlUmmahNow.CoreBridge;
 using AlUmmahNow.Studio.Encode;
 using AlUmmahNow.Studio.Timeline;
 using AlUmmahNow.Studio.Upload;
@@ -6,132 +5,11 @@ using Xunit;
 
 namespace AlUmmahNow.Studio.Tests;
 
-public sealed class UploadQueueTests : IDisposable
+public sealed class FolderWatchTests : IDisposable
 {
     private readonly string _dir = Directory.CreateTempSubdirectory().FullName;
-    private string State => Path.Combine(_dir, "queue.json");
 
     public void Dispose() => Directory.Delete(_dir, true);
-
-    private sealed class Engine : IUploadEngine
-    {
-        public int FailuresLeft;
-        public int MaxConcurrent, Current;
-        public List<long> Offsets = new();
-        public TaskCompletionSource? Gate;
-
-        public async Task UploadAsync(UploadRequest r, IProgress<long> p, CancellationToken ct)
-        {
-            var now = Interlocked.Increment(ref Current);
-            lock (Offsets)
-            {
-                MaxConcurrent = Math.Max(MaxConcurrent, now);
-                Offsets.Add(r.Offset);
-            }
-
-            try
-            {
-                p.Report(r.Offset + 1);
-                if (Gate != null) await Gate.Task.WaitAsync(ct);
-                else await Task.Delay(5, ct);
-                if (Interlocked.Decrement(ref FailuresLeft) >= 0) throw new IOException("network");
-                p.Report(r.Size);
-            }
-            finally
-            {
-                Interlocked.Decrement(ref Current);
-            }
-        }
-    }
-
-    private UploadQueue Make(Engine e, int parallel = 2, int attempts = 3) =>
-        new(e, State, parallel, attempts, _ => TimeSpan.Zero);
-
-    [Fact]
-    public async Task Completes_within_the_parallel_limit()
-    {
-        var e = new Engine();
-        var q = Make(e);
-        for (var i = 0; i < 6; i++) q.Enqueue("f" + i, 10);
-        await q.WhenIdleAsync();
-        Assert.All(q.Snapshot(), i => Assert.Equal(UploadStatus.Completed, i.Status));
-        Assert.InRange(e.MaxConcurrent, 1, 2);
-    }
-
-    [Fact]
-    public void Duplicate_path_and_size_is_ignored()
-    {
-        var q = Make(new Engine { Gate = new TaskCompletionSource() });
-        Assert.NotNull(q.Enqueue("a", 1));
-        Assert.Null(q.Enqueue("a", 1));
-    }
-
-    [Fact]
-    public async Task Retries_then_succeeds_resuming_from_the_saved_offset()
-    {
-        var e = new Engine { FailuresLeft = 1 };
-        var q = Make(e);
-        q.Enqueue("a", 10);
-        await q.WhenIdleAsync();
-        Assert.Equal(UploadStatus.Completed, q.Snapshot()[0].Status);
-        Assert.Equal(new long[] { 0, 1 }, e.Offsets);
-    }
-
-    [Fact]
-    public async Task Gives_up_after_max_attempts()
-    {
-        var q = Make(new Engine { FailuresLeft = 99 });
-        q.Enqueue("a", 10);
-        await q.WhenIdleAsync();
-        var item = q.Snapshot()[0];
-        Assert.Equal(UploadStatus.Failed, item.Status);
-        Assert.Equal("network", item.Error);
-    }
-
-    [Fact]
-    public async Task Pause_keeps_progress_and_resume_continues()
-    {
-        var e = new Engine { Gate = new TaskCompletionSource() };
-        var q = Make(e);
-        var item = q.Enqueue("a", 10)!;
-        while (q.Snapshot()[0].BytesSent == 0) await Task.Delay(5);
-        q.Pause(item.Id);
-        await q.WhenIdleAsync();
-        Assert.Equal(UploadStatus.Paused, q.Snapshot()[0].Status);
-        e.Gate = null;
-        q.Resume(item.Id);
-        await q.WhenIdleAsync();
-        Assert.Equal(UploadStatus.Completed, q.Snapshot()[0].Status);
-        Assert.Equal(1, e.Offsets[^1]);
-    }
-
-    [Fact]
-    public async Task Interrupted_upload_resumes_after_restart()
-    {
-        var blocked = new Engine { Gate = new TaskCompletionSource() };
-        var first = Make(blocked);
-        first.Enqueue("a", 10);
-        while (first.Snapshot()[0].BytesSent == 0) await Task.Delay(5);
-        // Saved state as if the process died mid-upload.
-        var saved = File.ReadAllText(State);
-        blocked.Gate.SetCanceled();
-        await first.WhenIdleAsync();
-        File.WriteAllText(State, saved.Replace("\"BytesSent\":0", "\"BytesSent\":4"));
-
-        var e = new Engine();
-        var second = Make(e);
-        Assert.Equal(UploadStatus.Queued, second.Snapshot()[0].Status);
-        second.Pump();
-        await second.WhenIdleAsync();
-        Assert.Equal(4, Assert.Single(e.Offsets));
-    }
-
-    [Fact]
-    public void Corrupt_state_starts_empty()
-    {
-        File.WriteAllText(State, "{not json");
-        Assert.Empty(Make(new Engine()).Snapshot());
-    }
 
     [Fact]
     public void FolderWatch_waits_for_stable_size_and_filters_types()
