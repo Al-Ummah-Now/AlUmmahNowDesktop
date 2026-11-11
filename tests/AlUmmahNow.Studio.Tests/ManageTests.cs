@@ -126,7 +126,7 @@ public sealed class VideosViewModelTests : IDisposable
     {
         var api = new StudioApiClient(_t);
         var shell = new StudioShellViewModel(_accounts, api);
-        var vm = new VideosViewModel(shell, api, a => new RecentlyDeleted(Path.Combine(_dir, a + ".json")), () => Array.Empty<string>(), _ => { }, () => _now, (_, _) => Task.CompletedTask);
+        var vm = new VideosViewModel(shell, api, () => Array.Empty<string>(), _ => { }, () => _now, (_, _) => Task.CompletedTask);
         await shell.InitializeAsync();
         await vm.LoadAsync();
         return vm;
@@ -166,40 +166,55 @@ public sealed class VideosViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task DeleteHidesRestoreBringsBackAndOldDeletionsArePurged()
+    public async Task SoftDeleteListsRestoresAndPurgesOnTheServer()
     {
+        var deleted = new List<string>();
+        var queued = new HashSet<string>();
+        _t.Responses["post_VideoBulkDelete"] = r =>
+        {
+            var ids = System.Text.Json.JsonDocument.Parse(r.BodyJson!).RootElement.GetProperty("videoIds").EnumerateArray().Select(x => x.GetString()!).ToList();
+            deleted.AddRange(ids.Where(i => i != "v2"));
+            return FakeTransport.Json(new { success = true, results = ids.Select(i => new { videoId = i, success = i != "v2", error = i == "v2" ? "forbidden" : null }) });
+        };
+        _t.Responses["GET /api/channels/{id}/content/deleted"] = r => FakeTransport.Json(new
+        {
+            success = true,
+            result = new
+            {
+                items = deleted.Select(i => new { id = i, title = "T" + i, deletedAt = "2026-11-10T08:00:00Z", purgeAfter = "2026-12-10T08:00:00Z", status = queued.Contains(i) ? "queued" : "deleted" }),
+                cursor = (string?)null,
+            },
+        });
+        _t.Responses["POST /api/videos/bulk-restore"] = r =>
+        {
+            deleted.Remove("v1");
+            return FakeTransport.Json(new { success = true, results = new[] { new { videoId = "v1", success = true } } });
+        };
+        _t.Responses["POST /api/videos/bulk-purge"] = r =>
+        {
+            queued.Add("v1");
+            return FakeTransport.Json(new { success = true, results = new[] { new { videoId = "v1", success = true } } });
+        };
         var vm = await CreateAsync();
-        Assert.Equal(2, await vm.DeleteAsync(new[] { "v1", "v2" }));
-        // Only the public one needed hiding.
-        Assert.Contains("\"videoIds\":[\"v1\"]", Assert.Single(_t.Calls("post_VideoBulkUpdate")).BodyJson);
-        Assert.Empty(vm.Items);
-        Assert.Equal(2, vm.Deleted.Count);
-        Assert.Empty(_t.Calls("delete_VideoDelete"));
 
-        // Reloading keeps them out of the list.
-        await vm.LoadAsync();
-        Assert.Empty(vm.Items);
+        Assert.Equal(1, await vm.DeleteAsync(new[] { "v1", "v2" }));
+        var call = Assert.Single(_t.Calls("post_VideoBulkDelete"));
+        Assert.Equal("c1", call.Headers["channelId"]);
+        Assert.Equal(new[] { "v2" }, vm.Items.Select(v => v.Id));
+        Assert.Equal("studio.videos.deleteFailed", vm.ErrorKey);
+        var d = Assert.Single(vm.Deleted);
+        Assert.True(d.CanRestore);
+        Assert.Equal(new DateTimeOffset(2026, 12, 10, 8, 0, 0, TimeSpan.Zero), d.PurgeAfter);
+        Assert.Equal("c1", _t.Calls("GET /api/channels/{id}/content/deleted").Last().PathParams["id"]);
 
         Assert.True(await vm.RestoreAsync("v1"));
-        Assert.Equal("{\"isPublic\":true}", Assert.Single(_t.Calls("put_VideoUpdate")).BodyJson);
-        Assert.Contains(vm.Items, v => v.Id == "v1");
-        Assert.True(await vm.RestoreAsync("v2"));
-
-        await vm.DeleteAsync(new[] { "v1" });
-        _now = _now.AddDays(31);
-        await vm.LoadAsync();
-        Assert.Equal("v1", Assert.Single(_t.Calls("delete_VideoDelete")).PathParams["id"]);
         Assert.Empty(vm.Deleted);
-    }
 
-    [Fact]
-    public async Task DeleteNowIsPermanent()
-    {
-        var vm = await CreateAsync();
-        await vm.DeleteAsync(new[] { "v2" });
-        Assert.True(await vm.DeleteNowAsync("v2"));
-        Assert.Single(_t.Calls("delete_VideoDelete"));
-        Assert.Empty(vm.Deleted);
+        deleted.Add("v1");
+        await vm.LoadDeletedAsync();
+        Assert.True(await vm.DeleteNowAsync("v1"));
+        Assert.False(Assert.Single(vm.Deleted).CanRestore);
+        Assert.Empty(_t.Calls("delete_VideoDelete"));
     }
 
     [Fact]

@@ -87,7 +87,6 @@ app.OnActivate += (_, _) =>
         settingsStore.Save(settings);
     });
     var videosVm = new VideosViewModel(shell, api,
-        account => new RecentlyDeleted(Path.Combine(stateDir, demo ? "demo" : "studio", "deleted-" + Convert.ToHexString(System.Text.Encoding.UTF8.GetBytes(account)) + ".json")),
         () => settings.RecentSearches ?? new List<string>(),
         recents =>
         {

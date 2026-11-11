@@ -53,6 +53,7 @@ public sealed class DemoTransport : IApiTransport
 {
     private readonly object _gate = new();
     private readonly List<Dictionary<string, object?>> _videos;
+    private readonly List<(Dictionary<string, object?> Video, DateTimeOffset At, string Status)> _deleted = new();
 
     public DemoTransport()
     {
@@ -153,9 +154,46 @@ public sealed class DemoTransport : IApiTransport
                 return "{\"success\":true}";
             }
 
-            case "delete_VideoDelete":
-                _videos.RemoveAll(x => (string)x["id"]! == r.PathParams["id"]);
-                return "{\"success\":true}";
+            case "post_VideoBulkDelete":
+            case "POST /api/videos/bulk-restore":
+            case "POST /api/videos/bulk-purge":
+            {
+                using var doc = JsonDocument.Parse(r.BodyJson ?? "{}");
+                var ids = doc.RootElement.GetProperty("videoIds").EnumerateArray().Select(x => x.GetString()!).ToList();
+                foreach (var id in ids)
+                {
+                    if (r.OperationId == "post_VideoBulkDelete" && _videos.FirstOrDefault(v => (string)v["id"]! == id) is { } v)
+                    {
+                        _videos.Remove(v);
+                        _deleted.Add((v, DateTimeOffset.UtcNow, "deleted"));
+                    }
+                    else if (_deleted.FindIndex(d => (string)d.Video["id"]! == id) is var i and >= 0)
+                    {
+                        if (r.OperationId.EndsWith("restore", StringComparison.Ordinal))
+                        {
+                            _videos.Add(_deleted[i].Video);
+                            _deleted.RemoveAt(i);
+                        }
+                        else
+                        {
+                            _deleted[i] = (_deleted[i].Video, _deleted[i].At, "queued");
+                        }
+                    }
+                }
+
+                return Json(new { success = true, results = ids.Select(id => new { videoId = id, success = true }) });
+            }
+
+            case "GET /api/channels/{id}/content/deleted":
+                return Json(new
+                {
+                    success = true,
+                    result = new
+                    {
+                        items = _deleted.Select(d => new { id = d.Video["id"], title = d.Video["title"], deletedAt = d.At.ToString("O"), purgeAfter = d.At.AddDays(30).ToString("O"), status = d.Status }),
+                        cursor = (string?)null,
+                    },
+                });
             case "get_PlaylistsList":
                 return Json(new { data = new[] { new { id = "demo-p1", title = "تفسير القرآن", videos = new[] { "demo-v1" }, isPublic = true }, new { id = "demo-p2", title = "Weekly lessons", videos = Array.Empty<string>(), isPublic = true } } });
             case "get_AnalyticsChannelGet":

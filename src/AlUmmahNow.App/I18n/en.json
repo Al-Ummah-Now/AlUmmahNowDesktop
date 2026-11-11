@@ -206,7 +206,7 @@
   "studio.videos.deleteOne": "Delete {0}",
   "studio.videos.deleteTitle": "Delete {0} videos?",
   "studio.videos.deleteTitleOne": "Delete \"{0}\"?",
-  "studio.videos.deleteBody": "They become private at once and move to Recently deleted. You can restore them for 30 days; after that they are deleted for good.",
+  "studio.videos.deleteBody": "They leave your channel at once. You can restore them from Recently deleted for 30 days; after that they are deleted for good.",
   "studio.videos.save": "Save",
   "studio.videos.apply": "Apply",
   "studio.videos.saved": "Saved.",
@@ -214,7 +214,7 @@
   "studio.videos.addedToPlaylist": "Added to the playlist.",
   "studio.videos.movedToDeleted": "Moved to Recently deleted.",
   "studio.videos.restored": "Restored.",
-  "studio.videos.deletedForever": "Deleted for good.",
+  "studio.videos.deletedForever": "Queued for permanent deletion.",
   "studio.videos.titleRequired": "A title is required.",
   "studio.videos.loadFailed": "Your videos could not be loaded.",
   "studio.videos.saveFailed": "The changes were not saved. Please try again.",
@@ -229,9 +229,9 @@
   "studio.videos.deletedOn": "Deleted {0} · deleted for good after {1}",
   "studio.videos.restore": "Restore",
   "studio.videos.restoreOne": "Restore {0}",
-  "studio.videos.deleteNow": "Delete now",
+  "studio.videos.deleteNow": "Delete permanently",
   "studio.videos.deleteNowTitle": "Delete \"{0}\" for good?",
-  "studio.videos.deleteNowBody": "The video, its views and comments are removed from Al Ummah Now. This can't be undone.",
+  "studio.videos.deleteNowBody": "The video is queued for permanent deletion within the hour. Its views and comments go with it. This can't be undone.",
   "studio.analytics.range": "Period",
   "studio.analytics.days": "Last {0} days",
   "studio.analytics.views": "Views",
@@ -246,5 +246,6 @@
   "studio.analytics.empty": "No data for this period yet.",
   "studio.analytics.failed": "Analytics could not be loaded.",
   "studio.analytics.ownerOnly": "Only the channel owner can see analytics.",
-  "studio.analytics.table": "Show as a table"
+  "studio.analytics.table": "Show as a table",
+  "studio.videos.queuedForDeletion": "Being deleted permanently"
 }

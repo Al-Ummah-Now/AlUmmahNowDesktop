@@ -124,6 +124,35 @@ namespace AlUmmahNow.CoreBridge.Studio
         public bool IsEmpty => IsPublic == null && Category == null && Language == null && AddTags.Count == 0 && RemoveTags.Count == 0;
     }
 
+    public enum DeletionStatus { Deleted, Queued, Purging, Purged }
+
+    /// <summary>A video in Recently deleted: restorable until <see cref="PurgeAfter"/> unless queued for permanent deletion.</summary>
+    public sealed class DeletedVideo
+    {
+        public string Id { get; set; } = "";
+        public string Title { get; set; } = "";
+        public DateTimeOffset DeletedAt { get; set; }
+        public DateTimeOffset? PurgeAfter { get; set; }
+        public DeletionStatus Status { get; set; }
+
+        public bool CanRestore => Status == DeletionStatus.Deleted;
+    }
+
+    /// <summary>Per-video outcome of a bulk delete, restore or purge.</summary>
+    public sealed class BulkOutcome
+    {
+        public BulkOutcome(IReadOnlyList<string> succeeded, IReadOnlyDictionary<string, string> failed)
+        {
+            Succeeded = succeeded;
+            Failed = failed;
+        }
+
+        public IReadOnlyList<string> Succeeded { get; }
+
+        /// <summary>Video id → the server's reason.</summary>
+        public IReadOnlyDictionary<string, string> Failed { get; }
+    }
+
     public sealed class StudioPlaylist
     {
         public StudioPlaylist(string id, string title, int videoCount, bool isPublic)

@@ -206,7 +206,7 @@
   "studio.videos.deleteOne": "حذف {0}",
   "studio.videos.deleteTitle": "حذف {0} من الفيديوهات؟",
   "studio.videos.deleteTitleOne": "حذف «{0}»؟",
-  "studio.videos.deleteBody": "تصبح خاصة فورًا وتنتقل إلى المحذوفة مؤخرًا. يمكنك استعادتها خلال 30 يومًا، وبعدها تُحذف نهائيًا.",
+  "studio.videos.deleteBody": "تختفي من قناتك فورًا. يمكنك استعادتها من المحذوفة مؤخرًا خلال 30 يومًا، وبعدها تُحذف نهائيًا.",
   "studio.videos.save": "حفظ",
   "studio.videos.apply": "تطبيق",
   "studio.videos.saved": "تم الحفظ.",
@@ -214,7 +214,7 @@
   "studio.videos.addedToPlaylist": "أُضيفت إلى قائمة التشغيل.",
   "studio.videos.movedToDeleted": "نُقلت إلى المحذوفة مؤخرًا.",
   "studio.videos.restored": "تمت الاستعادة.",
-  "studio.videos.deletedForever": "حُذفت نهائيًا.",
+  "studio.videos.deletedForever": "أُدرج للحذف النهائي.",
   "studio.videos.titleRequired": "العنوان مطلوب.",
   "studio.videos.loadFailed": "تعذّر تحميل فيديوهاتك.",
   "studio.videos.saveFailed": "لم تُحفظ التغييرات. يُرجى إعادة المحاولة.",
@@ -229,9 +229,9 @@
   "studio.videos.deletedOn": "حُذف في {0} · يُحذف نهائيًا بعد {1}",
   "studio.videos.restore": "استعادة",
   "studio.videos.restoreOne": "استعادة {0}",
-  "studio.videos.deleteNow": "حذف الآن",
+  "studio.videos.deleteNow": "حذف نهائي",
   "studio.videos.deleteNowTitle": "حذف «{0}» نهائيًا؟",
-  "studio.videos.deleteNowBody": "يُزال الفيديو ومشاهداته وتعليقاته من الأمة الآن. لا يمكن التراجع عن ذلك.",
+  "studio.videos.deleteNowBody": "يُدرج الفيديو للحذف النهائي خلال ساعة، ومعه مشاهداته وتعليقاته. لا يمكن التراجع عن ذلك.",
   "studio.analytics.range": "الفترة",
   "studio.analytics.days": "آخر {0} يومًا",
   "studio.analytics.views": "المشاهدات",
@@ -246,5 +246,6 @@
   "studio.analytics.empty": "لا توجد بيانات لهذه الفترة بعد.",
   "studio.analytics.failed": "تعذّر تحميل الإحصاءات.",
   "studio.analytics.ownerOnly": "يستطيع مالك القناة فقط رؤية الإحصاءات.",
-  "studio.analytics.table": "عرض كجدول"
+  "studio.analytics.table": "عرض كجدول",
+  "studio.videos.queuedForDeletion": "جارٍ الحذف النهائي"
 }

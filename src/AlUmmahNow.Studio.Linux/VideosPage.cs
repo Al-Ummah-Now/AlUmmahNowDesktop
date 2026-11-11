@@ -307,21 +307,30 @@ public sealed class VideosPage
             var text = Gtk.Box.New(Gtk.Orientation.Vertical, 2);
             text.SetHexpand(true);
             text.Append(Ui.Label(d.Title));
-            text.Append(Ui.Label(_l.Format("studio.videos.deletedOn", d.DeletedAt.ToLocalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), (d.DeletedAt + RecentlyDeleted.Retention).ToLocalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)), dim: true));
+            text.Append(Ui.Label(DeletedMeta(d), dim: true));
             row.Append(text);
-            var restore = Ui.Button(_l["studio.videos.restore"], () => _ = _vm.RestoreAsync(d.VideoId));
-            Ui.Named(restore, _l.Format("studio.videos.restoreOne", d.Title));
-            row.Append(restore);
-            row.Append(Ui.Button(_l["studio.videos.deleteNow"], async () =>
+            if (d.CanRestore)
             {
-                if (await Confirm.AskAsync(_window, _l.Format("studio.videos.deleteNowTitle", Localizer.Isolate(d.Title)), _l["studio.videos.deleteNowBody"], _l["studio.videos.deleteNow"], _l["common.cancel"]))
+                var restore = Ui.Button(_l["studio.videos.restore"], () => _ = _vm.RestoreAsync(d.Id));
+                Ui.Named(restore, _l.Format("studio.videos.restoreOne", d.Title));
+                row.Append(restore);
+                row.Append(Ui.Button(_l["studio.videos.deleteNow"], async () =>
                 {
-                    await _vm.DeleteNowAsync(d.VideoId);
-                }
-            }, "flat"));
+                    if (await Confirm.AskAsync(_window, _l.Format("studio.videos.deleteNowTitle", Localizer.Isolate(d.Title)), _l["studio.videos.deleteNowBody"], _l["studio.videos.deleteNow"], _l["common.cancel"]))
+                    {
+                        await _vm.DeleteNowAsync(d.Id);
+                    }
+                }, "flat"));
+            }
+
             _deleted.Append(row);
         }
     }
+
+    private string DeletedMeta(DeletedVideo d) =>
+        d.CanRestore
+            ? _l.Format("studio.videos.deletedOn", d.DeletedAt.ToLocalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), (d.PurgeAfter ?? d.DeletedAt.AddDays(30)).ToLocalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))
+            : _l["studio.videos.queuedForDeletion"];
 
     private async Task DeleteAsync(IReadOnlyList<string> ids)
     {

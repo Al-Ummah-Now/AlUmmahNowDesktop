@@ -17,11 +17,7 @@ public sealed partial class VideosViewModel : ObservableObject
 
     private readonly StudioShellViewModel _shell;
     private readonly IStudioApi _api;
-    private readonly Func<string, RecentlyDeleted> _trashFor;
-    private readonly Func<DateTimeOffset> _now;
     private readonly HashSet<string> _selected = new();
-    private RecentlyDeleted? _trash;
-    private string? _trashAccount;
     private int _generation;
 
     [ObservableProperty] private IReadOnlyList<StudioVideo> _items = Array.Empty<StudioVideo>();
@@ -33,12 +29,10 @@ public sealed partial class VideosViewModel : ObservableObject
     [ObservableProperty] private string _query = "";
     [ObservableProperty] private IReadOnlyList<DeletedVideo> _deleted = Array.Empty<DeletedVideo>();
 
-    public VideosViewModel(StudioShellViewModel shell, IStudioApi api, Func<string, RecentlyDeleted> trashFor, Func<IReadOnlyList<string>> loadRecents, Action<IReadOnlyList<string>> saveRecents, Func<DateTimeOffset>? now = null, Func<TimeSpan, CancellationToken, Task>? delay = null)
+    public VideosViewModel(StudioShellViewModel shell, IStudioApi api, Func<IReadOnlyList<string>> loadRecents, Action<IReadOnlyList<string>> saveRecents, Func<DateTimeOffset>? now = null, Func<TimeSpan, CancellationToken, Task>? delay = null)
     {
         _shell = shell;
         _api = api;
-        _trashFor = trashFor;
-        _now = now ?? (() => DateTimeOffset.UtcNow);
         Search = new SuggestViewModel(
             (text, ct) => _api.SuggestAsync(text, _shell.ActiveChannel?.Id, ct),
             text => Items.Select(v => v.Title),
@@ -86,13 +80,38 @@ public sealed partial class VideosViewModel : ObservableObject
     public async Task LoadAsync()
     {
         var gen = Interlocked.Increment(ref _generation);
-        SyncTrash();
         _selected.Clear();
         OnPropertyChanged(nameof(Selected));
         Items = Array.Empty<StudioVideo>();
         Cursor = null;
         await FetchAsync(gen, null);
-        await PurgeDueAsync();
+        await LoadDeletedAsync();
+    }
+
+    /// <summary>Re-reads Recently deleted from the server.</summary>
+    public async Task LoadDeletedAsync()
+    {
+        if (_shell.ActiveChannel is not { } channel)
+        {
+            Deleted = Array.Empty<DeletedVideo>();
+            return;
+        }
+
+        try
+        {
+            var list = await _api.ListDeletedAsync(channel.Id);
+            if (_shell.ActiveChannel?.Id == channel.Id) Deleted = list;
+        }
+        catch (Exception ex) when (ex is StudioApiException || ex is RateLimitedException)
+        {
+            // Owner-only on the server; editors simply don't see the list.
+            Logger.Warn("recently deleted unavailable", ex);
+            Deleted = Array.Empty<DeletedVideo>();
+        }
+        catch (AuthRequiredException)
+        {
+            _shell.ReportAuthRequired();
+        }
     }
 
     public Task LoadMoreAsync() => Cursor == null || IsLoading ? Task.CompletedTask : FetchAsync(_generation, Cursor);
@@ -147,42 +166,46 @@ public sealed partial class VideosViewModel : ObservableObject
         }
     }
 
-    /// <summary>Moves videos to Recently deleted (private, hidden in Studio). The UI confirms first.</summary>
+    /// <summary>Soft delete: gone from the channel at once, restorable for 30 days. The UI confirms first.</summary>
     public async Task<int> DeleteAsync(IReadOnlyCollection<string> videoIds)
     {
-        if (_shell.ActiveChannel is not { } channel || _trash == null) return 0;
-        var targets = Items.Where(v => videoIds.Contains(v.Id)).ToList();
-        var done = 0;
+        if (_shell.ActiveChannel is not { } channel || videoIds.Count == 0) return 0;
         try
         {
-            var wasPublic = targets.Where(v => v.IsPublic).Select(v => v.Id).ToList();
-            if (wasPublic.Count > 0) await _api.BulkUpdateAsync(channel.Id, wasPublic, new BulkVideoChanges { IsPublic = false });
-            foreach (var v in targets)
+            var outcome = await _api.DeleteVideosAsync(channel.Id, videoIds.ToList());
+            var gone = outcome.Succeeded.ToHashSet();
+            Items = Items.Where(v => !gone.Contains(v.Id)).ToList();
+            foreach (var id in gone) _selected.Remove(id);
+            OnPropertyChanged(nameof(Selected));
+            if (outcome.Failed.Count > 0)
             {
-                _trash.Add(new DeletedVideo { VideoId = v.Id, ChannelId = channel.Id, Title = v.Title, WasPublic = v.IsPublic, DeletedAt = _now() });
-                done++;
+                Logger.Warn($"{outcome.Failed.Count} of {videoIds.Count} deletes refused");
+                ErrorKey = "studio.videos.deleteFailed";
             }
+
+            if (gone.Count > 0) NoticeKey = "studio.videos.movedToDeleted";
+            await LoadDeletedAsync();
+            return gone.Count;
         }
         catch (Exception ex) when (Handle(ex, "studio.videos.deleteFailed"))
         {
+            return 0;
         }
-
-        Items = Items.Where(v => !_trash.Contains(v.Id)).ToList();
-        foreach (var v in targets) _selected.Remove(v.Id);
-        OnPropertyChanged(nameof(Selected));
-        Deleted = _trash.Items.Where(d => d.ChannelId == channel.Id).ToList();
-        if (done > 0) NoticeKey = "studio.videos.movedToDeleted";
-        return done;
     }
 
     public async Task<bool> RestoreAsync(string videoId)
     {
-        var item = _trash?.Items.FirstOrDefault(d => d.VideoId == videoId);
-        if (item == null) return false;
+        if (_shell.ActiveChannel is not { } channel) return false;
         try
         {
-            if (item.WasPublic) await _api.UpdateVideoAsync(item.ChannelId, videoId, new VideoChanges { IsPublic = true });
-            _trash!.Remove(videoId);
+            var outcome = await _api.RestoreVideosAsync(channel.Id, new[] { videoId });
+            if (outcome.Failed.Count > 0)
+            {
+                ErrorKey = "studio.videos.restoreFailed";
+                await LoadDeletedAsync();
+                return false;
+            }
+
             NoticeKey = "studio.videos.restored";
             await LoadAsync();
             return true;
@@ -193,52 +216,22 @@ public sealed partial class VideosViewModel : ObservableObject
         }
     }
 
-    /// <summary>Deletes on the server now. The UI confirms first: this can't be undone.</summary>
+    /// <summary>"Delete permanently": queued for the hourly cleanup. The UI confirms first: it can't be undone.</summary>
     public async Task<bool> DeleteNowAsync(string videoId)
     {
-        var item = _trash?.Items.FirstOrDefault(d => d.VideoId == videoId);
-        if (item == null) return false;
+        if (_shell.ActiveChannel is not { } channel) return false;
         try
         {
-            await _api.DeleteVideoAsync(item.ChannelId, videoId);
-            _trash!.Remove(videoId);
-            Deleted = _trash.Items.Where(d => d.ChannelId == _shell.ActiveChannel?.Id).ToList();
-            NoticeKey = "studio.videos.deletedForever";
-            return true;
-        }
-        catch (StudioApiException ex) when (ex.Status == 404)
-        {
-            _trash!.Remove(videoId);
-            Deleted = _trash.Items.Where(d => d.ChannelId == _shell.ActiveChannel?.Id).ToList();
-            return true;
+            var outcome = await _api.PurgeVideosAsync(channel.Id, new[] { videoId });
+            if (outcome.Failed.Count > 0) ErrorKey = "studio.videos.deleteFailed";
+            else NoticeKey = "studio.videos.deletedForever";
+            await LoadDeletedAsync();
+            return outcome.Failed.Count == 0;
         }
         catch (Exception ex) when (Handle(ex, "studio.videos.deleteFailed"))
         {
             return false;
         }
-    }
-
-    private async Task PurgeDueAsync()
-    {
-        if (_trash == null) return;
-        foreach (var due in _trash.Due(_now()))
-        {
-            try
-            {
-                await _api.DeleteVideoAsync(due.ChannelId, due.VideoId);
-                _trash.Remove(due.VideoId);
-            }
-            catch (StudioApiException ex) when (ex.Status == 404)
-            {
-                _trash.Remove(due.VideoId);
-            }
-            catch (Exception ex) when (ex is StudioApiException || ex is AuthRequiredException)
-            {
-                Logger.Warn("a due deletion will be tried again later", ex);
-            }
-        }
-
-        Deleted = _trash.Items.Where(d => d.ChannelId == _shell.ActiveChannel?.Id).ToList();
     }
 
     private async Task FetchAsync(int gen, string? cursor)
@@ -250,7 +243,7 @@ public sealed partial class VideosViewModel : ObservableObject
         {
             var page = await _api.ListVideosAsync(new StudioVideoQuery { ChannelId = channel.Id, Text = Query, Visibility = Visibility, Cursor = cursor });
             if (gen != _generation) return;
-            var fresh = page.Items.Where(v => _trash?.Contains(v.Id) != true);
+            var fresh = page.Items;
             Items = cursor == null ? fresh.ToList() : Items.Concat(fresh).GroupBy(v => v.Id).Select(g => g.First()).ToList();
             Cursor = page.Cursor;
             OnPropertyChanged(nameof(HasMore));
@@ -276,26 +269,6 @@ public sealed partial class VideosViewModel : ObservableObject
         {
             Logger.Warn("video refresh failed", ex);
         }
-    }
-
-    private void SyncTrash()
-    {
-        var account = _shell.ActiveAccount?.UserId;
-        if (account == null)
-        {
-            _trash = null;
-            _trashAccount = null;
-            Deleted = Array.Empty<DeletedVideo>();
-            return;
-        }
-
-        if (_trashAccount != account)
-        {
-            _trash = _trashFor(account);
-            _trashAccount = account;
-        }
-
-        Deleted = _trash!.Items.Where(d => d.ChannelId == _shell.ActiveChannel?.Id).ToList();
     }
 
     private bool Handle(Exception ex, string key)

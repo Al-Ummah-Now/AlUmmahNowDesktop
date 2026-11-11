@@ -287,26 +287,32 @@ internal sealed class VideosPage
             text.Children.Add(new TextBlock { Text = d.Title });
             text.Children.Add(new TextBlock
             {
-                Text = _l.Format("studio.videos.deletedOn", d.DeletedAt.ToLocalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), (d.DeletedAt + RecentlyDeleted.Retention).ToLocalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)),
+                Text = d.CanRestore
+                    ? _l.Format("studio.videos.deletedOn", d.DeletedAt.ToLocalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), (d.PurgeAfter ?? d.DeletedAt.AddDays(30)).ToLocalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))
+                    : _l["studio.videos.queuedForDeletion"],
                 Opacity = 0.75,
                 FontSize = 12,
             });
-            var restore = new Button { Content = _l["studio.videos.restore"] };
-            AutomationProperties.SetName(restore, _l.Format("studio.videos.restoreOne", d.Title));
-            restore.Click += (_, _) => _ = _vm.RestoreAsync(d.VideoId);
-            Grid.SetColumn(restore, 1);
-            var now = new Button { Content = _l["studio.videos.deleteNow"] };
-            now.Click += async (_, _) =>
-            {
-                if (_root() is { } root && await Confirm.AskAsync(root, _direction, _l.Format("studio.videos.deleteNowTitle", Localizer.Isolate(d.Title)), _l["studio.videos.deleteNowBody"], _l["studio.videos.deleteNow"], _l["common.cancel"]))
-                {
-                    await _vm.DeleteNowAsync(d.VideoId);
-                }
-            };
-            Grid.SetColumn(now, 2);
             row.Children.Add(text);
-            row.Children.Add(restore);
-            row.Children.Add(now);
+            if (d.CanRestore)
+            {
+                var restore = new Button { Content = _l["studio.videos.restore"] };
+                AutomationProperties.SetName(restore, _l.Format("studio.videos.restoreOne", d.Title));
+                restore.Click += (_, _) => _ = _vm.RestoreAsync(d.Id);
+                Grid.SetColumn(restore, 1);
+                var now = new Button { Content = _l["studio.videos.deleteNow"] };
+                now.Click += async (_, _) =>
+                {
+                    if (_root() is { } root && await Confirm.AskAsync(root, _direction, _l.Format("studio.videos.deleteNowTitle", Localizer.Isolate(d.Title)), _l["studio.videos.deleteNowBody"], _l["studio.videos.deleteNow"], _l["common.cancel"]))
+                    {
+                        await _vm.DeleteNowAsync(d.Id);
+                    }
+                };
+                Grid.SetColumn(now, 2);
+                row.Children.Add(restore);
+                row.Children.Add(now);
+            }
+
             _deleted.Children.Add(row);
         }
     }
