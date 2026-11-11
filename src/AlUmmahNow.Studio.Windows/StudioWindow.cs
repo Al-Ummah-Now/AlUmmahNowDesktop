@@ -4,6 +4,7 @@ using AlUmmahNow.CoreBridge.Studio;
 using AlUmmahNow.Studio.Shell;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
+using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Controls;
 
 namespace AlUmmahNow.Studio.WindowsApp;
