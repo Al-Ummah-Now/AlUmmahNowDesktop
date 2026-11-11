@@ -30,7 +30,9 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force artifacts/windows | Out-Null
           $exe = Resolve-Path "src/AlUmmahNow.Windows/bin/x64/Release/net9.0-windows10.0.22621.0/win-x64/AlUmmahNow.exe"
-          $video = "ddd1c77b-4833-4d75-b1ce-105a4d083480"
+          # QA's test library is purged regularly: pick a current video instead of pinning one.
+          $video, $captions = (python scripts/pick-qa-video.py).Split(" ")
+          $env:AUN_EXPECT_CAPTION = $captions
           $out = (Resolve-Path artifacts/windows).Path
           ./scripts/windows-scenario.ps1 $exe ar dark home home-ar-dark $out
           ./scripts/windows-scenario.ps1 $exe en light home home-en-light $out

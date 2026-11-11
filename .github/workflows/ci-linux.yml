@@ -33,7 +33,9 @@ jobs:
           LIBGL_ALWAYS_SOFTWARE: "1"
         run: |
           mkdir -p artifacts/linux
-          video=ddd1c77b-4833-4d75-b1ce-105a4d083480
+          # QA's test library is purged regularly: pick a current video instead of pinning one.
+          read video captions < <(python3 scripts/pick-qa-video.py)
+          export AUN_EXPECT_CAPTION=$captions
           run() {
             dbus-run-session -- xvfb-run -a -s "-screen 0 1280x800x24" scripts/linux-scenario.sh "$1" "$2" "$3" "$4" artifacts/linux 2>&1 | tee artifacts/linux/$4.log || true
           }
