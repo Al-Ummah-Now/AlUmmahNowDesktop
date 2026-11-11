@@ -40,10 +40,23 @@ public sealed class SecureStorageAdapter : SecureStorage
 
     public SecureStorageAdapter(ISecureStore store) => _store = store;
 
-    public byte[]? Get(string key) => _store.Get(key);
-    public void Set(string key, byte[] value) => _store.Set(key, value);
-    public void Delete(string key) => _store.Delete(key);
-    public string[] List(string prefix) => _store.List(prefix);
+    public byte[]? Get(string key) => Guard(() => _store.Get(key));
+    public void Set(string key, byte[] value) => Guard(() => { _store.Set(key, value); return 0; });
+    public void Delete(string key) => Guard(() => { _store.Delete(key); return 0; });
+    public string[] List(string prefix) => Guard(() => _store.List(prefix));
+
+    // A missing or locked keyring reaches the core as a storage error, not an unexpected one.
+    private static T Guard<T>(Func<T> f)
+    {
+        try
+        {
+            return f();
+        }
+        catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is CryptographicException || ex is InvalidOperationException)
+        {
+            throw new AunException.Storage(ex.GetType().Name + ": " + ex.Message);
+        }
+    }
 }
 
 public sealed class SystemConnectivity : Connectivity
