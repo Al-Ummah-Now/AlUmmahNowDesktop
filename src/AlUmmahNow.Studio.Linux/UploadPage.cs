@@ -301,7 +301,7 @@ public sealed class UploadPage
             title.SetHexpand(true);
             Ui.Named(title, _l.Format("studio.upload.titleFor", file));
             title.OnChanged += (_, _) => _vm.RenameStaged(plan.FilePath, title.GetText());
-            var meta = Ui.Label(file + " · " + Formats.Bytes(plan.Size, CultureInfo.InvariantCulture)
+            var meta = Ui.Label(Localizer.Isolate(file) + " · " + Formats.Bytes(plan.Size, CultureInfo.InvariantCulture)
                 + (plan.PublishAt is { } at ? " · " + _l.Format("studio.upload.publishesAt", Formats.ToLocalInput(at)) : ""), dim: true);
             meta.SetSizeRequest(320, -1);
             var remove = Gtk.Button.NewWithLabel(_l["studio.upload.remove"]);
