@@ -1,16 +1,28 @@
 name: Release
 # A v1.2.3 tag on main builds every package and creates a draft GitHub release.
-# Run it by hand on main for a dry run: same builds, no release.
+# A v1.2.3-preview.N tag (any -suffix) builds QA-configured packages and publishes a GitHub
+# pre-release at once, so testers can download it.
+# Run it by hand on main, or change packaging in a pull request, for a dry run: same builds and
+# install checks, no release.
 on:
   push:
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'
+  # Packaging changes are dry-run on their pull request.
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - packaging/**
+      - scripts/build-deb.sh
+      - scripts/release-notes.py
+      - scripts/stamp-version.py
   workflow_dispatch:
     inputs:
       version:
-        description: Version to stamp on the dry-run packages
+        description: Version to stamp on the dry-run packages (1.2.3 or 1.2.3-preview.1)
         required: true
-        default: 0.0.1
+        default: 0.0.1-dryrun.1
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
@@ -22,19 +34,35 @@ jobs:
     timeout-minutes: 20
     outputs:
       version: ${{ steps.version.outputs.version }}
+      numeric: ${{ steps.version.outputs.numeric }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+      prod: ${{ steps.version.outputs.prod }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: Only release from main
+        if: github.event_name != 'pull_request'
         run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main
       - id: version
         env:
           INPUT_VERSION: ${{ inputs.version }}
         run: |
-          if [ "$GITHUB_EVENT_NAME" = push ]; then v="${GITHUB_REF_NAME#v}"; else v="$INPUT_VERSION"; fi
-          echo "$v" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'
-          echo "version=$v" >> "$GITHUB_OUTPUT"
+          case "$GITHUB_EVENT_NAME" in
+            push) v="${GITHUB_REF_NAME#v}" ;;
+            pull_request) v="0.0.0-pr.${{ github.event.number }}" ;;
+            *) v="$INPUT_VERSION" ;;
+          esac
+          echo "$v" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'
+          numeric="${v%%-*}"
+          if [ "$v" != "$numeric" ]; then pre=true; prod=false; else pre=false; prod=true; fi
+          {
+            echo "version=$v"
+            echo "numeric=$numeric"
+            echo "prerelease=$pre"
+            # Pre-releases point at QA; only full releases default to production.
+            echo "prod=$prod"
+          } >> "$GITHUB_OUTPUT"
       - uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
@@ -48,15 +76,25 @@ jobs:
   windows:
     needs: verify
     runs-on: windows-latest
-    timeout-minutes: 40
+    timeout-minutes: 50
     strategy:
       fail-fast: true
       matrix:
         include:
-          - project: AlUmmahNow.Windows
-            package: AlUmmahNow-Windows
           - project: AlUmmahNow.Studio.Windows
             package: AlUmmahNow-Studio-Windows
+            product: Al Ummah Now Studio
+            exe: AlUmmahNowStudio.exe
+            dir: Al Ummah Now Studio
+            upgrade: 174DD000-F5DA-4A3E-944A-13F95EFA96C0
+            smoke: true
+          - project: AlUmmahNow.Windows
+            package: AlUmmahNow-Windows
+            product: Al Ummah Now
+            exe: AlUmmahNow.exe
+            dir: Al Ummah Now
+            upgrade: 0DAC7B41-DEF7-4BCA-B1D5-AF7683E1D605
+            smoke: false
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -66,36 +104,76 @@ jobs:
         shell: bash
         run: ./scripts/fetch-core.sh
       - name: Stamp version
-        run: python scripts/stamp-version.py ${{ needs.verify.outputs.version }}
-      - name: Build unsigned MSIX
-        run: dotnet build src/${{ matrix.project }} -c Release -p:Platform=x64 -p:BuildMsix=true -p:AunProd=true -p:Version=${{ needs.verify.outputs.version }} -p:AppxPackageDir=${{ github.workspace }}/artifacts/msix/
-      - name: Collect
+        run: python scripts/stamp-version.py ${{ needs.verify.outputs.numeric }}
+      - name: Publish self-contained
+        run: dotnet publish src/${{ matrix.project }} -c Release -r win-x64 --self-contained -p:Platform=x64 -p:WindowsPackageType=None -p:WindowsAppSDKSelfContained=true -p:AunProd=${{ needs.verify.outputs.prod }} -p:Version=${{ needs.verify.outputs.numeric }} -p:InformationalVersion=${{ needs.verify.outputs.version }} -o out/publish
+      - name: Portable zip
         shell: pwsh
         run: |
-          $msix = Get-ChildItem -Recurse artifacts/msix -Filter *.msix | Select-Object -First 1
-          if (-not $msix) { throw "no MSIX produced" }
-          New-Item -ItemType Directory -Force out | Out-Null
-          Copy-Item $msix.FullName "out/${{ matrix.package }}-${{ needs.verify.outputs.version }}-x64-unsigned.msix"
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Compress-Archive -Path out/publish/* -DestinationPath "dist/${{ matrix.package }}-${{ needs.verify.outputs.version }}-x64-portable-unsigned.zip"
+      - name: MSI installer (WiX 5)
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          wix build packaging/windows/app.wxs -arch x64 `
+            -d Version=${{ needs.verify.outputs.numeric }} `
+            -d "PublishDir=$((Resolve-Path out/publish).Path)" `
+            -d "ProductName=${{ matrix.product }}" `
+            -d "ExeName=${{ matrix.exe }}" `
+            -d "InstallDirName=${{ matrix.dir }}" `
+            -d "UpgradeCode={${{ matrix.upgrade }}}" `
+            -o "dist/${{ matrix.package }}-${{ needs.verify.outputs.version }}-x64-unsigned.msi"
+      - name: Install, launch and uninstall the MSI
+        if: matrix.smoke
+        shell: pwsh
+        run: |
+          $msi = (Resolve-Path "dist/${{ matrix.package }}-${{ needs.verify.outputs.version }}-x64-unsigned.msi").Path
+          $p = Start-Process msiexec -ArgumentList "/i `"$msi`" /qn /l*v install.log" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Get-Content install.log -Tail 50; throw "install failed: $($p.ExitCode)" }
+          $exe = "$env:ProgramFiles\${{ matrix.dir }}\${{ matrix.exe }}"
+          if (-not (Test-Path $exe)) { throw "not installed at $exe" }
+          if (-not (Test-Path "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\${{ matrix.product }}.lnk")) { throw "no Start menu shortcut" }
+          New-Item -ItemType Directory -Force smoke | Out-Null
+          ./scripts/windows-studio-scenario.ps1 $exe en uploads shell installed (Resolve-Path smoke).Path
+          if (-not (Select-String -Quiet "RESULT PASS" smoke/installed.txt)) { throw "installed app did not start" }
+          $p = Start-Process msiexec -ArgumentList "/x `"$msi`" /qn" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "uninstall failed: $($p.ExitCode)" }
+          if (Test-Path $exe) { throw "uninstall left the app behind" }
       - uses: actions/upload-artifact@v4
         with:
           name: release-${{ matrix.package }}
-          path: out/*
+          path: dist/*
           if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always() && matrix.smoke
+        with:
+          name: smoke-${{ matrix.package }}
+          path: smoke
+          if-no-files-found: ignore
 
   linux:
     needs: verify
-    runs-on: ubuntu-latest
-    timeout-minutes: 40
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
     strategy:
       fail-fast: true
       matrix:
         include:
-          - project: AlUmmahNow.Linux
-            appid: net.alummahnow.AlUmmahNow
-            package: AlUmmahNow-Linux
           - project: AlUmmahNow.Studio.Linux
             appid: net.alummahnow.Studio
             package: AlUmmahNow-Studio-Linux
+            deb: alummahnow-studio
+            exe: alummahnow-studio
+            description: Al Ummah Now Studio - upload and manage your channel's videos
+            smoke: true
+          - project: AlUmmahNow.Linux
+            appid: net.alummahnow.AlUmmahNow
+            package: AlUmmahNow-Linux
+            deb: alummahnow
+            exe: alummahnow
+            description: Al Ummah Now - watch Islamic videos
+            smoke: false
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -104,19 +182,44 @@ jobs:
       - name: Fetch AlUmmahNow.Core
         run: ./scripts/fetch-core.sh
       - run: sudo apt-get update && sudo apt-get install -y flatpak flatpak-builder
-      - name: Publish production build
-        run: dotnet publish src/${{ matrix.project }} -c Release -r linux-x64 --self-contained -p:AunProd=true -p:Version=${{ needs.verify.outputs.version }} -o artifacts/flatpak-input/publish
+      - name: Publish self-contained
+        run: dotnet publish src/${{ matrix.project }} -c Release -r linux-x64 --self-contained -p:AunProd=${{ needs.verify.outputs.prod }} -p:Version=${{ needs.verify.outputs.numeric }} -p:InformationalVersion=${{ needs.verify.outputs.version }} -o artifacts/flatpak-input/publish
+      - name: Debian package
+        run: |
+          scripts/build-deb.sh artifacts/flatpak-input/publish ${{ matrix.deb }} ${{ needs.verify.outputs.version }} ${{ matrix.appid }} ${{ matrix.exe }} \
+            packaging/flatpak/${{ matrix.appid }}.desktop src/AlUmmahNow.Studio.Windows/Assets/Square150x150Logo.png "${{ matrix.description }}" dist
+      - name: Install the .deb and launch it
+        if: matrix.smoke
+        env:
+          GDK_BACKEND: x11
+          GSK_RENDERER: cairo
+          LIBGL_ALWAYS_SOFTWARE: "1"
+        run: |
+          sudo apt-get install -y ./dist/${{ matrix.deb }}_*.deb xvfb imagemagick openbox
+          test -x /usr/bin/${{ matrix.exe }}
+          test -f /usr/share/applications/${{ matrix.appid }}.desktop
+          mkdir -p smoke
+          export AUN_DEMO=1 AUN_AUTOMATION=shell AUN_EXIT_AFTER=15 AUN_LANG=en XDG_CONFIG_HOME=$(mktemp -d) XDG_STATE_HOME=$(mktemp -d)
+          xvfb-run -a -s "-screen 0 1280x800x24" bash -c 'openbox & sleep 2; (sleep 10; import -window root smoke/installed.png) & ${{ matrix.exe }}' 2>&1 | tee smoke/installed.log || true
+          grep -q 'RESULT PASS' smoke/installed.log
+          sudo apt-get remove -y ${{ matrix.deb }}
+          test ! -e /usr/bin/${{ matrix.exe }}
       - name: Build Flatpak bundle
         run: |
           flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
           flatpak-builder --user --force-clean --install-deps-from=flathub --repo=flatpak-repo build-dir packaging/flatpak/${{ matrix.appid }}.yml
-          mkdir -p out
-          flatpak build-bundle flatpak-repo "out/${{ matrix.package }}-${{ needs.verify.outputs.version }}-x86_64.flatpak" ${{ matrix.appid }} --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak build-bundle flatpak-repo "dist/${{ matrix.package }}-${{ needs.verify.outputs.version }}-x86_64.flatpak" ${{ matrix.appid }} --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo
       - uses: actions/upload-artifact@v4
         with:
           name: release-${{ matrix.package }}
-          path: out/*
+          path: dist/*
           if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always() && matrix.smoke
+        with:
+          name: smoke-${{ matrix.package }}
+          path: smoke
+          if-no-files-found: ignore
 
   tizen:
     needs: verify
@@ -128,9 +231,9 @@ jobs:
         with:
           global-json-file: global.json
       - name: Stamp version
-        run: python3 scripts/stamp-version.py ${{ needs.verify.outputs.version }}
+        run: python3 scripts/stamp-version.py ${{ needs.verify.outputs.numeric }}
       - name: Build unsigned TPK
-        run: dotnet build src/AlUmmahNow.Tizen -c Release -p:AunProd=true -p:Version=${{ needs.verify.outputs.version }}
+        run: dotnet build src/AlUmmahNow.Tizen -c Release -p:AunProd=${{ needs.verify.outputs.prod }} -p:Version=${{ needs.verify.outputs.numeric }}
       - name: Collect
         run: |
           mkdir -p out
@@ -143,7 +246,7 @@ jobs:
           path: out/*
           if-no-files-found: error
 
-  draft-release:
+  release:
     # Dry runs stop after the builds above.
     if: github.event_name == 'push'
     needs: [verify, windows, linux, tizen]
@@ -152,6 +255,7 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           pattern: release-*
@@ -159,7 +263,14 @@ jobs:
           merge-multiple: true
       - name: Checksums
         run: cd dist && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
-      - name: Create draft release
+      - name: Release notes
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+          PRERELEASE: ${{ needs.verify.outputs.prerelease }}
+        run: python3 scripts/release-notes.py "$VERSION" "$PRERELEASE" > notes.md && cat notes.md
+      - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --draft --verify-tag --generate-notes --title "$GITHUB_REF_NAME"
+        run: |
+          if [ "${{ needs.verify.outputs.prerelease }}" = true ]; then mode=--prerelease; else mode=--draft; fi
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" $mode --verify-tag --notes-file notes.md --title "$GITHUB_REF_NAME"
