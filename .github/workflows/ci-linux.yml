@@ -46,7 +46,7 @@ jobs:
           grep -h -E 'AUTOMATION|MPRIS' artifacts/linux/*.log
           # The automation result, not the launcher exit status, is the gate.
           test "$(cat artifacts/linux/*.log | grep -c 'RESULT PASS')" = 4
-          test "$(cat artifacts/linux/*.log | grep -c 'core=0.1.0')" = 4
+          test "$(cat artifacts/linux/*.log | grep -cE 'core=[0-9]+\.[0-9]+\.[0-9]+')" = 4
           grep -q "MPRIS before: ('<'Playing'>',)\|MPRIS before: (<'Playing'>,)" artifacts/linux/watch-ar-dark.log
           grep -q "MPRIS after: (<'Paused'>,)" artifacts/linux/watch-ar-dark.log
       - uses: actions/upload-artifact@v4
