@@ -53,9 +53,31 @@ Every UI story ships in Arabic and English with RTL verified by a screenshot.
 
 `.github/workflows/release.yml` is the only release path:
 
-- Push a `v1.2.3` tag on a commit already on `main`. The workflow tests, stamps the version, builds
-  production-configured packages for both Windows and Linux apps and for Tizen, then creates a
-  **draft** GitHub release with SHA-256 checksums. A person publishes the draft.
-- Running the workflow by hand on `main` is a dry run: the same builds and no release.
-- Packages are unsigned, and store submission is not automated yet. Both wait for the owner inputs in
-  `docs/OWNER_INPUTS.md` (tracked in #15).
+- **Pre-release:** push `v0.x.y-preview.N` (any `-suffix`) on a commit already on `main`. The packages
+  default to **QA** and the workflow publishes a GitHub **pre-release** at once.
+- **Release:** push `v1.2.3` on `main`. The packages default to production and the workflow creates a
+  **draft** release that a person publishes.
+- Changing packaging in a pull request, or running the workflow by hand, is a dry run: same builds and
+  install checks, no release.
+
+| Platform | Packages |
+|---|---|
+| Windows x64 | per-machine MSI (WiX 5, `packaging/windows/app.wxs`), portable zip |
+| Linux x86-64 | `.deb` (`scripts/build-deb.sh`, Ubuntu 24.04+ for libadwaita 1.5), Flatpak bundle |
+| Tizen | unsigned TPK |
+
+CI installs the Studio MSI and `.deb`, launches them in demo mode, checks they start, and removes them.
+Every package is **unsigned** and the release notes say so (`scripts/release-notes.py`). Code signing
+waits for the owner inputs in `docs/OWNER_INPUTS.md` (#15).
+
+## Studio
+
+- Sign-in: aun-core `AuthManager`, system browser, PKCE, loopback redirect on an OS-assigned port;
+  several accounts; sign-out revokes the refresh token.
+- Uploads: aun-core `UploadEngine` per account (resumable across restarts); finish steps (language,
+  playlists, schedule) are saved and retried.
+- Videos: Recently deleted is local to the device until the API has creator soft delete
+  (AlUmmahNow#778).
+- `AUN_DEMO=1` runs on canned accounts and data (CI screenshots); `AUN_SCENE` opens a dialog or menu.
+- Logs: `%LOCALAPPDATA%\AlUmmahNowStudio\logs` (Windows), `$XDG_STATE_HOME/alummahnow-studio/logs`
+  (Linux); tokens, codes, emails and search text are scrubbed.
