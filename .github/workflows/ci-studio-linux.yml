@@ -63,10 +63,10 @@ jobs:
           grep -h AUTOMATION artifacts/studio/*.log
           test "$(cat artifacts/studio/*.log | grep -c 'RESULT PASS')" = 21
           # Screen readers (Orca reads AT-SPI): named controls on the shell, search, upload and rows.
-          grep -P "^push button\tSign in$" artifacts/studio/signin-en.atspi.txt
+          grep -P "^button\tSign in$" artifacts/studio/signin-en.atspi.txt
           grep -P "\tChannel$" artifacts/studio/shell-en.atspi.txt
           grep -P "^check box\tSeerah" artifacts/studio/videos-en.atspi.txt
-          grep -P "^push button\tUpload 3 videos$" artifacts/studio/upload-staged-en.atspi.txt
+          grep -P "^button\tUpload 3 videos$" artifacts/studio/upload-staged-en.atspi.txt
           gst-discoverer-1.0 source.mp4.out.mp4 | tee artifacts/studio/discover.txt
           grep -qi 'h.264' artifacts/studio/discover.txt
           ! grep -qi '4:4:4' artifacts/studio/discover.txt
