@@ -52,4 +52,23 @@ public class LocalizerTests
 
     [Fact]
     public void Missing_key_returns_the_key() => Assert.Equal("nope", new Localizer()["nope"]);
+
+    [Fact]
+    public void Chart_numbers_are_compact_and_localized()
+    {
+        var en = new Localizer("en");
+        Assert.Equal("950", en.Compact(950));
+        Assert.Equal("1.2K", en.Compact(1200));
+        Assert.Equal("2M", en.Compact(2_000_000));
+        Assert.Equal("0.1", en.Decimal(0.05));
+        var ar = new Localizer("ar") { EasternNumerals = true };
+        Assert.Equal("١٫٢ ألف", ar.Compact(1200));
+    }
+
+    [Fact]
+    public void Chart_dates_use_gregorian_month_names()
+    {
+        Assert.Equal("11 Nov", new Localizer("en").ShortDate(new DateTime(2026, 11, 11)));
+        Assert.Equal("١١ نوفمبر", new Localizer("ar") { EasternNumerals = true }.ShortDate(new DateTime(2026, 11, 11)));
+    }
 }

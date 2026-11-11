@@ -1,4 +1,3 @@
-using System.Globalization;
 using AlUmmahNow.App.I18n;
 using AlUmmahNow.Studio.Analytics;
 using Microsoft.UI.Xaml;
@@ -16,7 +15,7 @@ internal sealed class AnalyticsPage
     private readonly Localizer _l;
     private readonly AnalyticsViewModel _vm;
     private readonly StackPanel _totals = new() { Orientation = Orientation.Horizontal, Spacing = 12 };
-    private readonly Canvas _chart = new() { Height = 200, FlowDirection = FlowDirection.LeftToRight };
+    private readonly Canvas _chart = new() { Height = 222, FlowDirection = FlowDirection.LeftToRight };
     private readonly TextBlock _summary = new() { Opacity = 0.8, TextWrapping = TextWrapping.Wrap };
     private readonly StackPanel _table = new();
     private readonly StackPanel _top = new() { Spacing = 4 };
@@ -66,7 +65,7 @@ internal sealed class AnalyticsPage
         if (_vm.Data is { } d)
         {
             Card(_l["studio.analytics.views"], _l.Number(d.Totals.Views));
-            Card(_l["studio.analytics.watchHours"], _l.Number((long)Math.Round(d.Totals.WatchTimeMinutes / 60)));
+            Card(_l["studio.analytics.watchHours"], _l.Decimal(d.Totals.WatchTimeMinutes / 60));
             Card(_l["studio.analytics.likes"], _l.Number(d.Totals.Likes));
             Card(_l["studio.analytics.comments"], _l.Number(d.Totals.Comments));
             Card(_l["studio.analytics.subscribers"], _l.Number(d.Totals.Subscribers));
@@ -74,14 +73,13 @@ internal sealed class AnalyticsPage
 
         var s = _vm.Series;
         _table.Children.Clear();
-        foreach (var p in s) _table.Children.Add(new TextBlock { Text = p.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + "    " + p.Value.ToString("0.#", CultureInfo.InvariantCulture) });
+        foreach (var p in s) _table.Children.Add(new TextBlock { Text = _l.ShortDate(p.Date) + "    " + ValueLabel(p.Value) });
         if (s.Count > 0)
         {
             var max = s.OrderByDescending(p => p.Value).First();
             _summary.Text = _l.Format("studio.analytics.chartSummary",
                 _vm.Metric == "watch" ? _l["studio.analytics.watchHours"] : _l["studio.analytics.views"],
-                s[0].Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), s[^1].Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-                max.Value.ToString("0.#", CultureInfo.InvariantCulture), max.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+                _l.ShortDate(s[0].Date), _l.ShortDate(s[^1].Date), ValueLabel(max.Value), _l.ShortDate(max.Date));
         }
         else
         {
@@ -105,24 +103,83 @@ internal sealed class AnalyticsPage
         _totals.Children.Add(card);
     }
 
+    /// <summary>
+    /// Bars with a 0-based value axis and dashed gridlines on the start side (right in Arabic), the
+    /// first, middle and last dates below, and a tooltip with the day and value on each day's column.
+    /// Colours are WinUI theme brushes, so light, dark and high contrast all apply.
+    /// </summary>
     private void DrawChart()
     {
         _chart.Children.Clear();
         var s = _vm.Series;
         var w = _chart.ActualWidth > 0 ? _chart.ActualWidth : 900;
         if (s.Count == 0) return;
-        var max = Math.Max(1, s.Max(p => p.Value));
-        const double gap = 2;
-        var bar = Math.Max(1, (w - (gap * (s.Count - 1))) / s.Count);
-        var brush = new SolidColorBrush(global::Windows.UI.Color.FromArgb(255, 8, 102, 120));
-        for (var i = 0; i < s.Count; i++)
+        var layout = ChartLayout.Compute(w, _chart.Height, s.Select(p => p.Value).ToList(), integer: _vm.Metric != "watch", _l.IsRtl);
+        var text = ThemeBrush("TextFillColorSecondaryBrush");
+        var grid = ThemeBrush("DividerStrokeColorDefaultBrush");
+        var baseline = ThemeBrush("ControlStrongStrokeColorDefaultBrush");
+        var accent = ThemeBrush("AccentFillColorDefaultBrush");
+
+        foreach (var tick in layout.Ticks)
         {
-            var index = _l.IsRtl ? s.Count - 1 - i : i;
-            var height = (_chart.Height - 10) * (s[index].Value / max);
-            var rect = new Rectangle { Width = bar, Height = Math.Max(1, height), Fill = brush };
-            Canvas.SetLeft(rect, i * (bar + gap));
-            Canvas.SetTop(rect, _chart.Height - height);
-            _chart.Children.Add(rect);
+            var line = new Line { X1 = layout.PlotLeft, X2 = layout.PlotRight, Y1 = tick.Y, Y2 = tick.Y, Stroke = tick.Value == 0 ? baseline : grid, StrokeThickness = 1 };
+            if (tick.Value != 0) line.StrokeDashArray = new DoubleCollection { 4, 4 };
+            _chart.Children.Add(line);
+            var label = Label(AxisLabel(tick.Value), text);
+            label.Width = ChartLayout.AxisWidth - 8;
+            label.TextAlignment = layout.Rtl ? TextAlignment.Left : TextAlignment.Right;
+            Canvas.SetLeft(label, layout.Rtl ? layout.AxisLabelEdge : layout.AxisLabelEdge - label.Width);
+            Canvas.SetTop(label, tick.Y - 9);
+            _chart.Children.Add(label);
+        }
+
+        foreach (var bar in layout.Bars)
+        {
+            if (bar.Height > 0)
+            {
+                var rect = new Rectangle { Width = bar.Width, Height = bar.Height, Fill = accent, RadiusX = 2, RadiusY = 2 };
+                Canvas.SetLeft(rect, bar.X);
+                Canvas.SetTop(rect, bar.Y);
+                _chart.Children.Add(rect);
+            }
+
+            // A transparent column per day carries the tooltip, so even a short bar is easy to hover
+            var hit = new Rectangle { Width = bar.SlotWidth, Height = layout.PlotBottom - layout.PlotTop, Fill = new SolidColorBrush(global::Windows.UI.Color.FromArgb(0, 0, 0, 0)) };
+            ToolTipService.SetToolTip(hit, _l.Format("studio.analytics.readout", _l.ShortDate(s[bar.Index].Date), ValueLabel(s[bar.Index].Value)));
+            Canvas.SetLeft(hit, bar.SlotX);
+            Canvas.SetTop(hit, layout.PlotTop);
+            _chart.Children.Add(hit);
+        }
+
+        foreach (var (index, x) in layout.Dates)
+        {
+            var label = Label(_l.ShortDate(s[index].Date), text);
+            label.Measure(new global::Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
+            var width = label.DesiredSize.Width;
+            var first = index == 0;
+            var last = index == s.Count - 1;
+            var left = first ? (layout.Rtl ? x - width : x) : last ? (layout.Rtl ? x : x - width) : x - (width / 2);
+            Canvas.SetLeft(label, Math.Clamp(left, 0, Math.Max(0, w - width)));
+            Canvas.SetTop(label, layout.PlotBottom + 3);
+            _chart.Children.Add(label);
+        }
+
+        if (layout.Empty)
+        {
+            var empty = Label(_l[_vm.Metric == "watch" ? "studio.analytics.emptyWatch" : "studio.analytics.emptyViews"], text);
+            empty.Width = layout.PlotRight - layout.PlotLeft;
+            empty.TextAlignment = TextAlignment.Center;
+            Canvas.SetLeft(empty, layout.PlotLeft);
+            Canvas.SetTop(empty, ((layout.PlotTop + layout.PlotBottom) / 2) - 10);
+            _chart.Children.Add(empty);
         }
     }
+
+    private static Brush ThemeBrush(string key) => (Brush)Application.Current.Resources[key];
+
+    private static TextBlock Label(string value, Brush brush) => new() { Text = value, FontSize = 12, Foreground = brush };
+
+    private string AxisLabel(double value) => _vm.Metric == "watch" ? _l.Decimal(value) : _l.Compact(value);
+
+    private string ValueLabel(double value) => _vm.Metric == "watch" ? _l.Decimal(value) : _l.Number((long)value);
 }

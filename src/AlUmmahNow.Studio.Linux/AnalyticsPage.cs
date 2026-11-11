@@ -1,4 +1,3 @@
-using System.Globalization;
 using AlUmmahNow.App.I18n;
 using AlUmmahNow.Studio.Analytics;
 
@@ -46,9 +45,13 @@ public sealed class AnalyticsPage
         var heading = Ui.Label(l["studio.analytics.daily"]);
         heading.AddCssClass("heading");
         page.Append(heading);
-        _chart.SetContentHeight(200);
         _chart.SetHexpand(true);
+        _chart.SetContentHeight(222);
         _chart.SetDrawFunc((_, cr, w, h) => DrawChart(cr, w, h));
+        var motion = Gtk.EventControllerMotion.New();
+        motion.OnMotion += (_, e) => OnHover(e.X);
+        _chart.AddController(motion);
+        _chart.SetHasTooltip(true);
         page.Append(_chart);
         page.Append(_summary);
         var tableExpander = Gtk.Expander.New(l["studio.analytics.table"]);
@@ -75,7 +78,7 @@ public sealed class AnalyticsPage
         if (_vm.Data is { } d)
         {
             Card(_l["studio.analytics.views"], _l.Number(d.Totals.Views));
-            Card(_l["studio.analytics.watchHours"], _l.Number((long)Math.Round(d.Totals.WatchTimeMinutes / 60)));
+            Card(_l["studio.analytics.watchHours"], _l.Decimal(d.Totals.WatchTimeMinutes / 60));
             Card(_l["studio.analytics.likes"], _l.Number(d.Totals.Likes));
             Card(_l["studio.analytics.comments"], _l.Number(d.Totals.Comments));
             Card(_l["studio.analytics.subscribers"], _l.Number(d.Totals.Subscribers));
@@ -85,8 +88,8 @@ public sealed class AnalyticsPage
         while (_table.GetFirstChild() is { } c) _table.Remove(c);
         for (var i = 0; i < series.Count; i++)
         {
-            _table.Attach(Ui.Label(series[i].Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)), 0, i, 1, 1);
-            _table.Attach(Ui.Label(series[i].Value.ToString("0.#", CultureInfo.InvariantCulture)), 1, i, 1, 1);
+            _table.Attach(Ui.Label(_l.ShortDate(series[i].Date)), 0, i, 1, 1);
+            _table.Attach(Ui.Label(ValueLabel(series[i].Value)), 1, i, 1, 1);
         }
 
         _summary.SetText(Summary(series));
@@ -109,10 +112,10 @@ public sealed class AnalyticsPage
         var max = s.OrderByDescending(p => p.Value).First();
         return _l.Format("studio.analytics.chartSummary",
             _vm.Metric == "watch" ? _l["studio.analytics.watchHours"] : _l["studio.analytics.views"],
-            s[0].Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-            s[^1].Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-            max.Value.ToString("0.#", CultureInfo.InvariantCulture),
-            max.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+            _l.ShortDate(s[0].Date),
+            _l.ShortDate(s[^1].Date),
+            ValueLabel(max.Value),
+            _l.ShortDate(max.Date));
     }
 
     private void Card(string label, string value)
@@ -132,22 +135,76 @@ public sealed class AnalyticsPage
         _totals.Append(card);
     }
 
+    private ChartLayout? _layout;
+
+    /// <summary>
+    /// Bars with a 0-based value axis and dashed gridlines on the start side (right in Arabic), the
+    /// first, middle and last dates below, and the hovered day in the tooltip. Text and lines use the
+    /// theme's foreground colour; bars use the app's accent (@accent_color in Program.cs).
+    /// </summary>
     private void DrawChart(Cairo.Context cr, int w, int h)
     {
         var s = _vm.Series;
-        if (s.Count == 0) return;
-        var max = Math.Max(1, s.Max(p => p.Value));
-        var gap = 2.0;
-        var bar = Math.Max(1, (w - (gap * (s.Count - 1))) / s.Count);
-        cr.SetSourceRgb(0.03, 0.40, 0.47);
-        for (var i = 0; i < s.Count; i++)
+        if (s.Count == 0)
         {
-            // Time runs right to left in Arabic.
-            var index = _l.IsRtl ? s.Count - 1 - i : i;
-            var height = (h - 10) * (s[index].Value / max);
-            cr.Rectangle(i * (bar + gap), h - height, bar, height);
+            _layout = null;
+            return;
         }
 
+        var layout = ChartLayout.Compute(w, h, s.Select(p => p.Value).ToList(), integer: _vm.Metric != "watch", _l.IsRtl);
+        _layout = layout;
+        _chart.GetColor(out var fg);
+
+        cr.LineWidth = 1;
+        foreach (var tick in layout.Ticks)
+        {
+            var y = Math.Round(tick.Y) + 0.5;
+            cr.SetSourceRgba(fg.Red, fg.Green, fg.Blue, tick.Value == 0 ? 0.6 : 0.18);
+            cr.SetDash(tick.Value == 0 ? System.Array.Empty<double>() : new double[] { 4, 4 }, 0);
+            cr.MoveTo(layout.PlotLeft, y);
+            cr.LineTo(layout.PlotRight, y);
+            cr.Stroke();
+            var label = AxisLabel(tick.Value);
+            DrawText(cr, fg, label, layout.AxisLabelEdge, tick.Y, layout.Rtl ? 0 : 1, 0.5);
+        }
+
+        cr.SetDash(System.Array.Empty<double>(), 0);
+        cr.SetSourceRgb(1, 0.627, 0.216);
+        foreach (var bar in layout.Bars.Where(b => b.Height > 0)) cr.Rectangle(bar.X, bar.Y, bar.Width, bar.Height);
         cr.Fill();
+
+        foreach (var (index, x) in layout.Dates)
+        {
+            var align = index == 0 ? (layout.Rtl ? 1 : 0) : index == s.Count - 1 ? (layout.Rtl ? 0 : 1) : 0.5;
+            DrawText(cr, fg, _l.ShortDate(s[index].Date), x, layout.PlotBottom + 4, align, 0);
+        }
+
+        if (layout.Empty)
+        {
+            var empty = _l[_vm.Metric == "watch" ? "studio.analytics.emptyWatch" : "studio.analytics.emptyViews"];
+            DrawText(cr, fg, empty, (layout.PlotLeft + layout.PlotRight) / 2, (layout.PlotTop + layout.PlotBottom) / 2, 0.5, 0.5);
+        }
+    }
+
+    private string AxisLabel(double value) => _vm.Metric == "watch" ? _l.Decimal(value) : _l.Compact(value);
+
+    private string ValueLabel(double value) => _vm.Metric == "watch" ? _l.Decimal(value) : _l.Number((long)value);
+
+    /// <summary>Text at (x, y), aligned by fractions of its own size (0 = start edge, 1 = end edge).</summary>
+    private void DrawText(Cairo.Context cr, Gdk.RGBA fg, string text, double x, double y, double alignX, double alignY)
+    {
+        var layout = _chart.CreatePangoLayout(text);
+        layout.GetPixelSize(out var tw, out var th);
+        cr.SetSourceRgba(fg.Red, fg.Green, fg.Blue, 0.75);
+        cr.MoveTo(x - (tw * alignX), y - (th * alignY));
+        PangoCairo.Functions.ShowLayout(cr, layout);
+    }
+
+    /// <summary>The hovered day and its value, as the chart's tooltip.</summary>
+    private void OnHover(double x)
+    {
+        var s = _vm.Series;
+        var index = _layout?.IndexAt(x);
+        _chart.SetTooltipText(index is { } i && i < s.Count ? _l.Format("studio.analytics.readout", _l.ShortDate(s[i].Date), ValueLabel(s[i].Value)) : null);
     }
 }

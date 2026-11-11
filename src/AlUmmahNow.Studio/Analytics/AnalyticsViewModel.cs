@@ -56,7 +56,8 @@ public sealed partial class AnalyticsViewModel : ObservableObject
         try
         {
             var to = _now();
-            var data = await _api.ChannelAnalyticsAsync(channel.Id, to.AddDays(-Days), to);
+            // "Last 28 days" is today and the 27 before it (the API counts both ends)
+            var data = await _api.ChannelAnalyticsAsync(channel.Id, to.AddDays(-(Days - 1)), to);
             if (gen == _generation) Data = data;
         }
         catch (AuthRequiredException)

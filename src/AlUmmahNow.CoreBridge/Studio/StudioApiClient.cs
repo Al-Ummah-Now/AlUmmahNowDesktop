@@ -262,14 +262,16 @@ namespace AlUmmahNow.CoreBridge.Studio
                 .Select(m => new AnalyticsDay(m.Date!.Value, m.Views, m.Watch))
                 .ToList();
             var top = Array(root, "topPerformingVideos").Select(v => new TopVideo(Str(v, "videoId") ?? "", Str(v, "title") ?? "", Long(v, "views"))).Where(v => v.Id.Length > 0).ToList();
+            // The cards are the chosen period's numbers, the sum of the chart (the total* fields are lifetime)
+            var days = Array(root, "recentMetrics").ToList();
             return new ChannelAnalytics
             {
                 Totals = new AnalyticsTotals
                 {
-                    Views = Long(root, "totalViews"),
-                    Likes = Long(root, "totalLikes"),
-                    Comments = Long(root, "totalComments"),
-                    Subscribers = Long(root, "totalSubscribers"),
+                    Views = daily.Sum(d => d.Views),
+                    Likes = days.Sum(m => Long(m, "likes")),
+                    Comments = days.Sum(m => Long(m, "comments")),
+                    Subscribers = days.Sum(m => Long(m, "subscribers")),
                     WatchTimeMinutes = daily.Sum(d => d.WatchTimeMinutes),
                 },
                 Daily = daily,
