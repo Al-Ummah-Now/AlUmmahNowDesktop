@@ -25,9 +25,15 @@ public sealed class CoreApiTransport : IApiTransport
     public async Task<string> SendAsync(ApiRequest request, CancellationToken cancellationToken = default)
     {
         var client = Client();
-        var call = new ApiCall(request.OperationId, request.PathParams, request.Query, request.Headers, request.BodyJson, request.IdempotencyKey);
         try
         {
+            if (request.PathTemplate != null)
+            {
+                var path = new PathCall(request.Method!, request.PathTemplate, request.PathParams, request.Query, request.Headers, request.BodyJson, request.IdempotencyKey, true);
+                return (await client.RequestPath(path).WaitAsync(cancellationToken).ConfigureAwait(false)).Body;
+            }
+
+            var call = new ApiCall(request.OperationId, request.PathParams, request.Query, request.Headers, request.BodyJson, request.IdempotencyKey);
             var response = await client.Request(call).WaitAsync(cancellationToken).ConfigureAwait(false);
             return response.Body;
         }
