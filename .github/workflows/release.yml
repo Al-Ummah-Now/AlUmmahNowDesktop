@@ -181,28 +181,35 @@ jobs:
           global-json-file: global.json
       - name: Fetch AlUmmahNow.Core
         run: ./scripts/fetch-core.sh
-      - run: sudo apt-get update && sudo apt-get install -y flatpak flatpak-builder
+      - uses: ./.github/actions/apt-install
+        with:
+          packages: flatpak flatpak-builder
       - name: Publish self-contained
         run: dotnet publish src/${{ matrix.project }} -c Release -r linux-x64 --self-contained -p:AunProd=${{ needs.verify.outputs.prod }} -p:Version=${{ needs.verify.outputs.numeric }} -p:InformationalVersion=${{ needs.verify.outputs.version }} -o artifacts/flatpak-input/publish
       - name: Debian package
         run: |
           scripts/build-deb.sh artifacts/flatpak-input/publish ${{ matrix.deb }} ${{ needs.verify.outputs.version }} ${{ matrix.appid }} ${{ matrix.exe }} \
             packaging/flatpak/${{ matrix.appid }}.desktop src/AlUmmahNow.Studio.Windows/Assets/Square150x150Logo.png "${{ matrix.description }}" dist
-      - name: Install the .deb and launch it
+      # The built .deb with its dependencies, and the smoke test's display tools
+      - name: Install the .deb
+        if: matrix.smoke
+        uses: ./.github/actions/apt-install
+        with:
+          packages: ./dist/${{ matrix.deb }}_*.deb xvfb imagemagick openbox
+      - name: Launch the installed app
         if: matrix.smoke
         env:
           GDK_BACKEND: x11
           GSK_RENDERER: cairo
           LIBGL_ALWAYS_SOFTWARE: "1"
         run: |
-          sudo apt-get install -y ./dist/${{ matrix.deb }}_*.deb xvfb imagemagick openbox
           test -x /usr/bin/${{ matrix.exe }}
           test -f /usr/share/applications/${{ matrix.appid }}.desktop
           mkdir -p smoke
           export AUN_DEMO=1 AUN_AUTOMATION=shell AUN_EXIT_AFTER=15 AUN_LANG=en XDG_CONFIG_HOME=$(mktemp -d) XDG_STATE_HOME=$(mktemp -d)
           xvfb-run -a -s "-screen 0 1280x800x24" bash -c 'openbox & sleep 2; (sleep 10; import -window root smoke/installed.png) & ${{ matrix.exe }}' 2>&1 | tee smoke/installed.log || true
           grep -q 'RESULT PASS' smoke/installed.log
-          sudo apt-get remove -y ${{ matrix.deb }}
+          sudo dpkg --remove ${{ matrix.deb }}
           test ! -e /usr/bin/${{ matrix.exe }}
       - name: Build Flatpak bundle
         run: |
