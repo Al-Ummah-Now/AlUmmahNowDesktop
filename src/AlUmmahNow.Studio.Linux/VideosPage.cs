@@ -177,9 +177,9 @@ public sealed class VideosPage
             box.Append(label);
             if (empty)
             {
-                var remove = Gtk.Button.NewFromIconName("window-close-symbolic");
+                var remove = Gtk.Button.NewWithLabel(_l["studio.upload.remove"]);
                 remove.AddCssClass("flat");
-                remove.SetTooltipText(_l["studio.upload.remove"] + ": " + s.Text);
+                Ui.Named(remove, _l["studio.upload.remove"] + ": " + s.Text);
                 remove.OnClicked += (_, _) =>
                 {
                     _vm.Search.RemoveRecent(s.Text);
@@ -260,24 +260,21 @@ public sealed class VideosPage
             row.SetMarginEnd(8);
             row.SetMarginTop(6);
             row.SetMarginBottom(6);
-            var check = Gtk.CheckButton.New();
+            // The checkbox's label is the title, so Orca reads "<title>, check box".
+            var check = Gtk.CheckButton.NewWithLabel(v.Title);
             check.SetActive(_vm.IsSelected(v.Id));
-            check.SetTooltipText(_l.Format("studio.videos.select", v.Title));
+            Ui.Named(check, _l.Format("studio.videos.select", v.Title));
             check.OnToggled += (_, _) => _vm.SetSelected(v.Id, check.GetActive());
             var text = Gtk.Box.New(Gtk.Orientation.Vertical, 2);
             text.SetHexpand(true);
-            var title = Ui.Label(v.Title);
-            title.SetEllipsize(Pango.EllipsizeMode.End);
-            check.SetChild(null);
-            text.Append(title);
+            text.Append(check);
             text.Append(Ui.Label(Meta(v), dim: true));
-            row.Append(check);
             row.Append(text);
             var edit = Ui.Button(_l["studio.videos.edit"], () => _ = EditAsync(v), "flat");
-            edit.SetTooltipText(_l.Format("studio.videos.editOne", v.Title));
+            Ui.Named(edit, _l.Format("studio.videos.editOne", v.Title));
             row.Append(edit);
             var delete = Ui.Button(_l["studio.videos.delete"], () => _ = DeleteAsync(new[] { v.Id }), "flat");
-            delete.SetTooltipText(_l.Format("studio.videos.deleteOne", v.Title));
+            Ui.Named(delete, _l.Format("studio.videos.deleteOne", v.Title));
             row.Append(delete);
             _list.Append(row);
         }
@@ -313,7 +310,7 @@ public sealed class VideosPage
             text.Append(Ui.Label(_l.Format("studio.videos.deletedOn", d.DeletedAt.ToLocalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), (d.DeletedAt + RecentlyDeleted.Retention).ToLocalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)), dim: true));
             row.Append(text);
             var restore = Ui.Button(_l["studio.videos.restore"], () => _ = _vm.RestoreAsync(d.VideoId));
-            restore.SetTooltipText(_l.Format("studio.videos.restoreOne", d.Title));
+            Ui.Named(restore, _l.Format("studio.videos.restoreOne", d.Title));
             row.Append(restore);
             row.Append(Ui.Button(_l["studio.videos.deleteNow"], async () =>
             {

@@ -299,14 +299,14 @@ public sealed class UploadPage
             var title = Gtk.Entry.New();
             title.SetText(plan.Title);
             title.SetHexpand(true);
-            title.SetTooltipText(_l.Format("studio.upload.titleFor", file));
+            Ui.Named(title, _l.Format("studio.upload.titleFor", file));
             title.OnChanged += (_, _) => _vm.RenameStaged(plan.FilePath, title.GetText());
             var meta = Ui.Label(file + " · " + Formats.Bytes(plan.Size, CultureInfo.InvariantCulture)
                 + (plan.PublishAt is { } at ? " · " + _l.Format("studio.upload.publishesAt", Formats.ToLocalInput(at)) : ""), dim: true);
             meta.SetSizeRequest(320, -1);
-            var remove = Gtk.Button.NewFromIconName("list-remove-symbolic");
+            var remove = Gtk.Button.NewWithLabel(_l["studio.upload.remove"]);
             remove.AddCssClass("flat");
-            remove.SetTooltipText(_l.Format("studio.upload.removeStaged", file));
+            Ui.Named(remove, _l.Format("studio.upload.removeStaged", file));
             remove.OnClicked += (_, _) => _vm.RemoveStaged(plan.FilePath);
             row.Append(title);
             row.Append(meta);
@@ -426,7 +426,7 @@ public sealed class UploadPage
             var phase = l["studio.phase." + item.Phase.ToString().ToLowerInvariant()];
             var amount = l.Format("studio.upload.progress", Formats.Bytes(item.SentBytes, CultureInfo.InvariantCulture), Formats.Bytes(item.TotalBytes, CultureInfo.InvariantCulture));
             _status.SetText(item.Phase == UploadPhase.Uploading ? phase + " · " + amount : phase);
-            _bar.SetTooltipText(item.Title + " · " + phase);
+            Ui.Named(_bar, item.Title + " · " + phase);
             if (_phase == item.Phase) return;
             _phase = item.Phase;
             Ui.Clear(_buttons);
