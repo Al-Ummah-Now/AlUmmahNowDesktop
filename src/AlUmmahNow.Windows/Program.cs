@@ -96,7 +96,7 @@ public sealed partial class App : Application
             end.Tick += (_, _) =>
             {
                 var isWatch = automation.StartsWith("watch:", StringComparison.Ordinal);
-                var pass = isWatch ? furthest > 2 && sawCaption : shell.Home.Rails.Count > 0;
+                var pass = isWatch ? furthest > 2 && (sawCaption || Environment.GetEnvironmentVariable("AUN_EXPECT_CAPTION") == "0") : shell.Home.Rails.Count > 0;
                 File.WriteAllText(Environment.GetEnvironmentVariable("AUN_RESULT") ?? "aun-result.txt",
                     $"AUTOMATION {automation} core={coreVersion} rails={shell.Home.Rails.Count} furthest={furthest:F1} caption={sawCaption} failed={shell.Watch?.PlaybackFailed} RESULT {(pass ? "PASS" : "FAIL")}");
                 player.Stop();

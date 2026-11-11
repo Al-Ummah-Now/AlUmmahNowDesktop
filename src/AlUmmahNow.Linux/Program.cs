@@ -83,7 +83,7 @@ app.OnActivate += async (_, _) =>
         GLib.Functions.TimeoutAdd(0, (uint)exitAfter * 1000, () =>
         {
             var pass = automation.StartsWith("watch:", StringComparison.Ordinal)
-                ? furthest > 2 && sawCaption && window.Watch?.PlaybackFailed == false
+                ? furthest > 2 && (sawCaption || Environment.GetEnvironmentVariable("AUN_EXPECT_CAPTION") == "0") && window.Watch?.PlaybackFailed == false
                 : window.Home.Rails.Count > 0;
             Log.For("automation").Info($"AUTOMATION {automation} core={coreVersion} rails={window.Home.Rails.Count} furthest={furthest:F1} caption={sawCaption} RESULT {(pass ? "PASS" : "FAIL")}");
             exitCode = pass ? 0 : 3;
