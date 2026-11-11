@@ -243,12 +243,13 @@ public sealed class AnalyticsViewModelTests
         var vm = new AnalyticsViewModel(shell, api, () => new DateTimeOffset(2026, 11, 10, 0, 0, 0, TimeSpan.Zero));
         await shell.InitializeAsync();
         await vm.LoadAsync();
-        Assert.Equal(10, vm.Data!.Totals.Views);
+        Assert.Equal(4, vm.Data!.Totals.Views);
         Assert.Equal(4, vm.Series.Single().Value);
         vm.Metric = "watch";
         Assert.Equal(2, vm.Series.Single().Value);
         vm.Days = 7;
         for (var i = 0; i < 20 && t.Calls("get_AnalyticsChannelGet").Count < 3; i++) await Task.Delay(10);
-        Assert.Equal("2026-11-03T00:00:00Z", t.Calls("get_AnalyticsChannelGet").Last().Query["dateFrom"]);
+        // Last 7 days = 4 to 10 November, both ends counted
+        Assert.Equal("2026-11-04T00:00:00Z", t.Calls("get_AnalyticsChannelGet").Last().Query["dateFrom"]);
     }
 }

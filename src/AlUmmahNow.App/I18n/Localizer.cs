@@ -61,6 +61,40 @@ namespace AlUmmahNow.App.I18n
 
         public string Number(long value) => Digits(value.ToString("N0", CultureInfo.InvariantCulture));
 
+        /// <summary>A number with at most one decimal ("1.5", "١٫٥" with Eastern numerals).</summary>
+        public string Decimal(double value)
+        {
+            var text = value.ToString("#,0.#", CultureInfo.InvariantCulture);
+            if (_easternNumerals && _language == "ar") text = text.Replace('.', '٫');
+            return Digits(text);
+        }
+
+        /// <summary>Axis labels: 950, 1.2K, 3M ("١٫٢ ألف" in Arabic).</summary>
+        public string Compact(double value)
+        {
+            var abs = Math.Abs(value);
+            if (abs >= 1_000_000) return Format("num.million", Decimal(Math.Round(value / 1_000_000, 1)));
+            if (abs >= 1_000) return Format("num.thousand", Decimal(Math.Round(value / 1_000, 1)));
+            return Decimal(value);
+        }
+
+        /// <summary>A day for chart labels: "11 Nov" / "11 نوفمبر".</summary>
+        public string ShortDate(DateTime date)
+        {
+            var month = date.ToString("MMM", _language == "ar" ? Arabic : CultureInfo.InvariantCulture);
+            return Digits(date.Day.ToString(CultureInfo.InvariantCulture)) + " " + month;
+        }
+
+        private static readonly CultureInfo Arabic = ArabicMonths();
+
+        /// <summary>Arabic with Gregorian month names (the default "ar" culture uses the Hijri calendar).</summary>
+        private static CultureInfo ArabicMonths()
+        {
+            var culture = (CultureInfo)CultureInfo.GetCultureInfo("ar-EG").Clone();
+            culture.DateTimeFormat.Calendar = new GregorianCalendar();
+            return culture;
+        }
+
         /// <summary>Formats seconds as m:ss or h:mm:ss, isolated so it stays intact in RTL text.</summary>
         public string Duration(double seconds)
         {

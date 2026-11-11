@@ -106,12 +106,16 @@ public sealed class StudioApiClientTests
             topPerformingVideos = new[] { new { videoId = "v1", title = "Top", views = 600 } },
             recentMetrics = new[]
             {
-                new { date = "2026-11-02", views = 30, watchTime = 600 },
-                new { date = "2026-11-01", views = 10, watchTime = 120 },
+                new { date = "2026-11-02", views = 30, watchTime = 600, likes = 2, comments = 1, subscribers = 1 },
+                new { date = "2026-11-01", views = 10, watchTime = 120, likes = 1, comments = 0, subscribers = 0 },
             },
         });
         var a = await Api.ChannelAnalyticsAsync("c1", DateTimeOffset.UtcNow.AddDays(-28), DateTimeOffset.UtcNow);
-        Assert.Equal(1000, a.Totals.Views);
+        // The period's numbers (sum of the chart), not the lifetime total* fields
+        Assert.Equal(40, a.Totals.Views);
+        Assert.Equal(3, a.Totals.Likes);
+        Assert.Equal(1, a.Totals.Comments);
+        Assert.Equal(1, a.Totals.Subscribers);
         Assert.Equal(12, a.Totals.WatchTimeMinutes);
         Assert.Equal(new DateTime(2026, 11, 1), a.Daily[0].Date);
         Assert.Equal("Top", Assert.Single(a.TopVideos).Title);

@@ -247,5 +247,10 @@
   "studio.analytics.failed": "Analytics could not be loaded.",
   "studio.analytics.ownerOnly": "Only the channel owner can see analytics.",
   "studio.analytics.table": "Show as a table",
-  "studio.videos.queuedForDeletion": "Being deleted permanently"
+  "studio.videos.queuedForDeletion": "Being deleted permanently",
+  "num.thousand": "{0}K",
+  "num.million": "{0}M",
+  "studio.analytics.emptyViews": "No views in this period.",
+  "studio.analytics.emptyWatch": "No watch time recorded in this period.",
+  "studio.analytics.readout": "{0}: {1}"
 }

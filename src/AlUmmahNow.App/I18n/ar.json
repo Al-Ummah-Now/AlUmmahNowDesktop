@@ -247,5 +247,10 @@
   "studio.analytics.failed": "تعذّر تحميل الإحصاءات.",
   "studio.analytics.ownerOnly": "يستطيع مالك القناة فقط رؤية الإحصاءات.",
   "studio.analytics.table": "عرض كجدول",
-  "studio.videos.queuedForDeletion": "جارٍ الحذف النهائي"
+  "studio.videos.queuedForDeletion": "جارٍ الحذف النهائي",
+  "num.thousand": "{0} ألف",
+  "num.million": "{0} مليون",
+  "studio.analytics.emptyViews": "لا توجد مشاهدات في هذه الفترة.",
+  "studio.analytics.emptyWatch": "لم يُسجَّل وقت مشاهدة في هذه الفترة.",
+  "studio.analytics.readout": "{0}: {1}"
 }
