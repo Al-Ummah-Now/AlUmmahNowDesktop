@@ -44,8 +44,9 @@ public sealed partial class App : Application
     {
         var demo = Environment.GetEnvironmentVariable("AUN_DEMO") == "1";
         var environment = AppEnvironment.Resolve(Environment.GetEnvironmentVariable("AUN_ENV"), AppEnvironment.BuildDefault);
+        // CI keeps each scenario's log next to its result (artifact); demo data is canned text only.
         var dataRoot = demo
-            ? Path.Combine(Path.GetTempPath(), "aun-admin-" + Guid.NewGuid().ToString("N"))
+            ? Path.Combine(ResultPath is { } r ? Path.GetDirectoryName(Path.GetFullPath(r))! : Path.GetTempPath(), "admin-data-" + Path.GetFileNameWithoutExtension(ResultPath ?? Guid.NewGuid().ToString("N")))
             : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AlUmmahNowAdmin");
         Log.AddSink(new FileLogSink(Path.Combine(dataRoot, "logs", "admin.log")));
         var log = Log.For("app");
