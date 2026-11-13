@@ -2,6 +2,7 @@ using AlUmmahNow.Admin.Review;
 using AlUmmahNow.App.I18n;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
+using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Controls;
 
 namespace AlUmmahNow.Admin.WindowsApp;
@@ -37,7 +38,7 @@ internal static class Dialogs
         var reasons = new ComboBox { Header = l["admin.reason.title"], PlaceholderText = l["admin.reason.pick"], HorizontalAlignment = HorizontalAlignment.Stretch };
         AutomationProperties.SetAutomationId(reasons, "ReasonPicker");
         AutomationProperties.SetName(reasons, l["admin.reason.title"]);
-        foreach (var code in ReviewReasons.Codes) reasons.Items.Add(new ComboBoxItem { Content = l["admin.reason." + code], Tag = code });
+        foreach (var reason in ReviewReasons.Codes) reasons.Items.Add(new ComboBoxItem { Content = l["admin.reason." + reason], Tag = reason });
         var note = new TextBox { Header = l["admin.reason.note"], AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MaxLength = 1000, MinHeight = 80 };
         AutomationProperties.SetAutomationId(note, "ReasonNote");
         var error = new TextBlock { Text = l["admin.reason.required"], Visibility = Visibility.Collapsed, TextWrapping = TextWrapping.Wrap };
@@ -68,7 +69,7 @@ internal static class Dialogs
         dialog.Opened += (_, _) => reasons.Focus(FocusState.Programmatic);
         if (await ShowAsync(dialog) != ContentDialogResult.Primary) return null;
         var code = (reasons.SelectedItem as ComboBoxItem)?.Tag as string;
-        return (code ?? (required ? null : null), string.IsNullOrWhiteSpace(note.Text) ? null : note.Text);
+        return (code, string.IsNullOrWhiteSpace(note.Text) ? null : note.Text);
     }
 
     public static async Task ShortcutsAsync(XamlRoot root, FlowDirection direction, Localizer l)
