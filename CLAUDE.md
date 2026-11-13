@@ -16,6 +16,11 @@ Viewer and Studio share one application layer. See `docs/PLAN.md`.
 - Commit as `meywd` with the GitHub noreply address; never put a personal email in a command.
 - Each platform has its own workflow file, so parallel branches do not conflict in CI.
 - Out-of-scope findings become GitHub issues labelled `queue`.
+- UI copy tone (en + ar): Al Ummah Now is a content-sharing site, not a lectures library. Use YouTube's neutral
+  words (videos, Shorts, live streams, posts, playlists, channels, creators, the community; watch, upload, share,
+  subscribe, save, explore). Never describe the platform as lessons, lectures, courses, a library or "beneficial
+  knowledge" («دروس، محاضرات، مكتبة، العلم النافع»), and no entertainment or hype words. Content categories keep
+  their names. Arabic "video" is «مرئي / مرئيات». Full guide: wiki page "Copy Tone Guide".
 
 ## Commands
 
