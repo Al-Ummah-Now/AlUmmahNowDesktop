@@ -634,7 +634,7 @@ internal sealed class AdminWindow
         var flags = new List<string>();
         if (item.Minor) flags.Add(L["admin.row.minor"]);
         else if (item.IsSensitive) flags.Add(L["admin.row.sensitive"]);
-        if (item.Escalate) flags.Add(L["admin.row.escalated"]);
+        if (item.Escalate && item.HoldCause != HoldCause.Escalation) flags.Add(L["admin.row.escalated"]);
         return flags;
     }
 
