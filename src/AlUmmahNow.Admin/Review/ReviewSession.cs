@@ -177,11 +177,14 @@ public sealed class ReviewSession : ObservableObject, IDisposable
     /// <summary>The audited per-item "Show": the reveal is recorded first, and nothing is shown if that fails.</summary>
     public async Task<bool> RevealAsync(string target = "item")
     {
-        if (Detail == null) return false;
+        // The id is pinned before the await: a reveal recorded for one item never shows another.
+        var id = Detail?.Item.Id;
+        if (id == null) return false;
         try
         {
-            await _service.RevealAsync(Detail.Item.Id, target, _installId).ConfigureAwait(true);
-            _reveal.Reveal(Detail.Item.Id);
+            await _service.RevealAsync(id, target, _installId).ConfigureAwait(true);
+            if (Detail?.Item.Id != id) return false;
+            _reveal.Reveal(id);
             return true;
         }
         catch (ReviewException ex)

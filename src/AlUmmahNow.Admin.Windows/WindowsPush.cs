@@ -20,12 +20,12 @@ internal sealed class WindowsPush
 
     private readonly PushConfig _config;
     private readonly IPushRegistry _registry;
-    private readonly string _installId;
+    private readonly Func<string> _installId;
     private readonly Localizer _l;
     private readonly Func<PushActivation, Task> _activate;
     private PushNotificationChannel? _channel;
 
-    public WindowsPush(PushConfig config, IPushRegistry registry, string installId, Localizer l, Func<PushActivation, Task> activate)
+    public WindowsPush(PushConfig config, IPushRegistry registry, Func<string> installId, Localizer l, Func<PushActivation, Task> activate)
     {
         _config = config;
         _registry = registry;
@@ -88,7 +88,7 @@ internal sealed class WindowsPush
         {
             _channel = await PushNotificationChannelManager.CreatePushNotificationChannelForApplicationAsync();
             _channel.PushNotificationReceived += OnReceived;
-            await _registry.RegisterAsync(_installId, _channel.Uri, _l.Language, appVersion);
+            await _registry.RegisterAsync(_installId(), _channel.Uri, _l.Language, appVersion);
             State = PushState.Registered;
         }
         catch (Exception ex)
@@ -114,22 +114,41 @@ internal sealed class WindowsPush
         }
     }
 
-    public async Task StopAsync()
+    /// <summary>
+    /// Sign-out: always removes this install's registration (even when this run opened no
+    /// channel, e.g. offline start), before the token is revoked. False when the server could
+    /// not be told, so the caller retires the install id and the old row matches nothing.
+    /// </summary>
+    public async Task<bool> StopAsync()
     {
-        if (_channel == null) return;
+        var ok = true;
         try
         {
-            await _registry.UnregisterAsync(_installId);
-            ToastNotificationManager.History.RemoveGroup(PushClear.ReviewGroup);
+            await _registry.UnregisterAsync(_installId());
         }
-        catch (Exception ex) when (ex is ReviewException || ex is System.Runtime.InteropServices.COMException)
+        catch (ReviewException ex)
         {
             Logger.Warn("push unregister failed: " + ex.GetType().Name);
+            ok = false;
         }
 
-        _channel.PushNotificationReceived -= OnReceived;
-        _channel.Close();
-        _channel = null;
-        State = PushState.Off;
+        try
+        {
+            if (_config.Packaged) ToastNotificationManager.History.RemoveGroup(PushClear.ReviewGroup);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn("could not clear delivered alerts: " + ex.GetType().Name);
+        }
+
+        if (_channel != null)
+        {
+            _channel.PushNotificationReceived -= OnReceived;
+            _channel.Close();
+            _channel = null;
+        }
+
+        State = _config.CanRegister ? PushState.Off : PushState.NotConfigured;
+        return ok;
     }
 }
