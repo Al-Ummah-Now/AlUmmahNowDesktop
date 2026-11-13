@@ -62,7 +62,7 @@ internal sealed class WindowsPush
         if (!_config.Packaged) return;
         try
         {
-            AppNotificationManager.Default.NotificationInvoked += (_, args) =>
+            AppNotificationManager.Default.NotificationInvoked += (sender, args) =>
             {
                 if (PushActivation.Parse(args.Argument) is { } a) _ = _activate(a);
             };
