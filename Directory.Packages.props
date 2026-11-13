@@ -10,6 +10,7 @@
     <PackageVersion Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.4188" />
     <PackageVersion Include="AlUmmahNow.Core" Version="0.3.0-rc.1" />
     <PackageVersion Include="System.Security.Cryptography.ProtectedData" Version="9.0.10" />
+    <PackageVersion Include="Microsoft.Win32.SystemEvents" Version="9.0.10" />
     <PackageVersion Include="GirCore.Gtk-4.0" Version="0.8.1" />
     <PackageVersion Include="GirCore.Adw-1" Version="0.8.1" />
     <PackageVersion Include="GirCore.Gst-1.0" Version="0.8.1" />

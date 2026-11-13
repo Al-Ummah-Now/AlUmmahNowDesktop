@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0-windows10.0.22621.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.19041.0</TargetPlatformMinVersion>
+    <RootNamespace>AlUmmahNow.Admin.WindowsApp</RootNamespace>
+    <AssemblyName>AlUmmahNowAdmin</AssemblyName>
+    <UseWinUI>true</UseWinUI>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Platforms>x64</Platforms>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <SelfContained>true</SelfContained>
+    <!-- Program.cs owns Main: one instance, and sign-in callbacks and toasts reach it. -->
+    <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
+    <EnableMsixTooling>true</EnableMsixTooling>
+    <WindowsPackageType Condition="'$(BuildMsix)' != 'true'">None</WindowsPackageType>
+    <GenerateAppxPackageOnBuild Condition="'$(BuildMsix)' == 'true'">true</GenerateAppxPackageOnBuild>
+    <!-- Signed by the release workflow with the owner's certificate, never in the repo. -->
+    <AppxPackageSigningEnabled>false</AppxPackageSigningEnabled>
+    <AppxBundle>Never</AppxBundle>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <!-- Stamped by the release workflow (WNS needs the Partner Center identity). Empty: push off. -->
+    <AdminPackageIdentity Condition="'$(AdminPackageIdentity)' == ''"></AdminPackageIdentity>
+  </PropertyGroup>
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>AdminPackageIdentity</_Parameter1>
+      <_Parameter2>$(AdminPackageIdentity)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" />
+    <PackageReference Include="Microsoft.Win32.SystemEvents" />
+    <AppxManifest Include="Package.appxmanifest" Condition="'$(BuildMsix)' == 'true'" />
+    <Content Include="Assets\*.png" Condition="'$(BuildMsix)' == 'true'" />
+    <ProjectReference Include="..\AlUmmahNow.App\AlUmmahNow.App.csproj" />
+    <ProjectReference Include="..\AlUmmahNow.Admin\AlUmmahNow.Admin.csproj" />
+    <ProjectReference Include="..\AlUmmahNow.CoreBridge.Native\AlUmmahNow.CoreBridge.Native.csproj" />
+  </ItemGroup>
+</Project>

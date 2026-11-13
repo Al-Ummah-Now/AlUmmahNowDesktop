@@ -1,0 +1,118 @@
+name: Release Admin Windows
+# The internal "Al Ummah Now Admin" app (staff only, wiki AUN-ADMIN-NATIVE, Distribution):
+# a signed MSIX delivered through a private channel. This repository is public, so the package
+# never goes to GitHub Releases or workflow artifacts. Tag admin-windows-v1.2.3 on main.
+#
+# Gated on owner-supplied secrets (docs/ADMIN_WINDOWS.md):
+#   ADMIN_WINDOWS_CERT_PFX_BASE64, ADMIN_WINDOWS_CERT_PASSWORD  code-signing certificate
+#   ADMIN_WINDOWS_PACKAGE_NAME, ADMIN_WINDOWS_PUBLISHER         Partner Center identity (WNS)
+#   ADMIN_RELEASE_BUCKET                                        private R2 bucket for the MSIX
+#   CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID                 (organization secrets)
+on:
+  push:
+    tags:
+      - 'admin-windows-v[0-9]+.[0-9]+.[0-9]+'
+  workflow_dispatch:
+concurrency:
+  group: release-admin-windows-${{ github.ref }}
+  cancel-in-progress: false
+permissions:
+  contents: read
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      ready: ${{ steps.check.outputs.ready }}
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Only release from main
+        run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+      - id: check
+        env:
+          PFX: ${{ secrets.ADMIN_WINDOWS_CERT_PFX_BASE64 }}
+          PFX_PASSWORD: ${{ secrets.ADMIN_WINDOWS_CERT_PASSWORD }}
+          PACKAGE_NAME: ${{ secrets.ADMIN_WINDOWS_PACKAGE_NAME }}
+          PUBLISHER: ${{ secrets.ADMIN_WINDOWS_PUBLISHER }}
+          BUCKET: ${{ secrets.ADMIN_RELEASE_BUCKET }}
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          missing=""
+          for n in PFX PFX_PASSWORD PACKAGE_NAME PUBLISHER BUCKET CF_TOKEN; do [ -n "${!n}" ] || missing="$missing $n"; done
+          case "$GITHUB_REF_NAME" in admin-windows-v*) v="${GITHUB_REF_NAME#admin-windows-v}" ;; *) v="0.0.1" ;; esac
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          if [ -n "$missing" ]; then
+            echo "::warning::Admin for Windows is not released: owner secrets missing:$missing (see docs/ADMIN_WINDOWS.md)"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  msix:
+    needs: gate
+    if: needs.gate.outputs.ready == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Fetch AlUmmahNow.Core
+        shell: bash
+        run: ./scripts/fetch-core.sh
+      - name: Test the Admin shared layer
+        run: dotnet test tests/AlUmmahNow.Admin.Tests -c Release
+      - name: Stamp the package identity and version
+        shell: pwsh
+        env:
+          PACKAGE_NAME: ${{ secrets.ADMIN_WINDOWS_PACKAGE_NAME }}
+          PUBLISHER: ${{ secrets.ADMIN_WINDOWS_PUBLISHER }}
+        run: |
+          $m = "src/AlUmmahNow.Admin.Windows/Package.appxmanifest"
+          [xml]$x = Get-Content $m
+          $x.Package.Identity.Name = $env:PACKAGE_NAME
+          $x.Package.Identity.Publisher = $env:PUBLISHER
+          $x.Package.Identity.Version = "${{ needs.gate.outputs.version }}.0"
+          $x.Save((Resolve-Path $m).Path)
+      - name: Build the MSIX (production)
+        shell: pwsh
+        env:
+          PACKAGE_NAME: ${{ secrets.ADMIN_WINDOWS_PACKAGE_NAME }}
+        run: |
+          dotnet publish src/AlUmmahNow.Admin.Windows -c Release -r win-x64 -p:Platform=x64 -p:BuildMsix=true -p:AunProd=true `
+            -p:Version=${{ needs.gate.outputs.version }} -p:AdminPackageIdentity=$env:PACKAGE_NAME `
+            -p:AppxPackageDir="$((Get-Location).Path)\out\msix\\"
+      - name: Sign
+        shell: pwsh
+        env:
+          PFX: ${{ secrets.ADMIN_WINDOWS_CERT_PFX_BASE64 }}
+          PFX_PASSWORD: ${{ secrets.ADMIN_WINDOWS_CERT_PASSWORD }}
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP "admin.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:PFX))
+          try {
+            $msix = Get-ChildItem out/msix -Recurse -Filter *.msix | Select-Object -First 1
+            $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName -Descending | Select-Object -First 1
+            & $signtool.FullName sign /fd SHA256 /f $pfx /p $env:PFX_PASSWORD /tr http://timestamp.digicert.com /td SHA256 $msix.FullName
+            if ($LASTEXITCODE -ne 0) { throw "signing failed" }
+            & $signtool.FullName verify /pa $msix.FullName
+            New-Item -ItemType Directory -Force dist | Out-Null
+            Copy-Item $msix.FullName "dist/AlUmmahNow-Admin-${{ needs.gate.outputs.version }}-x64.msix"
+          } finally { Remove-Item $pfx -Force }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Upload to the internal channel (private R2 bucket)
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          BUCKET: ${{ secrets.ADMIN_RELEASE_BUCKET }}
+        run: |
+          f="dist/AlUmmahNow-Admin-${{ needs.gate.outputs.version }}-x64.msix"
+          npx --yes wrangler@4 r2 object put "$BUCKET/admin/windows/$(basename "$f")" --file "$f" --remote --content-type application/msix
+          sha256sum "$f"
