@@ -34,7 +34,7 @@ public sealed partial class App : Application
         UnhandledException += (_, e) =>
         {
             Log.For("app").Error("unhandled exception", e.Exception);
-            if (ResultPath != null) File.AppendAllText(ResultPath + ".crash.txt", LogScrubber.Scrub(e.Exception.ToString()) + "\n");
+            if (Environment.GetEnvironmentVariable("AUN_DEMO") == "1" && ResultPath != null) File.AppendAllText(ResultPath + ".crash.txt", LogScrubber.Scrub(e.Exception.ToString()) + "\n");
         };
     }
 
