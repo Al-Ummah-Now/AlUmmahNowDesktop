@@ -58,6 +58,7 @@ internal sealed class AdminWindow
     private readonly DispatcherQueueTimer _toastTimer;
     private readonly Grid _root = new();
     private readonly Grid _body = new();
+    private readonly Border _barHost = new();
     private readonly InfoBar _toast = new() { IsClosable = true, Margin = new Thickness(12) };
     private readonly ReviewQueue _queue;
     private readonly ReviewSession _session;
@@ -144,8 +145,8 @@ internal sealed class AdminWindow
         catch (Exception ex)
         {
             Logger.Error("render failed", ex);
-            if (Environment.GetEnvironmentVariable("AUN_RESULT") is { Length: > 0 } result)
-                File.AppendAllText(result + ".crash.txt", ex.GetType().Name + ": " + ex.Message + "\n" + ex.StackTrace + "\n");
+            if (Environment.GetEnvironmentVariable("AUN_DEMO") == "1" && Environment.GetEnvironmentVariable("AUN_RESULT") is { Length: > 0 } result)
+                File.AppendAllText(result + ".crash.txt", LogScrubber.Scrub(ex.ToString()) + "\n");
         }
     }
 
@@ -321,9 +322,8 @@ internal sealed class AdminWindow
         _root.RowDefinitions[2].Height = new GridLength(1, GridUnitType.Star);
 
         if (!string.IsNullOrEmpty(_c.Banner)) _root.Children.Add(new InfoBar { IsOpen = true, IsClosable = false, Severity = InfoBarSeverity.Informational, Message = _c.Banner });
-        var bar = TopBar();
-        Grid.SetRow(bar, 1);
-        _root.Children.Add(bar);
+        Grid.SetRow(_barHost, 1);
+        _root.Children.Add(_barHost);
         Grid.SetRow(_body, 2);
         _root.Children.Add(_body);
         Grid.SetRow(_toast, 3);
@@ -452,6 +452,8 @@ internal sealed class AdminWindow
 
     private void Render()
     {
+        // The account menu appears only once unlocked and signed in.
+        _barHost.Child = TopBar();
         _body.Children.Clear();
         _body.ColumnDefinitions.Clear();
         if (_hidden)
