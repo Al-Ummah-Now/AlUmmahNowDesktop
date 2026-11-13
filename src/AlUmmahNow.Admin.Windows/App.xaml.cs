@@ -104,12 +104,18 @@ public sealed partial class App : Application
             },
             BeforeSignOut = async () =>
             {
-                if (_push != null) await _push.StopAsync();
+                // Unregister while the token still works; if the server can't be told, retire
+                // this install id so the stale registration never reaches the next account.
+                if (_push != null && !await _push.StopAsync())
+                {
+                    settings.InstallId = "win-" + Guid.NewGuid().ToString("N");
+                    settings.Save(settingsPath);
+                }
             },
         };
         context.PushMessage = pushConfig.CanRegister ? null : localizer["admin.push.off"];
         _window = new AdminWindow(context);
-        _push = new WindowsPush(pushConfig, registry, settings.InstallId, localizer, a => _window.ActivateReviewAsync(a.ReviewId));
+        _push = new WindowsPush(pushConfig, registry, () => settings.InstallId, localizer, a => _window.ActivateReviewAsync(a.ReviewId));
         _push.ListenForToasts();
         SessionWatch.Start(_window);
 
