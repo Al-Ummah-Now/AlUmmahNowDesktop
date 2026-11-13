@@ -53,7 +53,7 @@
   "studio.encode.canceled": "Canceled",
   "studio.encode.hardware": "Hardware",
   "studio.encode.software": "Software",
-  "studio.preset.lecture": "Lecture",
+  "studio.preset.lecture": "Talk (one speaker)",
   "studio.preset.conference": "Conference",
   "studio.preset.recitation": "Recitation (audio)",
   "studio.timeline.split": "Split",

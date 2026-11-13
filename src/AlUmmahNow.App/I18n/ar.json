@@ -53,7 +53,7 @@
   "studio.encode.canceled": "أُلغي",
   "studio.encode.hardware": "عتادي",
   "studio.encode.software": "برمجي",
-  "studio.preset.lecture": "محاضرة",
+  "studio.preset.lecture": "كلمة (متحدث واحد)",
   "studio.preset.conference": "مؤتمر",
   "studio.preset.recitation": "تلاوة (صوت)",
   "studio.timeline.split": "تقسيم",
