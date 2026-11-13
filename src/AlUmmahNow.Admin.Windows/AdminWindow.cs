@@ -78,6 +78,7 @@ internal sealed class AdminWindow
     private StackPanel _detail = new();
     private StackPanel _media = new();
     private StackPanel _frames = new();
+    private ScrollViewer _framesScroll = new();
     private InfoBar _detailInfo = new();
     private readonly Dictionary<ReviewDecision, Button> _decisionButtons = new();
     private bool _renderingList;
@@ -92,9 +93,9 @@ internal sealed class AdminWindow
         Hwnd = WinRT.Interop.WindowNative.GetWindowHandle(Window);
         Protection.ExcludeFromCapture(Hwnd);
 
-        _queue.PropertyChanged += (_, e) => _ui.TryEnqueue(() => OnQueueChanged(e));
-        _session.PropertyChanged += (_, e) => _ui.TryEnqueue(() => OnSessionChanged(e));
-        context.Reveal.Changed += (_, _) => _ui.TryEnqueue(RenderMedia);
+        _queue.PropertyChanged += (_, e) => _ui.TryEnqueue(() => Safe(() => OnQueueChanged(e)));
+        _session.PropertyChanged += (_, e) => _ui.TryEnqueue(() => Safe(() => OnSessionChanged(e)));
+        context.Reveal.Changed += (_, _) => _ui.TryEnqueue(() => Safe(RenderMedia));
         context.Lock.Changed += (_, _) => _ui.TryEnqueue(() =>
         {
             if (_c.Lock.IsLocked) SetState(AdminState.Locked);
@@ -132,6 +133,21 @@ internal sealed class AdminWindow
     }
 
     public Window Window { get; }
+
+    /// <summary>A rendering fault is logged (and fails the CI scenario) instead of tearing the window down silently.</summary>
+    private static void Safe(Action action)
+    {
+        try
+        {
+            action();
+        }
+        catch (Exception ex)
+        {
+            Logger.Error("render failed", ex);
+            if (Environment.GetEnvironmentVariable("AUN_RESULT") is { Length: > 0 } result)
+                File.AppendAllText(result + ".crash.txt", ex.GetType().Name + ": " + ex.Message + "\n" + ex.StackTrace + "\n");
+        }
+    }
 
     public IntPtr Hwnd { get; }
 
@@ -425,6 +441,7 @@ internal sealed class AdminWindow
         _detailScroll = new ScrollViewer { Content = _detail, HorizontalScrollMode = ScrollMode.Disabled };
         _media = new StackPanel { Spacing = 8 };
         _frames = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        _framesScroll = new ScrollViewer { Content = _frames, HorizontalScrollMode = ScrollMode.Enabled, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollMode = ScrollMode.Disabled };
         _detailInfo = new InfoBar { IsClosable = false };
         AutomationProperties.SetAutomationId(_detailInfo, "DetailInfo");
         _player?.Stop();
@@ -687,7 +704,7 @@ internal sealed class AdminWindow
         RenderMedia();
 
         _detail.Children.Add(Section("admin.detail.frames"));
-        _detail.Children.Add(new ScrollViewer { Content = _frames, HorizontalScrollMode = ScrollMode.Enabled, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollMode = ScrollMode.Disabled });
+        _detail.Children.Add(_framesScroll);
         _ = RenderFramesAsync(detail);
 
         _detail.Children.Add(Section("admin.detail.findings"));
