@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+         xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+         xmlns:com="http://schemas.microsoft.com/appx/manifest/com/windows10"
+         xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
+         xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+         IgnorableNamespaces="uap com desktop rescap">
+  <!-- Placeholder identity. The release workflow stamps the owner's Partner Center identity and
+       publisher (needed for WNS and the code-signing certificate); see docs/ADMIN_WINDOWS.md. -->
+  <Identity Name="AlUmmahNow.Admin.Dev" Publisher="CN=AlUmmahNowDev" Version="0.1.0.0" />
+  <Properties>
+    <DisplayName>Al Ummah Now Admin</DisplayName>
+    <PublisherDisplayName>Al Ummah Now</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+  <Resources>
+    <Resource Language="en-us" />
+    <Resource Language="ar" />
+  </Resources>
+  <Applications>
+    <Application Id="App" Executable="$targetnametoken$.exe" EntryPoint="$targetentrypoint$">
+      <uap:VisualElements DisplayName="Al Ummah Now Admin" Description="Al Ummah Now Admin (staff only)" BackgroundColor="#093041"
+                          Square150x150Logo="Assets\Square150x150Logo.png" Square44x44Logo="Assets\Square44x44Logo.png" />
+      <Extensions>
+        <!-- Sign-in returns here: alummahnow-admin://auth/callback (Auth client "Admin (Windows)"). -->
+        <uap:Extension Category="windows.protocol">
+          <uap:Protocol Name="alummahnow-admin">
+            <uap:DisplayName>Al Ummah Now Admin</uap:DisplayName>
+          </uap:Protocol>
+        </uap:Extension>
+        <!-- Toast buttons (Open, Claim) start or reach the running app. -->
+        <com:Extension Category="windows.comServer">
+          <com:ComServer>
+            <com:ExeServer Executable="AlUmmahNowAdmin.exe" DisplayName="Al Ummah Now Admin" Arguments="----AppNotificationActivated:">
+              <com:Class Id="9c3b3c4e-5f0a-4d55-9b7c-1a2d0e6f7a10" />
+            </com:ExeServer>
+          </com:ComServer>
+        </com:Extension>
+        <desktop:Extension Category="windows.toastNotificationActivation">
+          <desktop:ToastNotificationActivation ToastActivatorCLSID="9c3b3c4e-5f0a-4d55-9b7c-1a2d0e6f7a10" />
+        </desktop:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+  <Capabilities>
+    <Capability Name="internetClient" />
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+</Package>

@@ -1,0 +1,116 @@
+name: CI Admin Windows
+# The internal "Al Ummah Now Admin" app for Windows (wiki AUN-ADMIN-NATIVE). Demo queue and a
+# loopback stream only: no deployed QA, no real pushes, no AI calls.
+on:
+  push:
+  workflow_dispatch:
+concurrency:
+  group: ci-admin-windows-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  admin-shared:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Fetch AlUmmahNow.Core
+        run: ./scripts/fetch-core.sh
+      - name: Test the Admin shared layer
+        env:
+          AUN_FULL_DISK_SCAN: '1'
+        run: dotnet test tests/AlUmmahNow.Admin.Tests -c Release
+
+  admin-windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Fetch AlUmmahNow.Core
+        shell: bash
+        run: ./scripts/fetch-core.sh
+      - name: Test the Admin shared layer on Windows (media never on disk)
+        env:
+          AUN_FULL_DISK_SCAN: '1'
+        run: dotnet test tests/AlUmmahNow.Admin.Tests -c Release
+      - name: Build Admin
+        run: dotnet build src/AlUmmahNow.Admin.Windows -c Release -p:Platform=x64
+      - name: Enable Media Foundation (optional feature on Windows Server)
+        run: Install-WindowsFeature Server-Media-Foundation | Format-List
+      - name: Install ffmpeg to make a test stream
+        run: choco install ffmpeg -y --no-progress
+      - name: Run Admin scenarios
+        shell: pwsh
+        run: |
+          $out = (New-Item -ItemType Directory -Force artifacts/admin).FullName
+          # A loopback HLS stream outside every folder the scan below looks at.
+          $hls = (New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/hls").FullName
+          ffmpeg -hide_banner -loglevel error -y -f lavfi -i testsrc=duration=20:size=640x360:rate=30 -f lavfi -i sine=frequency=440:duration=20 -c:v libx264 -pix_fmt yuv420p -c:a aac -f hls -hls_time 4 -hls_list_size 0 "$hls/index.m3u8"
+          $server = Start-Process python -ArgumentList "-m","http.server","8791","--bind","127.0.0.1","--directory",$hls -PassThru -RedirectStandardError "$env:RUNNER_TEMP/http.log" -RedirectStandardOutput "$env:RUNNER_TEMP/http.out"
+          Start-Sleep -Seconds 2
+          $scanStart = (Get-Date).ToUniversalTime().AddSeconds(-5).ToString("o")
+          $env:AUN_DEMO_STREAM = "http://127.0.0.1:8791/index.m3u8"
+          $exe = (Resolve-Path "src/AlUmmahNow.Admin.Windows/bin/x64/Release/net9.0-windows10.0.22621.0/win-x64/AlUmmahNowAdmin.exe").Path
+          $runs = @(
+            @("en","","ready-en"), @("ar","","ready-ar"), @("en","queue","queue-en"), @("ar","queue","queue-ar","dark"),
+            @("en","history","history-en"), @("en","search","search-en"), @("en","detail","detail-en"), @("ar","detail","detail-ar"),
+            @("en","play","play-en"), @("en","blurred","blurred-en"), @("ar","blurred","blurred-ar","dark"), @("en","revealed","revealed-en"),
+            @("en","hidden","hidden-en"), @("en","approve","approve-en"), @("ar","approve","approve-ar"), @("en","undo","undo-en"),
+            @("en","conflict","conflict-en"), @("ar","conflict","conflict-ar"), @("en","reason","reason-en"), @("ar","reason","reason-ar"),
+            @("en","keys","keys-en"), @("en","notstaff","notstaff-en"), @("ar","notstaff","notstaff-ar"), @("en","locked","locked-en","light","hello")
+          )
+          foreach ($r in $runs) {
+            $theme = if ($r.Count -gt 3) { $r[3] } else { "light" }
+            $extra = if ($r.Count -gt 4) { $r[4] } else { "" }
+            ./scripts/windows-admin-scenario.ps1 $exe $r[0] $r[1] $r[2] $out $theme $extra
+          }
+          Stop-Process -Id $server.Id -Force
+          $failed = @()
+          foreach ($r in $runs) {
+            $n = $r[2]
+            if (-not (Select-String -Quiet "RESULT PASS" "$out/$n.txt")) { $failed += $n }
+            if (Test-Path "$out/$n.txt.hang.txt") { $failed += "$n (no exit)" }
+          }
+          if ($failed.Count) { throw "failed: $($failed -join ', ')" }
+          # Every window is excluded from capture (WDA_EXCLUDEFROMCAPTURE = 17).
+          if (-not (Select-String -Quiet "affinity=17" "$out/detail-en.txt")) { throw "window is not excluded from capture" }
+          # The player streamed: segments were requested from the loopback server.
+          if (-not (Select-String -Quiet "GET /index.*\.ts|GET /index[0-9]+\.ts" "$env:RUNNER_TEMP/http.log")) { Get-Content "$env:RUNNER_TEMP/http.log"; throw "the player never streamed" }
+          Copy-Item "$env:RUNNER_TEMP/http.log" "$out/http.log"
+          # Narrator: named controls with their shortcuts.
+          $checks = @(
+            @("queue-en", "`tQueueSearch`tSearch the queue"), @("queue-ar", "`tQueueSearch`tابحث في القائمة"),
+            @("detail-en", "`tApprove`tApprove`tA"), @("detail-en", "`tReject`tReject`tR"), @("detail-en", "`tEscalate`tEscalate`tE"),
+            @("detail-en", "`tRequestChanges`tRequest changes`tC"), @("detail-ar", "`tApprove`tموافقة"),
+            @("blurred-en", "`tShowMedia`tShow`tS"), @("approve-en", "`tUndo`tUndo`tU"), @("approve-en", "The creator has been told"),
+            @("conflict-en", "Already approved by Yusuf Admin"), @("conflict-ar", "تمت الموافقة عليه من قبل Yusuf Admin"),
+            @("reason-en", "`tReasonPicker`tReason"), @("keys-en", "Keyboard shortcuts"),
+            @("notstaff-en", "This app is for Al Ummah Now staff"), @("notstaff-ar", "هذا التطبيق لفريق عمل الأمة الآن"),
+            @("locked-en", "`tUnlock`tUnlock"), @("ready-en", "`tAccountMenu`tAccount: Amina Reviewer")
+          )
+          foreach ($c in $checks) {
+            if (-not (Select-String -Quiet -SimpleMatch $c[1] "$out/$($c[0]).uia.txt", "$out/$($c[0]).txt")) { throw "$($c[0]): missing '$($c[1])'" }
+          }
+          # Owner rule: review media is streamed, never cached or written. Look for the stream's
+          # bytes in every file changed since the scenarios started (temp, app data, caches).
+          $seg = Get-ChildItem "$hls/*.ts" | Sort-Object Name | Select-Object -Skip 1 -First 1
+          $bytes = [IO.File]::ReadAllBytes($seg.FullName)
+          [IO.File]::WriteAllBytes("$env:RUNNER_TEMP/marker.bin", $bytes[20000..20255])
+          $env:AUN_SCAN_MARKER_FILE = "$env:RUNNER_TEMP/marker.bin"
+          $env:AUN_SCAN_SINCE = $scanStart
+          $env:AUN_FULL_DISK_SCAN = "1"
+          dotnet test tests/AlUmmahNow.Admin.Tests -c Release --no-build --filter "FullyQualifiedName~Streamed_video_is_nowhere_on_disk"
+          if ($LASTEXITCODE -ne 0) { throw "review video found on disk" }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: admin-windows
+          path: artifacts/admin
+          retention-days: 7

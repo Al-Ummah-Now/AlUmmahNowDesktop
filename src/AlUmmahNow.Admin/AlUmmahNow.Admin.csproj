@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- Shared Admin logic (no UI framework types): review queue, media rules, lock, push contract. -->
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" />
+    <ProjectReference Include="..\AlUmmahNow.CoreBridge\AlUmmahNow.CoreBridge.csproj" />
+    <ProjectReference Include="..\AlUmmahNow.App\AlUmmahNow.App.csproj" />
+    <InternalsVisibleTo Include="AlUmmahNow.Admin.Tests" />
+  </ItemGroup>
+</Project>
