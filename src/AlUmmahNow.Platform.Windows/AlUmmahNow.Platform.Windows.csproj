@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- Plain net9.0 (not -windows) so the webauthn.dll marshalling is unit-tested on every CI runner. -->
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\AlUmmahNow.CoreBridge\AlUmmahNow.CoreBridge.csproj" />
+    <InternalsVisibleTo Include="AlUmmahNow.Platform.Windows.Tests" />
+  </ItemGroup>
+</Project>

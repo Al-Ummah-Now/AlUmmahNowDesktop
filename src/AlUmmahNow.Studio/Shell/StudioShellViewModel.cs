@@ -1,5 +1,6 @@
 using AlUmmahNow.CoreBridge;
 using AlUmmahNow.CoreBridge.Logging;
+using AlUmmahNow.CoreBridge.Passkeys;
 using AlUmmahNow.CoreBridge.Studio;
 using CommunityToolkit.Mvvm.ComponentModel;
 
@@ -49,6 +50,9 @@ public sealed partial class StudioShellViewModel : ObservableObject
 
     /// <summary>An i18n key for the last failure, or null.</summary>
     [ObservableProperty] private string? _errorKey;
+
+    /// <summary>The Windows security sheet is open: passkey buttons are disabled.</summary>
+    [ObservableProperty] private bool _passkeyBusy;
 
     public StudioShellViewModel(IStudioAccounts accounts, IStudioApi api)
     {
@@ -105,6 +109,57 @@ public sealed partial class StudioShellViewModel : ObservableObject
 
         SyncAccounts();
         await LoadChannelsAsync();
+    }
+
+    /// <summary>Show "Sign in with a passkey" and "Add a passkey" (the platform has a passkey API).</summary>
+    public bool PasskeysAvailable => _accounts.PasskeysAvailable;
+
+    /// <summary>Passkey sign-in, no browser. The window shows the outcome's dialog, if any.</summary>
+    public async Task<PasskeyOutcome> SignInWithPasskeyAsync(CancellationToken cancellationToken = default)
+    {
+        if (PasskeyBusy || State == ShellState.SigningIn) return PasskeyOutcome.Silent;
+        PasskeyBusy = true;
+        ErrorKey = null;
+        try
+        {
+            await _accounts.SignInWithPasskeyAsync(cancellationToken);
+            Logger.Info("signed in with a passkey");
+        }
+        catch (Exception ex) when (ex is PasskeyException || ex is OperationCanceledException)
+        {
+            if (ex is PasskeyException { Error: not PasskeyError.Cancelled }) Logger.Warn("passkey sign-in failed", ex);
+            return PasskeyOutcome.ForError(ex, signIn: true);
+        }
+        finally
+        {
+            PasskeyBusy = false;
+        }
+
+        SyncAccounts();
+        await LoadChannelsAsync();
+        return PasskeyOutcome.Done;
+    }
+
+    /// <summary>"Add a passkey" for the active account; <paramref name="confirmSignInAgain"/> asks before a step-up sign-in.</summary>
+    public async Task<PasskeyOutcome> AddPasskeyAsync(Func<CancellationToken, Task<bool>>? confirmSignInAgain, CancellationToken cancellationToken = default)
+    {
+        if (PasskeyBusy || ActiveAccount == null) return PasskeyOutcome.Silent;
+        PasskeyBusy = true;
+        try
+        {
+            await _accounts.AddPasskeyAsync(confirmSignInAgain, cancellationToken);
+            Logger.Info("passkey added");
+            return PasskeyOutcome.Done;
+        }
+        catch (Exception ex) when (ex is PasskeyException || ex is OperationCanceledException)
+        {
+            if (ex is PasskeyException { Error: not PasskeyError.Cancelled }) Logger.Warn("adding a passkey failed", ex);
+            return PasskeyOutcome.ForError(ex, signIn: false);
+        }
+        finally
+        {
+            PasskeyBusy = false;
+        }
     }
 
     public async Task SwitchAccountAsync(string userId)

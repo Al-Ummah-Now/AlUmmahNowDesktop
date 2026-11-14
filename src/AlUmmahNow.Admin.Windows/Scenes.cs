@@ -63,6 +63,14 @@ internal static class Scenes
             case "keys":
                 _ = w.RunAsync(ReviewCommand.Help);
                 return "keys=open";
+            case "signedout":
+                // The sign-in screen: "Sign in with a passkey" and "Sign in another way".
+                await w.SignOutAsync(ask: false);
+                return "signedout";
+            case "addpasskey":
+                // Leaves the "Passkey added" dialog up for the screenshot.
+                _ = w.AddPasskeyAsync();
+                return "addpasskey=open";
             case "notstaff":
             case "locked":
             default:
@@ -86,6 +94,8 @@ internal static class Scenes
         "conflict" => result == "conflict=Conflict by=Yusuf Admin",
         "reason" => result == "reason=open",
         "keys" => result == "keys=open",
+        "signedout" => w.State == AdminState.SignedOut,
+        "addpasskey" => result == "addpasskey=open",
         "notstaff" => w.State == AdminState.NotStaff,
         "locked" => w.State == AdminState.Locked,
         _ => false,

@@ -1,5 +1,6 @@
 using AlUmmahNow.App.I18n;
 using AlUmmahNow.CoreBridge.Logging;
+using AlUmmahNow.CoreBridge.Passkeys;
 using AlUmmahNow.CoreBridge.Studio;
 using AlUmmahNow.Studio.Shell;
 using Microsoft.UI.Xaml;
@@ -105,12 +106,12 @@ internal sealed class StudioWindow
         _body.Children.Clear();
         _body.Children.Add(_shell.State switch
         {
-            ShellState.SignedOut => Status(_l["studio.shell.signInTitle"], _l["studio.shell.signInBody"], Action(_l["auth.signIn"], () => _ = _shell.SignInAsync(SignInMode.Default), primary: true, id: "SignIn"), _shell.ErrorKey is { } k ? _l[k] : null),
+            ShellState.SignedOut => Status(_l["studio.shell.signInTitle"], _shell.PasskeysAvailable ? _l["passkey.intro"] : _l["studio.shell.signInBody"], SignInActions(), _shell.ErrorKey is { } k ? _l[k] : null),
             ShellState.SigningIn => Status(_l["auth.signingIn"], null, new ProgressRing { IsActive = true }),
             ShellState.Loading => Status(_l["studio.shell.loading"], null, new ProgressRing { IsActive = true }),
             ShellState.NoChannel => Status(_l["studio.shell.noChannelTitle"], _l["studio.shell.noChannelBody"], Action(_l["studio.shell.retry"], () => _ = _shell.RetryAsync())),
             ShellState.Error => Status(_l["studio.shell.errorTitle"], _shell.ErrorKey is { } e ? _l[e] : null, Action(_l["studio.shell.retry"], () => _ = _shell.RetryAsync())),
-            ShellState.NeedsReauth => Status(_l["studio.shell.reauthTitle"], _l.Format("studio.shell.reauthBody", Localizer.Isolate(_shell.ActiveAccount?.Label ?? "")), Action(_l["auth.signIn"], () => _ = _shell.SignInAsync(SignInMode.Default), primary: true, id: "SignIn")),
+            ShellState.NeedsReauth => Status(_l["studio.shell.reauthTitle"], _l.Format("studio.shell.reauthBody", Localizer.Isolate(_shell.ActiveAccount?.Label ?? "")), SignInActions()),
             _ => _nav,
         });
         RenderChannels();
@@ -134,6 +135,75 @@ internal sealed class StudioWindow
         }
 
         return panel;
+    }
+
+    /// <summary>
+    /// "Sign in with a passkey" (the Windows security sheet, no browser) with "Sign in another way"
+    /// (the browser sign-in) under it; only the browser button where Windows has no passkey API.
+    /// </summary>
+    private FrameworkElement SignInActions()
+    {
+        if (!_shell.PasskeysAvailable) return Action(_l["auth.signIn"], () => _ = _shell.SignInAsync(SignInMode.Default), primary: true, id: "SignIn");
+        var passkey = Action(_l["passkey.signIn"], () => _ = SignInWithPasskeyAsync(), primary: true, id: "SignInPasskey");
+        passkey.IsEnabled = !_shell.PasskeyBusy;
+        passkey.HorizontalAlignment = HorizontalAlignment.Center;
+        passkey.Loaded += (_, _) => passkey.Focus(FocusState.Programmatic);
+        var other = new HyperlinkButton { Content = _l["passkey.otherWay"], HorizontalAlignment = HorizontalAlignment.Center, IsEnabled = !_shell.PasskeyBusy };
+        AutomationProperties.SetAutomationId(other, "SignIn");
+        AutomationProperties.SetName(other, _l["passkey.otherWay"]);
+        other.Click += (_, _) => _ = _shell.SignInAsync(SignInMode.Default);
+        var panel = new StackPanel { Spacing = 8 };
+        panel.Children.Add(passkey);
+        panel.Children.Add(other);
+        return panel;
+    }
+
+    private async Task SignInWithPasskeyAsync()
+    {
+        var outcome = await _shell.SignInWithPasskeyAsync();
+        await ShowPasskeyOutcomeAsync(outcome);
+    }
+
+    /// <summary>"Add a passkey" from the account menu; asks in-app before a step-up browser sign-in.</summary>
+    public async Task AddPasskeyAsync()
+    {
+        var outcome = await _shell.AddPasskeyAsync(_ => OnUiAsync(() => Window.Content?.XamlRoot is { } root
+            ? Confirm.AskAsync(root, _direction, _l["passkey.stepUp.title"], _l["passkey.stepUp.body"], _l["passkey.stepUp.continue"], _l["common.cancel"])
+            : Task.FromResult(false)));
+        if (Window.Content?.XamlRoot is not { } xamlRoot) return;
+        if (outcome == PasskeyOutcome.Done) await Confirm.TellAsync(xamlRoot, _direction, _l["passkey.add"], _l["passkey.added"], _l["passkey.ok"]);
+        else await ShowPasskeyOutcomeAsync(outcome);
+    }
+
+    /// <summary>One in-app dialog; closing the Windows sheet shows nothing.</summary>
+    private async Task ShowPasskeyOutcomeAsync(PasskeyOutcome outcome)
+    {
+        if (outcome.MessageKey is not { } key || Window.Content?.XamlRoot is not { } root) return;
+        if (!outcome.OfferOtherWay)
+        {
+            await Confirm.TellAsync(root, _direction, _l["passkey.error.title"], _l[key], _l["passkey.ok"]);
+            return;
+        }
+
+        if (await Confirm.AskAsync(root, _direction, _l["passkey.error.title"], _l[key], _l["passkey.otherWay"], _l["passkey.ok"])) await _shell.SignInAsync(SignInMode.Default);
+    }
+
+    private Task<bool> OnUiAsync(Func<Task<bool>> show)
+    {
+        var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var queued = Window.DispatcherQueue.TryEnqueue(async () =>
+        {
+            try
+            {
+                tcs.TrySetResult(await show());
+            }
+            catch (Exception ex)
+            {
+                tcs.TrySetException(ex);
+            }
+        });
+        if (!queued) tcs.TrySetResult(false);
+        return tcs.Task;
     }
 
     private static Button Action(string text, Action click, bool primary = false, string? id = null)
@@ -184,6 +254,15 @@ internal sealed class StudioWindow
         var add = new MenuFlyoutItem { Text = _l["studio.shell.addAccount"], Icon = new SymbolIcon(Symbol.AddFriend) };
         add.Click += (_, _) => _ = _shell.SignInAsync(SignInMode.AddAccount);
         _accountMenu.Items.Add(add);
+        if (_shell.PasskeysAvailable && active != null && !active.NeedsReauth)
+        {
+            var passkey = new MenuFlyoutItem { Text = _l["passkey.add"], Icon = new FontIcon { Glyph = "\uE8D7" }, IsEnabled = !_shell.PasskeyBusy };
+            AutomationProperties.SetAutomationId(passkey, "AddPasskey");
+            AutomationProperties.SetName(passkey, _l["passkey.add"]);
+            passkey.Click += (_, _) => _ = AddPasskeyAsync();
+            _accountMenu.Items.Add(passkey);
+        }
+
         _accountMenu.Items.Add(new MenuFlyoutSeparator());
         foreach (var account in _shell.AccountList)
         {

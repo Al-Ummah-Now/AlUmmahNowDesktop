@@ -1,5 +1,6 @@
 using System.Text.Json;
 using AlUmmahNow.CoreBridge;
+using AlUmmahNow.CoreBridge.Passkeys;
 using AlUmmahNow.CoreBridge.Studio;
 
 namespace AlUmmahNow.Studio.Tests;
@@ -57,6 +58,25 @@ public sealed class FakeAccounts : IStudioAccounts
         ActiveId = a.UserId;
         Changed?.Invoke(this, EventArgs.Empty);
         return Task.FromResult(a);
+    }
+
+    public bool PasskeysAvailable { get; set; } = true;
+    public Exception? PasskeyError;
+    public int PasskeySignIns;
+    public int PasskeysAdded;
+
+    public Task<StudioAccount> SignInWithPasskeyAsync(CancellationToken cancellationToken = default)
+    {
+        PasskeySignIns++;
+        if (PasskeyError != null) throw PasskeyError;
+        return SignInAsync(SignInMode.Default, cancellationToken);
+    }
+
+    public Task<SavedPasskey> AddPasskeyAsync(Func<CancellationToken, Task<bool>>? confirmSignInAgain = null, CancellationToken cancellationToken = default)
+    {
+        if (PasskeyError != null) throw PasskeyError;
+        PasskeysAdded++;
+        return Task.FromResult(new SavedPasskey("pk1", "Windows Hello", null));
     }
 
     public void Switch(string userId)

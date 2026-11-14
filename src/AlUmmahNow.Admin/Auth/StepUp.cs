@@ -57,4 +57,16 @@ public interface IAdminAuth
 
     /// <summary>The callback the OS handed the app (protocol activation).</summary>
     bool HandleRedirect(string uri);
+
+    /// <summary>True where the platform passkey API exists.</summary>
+    bool PasskeysAvailable { get; }
+
+    /// <summary>Sign-in with the Windows passkey sheet (no browser). Throws <c>PasskeyException</c>.</summary>
+    Task SignInWithPasskeyAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Adds a passkey to the signed-in account; on <c>step_up_required</c> runs <see cref="StepUpAsync"/>
+    /// (after <paramref name="confirmSignInAgain"/>) and retries once. Throws <c>PasskeyException</c>.
+    /// </summary>
+    Task AddPasskeyAsync(Func<CancellationToken, Task<bool>>? confirmSignInAgain = null, CancellationToken ct = default);
 }

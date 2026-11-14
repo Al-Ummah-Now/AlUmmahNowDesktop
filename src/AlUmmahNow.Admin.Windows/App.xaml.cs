@@ -9,6 +9,8 @@ using AlUmmahNow.App.I18n;
 using AlUmmahNow.App.Services;
 using AlUmmahNow.CoreBridge.Logging;
 using AlUmmahNow.CoreBridge.Native;
+using AlUmmahNow.CoreBridge.Passkeys;
+using AlUmmahNow.Platform.Windows;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.Windows.AppLifecycle;
@@ -75,7 +77,9 @@ public sealed partial class App : Application
         }
         else
         {
-            var auth = new CoreAdminAuth(environment.AuthIssuer, environment.AdminClientId, new DpapiSecureStore(Path.Combine(dataRoot, "secure")), new ShellBrowserLauncher());
+            // Native passkeys: the Windows security sheet over this window, modal to it.
+            var passkeys = new PasskeyFlows(new NativePasskeyClient(new HttpClient { Timeout = TimeSpan.FromSeconds(30) }, environment.AuthIssuer, userAgent), new WindowsWebAuthn(() => _window?.Hwnd ?? IntPtr.Zero));
+            var auth = new CoreAdminAuth(environment.AuthIssuer, environment.AdminClientId, new DpapiSecureStore(Path.Combine(dataRoot, "secure")), new ShellBrowserLauncher(), passkeys);
             _auth = auth;
             var api = new AdminApiReviewService(environment.AdminApi, environment.VideosApi, auth.AccessTokenAsync, userAgent,
                 fallbackAccount: () => auth.UserId == null ? null : new StaffProfile(auth.UserId, auth.DisplayName, Array.Empty<string>()));

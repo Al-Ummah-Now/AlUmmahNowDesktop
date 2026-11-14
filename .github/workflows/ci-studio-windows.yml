@@ -23,6 +23,13 @@ jobs:
         run: Install-WindowsFeature Server-Media-Foundation | Format-List
       - name: Install ffmpeg to generate a source clip
         run: choco install ffmpeg -y --no-progress
+      - name: Native passkeys (webauthn.dll) - struct layout against the SDK header, unit tests
+        shell: pwsh
+        run: |
+          ./scripts/webauthn-layout.ps1 "$env:RUNNER_TEMP/webauthn-layout.txt"
+          $env:AUN_WEBAUTHN_LAYOUT = "$env:RUNNER_TEMP/webauthn-layout.txt"
+          dotnet test tests/AlUmmahNow.Platform.Windows.Tests -c Release --logger "console;verbosity=normal"
+          if ($LASTEXITCODE -ne 0) { throw "passkey tests failed" }
       - name: Build Studio
         run: dotnet build src/AlUmmahNow.Studio.Windows -c Release -p:Platform=x64
       - name: Run Studio scenarios
@@ -41,6 +48,8 @@ jobs:
           ./scripts/windows-studio-scenario.ps1 $exe en uploads shell shell-en $out
           ./scripts/windows-studio-scenario.ps1 $exe en uploads shell accounts-en $out "" accounts
           ./scripts/windows-studio-scenario.ps1 $exe ar uploads shell signout-ar $out "" signout
+          ./scripts/windows-studio-scenario.ps1 $exe en uploads shell addpasskey-en $out "" addpasskey
+          ./scripts/windows-studio-scenario.ps1 $exe ar uploads shell addpasskey-ar $out "" addpasskey
           $stage = (New-Item -ItemType Directory -Force staged).FullName
           foreach ($n in "درس 1.mp4","درس 2.mp4","lesson 10.mp4") { [IO.File]::WriteAllBytes("$stage/$n", (New-Object byte[] 1500000)) }
           $env:AUN_STAGE_DIR = $stage
@@ -57,12 +66,20 @@ jobs:
           ./scripts/windows-studio-scenario.ps1 $exe en analytics shell analytics-en $out
           ./scripts/windows-studio-scenario.ps1 $exe ar timeline "" timeline-ar $out
           ./scripts/windows-studio-scenario.ps1 $exe en encode "encode:$source" encode-en $out
-          foreach ($n in "uploads-ar","signin-ar","signin-en","shell-ar","shell-en","accounts-en","signout-ar","upload-staged-ar","upload-staged-en","videos-ar","videos-en","search-ar","edit-en","bulk-ar","delete-en","analytics-ar","analytics-en","timeline-ar","encode-en") {
+          foreach ($n in "uploads-ar","signin-ar","signin-en","shell-ar","shell-en","accounts-en","signout-ar","addpasskey-en","addpasskey-ar","upload-staged-ar","upload-staged-en","videos-ar","videos-en","search-ar","edit-en","bulk-ar","delete-en","analytics-ar","analytics-en","timeline-ar","encode-en") {
             if (-not (Select-String -Quiet "RESULT PASS" "artifacts/studio/$n.txt")) { throw "$n failed" }
             if (Test-Path "artifacts/studio/$n.txt.hang.txt") { throw "$n did not exit" }
           }
           # Screen readers: the sign-in button, channel picker and account menu are named.
           if (-not (Select-String -Quiet "`tSignIn`t" artifacts/studio/signin-en.uia.txt)) { throw "sign-in button not exposed to UI Automation" }
+          # Native passkeys (webauthn.dll): passkey first, the browser sign-in one click away.
+          Get-Content artifacts/studio/signin-en.txt
+          if (-not (Select-String -Quiet -SimpleMatch "`tSignInPasskey`tSign in with a passkey" artifacts/studio/signin-en.uia.txt)) { throw "passkey sign-in button not exposed" }
+          if (-not (Select-String -Quiet -SimpleMatch "`tSignIn`tSign in another way" artifacts/studio/signin-en.uia.txt)) { throw "'Sign in another way' not exposed" }
+          if (-not (Select-String -Quiet -SimpleMatch "`tSignInPasskey`tالدخول بمفتاح المرور" artifacts/studio/signin-ar.uia.txt)) { throw "Arabic passkey button not exposed" }
+          if (-not (Select-String -Quiet -SimpleMatch "`tAddPasskey`tAdd a passkey" artifacts/studio/accounts-en.uia.txt)) { throw "'Add a passkey' not in the account menu" }
+          if (-not (Select-String -Quiet -SimpleMatch "Passkey added" artifacts/studio/addpasskey-en.uia.txt)) { throw "no 'Passkey added' dialog" }
+          if (-not (Select-String -Quiet -SimpleMatch "أُضيف مفتاح المرور" artifacts/studio/addpasskey-ar.uia.txt)) { throw "no Arabic 'Passkey added' dialog" }
           if (-not (Select-String -Quiet "`tChannelPicker`tChannel" artifacts/studio/shell-en.uia.txt)) { throw "channel picker has no accessible name" }
           if (-not (Select-String -Quiet "`tAccountMenu`tAccount: Amina Studio" artifacts/studio/shell-en.uia.txt)) { throw "account menu has no accessible name" }
           if (-not (Select-String -Quiet "Sign out of" artifacts/studio/accounts-en.uia.txt)) { throw "account menu items not exposed" }

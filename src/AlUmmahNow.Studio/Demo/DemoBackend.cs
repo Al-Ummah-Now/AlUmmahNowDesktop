@@ -1,4 +1,5 @@
 using System.Text.Json;
+using AlUmmahNow.CoreBridge.Passkeys;
 using AlUmmahNow.CoreBridge.Studio;
 
 namespace AlUmmahNow.Studio.Demo;
@@ -30,6 +31,13 @@ public sealed class DemoAccounts : IStudioAccounts
         Changed?.Invoke(this, EventArgs.Empty);
         return Task.FromResult(_accounts[0]);
     }
+
+    public bool PasskeysAvailable => true;
+
+    public Task<StudioAccount> SignInWithPasskeyAsync(CancellationToken cancellationToken = default) => SignInAsync(SignInMode.Default, cancellationToken);
+
+    public Task<SavedPasskey> AddPasskeyAsync(Func<CancellationToken, Task<bool>>? confirmSignInAgain = null, CancellationToken cancellationToken = default) =>
+        Task.FromResult(new SavedPasskey("demo-passkey", "Windows Hello", DateTimeOffset.UtcNow));
 
     public void Switch(string userId)
     {

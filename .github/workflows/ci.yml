@@ -27,6 +27,7 @@ jobs:
         run: |
           dotnet test tests/AlUmmahNow.App.Tests -c Release --logger trx --results-directory artifacts/test
           dotnet test tests/AlUmmahNow.Studio.Tests -c Release --logger trx --results-directory artifacts/test
+          dotnet test tests/AlUmmahNow.Platform.Windows.Tests -c Release --logger trx --results-directory artifacts/test
       - name: Install a keyring (gnome-keyring, libsecret)
         uses: ./.github/actions/apt-install
         with:
