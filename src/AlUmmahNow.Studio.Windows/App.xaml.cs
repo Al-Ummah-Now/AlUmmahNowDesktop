@@ -5,6 +5,8 @@ using AlUmmahNow.CoreBridge;
 using AlUmmahNow.CoreBridge.Logging;
 using AlUmmahNow.CoreBridge.Native;
 using AlUmmahNow.CoreBridge.Native.Studio;
+using AlUmmahNow.CoreBridge.Passkeys;
+using AlUmmahNow.Platform.Windows;
 using AlUmmahNow.CoreBridge.Studio;
 using AlUmmahNow.Studio.Demo;
 using AlUmmahNow.Studio.Encode;
@@ -65,6 +67,8 @@ public sealed partial class App : Application
         var settings = settingsStore.Load();
         var userAgent = "AlUmmahNowStudioWindows/" + version;
 
+        // The passkey sheet is modal to the Studio window; its handle is filled in once it exists.
+        var hwnd = IntPtr.Zero;
         IStudioAccounts accounts;
         IApiTransport transport;
         Func<string, IUploadService> uploadServiceFor;
@@ -76,7 +80,8 @@ public sealed partial class App : Application
         }
         else
         {
-            var core = new CoreStudioAccounts(environment.AuthIssuer, environment.StudioClientId, new DpapiSecureStore(Path.Combine(dataRoot, "secure")), new ShellBrowserLauncher(), localizer["auth.browser.done"]);
+            var passkeys = new PasskeyFlows(new NativePasskeyClient(new HttpClient { Timeout = TimeSpan.FromSeconds(30) }, environment.AuthIssuer, userAgent), new WindowsWebAuthn(() => hwnd));
+            var core = new CoreStudioAccounts(environment.AuthIssuer, environment.StudioClientId, new DpapiSecureStore(Path.Combine(dataRoot, "secure")), new ShellBrowserLauncher(), localizer["auth.browser.done"], passkeys: passkeys);
             accounts = core;
             transport = new CoreApiTransport(core, environment.VideosApi, userAgent, localizer.Language);
             uploadServiceFor = account => new CoreUploadService(core, environment.VideosApi, userAgent, Path.Combine(dataRoot, "uploads"), account);
@@ -91,6 +96,7 @@ public sealed partial class App : Application
         var banner = demo ? localizer["studio.shell.demo"] : environment.Name != "prod" ? localizer.Format("studio.shell.environment", environment.Name.ToUpperInvariant()) : null;
         _window = new StudioWindow(localizer, shell, banner);
         var window = _window;
+        hwnd = WinRT.Interop.WindowNative.GetWindowHandle(window.Window);
 
         var watchDir = Environment.GetEnvironmentVariable("AUN_WATCH_DIR");
         uploadsVm.Watch(string.IsNullOrEmpty(watchDir) ? settings.WatchFolder : watchDir);
@@ -168,6 +174,7 @@ public sealed partial class App : Application
             {
                 if (scene == "accounts") window.OpenAccountMenu();
                 else if (scene == "signout") window.AskSignOut();
+                else if (scene == "addpasskey") _ = window.AddPasskeyAsync();
                 else videos.RunScene(scene);
             };
             _sceneTimer.Start();

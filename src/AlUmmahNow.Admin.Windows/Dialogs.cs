@@ -31,6 +31,22 @@ internal static class Dialogs
         return await ShowAsync(dialog) == ContentDialogResult.Primary;
     }
 
+    /// <summary>A message with one button (passkey results).</summary>
+    public static async Task MessageAsync(XamlRoot root, FlowDirection direction, string title, string body, string close)
+    {
+        if (_open) return;
+        var dialog = new ContentDialog
+        {
+            XamlRoot = root,
+            FlowDirection = direction,
+            Title = title,
+            Content = new TextBlock { Text = body, TextWrapping = TextWrapping.Wrap },
+            CloseButtonText = close,
+            DefaultButton = ContentDialogButton.Close,
+        };
+        await ShowAsync(dialog);
+    }
+
     /// <summary>Reason (required for reject and request changes, optional for escalate) and a note to the creator.</summary>
     public static async Task<(string? Code, string? Note)?> ReasonAsync(XamlRoot root, FlowDirection direction, Localizer l, string title, bool required, string confirm)
     {

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using AlUmmahNow.CoreBridge.Passkeys;
 
 namespace AlUmmahNow.CoreBridge.Studio
 {
@@ -57,6 +58,22 @@ namespace AlUmmahNow.CoreBridge.Studio
         void Reload();
 
         Task<StudioAccount> SignInAsync(SignInMode mode, CancellationToken cancellationToken = default);
+
+        /// <summary>True where the platform passkey API exists: show "Sign in with a passkey" and "Add a passkey".</summary>
+        bool PasskeysAvailable { get; }
+
+        /// <summary>
+        /// Signs in with the platform passkey sheet (no browser); the code goes through the same PKCE
+        /// token exchange as the browser sign-in. Throws <see cref="PasskeyException"/>.
+        /// </summary>
+        Task<StudioAccount> SignInWithPasskeyAsync(CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Adds a passkey to the active account. When the server wants a recent sign-in, signs the
+        /// same account in again in the browser and retries once. Throws <see cref="PasskeyException"/>.
+        /// </summary>
+        /// <param name="confirmSignInAgain">Asks in-app before the browser opens for that sign-in; false cancels.</param>
+        Task<SavedPasskey> AddPasskeyAsync(Func<CancellationToken, Task<bool>>? confirmSignInAgain = null, CancellationToken cancellationToken = default);
 
         void Switch(string userId);
 

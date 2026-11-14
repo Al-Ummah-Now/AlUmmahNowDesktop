@@ -64,7 +64,8 @@ jobs:
             @("en","play","play-en"), @("en","blurred","blurred-en"), @("ar","blurred","blurred-ar","dark"), @("en","revealed","revealed-en"),
             @("en","hidden","hidden-en"), @("en","approve","approve-en"), @("ar","approve","approve-ar"), @("en","undo","undo-en"),
             @("en","conflict","conflict-en"), @("ar","conflict","conflict-ar"), @("en","reason","reason-en"), @("ar","reason","reason-ar"),
-            @("en","keys","keys-en"), @("en","notstaff","notstaff-en"), @("ar","notstaff","notstaff-ar"), @("en","locked","locked-en","light","hello")
+            @("en","keys","keys-en"), @("en","notstaff","notstaff-en"), @("ar","notstaff","notstaff-ar"), @("en","locked","locked-en","light","hello"),
+            @("en","signedout","signedout-en"), @("ar","signedout","signedout-ar","dark"), @("en","addpasskey","addpasskey-en")
           )
           foreach ($r in $runs) {
             $theme = if ($r.Count -gt 3) { $r[3] } else { "light" }
@@ -93,7 +94,10 @@ jobs:
             @("conflict-en", "Already approved by Yusuf Admin"), @("conflict-ar", "تمت الموافقة عليه من قبل Yusuf Admin"),
             @("reason-en", "`tReasonPicker`tReason"), @("keys-en", "Keyboard shortcuts"),
             @("notstaff-en", "This app is for Al Ummah Now staff"), @("notstaff-ar", "هذا التطبيق لفريق عمل الأمة الآن"),
-            @("locked-en", "`tUnlock`tUnlock"), @("ready-en", "`tAccountMenu`tAccount: Amina Reviewer")
+            @("locked-en", "`tUnlock`tUnlock"), @("ready-en", "`tAccountMenu`tAccount: Amina Reviewer"),
+            @("signedout-en", "`tSignInPasskey`tSign in with a passkey"), @("signedout-en", "`tSignIn`tSign in another way"),
+            @("signedout-ar", "`tSignInPasskey`tالدخول بمفتاح المرور"), @("signedout-ar", "`tSignIn`tتسجيل الدخول بطريقة أخرى"),
+            @("addpasskey-en", "Passkey added")
           )
           foreach ($c in $checks) {
             if (-not (Select-String -Quiet -SimpleMatch $c[1] "$out/$($c[0]).uia.txt", "$out/$($c[0]).txt")) { throw "$($c[0]): missing '$($c[1])'" }

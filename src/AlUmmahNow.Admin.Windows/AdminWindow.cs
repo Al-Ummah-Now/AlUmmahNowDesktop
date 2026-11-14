@@ -6,6 +6,7 @@ using AlUmmahNow.Admin.Review;
 using AlUmmahNow.Admin.Security;
 using AlUmmahNow.App.I18n;
 using AlUmmahNow.CoreBridge.Logging;
+using AlUmmahNow.CoreBridge.Passkeys;
 using Microsoft.UI;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Input;
@@ -68,6 +69,7 @@ internal sealed class AdminWindow
     private bool _hidden;
     private bool _minimised;
     private string? _signInError;
+    private bool _passkeySheet;
 
     // Built per language.
     private ListView _list = new();
@@ -262,6 +264,76 @@ internal sealed class AdminWindow
         }
     }
 
+    /// <summary>"Sign in with a passkey": the Windows security sheet, no browser.</summary>
+    private async Task SignInWithPasskeyAsync()
+    {
+        _signInError = null;
+        _passkeySheet = true;
+        SetState(AdminState.SigningIn);
+        try
+        {
+            await _c.Auth.SignInWithPasskeyAsync();
+        }
+        catch (Exception ex) when (ex is PasskeyException || ex is OperationCanceledException)
+        {
+            _passkeySheet = false;
+            SetState(AdminState.SignedOut);
+            await ShowPasskeyOutcomeAsync(PasskeyOutcome.ForError(ex, signIn: true));
+            return;
+        }
+
+        _passkeySheet = false;
+        _profile = null;
+        await AfterUnlockAsync();
+    }
+
+    /// <summary>"Add a passkey" from the account menu.</summary>
+    public async Task AddPasskeyAsync()
+    {
+        try
+        {
+            await _c.Auth.AddPasskeyAsync(_ => OnUiAsync(() => Dialogs.ConfirmAsync(_root.XamlRoot, Direction, L["passkey.stepUp.title"], L["passkey.stepUp.body"], L["passkey.stepUp.continue"], L["admin.cancel"])));
+        }
+        catch (Exception ex) when (ex is PasskeyException || ex is OperationCanceledException)
+        {
+            await ShowPasskeyOutcomeAsync(PasskeyOutcome.ForError(ex, signIn: false));
+            return;
+        }
+
+        await Dialogs.MessageAsync(_root.XamlRoot, Direction, L["passkey.add"], L["passkey.added"], L["passkey.ok"]);
+    }
+
+    /// <summary>One in-app dialog for a passkey problem; closing the sheet shows nothing.</summary>
+    private async Task ShowPasskeyOutcomeAsync(PasskeyOutcome outcome)
+    {
+        if (outcome.MessageKey is not { } key) return;
+        if (!outcome.OfferOtherWay)
+        {
+            await Dialogs.MessageAsync(_root.XamlRoot, Direction, L["passkey.error.title"], L[key], L["passkey.ok"]);
+            return;
+        }
+
+        if (await Dialogs.ConfirmAsync(_root.XamlRoot, Direction, L["passkey.error.title"], L[key], L["passkey.otherWay"], L["passkey.ok"])) await SignInAsync();
+    }
+
+    private Task<bool> OnUiAsync(Func<Task<bool>> show)
+    {
+        var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var queued = _ui.TryEnqueue(async () =>
+        {
+            try
+            {
+                tcs.TrySetResult(await show());
+            }
+            catch (Exception ex)
+            {
+                tcs.TrySetException(ex);
+            }
+        });
+        if (!queued) tcs.TrySetResult(false);
+        return tcs.Task;
+    }
+
     public async Task SignOutAsync(bool ask = true)
     {
         if (ask && !await Dialogs.ConfirmAsync(_root.XamlRoot, Direction, L["admin.signout.confirm.title"], L["admin.signout.confirm.body"], L["admin.signout"], L["admin.cancel"])) return;
@@ -379,6 +451,15 @@ internal sealed class AdminWindow
         if (_c.Auth.IsSignedIn && _state != AdminState.Locked)
         {
             var menu = new MenuFlyout();
+            if (_c.Auth.PasskeysAvailable)
+            {
+                var addPasskey = new MenuFlyoutItem { Text = L["passkey.add"], Icon = new FontIcon { Glyph = "\uE8D7" } };
+                AutomationProperties.SetAutomationId(addPasskey, "AddPasskey");
+                addPasskey.Click += (_, _) => _ = AddPasskeyAsync();
+                menu.Items.Add(addPasskey);
+                menu.Items.Add(new MenuFlyoutSeparator());
+            }
+
             var signOut = new MenuFlyoutItem { Text = L["admin.signout"] };
             signOut.Click += (_, _) => _ = SignOutAsync();
             menu.Items.Add(signOut);
@@ -468,11 +549,20 @@ internal sealed class AdminWindow
                 _body.Children.Add(Centered(L["admin.lock.title"], _signInError ?? L["admin.lock.body"], (L["admin.lock.unlock"], "Unlock", () => _ = UnlockAsync())));
                 break;
             case AdminState.SignedOut:
-                _body.Children.Add(Centered(L["admin.signin.title"], _signInError ?? L["admin.signin.body"], (L["admin.signin.button"], "SignIn", () => _ = SignInAsync())));
+                if (_c.Auth.PasskeysAvailable)
+                {
+                    // Passkey first (no browser); the browser sign-in stays one click away.
+                    _body.Children.Add(Centered(L["admin.signin.title"], _signInError ?? L["passkey.intro"], (L["passkey.signIn"], "SignInPasskey", () => _ = SignInWithPasskeyAsync()), secondary: (L["passkey.otherWay"], "SignIn", () => _ = SignInAsync())));
+                }
+                else
+                {
+                    _body.Children.Add(Centered(L["admin.signin.title"], _signInError ?? L["admin.signin.body"], (L["admin.signin.button"], "SignIn", () => _ = SignInAsync())));
+                }
+
                 break;
             case AdminState.SigningIn:
             case AdminState.Checking:
-                _body.Children.Add(Centered(L["admin.signin.title"], L["admin.signin.waiting"], null, busy: true));
+                _body.Children.Add(Centered(L["admin.signin.title"], _passkeySheet ? L["passkey.adding"] : L["admin.signin.waiting"], null, busy: true));
                 break;
             case AdminState.NotStaff:
                 _body.Children.Add(Centered(L["admin.notstaff.title"], L.Format("admin.notstaff.body", _c.Auth.Email ?? _c.Auth.DisplayName ?? ""), (L["admin.signout"], "SignOut", () => _ = SignOutAsync(ask: false))));
@@ -483,7 +573,7 @@ internal sealed class AdminWindow
         }
     }
 
-    private FrameworkElement Centered(string title, string? body, (string Label, string Id, Action Click)? action, bool busy = false)
+    private FrameworkElement Centered(string title, string? body, (string Label, string Id, Action Click)? action, bool busy = false, (string Label, string Id, Action Click)? secondary = null)
     {
         var panel = new StackPanel { Spacing = 16, MaxWidth = 520, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Padding = new Thickness(24) };
         var heading = new TextBlock { Text = title, Style = (Style)Application.Current.Resources["TitleTextBlockStyle"], TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center };
@@ -505,6 +595,15 @@ internal sealed class AdminWindow
             button.Click += (_, _) => a.Click();
             panel.Children.Add(button);
             button.Loaded += (_, _) => button.Focus(FocusState.Programmatic);
+        }
+
+        if (secondary is { } b)
+        {
+            var link = new HyperlinkButton { Content = b.Label, HorizontalAlignment = HorizontalAlignment.Center };
+            AutomationProperties.SetAutomationId(link, b.Id);
+            AutomationProperties.SetName(link, b.Label);
+            link.Click += (_, _) => b.Click();
+            panel.Children.Add(link);
         }
 
         return panel;

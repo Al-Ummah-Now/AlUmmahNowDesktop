@@ -23,4 +23,19 @@ public static class Confirm
         };
         return await dialog.ShowAsync() == ContentDialogResult.Primary;
     }
+
+    /// <summary>A message with one button.</summary>
+    public static async Task TellAsync(XamlRoot root, FlowDirection direction, string title, string body, string closeLabel)
+    {
+        var dialog = new ContentDialog
+        {
+            XamlRoot = root,
+            FlowDirection = direction,
+            Title = title,
+            Content = new TextBlock { Text = body, TextWrapping = TextWrapping.Wrap },
+            CloseButtonText = closeLabel,
+            DefaultButton = ContentDialogButton.Close,
+        };
+        await dialog.ShowAsync();
+    }
 }

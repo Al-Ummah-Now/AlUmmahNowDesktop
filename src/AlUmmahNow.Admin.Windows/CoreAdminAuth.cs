@@ -3,6 +3,7 @@ using AlUmmahNow.Core;
 using AlUmmahNow.CoreBridge;
 using AlUmmahNow.CoreBridge.Logging;
 using AlUmmahNow.CoreBridge.Native;
+using AlUmmahNow.CoreBridge.Passkeys;
 
 namespace AlUmmahNow.Admin.WindowsApp;
 
@@ -17,12 +18,14 @@ internal sealed class CoreAdminAuth : IAdminAuth, IDisposable
     private static readonly Logger Logger = Log.For("auth");
 
     private readonly IBrowserLauncher _browser;
+    private readonly PasskeyFlows? _passkeys;
     private readonly object _gate = new();
     private TaskCompletionSource<string>? _pending;
 
-    public CoreAdminAuth(Uri issuer, string clientId, ISecureStore store, IBrowserLauncher browser)
+    public CoreAdminAuth(Uri issuer, string clientId, ISecureStore store, IBrowserLauncher browser, PasskeyFlows? passkeys = null)
     {
         _browser = browser;
+        _passkeys = passkeys;
         Manager = new AuthManager(new AuthConfig(issuer.AbsoluteUri.TrimEnd('/'), clientId, AdminRedirect.Uri, Scopes, null, null, null), new SecureStorageAdapter(store));
     }
 
@@ -132,6 +135,45 @@ internal sealed class CoreAdminAuth : IAdminAuth, IDisposable
         }
     }
 
+    public bool PasskeysAvailable => _passkeys?.IsAvailable == true;
+
+    public async Task SignInWithPasskeyAsync(CancellationToken ct = default)
+    {
+        if (_passkeys == null) throw new PasskeyException(PasskeyError.Unavailable, "No passkey support in this build");
+        LoginRequest request;
+        try
+        {
+            // Core keeps the PKCE verifier and state; the passkey's code completes the same login.
+            request = Manager.BeginLoginWithRedirect(LoginPrompt.Default, AdminRedirect.Uri);
+        }
+        catch (AunException ex)
+        {
+            throw new PasskeyException(PasskeyError.Failed, "Could not start sign-in: " + ex.GetType().Name, ex);
+        }
+
+        var redirect = await _passkeys.SignInAsync(request.Url, ct).ConfigureAwait(false);
+        try
+        {
+            await Manager.CompleteLogin(redirect).ConfigureAwait(false);
+        }
+        catch (AunException ex)
+        {
+            throw new PasskeyException(ex is AunException.Network ? PasskeyError.Offline : PasskeyError.Failed, "Token exchange failed: " + ex.GetType().Name, ex);
+        }
+
+        Logger.Info("signed in with a passkey");
+    }
+
+    public async Task AddPasskeyAsync(Func<CancellationToken, Task<bool>>? confirmSignInAgain = null, CancellationToken ct = default)
+    {
+        if (_passkeys == null) throw new PasskeyException(PasskeyError.Unavailable, "No passkey support in this build");
+        await _passkeys.AddAsync(
+            AccessTokenAsync,
+            async c => (confirmSignInAgain == null || await confirmSignInAgain(c).ConfigureAwait(false)) && await StepUpAsync(c).ConfigureAwait(false),
+            cancellationToken: ct).ConfigureAwait(false);
+        Logger.Info("passkey added");
+    }
+
     public bool HandleRedirect(string uri)
     {
         if (!AdminRedirect.IsCallback(uri)) return false;
@@ -170,4 +212,10 @@ internal sealed class DemoAdminAuth : IAdminAuth
     }
 
     public bool HandleRedirect(string uri) => false;
+
+    public bool PasskeysAvailable => true;
+
+    public Task SignInWithPasskeyAsync(CancellationToken ct = default) => SignInAsync(ct);
+
+    public Task AddPasskeyAsync(Func<CancellationToken, Task<bool>>? confirmSignInAgain = null, CancellationToken ct = default) => Task.CompletedTask;
 }
