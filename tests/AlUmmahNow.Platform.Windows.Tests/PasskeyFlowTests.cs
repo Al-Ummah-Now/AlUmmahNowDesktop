@@ -113,6 +113,29 @@ public class PasskeyFlowTests
         Assert.Equal(error, ex.ServerError);
     }
 
+    [Theory]
+    [InlineData("https://auth.qa.alummahnow.net", "qa.alummahnow.net", true)]
+    [InlineData("https://auth.qa.alummahnow.net", "alummahnow.net", true)]
+    [InlineData("https://auth.alummahnow.net", "alummahnow.net", true)]
+    [InlineData("https://auth.alummahnow.net", "ALUMMAHNOW.NET.", true)]
+    [InlineData("http://localhost:3301", "localhost", true)]
+    [InlineData("https://auth.qa.alummahnow.net", "net", false)]
+    [InlineData("https://auth.qa.alummahnow.net", "evilalummahnow.net", false)]
+    [InlineData("https://auth.qa.alummahnow.net", "google.com", false)]
+    [InlineData("https://auth.qa.alummahnow.net", "stage.alummahnow.net", false)]
+    [InlineData("https://auth.qa.alummahnow.net", "", false)]
+    public void Rp_id_is_pinned_to_the_issuer(string issuer, string rpId, bool allowed) =>
+        Assert.Equal(allowed, NativePasskeyClient.IsAllowedRpId(new Uri(issuer), rpId));
+
+    [Fact]
+    public async Task Options_for_another_site_are_refused_before_the_sheet_opens()
+    {
+        _issuer.On("/native/passkey/options", FakeIssuer.Json(new { challenge_id = "ch1", publicKey = Server.RequestOptions("google.com") }));
+        var ex = await Assert.ThrowsAsync<PasskeyException>(() => Flows().SignInAsync(Authorize));
+        Assert.Equal(PasskeyError.Failed, ex.Error);
+        Assert.Null(_webAuthn.LastRequest);
+    }
+
     [Fact]
     public async Task Rate_limit_carries_retry_after()
     {

@@ -54,7 +54,9 @@ namespace AlUmmahNow.CoreBridge.Passkeys
             });
             using var doc = await PostAsync("native/passkey/options", body, null, Stage.SignIn, cancellationToken).ConfigureAwait(false);
             var root = doc.RootElement;
-            return new Challenge<PasskeyRequest>(ChallengeId(root), WebAuthnJson.ParseRequestOptions(PublicKey(root)));
+            var options = WebAuthnJson.ParseRequestOptions(PublicKey(root));
+            CheckRpId(options.RpId);
+            return new Challenge<PasskeyRequest>(ChallengeId(root), options);
         }
 
         /// <returns>The authorization code.</returns>
@@ -76,7 +78,9 @@ namespace AlUmmahNow.CoreBridge.Passkeys
         {
             using var doc = await PostAsync("native/passkey/register/options", "{}", accessToken, Stage.Register, cancellationToken).ConfigureAwait(false);
             var root = doc.RootElement;
-            return new Challenge<PasskeyCreation>(ChallengeId(root), WebAuthnJson.ParseCreationOptions(PublicKey(root)));
+            var options = WebAuthnJson.ParseCreationOptions(PublicKey(root));
+            CheckRpId(options.RpId);
+            return new Challenge<PasskeyCreation>(ChallengeId(root), options);
         }
 
         public async Task<SavedPasskey> RegisterVerifyAsync(string accessToken, string challengeId, string credentialJson, string? name, CancellationToken cancellationToken = default)
@@ -98,6 +102,25 @@ namespace AlUmmahNow.CoreBridge.Passkeys
             }
 
             return new SavedPasskey(Str(root, "id") ?? throw new PasskeyException(PasskeyError.Failed, "Register answer has no id"), Str(root, "name") ?? "", created);
+        }
+
+        /// <summary>
+        /// A native app may claim any origin, so the RP id is pinned to the issuer: its host or a
+        /// parent domain on a label boundary (auth.qa.alummahnow.net → qa.alummahnow.net or
+        /// alummahnow.net), never a bare TLD. Anything else would let a tampered answer make the app
+        /// sign for another site.
+        /// </summary>
+        public static bool IsAllowedRpId(Uri issuer, string rpId)
+        {
+            var host = issuer.IdnHost.TrimEnd('.').ToLowerInvariant();
+            var rp = (rpId ?? "").Trim().TrimEnd('.').ToLowerInvariant();
+            if (rp.Length == 0 || rp.IndexOf('.') < 0 && rp != "localhost" && host != rp) return false;
+            return host == rp || host.EndsWith("." + rp, StringComparison.Ordinal);
+        }
+
+        private void CheckRpId(string rpId)
+        {
+            if (!IsAllowedRpId(_issuer, rpId)) throw new PasskeyException(PasskeyError.Failed, "Passkey options name a relying party outside the issuer's domain");
         }
 
         private enum Stage { SignIn, Register }
