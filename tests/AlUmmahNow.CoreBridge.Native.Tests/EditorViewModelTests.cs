@@ -42,6 +42,9 @@ public sealed class EditorViewModelTests : IDisposable
     [Theory]
     [InlineData(@"\\attacker.example\share\cam.mp4")]
     [InlineData("//attacker.example/share/cam.mp4")]
+    [InlineData(@"\/attacker.example/share/cam.mp4")]
+    [InlineData(@"/\attacker.example\share\cam.mp4")]
+    [InlineData(@"\\?\UNC\attacker.example\share\cam.mp4")]
     [InlineData("smb://attacker.example/share/cam.mp4")]
     [InlineData("relative/cam.mp4")]
     public async Task ProjectsWithNonLocalSourcesAreRefused(string source)

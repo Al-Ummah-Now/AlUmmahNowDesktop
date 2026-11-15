@@ -115,9 +115,8 @@ public static class EdlProject
     /// </summary>
     public static bool IsLocalMediaPath(string? path)
     {
-        if (string.IsNullOrWhiteSpace(path)) return false;
-        if (path.StartsWith(@"\\", StringComparison.Ordinal) || path.StartsWith("//", StringComparison.Ordinal) || path.Contains("://", StringComparison.Ordinal)) return false;
-        if (!Path.IsPathFullyQualified(path)) return false;
+        // The shape is checked before any file system call: even asking whether a UNC file exists contacts its host.
+        if (path == null || !HasLocalShape(path)) return false;
         try
         {
             var info = new FileInfo(path);
@@ -127,6 +126,34 @@ public static class EdlProject
         {
             return false;
         }
+    }
+
+    /// <summary>
+    /// Windows: drive-rooted (<c>C:\…</c>) and still not UNC once normalised. Elsewhere: rooted at a single
+    /// <c>/</c>. Never two leading separators in any mix (<c>\\</c>, <c>//</c>, <c>\/</c>, <c>/\</c>), never a URI.
+    /// </summary>
+    public static bool HasLocalShape(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || path.Length < 2 || path.Contains("://", StringComparison.Ordinal) || path.IndexOf('\0') >= 0) return false;
+        static bool Sep(char c) => c == '\\' || c == '/';
+        if (Sep(path[0]) && Sep(path[1])) return false;
+        if (OperatingSystem.IsWindows())
+        {
+            if (path.Length < 3 || !char.IsAsciiLetter(path[0]) || path[1] != ':' || !Sep(path[2])) return false;
+            string full;
+            try
+            {
+                full = Path.GetFullPath(path);
+            }
+            catch (Exception ex) when (ex is ArgumentException || ex is NotSupportedException || ex is PathTooLongException)
+            {
+                return false;
+            }
+
+            return full.Length >= 3 && char.IsAsciiLetter(full[0]) && full[1] == ':' && !(Sep(full[0]) && Sep(full[1]));
+        }
+
+        return path[0] == '/' && Path.IsPathFullyQualified(path);
     }
 
     /// <summary>Every source path in the project.</summary>
