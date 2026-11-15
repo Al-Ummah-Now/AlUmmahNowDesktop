@@ -62,7 +62,7 @@ jobs:
           test "$(cat artifacts/studio/*.log | grep -c 'RESULT PASS')" = 21
           # Screen readers (Orca reads AT-SPI): named controls on the shell, search, upload and rows.
           grep -P "^button\tSign in$" artifacts/studio/signin-en.atspi.txt
-          grep -P "\tActing as " artifacts/studio/shell-en.atspi.txt
+          grep -P "^toggle button\t.*Channel$" artifacts/studio/shell-en.atspi.txt
           grep -P "^check box\tSeerah" artifacts/studio/videos-en.atspi.txt
           grep -P "^button\tUpload 3 videos$" artifacts/studio/upload-staged-en.atspi.txt
           gst-discoverer-1.0 source.mp4.out.mp4 | tee artifacts/studio/discover.txt
@@ -108,8 +108,9 @@ jobs:
           grep -h AUTOMATION artifacts/acting-as/*.log
           test "$(cat artifacts/acting-as/*.log | grep -c 'RESULT PASS')" = 16
           grep -P "\tActing as$" artifacts/acting-as/picker-open-en-desktop-light.atspi.txt
-          grep -P "\tMasjid Media Team · Channel · Editor$" artifacts/acting-as/picker-open-en-desktop-light.atspi.txt
-          grep -P "\tMasjid Media Team · قناة · محرّر$" artifacts/acting-as/picker-open-ar-desktop-light.atspi.txt
+          grep -P "\tتتصرّف باسم$" artifacts/acting-as/picker-open-ar-desktop-light.atspi.txt
+          grep -P "^button\t.*Masjid Media Team Channel · Editor$" artifacts/acting-as/picker-open-en-desktop-light.atspi.txt
+          grep -P "^button\t.*Masjid Media Team قناة · محرّر$" artifacts/acting-as/picker-open-ar-desktop-light.atspi.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
