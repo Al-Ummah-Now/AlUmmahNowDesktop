@@ -143,9 +143,9 @@ internal sealed class TimelinePage
             _vm.SetTitleKind(Kind());
         };
         panel.Children.Add(_kind);
-        // Each box keeps its language's direction whatever the interface language is.
-        _arabic = new TextBox { Header = l["studio.editor.titleArabic"], FlowDirection = FlowDirection.RightToLeft, TextAlignment = TextAlignment.Left, MaxWidth = 520, HorizontalAlignment = HorizontalAlignment.Stretch };
-        _english = new TextBox { Header = l["studio.editor.titleEnglish"], FlowDirection = FlowDirection.LeftToRight, MaxWidth = 520, HorizontalAlignment = HorizontalAlignment.Stretch };
+        // The boxes sit in the page's flow; their text runs and aligns in its own language's direction (as on the Brand page).
+        _arabic = new TextBox { Header = l["studio.editor.titleArabic"], TextReadingOrder = TextReadingOrder.DetectFromContent, TextAlignment = TextAlignment.DetectFromContent, MaxWidth = 520, HorizontalAlignment = HorizontalAlignment.Stretch };
+        _english = new TextBox { Header = l["studio.editor.titleEnglish"], TextReadingOrder = TextReadingOrder.DetectFromContent, TextAlignment = TextAlignment.DetectFromContent, MaxWidth = 520, HorizontalAlignment = HorizontalAlignment.Stretch };
         _arabic.KeyDown += OnTitleKey;
         _english.KeyDown += OnTitleKey;
         panel.Children.Add(_arabic);
