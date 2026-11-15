@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using AlUmmahNow.CoreBridge.Studio;
 using AlUmmahNow.Studio.Encode;
 
 namespace AlUmmahNow.Studio.Linux;
@@ -10,9 +11,23 @@ public sealed class GStreamerEncodeBackend : IEncodeBackend
         GstPipeline.H264Encoders.Where(e => Gst.ElementFactory.Find(e.Name) != null).ToList();
 
     public Task EncodeAsync(EncodeRequest request, EncoderChoice encoder, IProgress<double> progress, CancellationToken cancellationToken) =>
+        GstRunner.RunAsync(GstPipeline.Build(request, encoder), request.Output, progress, cancellationToken);
+}
+
+/// <summary>Pre-encodes one rung of the server ladder (D11) with x264 through <see cref="RungPipeline"/>.</summary>
+public sealed class GStreamerRungEncoder : IRungEncoder
+{
+    public Task EncodeAsync(string source, string output, HlsRung rung, MediaSourceInfo info, IProgress<double> progress, CancellationToken cancellationToken) =>
+        GstRunner.RunAsync(RungPipeline.Build(source, output, rung, info), output, progress, cancellationToken);
+}
+
+/// <summary>Runs a gst-launch style pipeline to the end on a worker thread, with progress and cancel.</summary>
+public static class GstRunner
+{
+    public static Task RunAsync(string description, string output, IProgress<double> progress, CancellationToken cancellationToken) =>
         Task.Run(async () =>
         {
-            var pipeline = Gst.Functions.ParseLaunch(GstPipeline.Build(request, encoder))
+            var pipeline = Gst.Functions.ParseLaunch(description)
                 ?? throw new InvalidOperationException("Could not build the pipeline");
             var bus = pipeline.GetBus() ?? throw new InvalidOperationException("Pipeline has no bus");
             try
@@ -38,7 +53,7 @@ public sealed class GStreamerEncodeBackend : IEncodeBackend
                 pipeline.SetState(Gst.State.Null);
             }
 
-            if (!File.Exists(request.Output) || new FileInfo(request.Output).Length == 0)
+            if (!File.Exists(output) || new FileInfo(output).Length == 0)
             {
                 throw new InvalidOperationException("Encoder produced no output");
             }
@@ -48,7 +63,7 @@ public sealed class GStreamerEncodeBackend : IEncodeBackend
     [DllImport("libgstreamer-1.0.so.0")]
     private static extern void gst_message_parse_error(IntPtr message, out IntPtr error, out IntPtr debug);
 
-    private static string ReadError(Gst.Message message)
+    public static string ReadError(Gst.Message message)
     {
         gst_message_parse_error(message.Handle.DangerousGetHandle(), out var error, out _);
         return error != IntPtr.Zero ? Marshal.PtrToStringUTF8(Marshal.ReadIntPtr(error, 8)) ?? "Encode failed" : "Encode failed";
