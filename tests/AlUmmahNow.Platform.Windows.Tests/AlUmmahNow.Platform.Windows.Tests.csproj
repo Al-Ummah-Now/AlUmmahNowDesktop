@@ -9,6 +9,7 @@
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio" />
     <ProjectReference Include="..\..\src\AlUmmahNow.Platform.Windows\AlUmmahNow.Platform.Windows.csproj" />
+    <ProjectReference Include="..\..\src\AlUmmahNow.Studio\AlUmmahNow.Studio.csproj" />
   </ItemGroup>
   <ItemGroup>
     <!-- Sizes and offsets printed by layout/webauthn_layout.c against microsoft/webauthn's webauthn.h (API 9). -->

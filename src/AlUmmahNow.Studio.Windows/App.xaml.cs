@@ -16,6 +16,8 @@ using AlUmmahNow.Studio.Videos;
 using AlUmmahNow.Studio.Analytics;
 using AlUmmahNow.Studio.Captions;
 using AlUmmahNow.Studio.Institution;
+using AlUmmahNow.Studio.Engines;
+using AlUmmahNow.Studio.Timeline;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -81,9 +83,14 @@ public sealed partial class App : Application
         ICaptionsApi captionsApi;
         IInstitutionApi institutionApi;
         IInsightsApi insightsApi;
-        // On-device transcription and pre-encoding need Core's whisper and HLS packaging (v0.4); until then they stay hidden.
-        IOnDeviceTranscriber? transcriber = null;
-        PreEncodeCoordinator? preEncoder = null;
+        IOnDeviceTranscriber transcriber;
+        IRenditionsApi renditionsApi;
+        // Media work always runs on Core and Media Foundation: probing, the HLS ladder and packaging (D11), whisper
+        // models (D10) and the edit list (19.5). Demo mode only swaps the server for canned data.
+        var probe = new CoreMediaProbe();
+        var modelsDir = Environment.GetEnvironmentVariable("AUN_MODELS_DIR") is { Length: > 0 } md ? md : Path.Combine(dataRoot, "models");
+        // AUN_REAL_MEDIA=1 runs a demo pre-encode on the real encoder and packaging (CI); otherwise demo media is simulated.
+        var realMedia = !demo || Environment.GetEnvironmentVariable("AUN_REAL_MEDIA") == "1";
         if (demo)
         {
             accounts = new DemoAccounts();
@@ -93,9 +100,9 @@ public sealed partial class App : Application
             captionsApi = demoServices;
             institutionApi = demoServices;
             insightsApi = demoServices;
-            transcriber = new DemoTranscriber();
-            var demoMedia = new DemoRenditionPackaging();
-            preEncoder = new PreEncodeCoordinator(() => new LocalRenditionJob(demoMedia, demoMedia, demoMedia, demoServices), Path.Combine(dataRoot, "demo-renditions"));
+            renditionsApi = demoServices;
+            // Screenshots show an installed model without downloading one; AUN_MODELS_DIR uses real models.
+            transcriber = Environment.GetEnvironmentVariable("AUN_MODELS_DIR") is { Length: > 0 } ? new CoreOnDeviceTranscriber(modelsDir) : new DemoTranscriber();
         }
         else
         {
@@ -109,6 +116,21 @@ public sealed partial class App : Application
             captionsApi = services;
             institutionApi = services;
             insightsApi = services;
+            renditionsApi = services;
+            transcriber = new CoreOnDeviceTranscriber(modelsDir);
+        }
+
+        PreEncodeCoordinator preEncoder;
+        if (realMedia)
+        {
+            var packaging = new CoreRenditionPackaging();
+            var rungEncoder = new MediaFoundationRungEncoder();
+            preEncoder = new PreEncodeCoordinator(() => new LocalRenditionJob(probe, rungEncoder, packaging, renditionsApi) { EncoderName = $"Al Ummah Now Studio {version} (Windows)" }, Path.Combine(dataRoot, "renditions"));
+        }
+        else
+        {
+            var demoMedia = new DemoRenditionPackaging();
+            preEncoder = new PreEncodeCoordinator(() => new LocalRenditionJob(demoMedia, demoMedia, demoMedia, renditionsApi), Path.Combine(dataRoot, "demo-renditions"));
         }
 
         var api = new StudioApiClient(transport);
@@ -154,10 +176,12 @@ public sealed partial class App : Application
             return file?.Path;
         }
 
-        async Task<string?> PickSaveAsync(string suggestedName)
+        Task<string?> PickSaveAsync(string suggestedName) => PickSaveAsAsync(Path.GetFileNameWithoutExtension(suggestedName), "CSV", ".csv");
+
+        async Task<string?> PickSaveAsAsync(string suggestedName, string typeLabel, string extension)
         {
-            var picker = new global::Windows.Storage.Pickers.FileSavePicker { SuggestedFileName = Path.GetFileNameWithoutExtension(suggestedName) };
-            picker.FileTypeChoices.Add("CSV", new List<string> { ".csv" });
+            var picker = new global::Windows.Storage.Pickers.FileSavePicker { SuggestedFileName = suggestedName };
+            picker.FileTypeChoices.Add(typeLabel, new List<string> { extension });
             WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(window.Window));
             var file = await picker.PickSaveFileAsync();
             return file?.Path;
@@ -177,7 +201,8 @@ public sealed partial class App : Application
             });
         var videos = new VideosPage(localizer, videosVm, uploadsVm, () => window.Window.Content?.XamlRoot);
         var encodePage = new EncodePage(localizer, encode);
-        var timeline = new TimelinePage(localizer);
+        var editorVm = new EditorViewModel(new CoreEdlEditing(), probe, new MediaCompositionRenderer());
+        var timeline = new TimelinePage(localizer, editorVm, uploadsVm, PickFilesAsync, () => PickFileAsync(new[] { EditorTime.ProjectExtension, ".json" }), PickSaveAsAsync);
         var captionsVm = new CaptionsViewModel(shell, api, captionsApi, transcriber);
         var captions = new CaptionsPage(localizer, captionsVm, () => window.Window.Content?.XamlRoot, () => PickFileAsync(UploadPlanner.VideoExtensions));
         var insightsVm = new InsightsViewModel(shell, api, insightsApi);
@@ -199,8 +224,9 @@ public sealed partial class App : Application
         {
             "captions" => scene == "captions-editor" ? captionsVm.Editor != null : captionsVm.Drafts != null,
             "analytics" => scene == "analytics-video" ? insightsVm.Retention != null : insightsVm.Summary != null,
+            "timeline" => scene != "editor" || editorVm.Clips.Count >= 3,
             "brand" => scene == "brand-team" ? institutionVm.State != null && !institutionVm.CanEdit : institutionVm.State is { CanEdit: true },
-            _ => scene != "preencode" || uploadsVm.Items.Any(i => preEncoder?.StatusOf(i.Id) != null),
+            _ => scene != "preencode" || uploadsVm.Items.Any(i => preEncoder.StatusOf(i.Id) != null),
         };
         window.Window.Activate();
         if (demo) SizeForScreenshots(window.Window.AppWindow);
@@ -236,6 +262,7 @@ public sealed partial class App : Application
                 if (scene == "accounts") window.OpenAccountMenu();
                 else if (scene == "signout") window.AskSignOut();
                 else if (scene == "addpasskey") _ = window.AddPasskeyAsync();
+                else if (scene == "editor") _ = RunEditorSceneAsync();
                 else if (scene.StartsWith("captions", StringComparison.Ordinal)) captions.RunScene(scene);
                 else if (scene == "analytics-video" && insightsVm.VideoStats.FirstOrDefault() is { } top) insightsVm.VideoId = top.VideoId;
                 else if (scene == "brand-team" && shell.Channels.FirstOrDefault(c => c.Role != ChannelRole.Owner) is { } managed) institutionVm.Switch(managed);
@@ -249,6 +276,13 @@ public sealed partial class App : Application
             _sceneTimer.Start();
         }
 
+        // CI: the editor scene, then (AUN_EXPORT_TO) a real export of the cut timeline through MediaComposition.
+        async Task RunEditorSceneAsync()
+        {
+            await timeline.RunSceneAsync((Environment.GetEnvironmentVariable("AUN_EDITOR_FILES") ?? "").Split('|', StringSplitOptions.RemoveEmptyEntries));
+            if (Environment.GetEnvironmentVariable("AUN_EXPORT_TO") is { Length: > 0 } output) await editorVm.ExportAsync(output);
+        }
+
         if (exitAfter > 0)
         {
             _endTimer = ui.CreateTimer();
@@ -258,12 +292,15 @@ public sealed partial class App : Application
             {
                 var snapshot = uploadsVm.Items;
                 var uploadsDone = snapshot.Count > 0 && snapshot.All(i => i.Phase == UploadPhase.Done);
+                var preEncoded = snapshot.Select(i => preEncoder.StatusOf(i.Id)?.Outcome).FirstOrDefault(o => o != null);
                 var pass = job != null ? job.Status == EncodeStatus.Completed
                     : automation == "shell" ? shell.State == ShellState.Ready && shell.ActiveChannel != null
+                    : automation == "export" ? editorVm.ExportedPath is { } exported && new FileInfo(exported).Length > 0
+                    : automation == "preencode" ? preEncoded == RenditionOutcomeKind.Ready
                     : uploadsDone || tabName != "uploads";
                 var sceneOk = SceneOk();
                 pass = pass && sceneOk;
-                File.WriteAllText(ResultPath, $"AUTOMATION {tabName} scene={scene} sceneOk={sceneOk} shell={shell.State} channel={shell.ActiveChannel?.Id} accounts={shell.AccountList.Count} uploads={snapshot.Count} uploadsDone={uploadsDone} encode={job?.Status} encoder={job?.UsedEncoder?.Name} error={job?.Error} RESULT {(pass ? "PASS" : "FAIL")}");
+                File.WriteAllText(ResultPath, $"AUTOMATION {tabName} scene={scene} sceneOk={sceneOk} shell={shell.State} channel={shell.ActiveChannel?.Id} accounts={shell.AccountList.Count} uploads={snapshot.Count} uploadsDone={uploadsDone} encode={job?.Status} encoder={job?.UsedEncoder?.Name} error={job?.Error} clips={editorVm.Clips.Count} exported={editorVm.ExportedPath} editorError={editorVm.ErrorKey}:{editorVm.ErrorDetail} preEncode={preEncoded} RESULT {(pass ? "PASS" : "FAIL")}");
                 Exit();
             };
             _endTimer.Start();

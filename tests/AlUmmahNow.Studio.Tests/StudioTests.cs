@@ -129,79 +129,60 @@ public class EncodeTests
 
 public class TimelineTests
 {
-    private static (TimelineProject P, Track T) Make()
+    [Theory]
+    [InlineData(false, 112)]
+    [InlineData(true, 888)]
+    public void Viewport_maps_and_mirrors(bool rtl, double expectedX)
     {
-        var t = new Track { Kind = TrackKind.Video };
-        t.Clips.Add(new Clip { Source = "a", Start = 0, Duration = 10 });
-        t.Clips.Add(new Clip { Source = "b", Start = 10, Duration = 5 });
-        var p = new TimelineProject();
-        p.Tracks.Add(t);
-        return (p, t);
+        var v = new TimelineViewport(0.01, 1000, rtl, 12);
+        Assert.Equal(expectedX, v.ToX(10_000), 6);
+        Assert.Equal(10_000, v.ToMs(expectedX));
     }
 
     [Fact]
-    public void Split_divides_time_and_source_offset()
+    public void Fit_keeps_the_whole_timeline_inside_the_insets()
     {
-        var (p, t) = Make();
-        var right = p.Split(t, 4)!;
-        Assert.Equal(4, t.Clips[0].Duration);
-        Assert.Equal(4, right.SourceIn);
-        Assert.Equal(6, right.Duration);
-        Assert.Equal(15, p.Duration);
+        var v = TimelineViewport.Fit(60_000, 1000, isRtl: false);
+        Assert.Equal(12, v.ToX(0), 6);
+        Assert.Equal(988, v.ToX(60_000), 6);
+        var rtl = TimelineViewport.Fit(60_000, 1000, isRtl: true);
+        Assert.Equal(988, rtl.ToX(0), 6);
     }
 
     [Fact]
-    public void Split_on_a_boundary_does_nothing()
+    public void Editor_time_axis_runs_left_to_right_in_every_language()
     {
-        var (p, t) = Make();
-        Assert.Null(p.Split(t, 10));
-    }
-
-    [Fact]
-    public void Ripple_delete_closes_the_gap()
-    {
-        var (p, t) = Make();
-        p.RippleDelete(t, t.Clips[0]);
-        Assert.Equal(0, t.Clips[0].Start);
-        Assert.Equal(5, p.Duration);
-    }
-
-    [Fact]
-    public void Trim_start_is_limited_by_available_source()
-    {
-        var (p, t) = Make();
-        var clip = t.Clips[1];
-        clip.SourceIn = 2;
-        p.TrimStart(clip, 1);
-        Assert.Equal(8, clip.Start);
-        Assert.Equal(0, clip.SourceIn);
-        Assert.Equal(7, clip.Duration);
-    }
-
-    [Fact]
-    public void Trim_keeps_a_minimum_length()
-    {
-        var (p, t) = Make();
-        p.TrimEnd(t.Clips[0], -5);
-        Assert.Equal(TimelineProject.MinClipDuration, t.Clips[0].Duration);
-    }
-
-    [Fact]
-    public void Json_round_trips()
-    {
-        var (p, _) = Make();
-        var back = TimelineProject.FromJson(p.ToJson());
-        Assert.Equal(15, back.Duration);
-        Assert.Equal(TrackKind.Video, back.Tracks[0].Kind);
+        // Matches the Mac editor and video editors generally: 0:00 on the left, in Arabic too.
+        var v = TimelineViewport.Fit(60_000, 1000, EditorTime.TimeIsRtl);
+        Assert.True(v.ToX(0) < v.ToX(60_000));
+        Assert.Equal(30_000, v.ToMs(v.ToX(30_000)));
     }
 
     [Theory]
-    [InlineData(false, 100)]
-    [InlineData(true, 900)]
-    public void Viewport_maps_and_mirrors(bool rtl, double expectedX)
+    [InlineData(0, "0:00.0")]
+    [InlineData(61_250, "1:01.2")]
+    [InlineData(3_723_400, "1:02:03.4")]
+    [InlineData(-5, "0:00.0")]
+    public void Editor_times_use_latin_digits(long ms, string expected) => Assert.Equal(expected, EditorTime.Format(ms));
+
+    [Fact]
+    public void First_video_source_sets_even_export_size_and_capped_rate()
     {
-        var v = new TimelineViewport(10, 0, 1000, rtl);
-        Assert.Equal(expectedX, v.ToX(10));
-        Assert.Equal(10, v.ToTime(expectedX));
+        var json = EdlProject.New("p", "", DateTimeOffset.FromUnixTimeMilliseconds(0));
+        var info = new AlUmmahNow.CoreBridge.Studio.MediaSourceInfo { DurationMs = 5000, Width = 1081, Height = 1921, Fps = 120, HasVideo = true };
+        json = EdlProject.AddSource(json, "s1", "/m/portrait.mp4", info);
+        json = EdlProject.AddSource(json, "s2", "/m/wide.mp4", new AlUmmahNow.CoreBridge.Studio.MediaSourceInfo { DurationMs = 5000, Width = 1920, Height = 1080, Fps = 30, HasVideo = true });
+        Assert.Equal(new ProjectSettings(1080, 1920, 60, 48000, 2), EdlProject.Settings(json));
+        Assert.Equal(2, EdlProject.SourceCount(json));
+        Assert.Equal("portrait", EdlProject.SourceNames(json)["s1"]);
+    }
+
+    [Fact]
+    public void Rotated_video_swaps_the_export_size()
+    {
+        var json = EdlProject.New("p", "", DateTimeOffset.FromUnixTimeMilliseconds(0));
+        json = EdlProject.AddSource(json, "s1", "/m/phone.mp4", new AlUmmahNow.CoreBridge.Studio.MediaSourceInfo { DurationMs = 5000, Width = 1920, Height = 1080, Rotation = 90, Fps = 30, HasVideo = true });
+        var s = EdlProject.Settings(json);
+        Assert.Equal((1080, 1920), (s.Width, s.Height));
     }
 }

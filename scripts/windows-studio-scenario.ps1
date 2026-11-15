@@ -1,7 +1,7 @@
 # Runs one Studio scenario on a CI desktop session, captures the app window and the UI Automation tree.
 param([string]$Exe, [string]$Lang, [string]$Tab, [string]$Automation, [string]$Name, [string]$Out, [string]$WatchDir = "", [string]$Scene = "", [string]$Demo = "1")
 Add-Type -AssemblyName System.Drawing, System.Windows.Forms, UIAutomationClient, UIAutomationTypes
-$env:AUN_LANG = $Lang; $env:AUN_TAB = $Tab; $env:AUN_AUTOMATION = $Automation; $env:AUN_EXIT_AFTER = "26"; $env:AUN_SIMULATE_UPLOADS = "1"; $env:AUN_WATCH_DIR = $WatchDir
+$env:AUN_LANG = $Lang; $env:AUN_TAB = $Tab; $env:AUN_AUTOMATION = $Automation; $env:AUN_EXIT_AFTER = $(if ($env:AUN_EXIT_AFTER_SECS) { $env:AUN_EXIT_AFTER_SECS } else { "26" }); $env:AUN_SIMULATE_UPLOADS = "1"; $env:AUN_WATCH_DIR = $WatchDir
 $env:AUN_SCENE = $Scene; $env:AUN_DEMO = $Demo
 $env:AUN_RESULT = Join-Path $Out "$Name.txt"
 $p = Start-Process -FilePath $Exe -PassThru
@@ -43,6 +43,6 @@ $lines = foreach ($w in $root.FindAll([System.Windows.Automation.TreeScope]::Chi
   }
 }
 $lines | Set-Content -Encoding utf8 (Join-Path $Out "$Name.uia.txt")
-if (-not $p.WaitForExit(30000)) { $p.Kill(); "EXIT HANG" | Add-Content "$env:AUN_RESULT.hang.txt" }
+if (-not $p.WaitForExit(([int]$env:AUN_EXIT_AFTER + 12) * 1000)) { $p.Kill(); "EXIT HANG" | Add-Content "$env:AUN_RESULT.hang.txt" }
 if (Test-Path "$env:AUN_RESULT.crash.txt") { Get-Content "$env:AUN_RESULT.crash.txt" }
 if (Test-Path $env:AUN_RESULT) { Get-Content $env:AUN_RESULT } else { "NO RESULT FILE" }

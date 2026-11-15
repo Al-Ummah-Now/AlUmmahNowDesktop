@@ -117,6 +117,9 @@ namespace AlUmmahNow.CoreBridge.Studio
 
         /// <summary>Checks a project; the problems, empty when valid.</summary>
         IReadOnlyList<string> Validate(string projectJson);
+
+        /// <summary>Reads a saved project, upgrading an older schema. Throws <see cref="EdlEditException"/> when it isn't one.</summary>
+        string Load(string json);
     }
 
     public enum EdlErrorKind { InvalidInput, NotFound, Conflict, Other }
@@ -290,8 +293,12 @@ namespace AlUmmahNow.CoreBridge.Studio
         public double Fps { get; set; }
         public bool HasVideo { get; set; }
         public bool HasAudio { get; set; }
+        public string VideoCodec { get; set; } = "";
+        public string AudioCodec { get; set; } = "";
+        public int SampleRate { get; set; }
+        public int Channels { get; set; }
 
-        /// <summary>Reads Core's probe JSON (<c>{duration_ms, tracks:[{kind, width, height, fps}]}</c>).</summary>
+        /// <summary>Reads Core's probe JSON (<c>{duration_ms, tracks:[{kind, codec, width, height, fps, sample_rate, channels}]}</c>).</summary>
         public static MediaSourceInfo FromProbeJson(string json)
         {
             using var doc = JsonDocument.Parse(json);
@@ -310,6 +317,15 @@ namespace AlUmmahNow.CoreBridge.Studio
                 info.Height = (int)J.Num(video, "height");
                 info.Fps = J.NumOrNull(video, "fps") ?? 30;
                 info.Rotation = (int)J.Num(video, "rotation");
+                info.VideoCodec = J.Str(video, "codec") ?? "";
+            }
+
+            var audio = tracks.FirstOrDefault(t => J.Str(t, "kind") == "audio");
+            if (info.HasAudio)
+            {
+                info.AudioCodec = J.Str(audio, "codec") ?? "";
+                info.SampleRate = (int)(J.NumOrNull(audio, "sample_rate") ?? 48000);
+                info.Channels = (int)(J.NumOrNull(audio, "channels") ?? 2);
             }
 
             return info;
