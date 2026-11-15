@@ -131,7 +131,7 @@ public sealed class CaptionsPage
             if (at >= 0) _video.SetSelected((uint)at);
 
             _modelIds = _vm.Models.Select(m => m.Id).ToList();
-            _model.SetModel(Gtk.StringList.New(_vm.Models.Select(m => _l.Format(m.Installed ? "studio.captions.device.installed" : "studio.captions.device.download", m.Id, Size(m.SizeBytes))).ToArray()));
+            _model.SetModel(Gtk.StringList.New(_vm.Models.Select(m => _l.Format(m.Installed ? "studio.captions.device.installed" : "studio.captions.device.download", Localizer.Isolate(m.Id), Localizer.Isolate(Size(m.SizeBytes)))).ToArray()));
             var mi = _vm.Model == null ? -1 : _modelIds.ToList().IndexOf(_vm.Model);
             if (mi >= 0) _model.SetSelected((uint)mi);
         }
@@ -299,14 +299,24 @@ public sealed class CueEditorView
         bar.Append(Ui.Named(Ui.Button(l["studio.captions.editor.back"], () => _ = _vm.CloseAsync(), "flat"), l["studio.captions.editor.back"]));
         _title.AddCssClass("title-3");
         _title.SetHexpand(true);
+        _title.SetWrap(false);
+        _title.SetEllipsize(Pango.EllipsizeMode.End);
         bar.Append(_title);
+        outer.Append(bar);
+        var actions = Gtk.Box.New(Gtk.Orientation.Horizontal, 8);
+        actions.SetMarginStart(20);
+        actions.SetMarginEnd(20);
         _undo = Ui.Button(l["studio.captions.editor.undo"], () => _vm.Undo(), "flat");
         _redo = Ui.Button(l["studio.captions.editor.redo"], () => _vm.Redo(), "flat");
         _save = Ui.Button(l["studio.captions.editor.save"], () => _ = _vm.SaveAsync());
         _publish = Ui.Button(l["studio.captions.editor.publish"], () => _ = _vm.PublishAsync(), "suggested-action");
         var delete = Ui.Button(l["studio.captions.editor.delete"], () => _ = _vm.DeleteDraftAsync(), "destructive-action");
-        foreach (var b in new[] { _undo, _redo, _save, _publish, delete }) bar.Append(b);
-        outer.Append(bar);
+        foreach (var b in new[] { _undo, _redo, _save, _publish }) actions.Append(b);
+        var spacer = Gtk.Box.New(Gtk.Orientation.Horizontal, 0);
+        spacer.SetHexpand(true);
+        actions.Append(spacer);
+        actions.Append(delete);
+        outer.Append(actions);
 
         var info = Gtk.Box.New(Gtk.Orientation.Vertical, 4);
         info.SetMarginStart(20);
@@ -370,8 +380,7 @@ public sealed class CueEditorView
         times.SetMarginStart(12);
         times.SetMarginEnd(12);
         times.SetMarginTop(8);
-        // Times read left to right in both languages.
-        times.SetDirection(Gtk.TextDirection.Ltr);
+        // The row follows the reading direction (start, then end); the time fields themselves stay left to right.
         var number = Ui.Label(_l.Number(index + 1), dim: true);
         number.SetWidthChars(3);
         times.Append(number);
@@ -474,6 +483,7 @@ public sealed class CueEditorView
         var e = Gtk.Entry.New();
         e.SetText(CueEditorViewModel.Time(ms));
         e.SetWidthChars(10);
+        e.SetDirection(Gtk.TextDirection.Ltr);
         e.SetTooltipText(name);
         return e;
     }

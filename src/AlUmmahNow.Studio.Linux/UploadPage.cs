@@ -25,6 +25,7 @@ public sealed class UploadPage
     private readonly Gtk.Label _error = Ui.Label("");
     private readonly Gtk.Label _watching = Ui.Label("", dim: true);
     private readonly Gtk.Button _stopWatching;
+    private readonly Gtk.Box _watchRow = Gtk.Box.New(Gtk.Orientation.Horizontal, 8);
     private readonly Gtk.Box _playlists = Gtk.Box.New(Gtk.Orientation.Vertical, 4);
     private readonly Gtk.Entry _scheduleStart = Gtk.Entry.New();
     private readonly Gtk.SpinButton _scheduleEvery = Gtk.SpinButton.NewWithRange(0, 24 * 30, 1);
@@ -51,7 +52,7 @@ public sealed class UploadPage
         add.Append(_recursive);
         add.Append(Ui.Button(l["studio.upload.watch"], () => _ = PickWatchFolderAsync(rememberWatchFolder)));
         page.Append(add);
-        var watchRow = Gtk.Box.New(Gtk.Orientation.Horizontal, 8);
+        var watchRow = _watchRow;
         watchRow.Append(_watching);
         _stopWatching = Ui.Button(l["studio.upload.stopWatching"], () =>
         {
@@ -61,6 +62,7 @@ public sealed class UploadPage
         watchRow.Append(_stopWatching);
         page.Append(watchRow);
         _error.AddCssClass("error");
+        _error.SetVisible(false);
         page.Append(_error);
 
         // Set for all
@@ -98,8 +100,7 @@ public sealed class UploadPage
 
         // Queue
         var queueHeader = Gtk.Box.New(Gtk.Orientation.Horizontal, 8);
-        var queueTitle = Ui.Label(l["studio.upload.queue"]);
-        queueTitle.AddCssClass("heading");
+        var queueTitle = Ui.Heading(l["studio.upload.queue"]);
         queueTitle.SetHexpand(true);
         queueHeader.Append(queueTitle);
         queueHeader.Append(Ui.Button(l["studio.upload.clearFinished"], () => _vm.ClearFinished(), "flat"));
@@ -115,7 +116,7 @@ public sealed class UploadPage
                 case nameof(UploadsViewModel.Staged): RenderStaged(); break;
                 case nameof(UploadsViewModel.Items): RenderQueue(); break;
                 case nameof(UploadsViewModel.Playlists): RenderPlaylists(); break;
-                case nameof(UploadsViewModel.ErrorKey): _error.SetText(_vm.ErrorKey is { } k ? _l[k] : ""); break;
+                case nameof(UploadsViewModel.ErrorKey): Ui.Status(_error, _vm.ErrorKey is { } k ? _l[k] : null); break;
                 case nameof(UploadsViewModel.WatchFolder): RenderWatching(); break;
             }
         };
@@ -295,6 +296,8 @@ public sealed class UploadPage
 
     private void RenderWatching()
     {
+        // Hidden when no folder is watched, so it leaves no gap.
+        _watchRow.SetVisible(_vm.WatchFolder != null);
         _watching.SetText(_vm.WatchFolder is { } f ? _l.Format("studio.upload.watchingFolder", Localizer.Isolate(f)) : "");
         _stopWatching.SetVisible(_vm.WatchFolder != null);
     }
@@ -321,7 +324,7 @@ public sealed class UploadPage
             title.SetHexpand(true);
             Ui.Named(title, _l.Format("studio.upload.titleFor", file));
             title.OnChanged += (_, _) => _vm.RenameStaged(plan.FilePath, title.GetText());
-            var meta = Ui.Label(Localizer.Isolate(file) + " · " + Formats.Bytes(plan.Size, CultureInfo.InvariantCulture)
+            var meta = Ui.Label(Localizer.IsolateLtr(file) + " · " + Localizer.IsolateLtr(Formats.Bytes(plan.Size, CultureInfo.InvariantCulture))
                 + (plan.PublishAt is { } at ? " · " + _l.Format("studio.upload.publishesAt", Formats.ToLocalInput(at)) : ""), dim: true);
             meta.SetSizeRequest(320, -1);
             var remove = Gtk.Button.NewWithLabel(_l["studio.upload.remove"]);
@@ -477,6 +480,8 @@ public sealed class UploadPage
             }
 
             if (preRunning) _buttons.Append(Ui.Named(Ui.Button(l["studio.upload.preEncodeStop"], () => vm.PreEncoder?.Cancel(_id), "flat"), l.Format("studio.upload.preEncodeStopFor", item.Title)));
+            // The buttons change width: redraw the whole row so no part of the old ones is left on screen.
+            Root.QueueDraw();
         }
 
         internal static string PreEncodeText(Localizer l, PreEncodeStatus s) => l.Format(s.LabelKey, l.Number(s.Percent));

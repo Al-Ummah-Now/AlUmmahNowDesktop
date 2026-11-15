@@ -14,6 +14,12 @@ public class LocalizerTests
     }
 
     [Fact]
+    public void File_names_are_isolated_left_to_right()
+    {
+        Assert.Equal("\u2066مرئي 1.mp4\u2069", Localizer.IsolateLtr("مرئي 1.mp4"));
+    }
+
+    [Fact]
     public void Arabic_is_default_and_rtl()
     {
         var l = new Localizer();

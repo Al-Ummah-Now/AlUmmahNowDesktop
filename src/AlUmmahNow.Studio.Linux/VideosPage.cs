@@ -74,9 +74,11 @@ public sealed class VideosPage
         {
             if (a.Row.GetName() is { Length: > 0 } text) _vm.Search.Submit(text);
         };
+        _suggestionCount.SetVisible(false);
         page.Append(_suggestionCount);
         page.Append(_suggestions);
         _error.AddCssClass("error");
+        _error.SetVisible(false);
         page.Append(_error);
 
         // Selection actions
@@ -133,7 +135,7 @@ public sealed class VideosPage
                 case nameof(VideosViewModel.Selected): RenderSelection(); break;
                 case nameof(VideosViewModel.IsLoading): RenderLoading(); break;
                 case nameof(VideosViewModel.Deleted): RenderDeleted(); break;
-                case nameof(VideosViewModel.ErrorKey): _error.SetText(_vm.ErrorKey is { } k ? _l[k] : ""); break;
+                case nameof(VideosViewModel.ErrorKey): Ui.Status(_error, _vm.ErrorKey is { } k ? _l[k] : null); break;
                 case nameof(VideosViewModel.NoticeKey):
                     if (_vm.NoticeKey is { } n) _toasts.AddToast(Adw.Toast.New(_l[n]));
                     break;
@@ -208,7 +210,7 @@ public sealed class VideosPage
         }
 
         _suggestions.SetVisible(items.Count > 0);
-        _suggestionCount.SetText(!empty && items.Count > 0 ? _l.Format("studio.videos.suggestions", items.Count) : "");
+        Ui.Status(_suggestionCount, !empty && items.Count > 0 ? _l.Format("studio.videos.suggestions", items.Count) : null);
     }
 
     private void RenderLoading()

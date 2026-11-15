@@ -237,7 +237,12 @@ public sealed class BrandPage
             _syncing = false;
         }
 
-        foreach (var w in _editors) w.SetSensitive(_vm.CanEdit);
+        // Team members read the owner's kit: text fields stay readable at full contrast (read-only, not greyed out).
+        foreach (var w in _editors)
+        {
+            if (w is Gtk.Entry entry) entry.SetEditable(_vm.CanEdit);
+            else w.SetSensitive(_vm.CanEdit);
+        }
         for (var i = 0; i < 4; i++)
         {
             if (BrandKit.IsValidColor(_colors[i].GetText())) _colors[i].RemoveCssClass("error");

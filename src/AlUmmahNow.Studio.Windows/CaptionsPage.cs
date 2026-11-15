@@ -135,7 +135,7 @@ internal sealed class CaptionsPage
             _video.ItemsSource = _vm.Videos.Select(v => v.Title).ToList();
             _video.SelectedIndex = _vm.Video == null ? -1 : _videoIds.ToList().IndexOf(_vm.Video.Id);
             _modelIds = _vm.Models.Select(m => m.Id).ToList();
-            _model.ItemsSource = _vm.Models.Select(m => _l.Format(m.Installed ? "studio.captions.device.installed" : "studio.captions.device.download", m.Id, Size(m.SizeBytes))).ToList();
+            _model.ItemsSource = _vm.Models.Select(m => _l.Format(m.Installed ? "studio.captions.device.installed" : "studio.captions.device.download", Localizer.Isolate(m.Id), Localizer.Isolate(Size(m.SizeBytes)))).ToList();
             _model.SelectedIndex = _vm.Model == null ? -1 : _modelIds.ToList().IndexOf(_vm.Model);
         }
         finally
@@ -362,8 +362,8 @@ internal sealed class CueEditorView
     {
         var card = Ui.Card();
         var n = _l.Number(index + 1);
-        // Times read left to right in both languages.
-        var times = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, FlowDirection = FlowDirection.LeftToRight };
+        // The row follows the reading direction: start, then end.
+        var times = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
         times.Children.Add(new TextBlock { Text = n, Width = 28, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, 0, 6), Foreground = Ui.Brush("TextFillColorSecondaryBrush") });
         var start = TimeBox(_l["studio.captions.editor.start"], _l.Format("studio.captions.editor.startOf", n), cue.StartMs);
         var end = TimeBox(_l["studio.captions.editor.end"], _l.Format("studio.captions.editor.endOf", n), cue.EndMs);
