@@ -384,9 +384,11 @@ jobs:
         env:
           MSSTORE_PRIVACY_POLICY_URL: ${{ vars.MSSTORE_PRIVACY_POLICY_URL }}
         run: |
-          python scripts/store-listing.py ${{ matrix.app }} > "$env:RUNNER_TEMP/listing.json"
+          python scripts/store-listing.py ${{ matrix.app }} "$env:RUNNER_TEMP/listing.json"
           if ($LASTEXITCODE -ne 0) { throw "listing files are invalid" }
-          Get-Content "$env:RUNNER_TEMP/listing.json" -Raw | ConvertFrom-Json | Out-Null
+          $l = Get-Content -Encoding utf8 "$env:RUNNER_TEMP/listing.json" -Raw | ConvertFrom-Json
+          foreach ($lang in "en-us", "ar-sa") { if (-not $l.$lang.description) { throw "no $lang listing" } }
+          "listing: $(($l.PSObject.Properties.Name) -join ', ')"
       - name: Owner values
         id: gate
         shell: pwsh
@@ -441,7 +443,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "msstore publish failed" }
           $raw = (msstore submission get $env:PRODUCT_ID | Out-String)
           $sub = $raw.Substring($raw.IndexOf('{'), $raw.LastIndexOf('}') - $raw.IndexOf('{') + 1) | ConvertFrom-Json
-          $listing = Get-Content "$env:RUNNER_TEMP/listing.json" -Raw | ConvertFrom-Json
+          $listing = Get-Content -Encoding utf8 "$env:RUNNER_TEMP/listing.json" -Raw | ConvertFrom-Json
           $listingsProp = $sub.PSObject.Properties["listings"]
           if (-not $listingsProp) { $sub | Add-Member -NotePropertyName listings -NotePropertyValue ([pscustomobject]@{}); $listingsProp = $sub.PSObject.Properties["listings"] }
           foreach ($lang in $listing.PSObject.Properties) {

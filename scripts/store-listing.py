@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Turns store/microsoft/<app>/<language>/ into Partner Center baseListing fields.
 
-Usage: store-listing.py viewer|studio  >  listings.json
+Usage: store-listing.py viewer|studio [out.json]   (stdout when no file; the file is always UTF-8)
 
 Output: {"en-us": {"title": ..., "description": ..., "shortDescription": ..., "features": [...],
 "keywords": [...], "releaseNotes": ..., "privacyPolicy": ...}, "ar-sa": {...}}. The release workflow
@@ -30,12 +30,16 @@ def listing(folder):
 
 
 def main():
-    if len(sys.argv) != 2 or sys.argv[1] not in ("viewer", "studio"):
-        sys.exit("usage: store-listing.py viewer|studio")
+    if len(sys.argv) not in (2, 3) or sys.argv[1] not in ("viewer", "studio"):
+        sys.exit("usage: store-listing.py viewer|studio [out.json]")
     app = ROOT / sys.argv[1]
     result = {folder.name: listing(folder) for folder in sorted(app.iterdir()) if folder.is_dir()}
-    json.dump(result, sys.stdout, ensure_ascii=False, indent=2)
-    sys.stdout.write("\n")
+    text = json.dumps(result, ensure_ascii=False, indent=2) + "\n"
+    if len(sys.argv) == 3:
+        # A file, not a redirect: Windows consoles and PowerShell pipes are not UTF-8.
+        pathlib.Path(sys.argv[2]).write_text(text, encoding="utf-8")
+    else:
+        sys.stdout.buffer.write(text.encode("utf-8"))
 
 
 if __name__ == "__main__":
