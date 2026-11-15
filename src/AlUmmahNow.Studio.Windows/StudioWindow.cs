@@ -240,7 +240,9 @@ internal sealed class StudioWindow
     /// <summary>Logo (initials until the picture loads), name and the small "Channel" tag.</summary>
     private ComboBoxItem ChannelItem(StudioChannel channel)
     {
-        var logo = new PersonPicture { DisplayName = channel.Name, Width = 28, Height = 28 };
+        // Our own initials: PersonPicture's own shows a generic icon for Arabic names.
+        var logo = new PersonPicture { Width = 28, Height = 28 };
+        if (Initials.For(channel.Name) is { } initials) logo.Initials = initials;
         if (Uri.TryCreate(channel.AvatarUrl, UriKind.Absolute, out var url)) logo.ProfilePicture = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(url) { DecodePixelWidth = 56 };
         var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
         text.Children.Add(new TextBlock { Text = channel.Name, TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 220 });

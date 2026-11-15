@@ -216,7 +216,10 @@ public sealed class StudioWindow
     private Gtk.Box IdentityRow(StudioChannel channel, int logoSize)
     {
         var row = Gtk.Box.New(Gtk.Orientation.Horizontal, 8);
-        var logo = Adw.Avatar.New(logoSize, channel.Name, true);
+        // Adw.Avatar draws the first letter of each of the first two words of its text, so it gets our
+        // initials one per word («قناة النور» → «ق», not «قا»). No letters: the generic icon.
+        var initials = Initials.For(channel.Name);
+        var logo = Adw.Avatar.New(logoSize, initials == null ? null : string.Join(" ", ActingAs.Graphemes(initials)), initials != null);
         if (channel.AvatarUrl is { Length: > 0 } url)
         {
             if (_logos.TryGetValue(url, out var texture)) logo.SetCustomImage(texture);

@@ -1,3 +1,4 @@
+using System.Globalization;
 using AlUmmahNow.CoreBridge.Studio;
 
 namespace AlUmmahNow.Studio.Shell;
@@ -27,4 +28,11 @@ public static class ActingAs
 
     /// <summary>One line for a channel option (screen readers, plain-text lists): "Name · Channel".</summary>
     public static string OptionText(StudioChannel channel, Func<string, string> text) => channel.Name + " · " + ChannelTag(channel, text);
+
+    /// <summary>The grapheme clusters of a short string (e.g. initials "MT" → "M", "T").</summary>
+    public static IEnumerable<string> Graphemes(string text)
+    {
+        var e = StringInfo.GetTextElementEnumerator(text);
+        while (e.MoveNext()) yield return (string)e.Current;
+    }
 }
