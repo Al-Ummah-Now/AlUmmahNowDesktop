@@ -135,23 +135,23 @@ public sealed class GesTimelineRenderer : ITimelineRenderer
     private const string GstLib = "libgstreamer-1.0.so.0";
     private const string Pbutils = "libgstpbutils-1.0.so.0";
 
-    [DllImport(Ges)] [return: MarshalAs(UnmanagedType.I4)] private static extern bool ges_init();
+    [DllImport(Ges)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool ges_init();
     [DllImport(Ges)] private static extern IntPtr ges_timeline_new_audio_video();
     [DllImport(Ges)] private static extern IntPtr ges_timeline_append_layer(IntPtr timeline);
-    [DllImport(Ges)] [return: MarshalAs(UnmanagedType.I4)] private static extern bool ges_timeline_commit_sync(IntPtr timeline);
+    [DllImport(Ges)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool ges_timeline_commit_sync(IntPtr timeline);
     [DllImport(Ges, CharSet = CharSet.Ansi)] private static extern IntPtr ges_uri_clip_new([MarshalAs(UnmanagedType.LPUTF8Str)] string uri);
-    [DllImport(Ges)] [return: MarshalAs(UnmanagedType.I4)] private static extern bool ges_timeline_element_set_start(IntPtr element, ulong start);
-    [DllImport(Ges)] [return: MarshalAs(UnmanagedType.I4)] private static extern bool ges_timeline_element_set_inpoint(IntPtr element, ulong inpoint);
-    [DllImport(Ges)] [return: MarshalAs(UnmanagedType.I4)] private static extern bool ges_timeline_element_set_duration(IntPtr element, ulong duration);
-    [DllImport(Ges)] [return: MarshalAs(UnmanagedType.I4)] private static extern bool ges_layer_add_clip(IntPtr layer, IntPtr clip);
+    [DllImport(Ges)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool ges_timeline_element_set_start(IntPtr element, ulong start);
+    [DllImport(Ges)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool ges_timeline_element_set_inpoint(IntPtr element, ulong inpoint);
+    [DllImport(Ges)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool ges_timeline_element_set_duration(IntPtr element, ulong duration);
+    [DllImport(Ges)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool ges_layer_add_clip(IntPtr layer, IntPtr clip);
     [DllImport(Ges)] private static extern IntPtr ges_pipeline_new();
-    [DllImport(Ges)] [return: MarshalAs(UnmanagedType.I4)] private static extern bool ges_pipeline_set_timeline(IntPtr pipeline, IntPtr timeline);
-    [DllImport(Ges)] [return: MarshalAs(UnmanagedType.I4)] private static extern bool ges_pipeline_set_render_settings(IntPtr pipeline, [MarshalAs(UnmanagedType.LPUTF8Str)] string outputUri, IntPtr profile);
-    [DllImport(Ges)] [return: MarshalAs(UnmanagedType.I4)] private static extern bool ges_pipeline_set_mode(IntPtr pipeline, int mode);
+    [DllImport(Ges)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool ges_pipeline_set_timeline(IntPtr pipeline, IntPtr timeline);
+    [DllImport(Ges)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool ges_pipeline_set_render_settings(IntPtr pipeline, [MarshalAs(UnmanagedType.LPUTF8Str)] string outputUri, IntPtr profile);
+    [DllImport(Ges)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool ges_pipeline_set_mode(IntPtr pipeline, int mode);
     [DllImport(GstLib)] private static extern IntPtr gst_caps_from_string([MarshalAs(UnmanagedType.LPUTF8Str)] string text);
     [DllImport(GstLib)] private static extern int gst_element_set_state(IntPtr element, int state);
     [DllImport(GstLib)] private static extern IntPtr gst_element_get_bus(IntPtr element);
-    [DllImport(GstLib)] [return: MarshalAs(UnmanagedType.I4)] private static extern bool gst_element_query_position(IntPtr element, int format, out long position);
+    [DllImport(GstLib)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool gst_element_query_position(IntPtr element, int format, out long position);
     [DllImport(GstLib)] private static extern IntPtr gst_bus_timed_pop_filtered(IntPtr bus, ulong timeout, int types);
     [DllImport(GstLib)] private static extern void gst_message_parse_error(IntPtr message, out IntPtr error, out IntPtr debug);
     [DllImport(GstLib)] private static extern void gst_mini_object_unref(IntPtr obj);
@@ -160,5 +160,5 @@ public sealed class GesTimelineRenderer : ITimelineRenderer
     [DllImport(Pbutils)] private static extern IntPtr gst_encoding_container_profile_new([MarshalAs(UnmanagedType.LPUTF8Str)] string name, [MarshalAs(UnmanagedType.LPUTF8Str)] string? description, IntPtr format, [MarshalAs(UnmanagedType.LPUTF8Str)] string? preset);
     [DllImport(Pbutils)] private static extern IntPtr gst_encoding_video_profile_new(IntPtr format, [MarshalAs(UnmanagedType.LPUTF8Str)] string? preset, IntPtr restriction, uint presence);
     [DllImport(Pbutils)] private static extern IntPtr gst_encoding_audio_profile_new(IntPtr format, [MarshalAs(UnmanagedType.LPUTF8Str)] string? preset, IntPtr restriction, uint presence);
-    [DllImport(Pbutils)] [return: MarshalAs(UnmanagedType.I4)] private static extern bool gst_encoding_container_profile_add_profile(IntPtr container, IntPtr profile);
+    [DllImport(Pbutils)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool gst_encoding_container_profile_add_profile(IntPtr container, IntPtr profile);
 }
