@@ -62,13 +62,14 @@ Every UI story ships in Arabic and English with RTL verified by a screenshot.
 
 | Platform | Packages |
 |---|---|
-| Windows x64 | per-machine MSI (WiX 5, `packaging/windows/app.wxs`), portable zip |
+| Windows x64 | per-machine MSI (WiX 5, `packaging/windows/app.wxs`), portable zip, MSIX (Store identity when configured; signed when the certificate exists) |
 | Linux x86-64 | `.deb` (`scripts/build-deb.sh`, Ubuntu 24.04+ for libadwaita 1.5), Flatpak bundle |
-| Tizen | unsigned TPK |
+| Tizen | TPK (SDK test certificate; Samsung-signed when the certificates exist) |
 
 CI installs the Studio MSI and `.deb`, launches them in demo mode, checks they start, and removes them.
-Every package is **unsigned** and the release notes say so (`scripts/release-notes.py`). Code signing
-waits for the owner inputs in `docs/OWNER_INPUTS.md` (#15).
+Every package is **unsigned** and the release notes say so (`scripts/release-notes.py`) until the owner inputs in
+`docs/OWNER_INPUTS.md` exist. Store infrastructure (MSIX signing, Microsoft Store draft submissions with the
+listing in `store/microsoft/`, Samsung-signed TPK, store screenshots) and the owner checklist: `docs/RELEASE.md`.
 
 ## Studio
 

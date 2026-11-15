@@ -1,0 +1,8 @@
+Upload several videos at once with a title pattern
+Watch a folder and upload new videos automatically
+Uploads resume after a lost connection or a restart
+Edit, schedule and bulk edit your videos
+Restore videos from Recently deleted
+Channel analytics: views, watch time, likes, comments and subscribers
+Several accounts and channels, and passkey sign-in
+Arabic and English, with a full right-to-left layout in Arabic

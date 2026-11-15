@@ -1,0 +1,11 @@
+Al Ummah Now Studio is the creator app for Al Ummah Now, an Islamic video and community platform. Manage your channel from your Windows PC, in Arabic or English.
+
+• Upload several videos at once, with a title pattern, category, language, tags and playlists
+• Watch a folder: new videos you put in it upload with the settings you chose
+• Uploads resume after a lost connection or a restart
+• Find your videos, edit their details and schedule them, or edit and delete several at once
+• Restore videos from Recently deleted
+• See your channel's analytics: views, watch time, likes, comments, subscribers and top videos
+• Sign in with a passkey, and switch between accounts and channels
+
+Uploading needs creator access on Al Ummah Now.
