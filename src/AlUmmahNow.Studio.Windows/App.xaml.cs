@@ -94,6 +94,8 @@ public sealed partial class App : Application
         var encode = new EncodeQueue(new MediaFoundationEncodeBackend());
 
         var banner = demo ? localizer["studio.shell.demo"] : environment.Name != "prod" ? localizer.Format("studio.shell.environment", environment.Name.ToUpperInvariant()) : null;
+        // Store screenshots (.github/workflows/store-screenshots.yml) show the demo data without the notice.
+        if (demo && Environment.GetEnvironmentVariable("AUN_STORE_SHOT") == "1") banner = null;
         _window = new StudioWindow(localizer, shell, banner);
         var window = _window;
         hwnd = WinRT.Interop.WindowNative.GetWindowHandle(window.Window);

@@ -78,7 +78,7 @@ public sealed class DemoTransport : IApiTransport
             ["channelId"] = "demo-c1",
             ["isPublic"] = i % 3 != 2,
             ["uploadStatus"] = i == 1 ? "processing" : "ready",
-            ["category"] = i % 2 == 0 ? "quran_tafsir" : "islamic_lectures",
+            ["category"] = i % 2 == 0 ? "quran_tafsir" : "islamic_history",
             ["language"] = i % 2 == 0 ? "ar" : "en",
             ["tags"] = new[] { "demo" },
             ["views"] = 1200 - (i * 130),
@@ -120,7 +120,7 @@ public sealed class DemoTransport : IApiTransport
                     success = true,
                     data = new object[]
                     {
-                        new { id = "demo-c1", userId = "demo-1", name = "دروس النور", handle = "alnoor", isMain = true, role = "owner", capabilities = Array.Empty<string>() },
+                        new { id = "demo-c1", userId = "demo-1", name = "قناة النور", handle = "alnoor", isMain = true, role = "owner", capabilities = Array.Empty<string>() },
                         new { id = "demo-c2", userId = "demo-9", name = "Masjid Media Team", handle = "masjidmedia", isMain = false, role = "editor", capabilities = new[] { "video.upload", "video.edit" } },
                     },
                 });
