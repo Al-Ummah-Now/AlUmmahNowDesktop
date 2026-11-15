@@ -246,5 +246,27 @@ namespace AlUmmahNow.CoreBridge.Studio
         public StudioApiException(string message, int? status = null, Exception? inner = null) : base(message, inner) => Status = status;
 
         public int? Status { get; }
+
+        /// <summary>The server's error code (<c>too_late</c>, <c>draft_exists</c>, <c>files_missing</c> …) when it sent one.</summary>
+        public string? Code { get; private set; }
+
+        /// <summary><c>files_missing</c>: the declared files the server does not have.</summary>
+        public IReadOnlyList<string> Missing { get; private set; } = Array.Empty<string>();
+
+        /// <summary><c>invalid_transcript</c>: why, and which segment (<see cref="Segment"/>).</summary>
+        public string? Reason { get; private set; }
+
+        public int? Segment { get; private set; }
+
+        /// <summary>No answer from the server (offline, DNS, reset); worth retrying.</summary>
+        public bool IsNetwork { get; private set; }
+
+        public static StudioApiException FromServer(string message, int status, string? code, IReadOnlyList<string>? missing = null, string? reason = null, int? segment = null) =>
+            new StudioApiException(message, status) { Code = code, Missing = missing ?? Array.Empty<string>(), Reason = reason, Segment = segment };
+
+        public static StudioApiException Network(string message, Exception inner) => new StudioApiException(message, null, inner) { IsNetwork = true };
+
+        /// <summary>Offline, 5xx and 429 answers can succeed later; everything else is final.</summary>
+        public bool IsTransient => IsNetwork || (Status is int s && (s >= 500 || s == 429));
     }
 }
