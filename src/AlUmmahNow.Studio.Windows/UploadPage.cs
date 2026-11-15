@@ -28,7 +28,8 @@ internal sealed class UploadPage
     private readonly Button _clear;
     private readonly StackPanel _queue = new() { Spacing = 8 };
     private readonly TextBlock _queueEmpty;
-    private readonly InfoBar _error = new() { Severity = InfoBarSeverity.Error, IsClosable = true };
+    private readonly InfoBar _error = Closable(Ui.Bar(InfoBarSeverity.Error));
+    private readonly StackPanel _watchRow = new() { Orientation = Orientation.Horizontal, Spacing = 8 };
     private readonly TextBlock _watching = new() { Opacity = 0.8, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap };
     private readonly Button _stopWatching;
     private readonly StackPanel _playlists = new() { Spacing = 2 };
@@ -61,7 +62,7 @@ internal sealed class UploadPage
             rememberWatchFolder(f);
         }));
         Root.Children.Add(add);
-        var watchRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        var watchRow = _watchRow;
         watchRow.Children.Add(_watching);
         _stopWatching = Button(l["studio.upload.stopWatching"], () =>
         {
@@ -280,14 +281,15 @@ internal sealed class UploadPage
 
     private void RenderError()
     {
-        _error.Message = _vm.ErrorKey is { } k ? _l[k] : "";
-        _error.IsOpen = _vm.ErrorKey != null;
+        Ui.Show(_error, _vm.ErrorKey is { } k ? _l[k] : null);
     }
 
     private void RenderWatching()
     {
-        _watching.Text = _vm.WatchFolder is { } f ? _l.Format("studio.upload.watchingFolder", Localizer.Isolate(f)) : "";
+        Ui.Status(_watching, _vm.WatchFolder is { } f ? _l.Format("studio.upload.watchingFolder", Localizer.Isolate(f)) : null);
         _stopWatching.Visibility = _vm.WatchFolder != null ? Visibility.Visible : Visibility.Collapsed;
+        // No folder watched: the row leaves no gap.
+        _watchRow.Visibility = _stopWatching.Visibility;
     }
 
     private void RenderStaged()
@@ -314,7 +316,7 @@ internal sealed class UploadPage
             title.TextChanged += (_, _) => _vm.RenameStaged(plan.FilePath, title.Text);
             var meta = new TextBlock
             {
-                Text = Localizer.IsolateLtr(file) + " · " + Localizer.IsolateLtr(Formats.Bytes(plan.Size, CultureInfo.InvariantCulture)) + (plan.PublishAt is { } at ? " · " + _l.Format("studio.upload.publishesAt", Formats.ToLocalInput(at)) : ""),
+                Text = Localizer.Isolate(file) + " · " + Localizer.IsolateLtr(Formats.Bytes(plan.Size, CultureInfo.InvariantCulture)) + (plan.PublishAt is { } at ? " · " + _l.Format("studio.upload.publishesAt", Formats.ToLocalInput(at)) : ""),
                 Opacity = 0.8,
                 VerticalAlignment = VerticalAlignment.Center,
                 TextTrimming = TextTrimming.CharacterEllipsis,
@@ -457,5 +459,13 @@ internal sealed class UploadPage
             };
             return b;
         }
+    }
+
+    /// <summary>The user can close the error; it then leaves no gap.</summary>
+    private static InfoBar Closable(InfoBar bar)
+    {
+        bar.IsClosable = true;
+        bar.Closed += (b, _) => b.Visibility = Visibility.Collapsed;
+        return bar;
     }
 }

@@ -48,12 +48,21 @@ internal static class Ui
         return b;
     }
 
-    public static InfoBar Bar(InfoBarSeverity severity) => new() { Severity = severity, IsClosable = false, IsOpen = false };
+    /// <summary>A message bar, collapsed until it has something to say (a closed bar would still take a stack slot).</summary>
+    public static InfoBar Bar(InfoBarSeverity severity) => new() { Severity = severity, IsClosable = false, IsOpen = false, Visibility = Visibility.Collapsed };
 
     public static void Show(InfoBar bar, string? message)
     {
         bar.Message = message ?? "";
         bar.IsOpen = !string.IsNullOrEmpty(message);
+        bar.Visibility = bar.IsOpen ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>Sets a status line and collapses it when empty, so empty lines leave no gap.</summary>
+    public static void Status(TextBlock text, string? value)
+    {
+        text.Text = value ?? "";
+        text.Visibility = string.IsNullOrEmpty(value) ? Visibility.Collapsed : Visibility.Visible;
     }
 
     public static StackPanel Row(double spacing = 8) => new() { Orientation = Orientation.Horizontal, Spacing = spacing };

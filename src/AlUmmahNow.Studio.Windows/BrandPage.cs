@@ -76,8 +76,9 @@ internal sealed class BrandPage
 
         string H(string key) => l[key].Replace("_", "", StringComparison.Ordinal);
 
-        _nameEn = Field(new TextBox { Header = H("studio.brand.nameEn"), MaxLength = BrandKit.MaxNameChars, FlowDirection = FlowDirection.LeftToRight });
-        _nameAr = Field(new TextBox { Header = H("studio.brand.nameAr"), MaxLength = BrandKit.MaxNameChars, FlowDirection = FlowDirection.RightToLeft });
+        // Values read in their own direction; headers stay on the page's side.
+        _nameEn = Field(new TextBox { Header = H("studio.brand.nameEn"), MaxLength = BrandKit.MaxNameChars, TextReadingOrder = TextReadingOrder.DetectFromContent, TextAlignment = TextAlignment.DetectFromContent });
+        _nameAr = Field(new TextBox { Header = H("studio.brand.nameAr"), MaxLength = BrandKit.MaxNameChars, TextReadingOrder = TextReadingOrder.DetectFromContent, TextAlignment = TextAlignment.DetectFromContent });
         _nameEn.TextChanged += (_, _) => Edit(k => k.NameEn = _nameEn.Text);
         _nameAr.TextChanged += (_, _) => Edit(k => k.NameAr = _nameAr.Text);
         string[] colorKeys = { "studio.brand.primary", "studio.brand.secondary", "studio.brand.text", "studio.brand.background" };
@@ -86,7 +87,7 @@ internal sealed class BrandPage
         {
             colorRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             var index = i;
-            var box = new TextBox { Header = H(colorKeys[i]), MaxLength = 7, PlaceholderText = "#rrggbb", FlowDirection = FlowDirection.LeftToRight };
+            var box = new TextBox { Header = H(colorKeys[i]), MaxLength = 7, PlaceholderText = "#rrggbb", TextReadingOrder = TextReadingOrder.DetectFromContent, TextAlignment = TextAlignment.DetectFromContent };
             box.TextChanged += (_, _) => Edit(k =>
             {
                 var v = box.Text.Trim().ToLowerInvariant();
@@ -209,7 +210,7 @@ internal sealed class BrandPage
             _channels.Children.Add(row);
         }
 
-        _status.Text = _vm.IsLoading ? _l["studio.shell.loading"] : "";
+        Ui.Status(_status, _vm.IsLoading ? _l["studio.shell.loading"] : null);
         Ui.Show(_readOnly, _vm.State != null && !_vm.CanEdit ? _l["studio.brand.readOnly"] : null);
         Ui.Show(_error, _vm.ErrorKey is { } e ? _l[e] : null);
         Ui.Show(_notice, _vm.NoticeKey is { } n && !_vm.IsDirty ? _l[n] : null);
@@ -237,7 +238,12 @@ internal sealed class BrandPage
             _syncing = false;
         }
 
-        foreach (var w in _editors) w.IsEnabled = _vm.CanEdit;
+        // Team members read the owner's kit: text fields stay at full contrast (read-only, not disabled).
+        foreach (var w in _editors)
+        {
+            if (w is TextBox box) box.IsReadOnly = !_vm.CanEdit;
+            else w.IsEnabled = _vm.CanEdit;
+        }
         foreach (var box in _colors)
         {
             var valid = BrandKit.IsValidColor(box.Text);

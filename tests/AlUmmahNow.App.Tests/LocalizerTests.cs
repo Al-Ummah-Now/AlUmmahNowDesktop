@@ -14,9 +14,9 @@ public class LocalizerTests
     }
 
     [Fact]
-    public void File_names_are_isolated_left_to_right()
+    public void Sizes_are_isolated_left_to_right()
     {
-        Assert.Equal("\u2066مرئي 1.mp4\u2069", Localizer.IsolateLtr("مرئي 1.mp4"));
+        Assert.Equal("\u20661.5 MB\u2069", Localizer.IsolateLtr("1.5 MB"));
     }
 
     [Fact]

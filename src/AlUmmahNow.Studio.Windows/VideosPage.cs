@@ -123,12 +123,10 @@ internal sealed class VideosPage
                 case nameof(VideosViewModel.IsLoading): _loading.IsActive = _vm.IsLoading; break;
                 case nameof(VideosViewModel.Deleted): RenderDeleted(); break;
                 case nameof(VideosViewModel.ErrorKey):
-                    _error.Message = _vm.ErrorKey is { } k ? _l[k] : "";
-                    _error.IsOpen = _vm.ErrorKey != null;
+                    Ui.Show(_error, _vm.ErrorKey is { } k ? _l[k] : null);
                     break;
                 case nameof(VideosViewModel.NoticeKey):
-                    _notice.Message = _vm.NoticeKey is { } n ? _l[n] : "";
-                    _notice.IsOpen = _vm.NoticeKey != null;
+                    Ui.Show(_notice, _vm.NoticeKey is { } n ? _l[n] : null);
                     break;
             }
         };
@@ -364,8 +362,7 @@ internal sealed class VideosPage
         edit.Tags = tags.Text;
         if (edit.Problem is { } p)
         {
-            _error.Message = _l[p];
-            _error.IsOpen = true;
+            Ui.Show(_error, _l[p]);
             return;
         }
 

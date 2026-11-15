@@ -70,6 +70,12 @@ public sealed class DemoTransport : IApiTransport
         "خطبة الجمعة: الصبر", "Hadith of the week: intentions", "قصص الأنبياء: يونس عليه السلام", "Q&A: prayer while travelling",
     };
 
+    // One fitting category per demo title above.
+    private static readonly string[] Categories =
+    {
+        "quran_tafsir", "islamic_history", "ramadan", "islamic_lifestyle", "khutbah", "hadith_studies", "islamic_history", "fiqh",
+    };
+
     public DemoTransport()
     {
         _videos = VideoTitles.Select((t, i) => new Dictionary<string, object?>
@@ -80,7 +86,7 @@ public sealed class DemoTransport : IApiTransport
             ["channelId"] = "demo-c1",
             ["isPublic"] = i % 3 != 2,
             ["uploadStatus"] = i == 1 ? "processing" : "ready",
-            ["category"] = i % 2 == 0 ? "quran_tafsir" : "islamic_history",
+            ["category"] = Categories[i],
             ["language"] = i % 2 == 0 ? "ar" : "en",
             ["tags"] = new[] { "demo" },
             ["views"] = 1200 - (i * 130),

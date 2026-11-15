@@ -143,7 +143,7 @@ internal sealed class CaptionsPage
             _syncing = false;
         }
 
-        _status.Text = _vm.IsLoading ? _l["studio.shell.loading"] : _vm.Videos.Count == 0 ? _l["studio.captions.noVideos"] : "";
+        Ui.Status(_status, _vm.IsLoading ? _l["studio.shell.loading"] : _vm.Videos.Count == 0 ? _l["studio.captions.noVideos"] : null);
         Ui.Show(_error, _vm.ErrorKey is { } e ? _l[e] : null);
         Ui.Show(_notice, _vm.NoticeKey is { } n ? _l[n] : null);
 

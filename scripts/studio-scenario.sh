@@ -13,6 +13,8 @@ sleep 15
 if command -v python3 >/dev/null && python3 -c "import pyatspi" 2>/dev/null; then
   python3 scripts/atspi-dump.py alummahnow-studio "$out/$name.atspi.txt" || true
 fi
+# Park the pointer in a corner so no hover tooltip covers the page.
+command -v xdotool >/dev/null && xdotool mousemove 1279 799 || true
 sleep 2
 import -window root "$out/$name.png"
 wait $app

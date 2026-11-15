@@ -133,7 +133,7 @@ internal sealed class InsightsPage
             _syncing = false;
         }
 
-        _status.Text = _vm.IsLoading ? _l["studio.shell.loading"] : _vm.ErrorKey is { } k ? _l[k] : _vm.Daily.Count == 0 ? _l["studio.analytics.empty"] : "";
+        Ui.Status(_status, _vm.IsLoading ? _l["studio.shell.loading"] : _vm.ErrorKey is { } k ? _l[k] : _vm.Daily.Count == 0 ? _l["studio.analytics.empty"] : null);
 
         _cards.Children.Clear();
         _cards.ColumnDefinitions.Clear();

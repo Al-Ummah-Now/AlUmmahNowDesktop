@@ -110,8 +110,8 @@ namespace AlUmmahNow.App.I18n
         public static string Isolate(string text) => "⁨" + text + "⁩";
 
         /// <summary>
-        /// Wraps text in a left-to-right isolate: file names and sizes ("مرئي 1.mp4", "1.5 MB") keep their own order
-        /// inside an Arabic line instead of following the first letter they contain.
+        /// Wraps text in a left-to-right isolate: Latin-only values such as sizes ("1.5 MB") keep their order
+        /// inside an Arabic line.
         /// </summary>
         public static string IsolateLtr(string text) => "⁦" + text + "⁩";
 
