@@ -1,7 +1,9 @@
+using AlUmmahNow.App.Demo;
 using AlUmmahNow.App.I18n;
 using AlUmmahNow.App.Navigation;
 using AlUmmahNow.App.Services;
 using AlUmmahNow.App.ViewModels;
+using AlUmmahNow.CoreBridge;
 using AlUmmahNow.CoreBridge.Native;
 using AlUmmahNow.CoreBridge.Temporary;
 using Microsoft.UI.Dispatching;
@@ -56,7 +58,10 @@ public sealed partial class App : Application
 
         var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
         http.DefaultRequestHeaders.UserAgent.ParseAdd("AlUmmahNowWindows/0.1");
-        var catalog = new HttpCatalogClient(http, environment.VideosApi);
+        // AUN_DEMO=1: fixture catalog for the store screenshots (no network, never in a normal launch).
+        ICatalogClient catalog = Environment.GetEnvironmentVariable("AUN_DEMO") == "1"
+            ? new DemoCatalogClient(Environment.GetEnvironmentVariable("AUN_DEMO_THUMBS"))
+            : new HttpCatalogClient(http, environment.VideosApi);
         var localizer = new Localizer(settings.Language) { EasternNumerals = settings.EasternNumerals };
         var navigator = new Navigator();
         var secureStore = new DpapiSecureStore(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AlUmmahNow", "secure"));

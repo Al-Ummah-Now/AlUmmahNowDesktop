@@ -33,4 +33,6 @@ on Windows, `~/.local/state/alummahnow-studio/logs` on Linux.
 ### Viewer and TV
 The viewer apps (`AlUmmahNow-Windows-*`, `alummahnow_*.deb`, `AlUmmahNow-Linux-*.flatpak`) and the Samsung
 TV package (`AlUmmahNow-Tizen-*-unsigned.tpk`, needs Samsung certificates to install) are included too.
+A signed `.msix` for each Windows app and a Samsung-signed `AlUmmahNow-Tizen-{version}.tpk` are attached only
+when the project's certificates are configured; the `.msix` installs with a double-click.
 """)

@@ -67,7 +67,7 @@ public sealed class DemoTransport : IApiTransport
     {
         string[] titles =
         {
-            "تفسير سورة الكهف — الدرس الأول", "Seerah: the early years in Makkah", "أحكام الصيام للمبتدئين", "Arabic grammar, lesson 3",
+            "تأملات في سورة الكهف — الجزء الأول", "Seerah: the early years in Makkah", "أحكام الصيام للمبتدئين", "Arabic grammar, part 3",
             "خطبة الجمعة: الصبر", "Hadith of the week: intentions", "قصص الأنبياء: يونس عليه السلام", "Q&A: prayer while travelling",
         };
         _videos = titles.Select((t, i) => new Dictionary<string, object?>

@@ -1,0 +1,85 @@
+name: Store screenshots
+# Microsoft Store screenshots of the Windows viewer and Studio, en + ar, at 1920x1080 (the Store takes
+# 1366x768 or larger). The real WinUI apps run on the runner's desktop in demo mode (AUN_DEMO=1):
+# fixture catalog for the viewer (src/AlUmmahNow.App/Demo/DemoCatalogClient.cs) and canned accounts
+# for Studio (src/AlUmmahNow.Studio/Demo/DemoBackend.cs). No network accounts, never QA or prod.
+# The screen is captured by scripts/windows-scenario.ps1 / windows-studio-scenario.ps1.
+# Actions → Store screenshots → Run workflow; download the "store-screenshots" artifact.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/store-screenshots.yml
+      - scripts/set-resolution.ps1
+      - scripts/store-thumbs.ps1
+      - src/AlUmmahNow.App/Demo/**
+concurrency:
+  group: store-screenshots-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Fetch AlUmmahNow.Core
+        shell: bash
+        run: ./scripts/fetch-core.sh
+      - name: Build the viewer and Studio
+        run: |
+          dotnet build src/AlUmmahNow.Windows -c Release -p:Platform=x64
+          dotnet build src/AlUmmahNow.Studio.Windows -c Release -p:Platform=x64
+      - name: Screen at 1920x1080
+        shell: pwsh
+        run: ./scripts/set-resolution.ps1 1920 1080
+      - name: Viewer (fixture catalog)
+        shell: pwsh
+        run: |
+          $out = (New-Item -ItemType Directory -Force shots/viewer).FullName
+          $env:AUN_DEMO = "1"
+          $env:AUN_DEMO_THUMBS = (New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/thumbs").FullName
+          ./scripts/store-thumbs.ps1 $env:AUN_DEMO_THUMBS
+          $exe = (Resolve-Path "src/AlUmmahNow.Windows/bin/x64/Release/net9.0-windows10.0.22621.0/win-x64/AlUmmahNow.exe").Path
+          foreach ($lang in "en", "ar") { foreach ($theme in "dark", "light") {
+            ./scripts/windows-scenario.ps1 $exe $lang $theme home "home-$lang-$theme" $out
+          } }
+      - name: Studio (demo accounts)
+        shell: pwsh
+        run: |
+          $out = (New-Item -ItemType Directory -Force shots/studio).FullName
+          $exe = (Resolve-Path "src/AlUmmahNow.Studio.Windows/bin/x64/Release/net9.0-windows10.0.22621.0/win-x64/AlUmmahNowStudio.exe").Path
+          # A few staged files so the upload page shows a batch.
+          $stage = (New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/staged").FullName
+          foreach ($n in "Friday khutbah.mp4", "Morning recitation.mp4", "Q&A part 2.mp4") { [IO.File]::WriteAllBytes("$stage/$n", (New-Object byte[] 1500000)) }
+          foreach ($lang in "en", "ar") {
+            $env:AUN_STAGE_DIR = $stage
+            ./scripts/windows-studio-scenario.ps1 $exe $lang uploads shell "upload-$lang" $out
+            $env:AUN_STAGE_DIR = ""
+            ./scripts/windows-studio-scenario.ps1 $exe $lang videos shell "videos-$lang" $out
+            ./scripts/windows-studio-scenario.ps1 $exe $lang analytics shell "analytics-$lang" $out
+          }
+      - name: Check every shot passed and is a Store size
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          $shots = Get-ChildItem shots -Recurse -Filter *.png
+          if ($shots.Count -ne 10) { throw "expected 10 screenshots, got $($shots.Count)" }
+          foreach ($s in $shots) {
+            $txt = [IO.Path]::ChangeExtension($s.FullName, ".txt")
+            if (-not (Select-String -Quiet "RESULT PASS" $txt)) { Get-Content $txt -ErrorAction SilentlyContinue; throw "$($s.Name): scenario failed" }
+            $img = [System.Drawing.Image]::FromFile($s.FullName)
+            "$($s.Directory.Name)/$($s.Name) $($img.Width)x$($img.Height)"
+            if ($img.Width -lt 1366 -or $img.Height -lt 768) { throw "$($s.Name) is $($img.Width)x$($img.Height); the Store needs 1366x768 or larger" }
+            $img.Dispose()
+          }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: store-screenshots
+          path: shots
+          if-no-files-found: error
