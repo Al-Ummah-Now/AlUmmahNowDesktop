@@ -203,7 +203,7 @@ public sealed class DemoTransport : IApiTransport
                     },
                 });
             case "get_PlaylistsList":
-                return Json(new { data = new[] { new { id = "demo-p1", title = "تفسير القرآن", videos = new[] { "demo-v1" }, isPublic = true }, new { id = "demo-p2", title = "Weekly lessons", videos = Array.Empty<string>(), isPublic = true } } });
+                return Json(new { data = new[] { new { id = "demo-p1", title = "تفسير القرآن", videos = new[] { "demo-v1" }, isPublic = true }, new { id = "demo-p2", title = "Friday khutbahs", videos = Array.Empty<string>(), isPublic = true } } });
             case "get_AnalyticsChannelGet":
             {
                 var start = DateTime.UtcNow.Date.AddDays(-27);
