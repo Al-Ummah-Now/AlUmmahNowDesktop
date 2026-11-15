@@ -20,6 +20,13 @@ public class LocalizerTests
     }
 
     [Fact]
+    public void Lines_start_with_the_interface_direction()
+    {
+        Assert.Equal("\u200F", new Localizer("ar").LineStart);
+        Assert.Equal("\u200E", new Localizer("en").LineStart);
+    }
+
+    [Fact]
     public void Arabic_is_default_and_rtl()
     {
         var l = new Localizer();

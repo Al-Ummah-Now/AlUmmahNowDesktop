@@ -324,8 +324,8 @@ public sealed class UploadPage
             title.SetHexpand(true);
             Ui.Named(title, _l.Format("studio.upload.titleFor", file));
             title.OnChanged += (_, _) => _vm.RenameStaged(plan.FilePath, title.GetText());
-            var meta = Ui.Label(Localizer.Isolate(file) + " · " + Localizer.IsolateLtr(Formats.Bytes(plan.Size, CultureInfo.InvariantCulture))
-                + (plan.PublishAt is { } at ? " · " + _l.Format("studio.upload.publishesAt", Formats.ToLocalInput(at)) : ""), dim: true);
+            var meta = Ui.Label(_l.LineStart + Localizer.Isolate(file) + " · " + Localizer.IsolateLtr(Formats.Bytes(plan.Size, CultureInfo.InvariantCulture))
+                + (plan.PublishAt is { } at ? " · " + _l.Format("studio.upload.publishesAt", Localizer.IsolateLtr(Formats.ToLocalInput(at))) : ""), dim: true);
             meta.SetSizeRequest(320, -1);
             var remove = Gtk.Button.NewWithLabel(_l["studio.upload.remove"]);
             remove.AddCssClass("flat");
@@ -480,8 +480,10 @@ public sealed class UploadPage
             }
 
             if (preRunning) _buttons.Append(Ui.Named(Ui.Button(l["studio.upload.preEncodeStop"], () => vm.PreEncoder?.Cancel(_id), "flat"), l.Format("studio.upload.preEncodeStopFor", item.Title)));
-            // The buttons change width: redraw the whole row so no part of the old ones is left on screen.
-            Root.QueueDraw();
+            // The buttons change width and the bar moves: redraw the whole window, since the cairo renderer leaves
+            // bits of the old buttons behind when only the row is redrawn.
+            if (Root.GetNative() is Gtk.Widget window) window.QueueDraw();
+            else Root.QueueDraw();
         }
 
         internal static string PreEncodeText(Localizer l, PreEncodeStatus s) => l.Format(s.LabelKey, l.Number(s.Percent));

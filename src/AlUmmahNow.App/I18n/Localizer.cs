@@ -115,6 +115,12 @@ namespace AlUmmahNow.App.I18n
         /// </summary>
         public static string IsolateLtr(string text) => "⁦" + text + "⁩";
 
+        /// <summary>
+        /// A mark (RLM or LRM) that starts a line in the interface's direction. Toolkits that pick a label's direction
+        /// from its first letter (GTK) would otherwise lay out a line that starts with a Latin file name left to right.
+        /// </summary>
+        public string LineStart => IsRtl ? "\u200F" : "\u200E";
+
         private string Digits(string text)
         {
             if (!_easternNumerals || _language != "ar") return text;
