@@ -4,7 +4,7 @@ using AlUmmahNow.Studio.Analytics;
 
 namespace AlUmmahNow.Studio.Linux;
 
-/// <summary>Reports: channel or video, summary cards, daily chart and table, per-video table, retention, CSV export.</summary>
+/// <summary>Analytics: channel or video, summary cards, daily chart and table, per-video table, retention, CSV export.</summary>
 public sealed class InsightsPage
 {
     private readonly Localizer _l;
@@ -51,6 +51,13 @@ public sealed class InsightsPage
             if (i >= 0 && i < _scopeIds.Count) _vm.VideoId = _scopeIds[i];
         };
         controls.Append(Ui.Labelled(l["studio.insights.scope"], _scope));
+        var metrics = new[] { "views", "watch" };
+        var metric = Gtk.DropDown.NewFromStrings(new[] { l["studio.analytics.views"], l["studio.analytics.watchHours"] });
+        metric.OnNotify += (_, e) =>
+        {
+            if (e.Pspec.GetName() == "selected") _vm.Metric = metrics[(int)metric.GetSelected()];
+        };
+        controls.Append(Ui.Labelled(l["studio.analytics.metric"], metric));
         page.Append(controls);
         page.Append(_status);
         page.Append(_cards);
@@ -162,12 +169,15 @@ public sealed class InsightsPage
 
         var days = _vm.Daily;
         var dates = days.Select(d => _l.ShortDate(d.Day)).ToList();
-        _daily.Set(days.Select(d => (double)d.Views).ToList(), dates, true, v => _l.Compact(v),
-            i => _l.Format("studio.analytics.readout", dates[i], _l.Number(days[i].Views)), _l["studio.analytics.emptyViews"]);
+        var watch = _vm.Metric == "watch";
+        var series = _vm.DailySeries;
+        string Value(double v) => watch ? _l.Decimal(v) : _l.Number((long)v);
+        _daily.Set(series, dates, !watch, v => _l.Compact(v),
+            i => _l.Format("studio.analytics.readout", dates[i], Value(series[i])), _l[watch ? "studio.analytics.emptyWatch" : "studio.analytics.emptyViews"]);
         if (days.Count > 0)
         {
-            var max = days.OrderByDescending(d => d.Views).First();
-            _dailySummary.SetText(_l.Format("studio.analytics.chartSummary", _l["studio.analytics.views"], dates[0], dates[^1], _l.Number(max.Views), _l.ShortDate(max.Day)));
+            var top = Enumerable.Range(0, series.Count).OrderByDescending(i => series[i]).First();
+            _dailySummary.SetText(_l.Format("studio.analytics.chartSummary", _l[watch ? "studio.analytics.watchHours" : "studio.analytics.views"], dates[0], dates[^1], Value(series[top]), _l.ShortDate(days[top].Day)));
         }
         else
         {

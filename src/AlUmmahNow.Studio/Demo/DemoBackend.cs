@@ -66,7 +66,7 @@ public sealed class DemoTransport : IApiTransport
     /// <summary>The demo channel's videos, shared with the demo captions and reports.</summary>
     public static readonly IReadOnlyList<string> VideoTitles = new[]
     {
-        "تأملات في سورة الكهف — الجزء الأول", "Seerah: the early years in Makkah", "أحكام الصيام للمبتدئين", "Arabic grammar, part 3",
+        "تأملات في سورة الكهف — الجزء الأول", "Seerah: the early years in Makkah", "أحكام الصيام للمبتدئين", "Old Damascus: a walk through the souq",
         "خطبة الجمعة: الصبر", "Hadith of the week: intentions", "قصص الأنبياء: يونس عليه السلام", "Q&A: prayer while travelling",
     };
 

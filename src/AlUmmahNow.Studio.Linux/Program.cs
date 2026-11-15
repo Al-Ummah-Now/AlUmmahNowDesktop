@@ -119,9 +119,7 @@ app.OnActivate += (_, _) =>
             settings.RecentSearches = recents.ToList();
             settingsStore.Save(settings);
         });
-    var analyticsVm = new AnalyticsViewModel(shell, api);
     var videos = new VideosPage(localizer, videosVm, uploadsVm, window.Window);
-    var analytics = new AnalyticsPage(localizer, analyticsVm);
     var encodePage = new EncodePage(localizer, encode);
     var timeline = new TimelinePage(localizer);
     var captionsVm = new CaptionsViewModel(shell, api, captionsApi, transcriber);
@@ -133,8 +131,7 @@ app.OnActivate += (_, _) =>
     window.AddPage("uploads", localizer["studio.tab.upload"], "document-send-symbolic", uploads.Root);
     window.AddPage("videos", localizer["studio.tab.videos"], "view-list-symbolic", videos.Root);
     window.AddPage("captions", localizer["studio.tab.captions"], "media-view-subtitles-symbolic", captions.Root);
-    window.AddPage("analytics", localizer["studio.tab.analytics"], "power-profile-performance-symbolic", analytics.Root);
-    window.AddPage("reports", localizer["studio.tab.reports"], "x-office-spreadsheet-symbolic", insights.Root);
+    window.AddPage("analytics", localizer["studio.tab.analytics"], "x-office-spreadsheet-symbolic", insights.Root);
     window.AddPage("brand", localizer["studio.tab.brand"], "applications-graphics-symbolic", brand.Root);
     window.AddPage("encode", localizer["studio.tab.encode"], "media-record-symbolic", encodePage.Root);
     window.AddPage("timeline", localizer["studio.tab.timeline"], "video-x-generic-symbolic", timeline.Root);
@@ -144,7 +141,7 @@ app.OnActivate += (_, _) =>
     bool SceneOk() => tabName switch
     {
         "captions" => scene == "captions-editor" ? captionsVm.Editor != null : captionsVm.Drafts != null,
-        "reports" => scene == "reports-video" ? insightsVm.Retention != null : insightsVm.Summary != null,
+        "analytics" => scene == "analytics-video" ? insightsVm.Retention != null : insightsVm.Summary != null,
         "brand" => scene == "brand-team" ? institutionVm.State != null && !institutionVm.CanEdit : institutionVm.State is { CanEdit: true },
         _ => scene != "preencode" || uploadsVm.Items.Any(i => preEncoder?.StatusOf(i.Id) != null),
     };
@@ -175,7 +172,7 @@ app.OnActivate += (_, _) =>
         {
             if (scene == "accounts") window.OpenAccountMenu();
             else if (scene.StartsWith("captions", StringComparison.Ordinal)) captions.RunScene(scene);
-            else if (scene == "reports-video" && insightsVm.VideoStats.FirstOrDefault() is { } top) insightsVm.VideoId = top.VideoId;
+            else if (scene == "analytics-video" && insightsVm.VideoStats.FirstOrDefault() is { } top) insightsVm.VideoId = top.VideoId;
             else if (scene == "brand-team" && shell.Channels.FirstOrDefault(c => c.Role != ChannelRole.Owner) is { } managed) institutionVm.Switch(managed);
             else if (scene == "preencode")
             {

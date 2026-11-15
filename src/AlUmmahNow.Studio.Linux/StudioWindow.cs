@@ -6,8 +6,8 @@ using AlUmmahNow.Studio.Shell;
 namespace AlUmmahNow.Studio.Linux;
 
 /// <summary>
-/// The Studio window: header with the page switcher, channel picker and account menu; a body that
-/// shows sign-in, loading, error states or the Studio pages.
+/// The Studio window: header with the channel picker and account menu; a body that shows sign-in,
+/// loading, error states or the Studio pages with a side rail listing them (labels never cut off).
 /// </summary>
 public sealed class StudioWindow
 {
@@ -16,7 +16,9 @@ public sealed class StudioWindow
     private readonly Localizer _l;
     private readonly StudioShellViewModel _shell;
     private readonly Gtk.Stack _body = Gtk.Stack.New();
-    private readonly Adw.ViewStack _pages = Adw.ViewStack.New();
+    private readonly Gtk.Stack _pages = Gtk.Stack.New();
+    private readonly Gtk.ListBox _rail = Gtk.ListBox.New();
+    private readonly List<string> _pageNames = new();
     private readonly Gtk.DropDown _channelPicker = Gtk.DropDown.NewFromStrings(Array.Empty<string>());
     private readonly Gtk.Box _channelBox = Gtk.Box.New(Gtk.Orientation.Horizontal, 6);
     private readonly Gtk.MenuButton _accountButton = Gtk.MenuButton.New();
@@ -36,10 +38,7 @@ public sealed class StudioWindow
         Window.SetTitle(l["studio.name"]);
 
         var header = Adw.HeaderBar.New();
-        var switcher = Adw.ViewSwitcher.New();
-        switcher.SetStack(_pages);
-        switcher.SetPolicy(Adw.ViewSwitcherPolicy.Wide);
-        header.SetTitleWidget(switcher);
+        header.SetTitleWidget(Adw.WindowTitle.New(l["studio.name"], ""));
 
         _channelBox.Append(Ui.Labelled(l["studio.shell.channel"], _channelPicker));
         _channelPicker.OnNotify += (_, e) =>
@@ -79,10 +78,24 @@ public sealed class StudioWindow
 
     public Adw.ApplicationWindow Window { get; }
 
-    public void AddPage(string name, string title, string icon, Gtk.Widget page) =>
-        _pages.AddTitledWithIcon(page, name, title, icon);
+    public void AddPage(string name, string title, string icon, Gtk.Widget page)
+    {
+        _pages.AddTitled(page, name, title);
+        _pageNames.Add(name);
+        var row = Gtk.Box.New(Gtk.Orientation.Horizontal, 12);
+        row.SetMarginTop(4);
+        row.SetMarginBottom(4);
+        row.Append(Gtk.Image.NewFromIconName(icon));
+        row.Append(Ui.Label(title));
+        _rail.Append(row);
+        if (_pageNames.Count == 1) ShowPage(name);
+    }
 
-    public void ShowPage(string name) => _pages.SetVisibleChildName(name);
+    public void ShowPage(string name)
+    {
+        var i = _pageNames.IndexOf(name);
+        if (_rail.GetRowAtIndex(Math.Max(0, i)) is { } row) _rail.SelectRow(row);
+    }
 
     /// <summary>For CI screenshots: open the account menu.</summary>
     public void OpenAccountMenu() => _accountButton.Popup();
@@ -141,7 +154,25 @@ public sealed class StudioWindow
         _reauth.SetChild(Ui.Button(_l["auth.signIn"], () => _ = _shell.SignInAsync(SignInMode.Default), "suggested-action"));
         _body.AddNamed(_reauth, "reauth");
 
-        _body.AddNamed(_pages, "studio");
+        // Side rail (GNOME "navigation-sidebar"): every page's full name at any width, in both languages;
+        // a Gtk.Box puts it on the right in Arabic.
+        _rail.AddCssClass("navigation-sidebar");
+        _rail.SetSelectionMode(Gtk.SelectionMode.Browse);
+        Ui.Named(_rail, _l["studio.shell.pages"]);
+        _rail.OnRowSelected += (_, e) =>
+        {
+            if (e.Row is { } r && r.GetIndex() is var i && i >= 0 && i < _pageNames.Count) _pages.SetVisibleChildName(_pageNames[i]);
+        };
+        var railScroll = Gtk.ScrolledWindow.New();
+        railScroll.SetPolicy(Gtk.PolicyType.Never, Gtk.PolicyType.Automatic);
+        railScroll.SetChild(_rail);
+        railScroll.SetSizeRequest(200, -1);
+        _pages.SetHexpand(true);
+        var studio = Gtk.Box.New(Gtk.Orientation.Horizontal, 0);
+        studio.Append(railScroll);
+        studio.Append(Gtk.Separator.New(Gtk.Orientation.Vertical));
+        studio.Append(_pages);
+        _body.AddNamed(studio, "studio");
     }
 
     private void Render()

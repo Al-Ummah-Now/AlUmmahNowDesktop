@@ -6,7 +6,7 @@ using Microsoft.UI.Xaml.Controls;
 
 namespace AlUmmahNow.Studio.WindowsApp;
 
-/// <summary>Reports: channel or video, summary cards, daily chart and table, per-video table, retention, CSV export.</summary>
+/// <summary>Analytics: channel or video, summary cards, daily chart and table, per-video table, retention, CSV export.</summary>
 internal sealed class InsightsPage
 {
     private readonly Localizer _l;
@@ -41,7 +41,7 @@ internal sealed class InsightsPage
         range.SelectionChanged += (_, _) => _vm.Days = InsightsViewModel.Ranges[Math.Max(0, range.SelectedIndex)];
         controls.Children.Add(range);
         _scope = new ComboBox { Header = l["studio.insights.scope"].Replace("_", "", StringComparison.Ordinal), MinWidth = 320 };
-        AutomationProperties.SetAutomationId(_scope, "ReportsScope");
+        AutomationProperties.SetAutomationId(_scope, "AnalyticsScope");
         _scope.SelectionChanged += (_, _) =>
         {
             if (_syncing) return;
@@ -49,6 +49,11 @@ internal sealed class InsightsPage
             if (i >= 0 && i < _scopeIds.Count) _vm.VideoId = _scopeIds[i];
         };
         controls.Children.Add(_scope);
+        var metrics = new[] { "views", "watch" };
+        var metric = new ComboBox { Header = l["studio.analytics.metric"], ItemsSource = new[] { l["studio.analytics.views"], l["studio.analytics.watchHours"] }, SelectedIndex = 0 };
+        AutomationProperties.SetAutomationId(metric, "AnalyticsMetric");
+        metric.SelectionChanged += (_, _) => _vm.Metric = metrics[Math.Max(0, metric.SelectedIndex)];
+        controls.Children.Add(metric);
         Root.Children.Add(controls);
         Root.Children.Add(_status);
         Root.Children.Add(_cards);
@@ -151,12 +156,15 @@ internal sealed class InsightsPage
 
         var days = _vm.Daily;
         var dates = days.Select(d => _l.ShortDate(d.Day)).ToList();
-        _daily.Set(days.Select(d => (double)d.Views).ToList(), dates, true, v => _l.Compact(v),
-            i => _l.Format("studio.analytics.readout", dates[i], _l.Number(days[i].Views)), _l["studio.analytics.emptyViews"]);
+        var watch = _vm.Metric == "watch";
+        var series = _vm.DailySeries;
+        string Value(double v) => watch ? _l.Decimal(v) : _l.Number((long)v);
+        _daily.Set(series, dates, !watch, v => _l.Compact(v),
+            i => _l.Format("studio.analytics.readout", dates[i], Value(series[i])), _l[watch ? "studio.analytics.emptyWatch" : "studio.analytics.emptyViews"]);
         if (days.Count > 0)
         {
-            var max = days.OrderByDescending(d => d.Views).First();
-            _dailySummary.Text = _l.Format("studio.analytics.chartSummary", _l["studio.analytics.views"], dates[0], dates[^1], _l.Number(max.Views), _l.ShortDate(max.Day));
+            var top = Enumerable.Range(0, series.Count).OrderByDescending(i => series[i]).First();
+            _dailySummary.Text = _l.Format("studio.analytics.chartSummary", _l[watch ? "studio.analytics.watchHours" : "studio.analytics.views"], dates[0], dates[^1], Value(series[top]), _l.ShortDate(days[top].Day));
         }
         else
         {

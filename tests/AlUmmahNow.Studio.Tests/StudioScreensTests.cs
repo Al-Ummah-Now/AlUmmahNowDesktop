@@ -522,6 +522,20 @@ public sealed class InsightsViewModelTests
     }
 
     [Fact]
+    public async Task ChartMetricSwitchesBetweenViewsAndWatchHours()
+    {
+        var (shell, api, _) = await ScreensSetup.ShellAsync();
+        var vm = new InsightsViewModel(shell, api, new ScriptedServices(), () => Now);
+        await vm.LoadAsync();
+        Assert.Equal(vm.Daily.Select(d => (double)d.Views), vm.DailySeries);
+        var changed = new List<string?>();
+        vm.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+        vm.Metric = "watch";
+        Assert.Contains(nameof(InsightsViewModel.DailySeries), changed);
+        Assert.Equal(vm.Daily.Select(d => Math.Round(d.WatchTimeSeconds / 3600, 1)), vm.DailySeries);
+    }
+
+    [Fact]
     public async Task RebuildingAnalyticsSaysSo()
     {
         var (shell, api, _) = await ScreensSetup.ShellAsync();

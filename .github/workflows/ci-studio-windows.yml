@@ -35,6 +35,10 @@ jobs:
       - name: Run Studio scenarios
         shell: pwsh
         run: |
+          # Room for a 1280x800 window like the Linux captures; if the runner refuses, the app maximises instead.
+          try { Set-DisplayResolution -Width 1920 -Height 1080 -Force -ErrorAction Stop } catch { Write-Host "display resolution unchanged: $_" }
+          Add-Type -AssemblyName System.Windows.Forms
+          Write-Host "screen $([System.Windows.Forms.Screen]::PrimaryScreen.Bounds)"
           $out = (New-Item -ItemType Directory -Force artifacts/studio).FullName
           $watch = (New-Item -ItemType Directory -Force watched).FullName
           [IO.File]::WriteAllBytes("$watch/talk-one.mp4", (New-Object byte[] 2000000))
@@ -62,17 +66,14 @@ jobs:
           ./scripts/windows-studio-scenario.ps1 $exe en videos shell edit-en $out "" edit
           ./scripts/windows-studio-scenario.ps1 $exe ar videos shell bulk-ar $out "" bulk
           ./scripts/windows-studio-scenario.ps1 $exe en videos shell delete-en $out "" delete
-          ./scripts/windows-studio-scenario.ps1 $exe ar analytics shell analytics-ar $out
-          ./scripts/windows-studio-scenario.ps1 $exe en analytics shell analytics-en $out
           ./scripts/windows-studio-scenario.ps1 $exe ar timeline "" timeline-ar $out
           ./scripts/windows-studio-scenario.ps1 $exe en encode "encode:$source" encode-en $out
-          # Studio screens (E19): dark in both languages for every screen, light for the busiest ones.
+          # Studio screens (E19): every screen in both languages, dark and light.
           $screens = @()
           foreach ($theme in "dark","light") {
             $env:AUN_THEME = $theme
             foreach ($lang in "ar","en") {
-              $runs = @(@("captions-editor","captions","captions-editor"), @("reports-video","reports","reports-video"), @("brand","brand",""))
-              if ($theme -eq "dark") { $runs += @(@("captions","captions",""), @("reports","reports",""), @("brand-team","brand","brand-team"), @("preencode","uploads","preencode")) }
+              $runs = @(@("captions","captions",""), @("captions-editor","captions","captions-editor"), @("analytics","analytics",""), @("analytics-video","analytics","analytics-video"), @("brand","brand",""), @("brand-team","brand","brand-team"), @("preencode","uploads","preencode"))
               foreach ($r in $runs) {
                 $n = "$($r[0])-$lang-$theme"
                 if ($r[2] -eq "preencode") { $env:AUN_STAGE_DIR = $stage }
@@ -91,11 +92,11 @@ jobs:
           if (-not (Select-String -Quiet -SimpleMatch "Edit the Arabic captions" artifacts/studio/captions-en-dark.uia.txt)) { throw "draft edit buttons have no accessible names" }
           if (-not (Select-String -Quiet -SimpleMatch "Text of line 1" artifacts/studio/captions-editor-en-dark.uia.txt)) { throw "cue text boxes have no accessible names" }
           if (-not (Select-String -Quiet -SimpleMatch "Start line 1 earlier" artifacts/studio/captions-editor-en-dark.uia.txt)) { throw "nudge buttons have no accessible names" }
-          if (-not (Select-String -Quiet "`tReportsScope`tShow" artifacts/studio/reports-en-dark.uia.txt)) { throw "reports scope has no accessible name" }
+          if (-not (Select-String -Quiet "`tAnalyticsScope`tShow" artifacts/studio/analytics-en-dark.uia.txt)) { throw "analytics scope has no accessible name" }
           if (-not (Select-String -Quiet -SimpleMatch "Switch to Masjid Media Team" artifacts/studio/brand-en-dark.uia.txt)) { throw "channel switch buttons have no accessible names" }
           if (-not (Select-String -Quiet -SimpleMatch "Only the owner can change it" artifacts/studio/brand-team-en-dark.uia.txt)) { throw "read-only brand kit not announced" }
           if (-not (Select-String -Quiet "`tPreEncode`tPre-encode renditions on this computer" artifacts/studio/preencode-en-dark.uia.txt)) { throw "pre-encode option not exposed" }
-          foreach ($n in "uploads-ar","signin-ar","signin-en","shell-ar","shell-en","accounts-en","signout-ar","addpasskey-en","addpasskey-ar","upload-staged-ar","upload-staged-en","videos-ar","videos-en","search-ar","edit-en","bulk-ar","delete-en","analytics-ar","analytics-en","timeline-ar","encode-en") {
+          foreach ($n in "uploads-ar","signin-ar","signin-en","shell-ar","shell-en","accounts-en","signout-ar","addpasskey-en","addpasskey-ar","upload-staged-ar","upload-staged-en","videos-ar","videos-en","search-ar","edit-en","bulk-ar","delete-en","timeline-ar","encode-en") {
             if (-not (Select-String -Quiet "RESULT PASS" "artifacts/studio/$n.txt")) { throw "$n failed" }
             if (Test-Path "artifacts/studio/$n.txt.hang.txt") { throw "$n did not exit" }
           }

@@ -388,7 +388,8 @@ internal sealed class CueEditorView
         times.Children.Add(Nudge(_l["studio.captions.editor.minus"], _l.Format("studio.captions.editor.startEarlier", n), () => _vm.Nudge(index, CueEditing.Edge.Start, -CueEditing.NudgeMs)));
         times.Children.Add(start);
         times.Children.Add(Nudge(_l["studio.captions.editor.plus"], _l.Format("studio.captions.editor.startLater", n), () => _vm.Nudge(index, CueEditing.Edge.Start, CueEditing.NudgeMs)));
-        times.Children.Add(new TextBlock { Text = "→", VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(4, 0, 4, 6) });
+        // Start to end follows the reading direction: the arrow points left in Arabic.
+        times.Children.Add(new TextBlock { Text = _l.IsRtl ? "←" : "→", VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(4, 0, 4, 6) });
         times.Children.Add(Nudge(_l["studio.captions.editor.minus"], _l.Format("studio.captions.editor.endEarlier", n), () => _vm.Nudge(index, CueEditing.Edge.End, -CueEditing.NudgeMs)));
         times.Children.Add(end);
         times.Children.Add(Nudge(_l["studio.captions.editor.plus"], _l.Format("studio.captions.editor.endLater", n), () => _vm.Nudge(index, CueEditing.Edge.End, CueEditing.NudgeMs)));

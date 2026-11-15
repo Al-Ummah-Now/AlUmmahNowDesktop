@@ -25,6 +25,9 @@ public sealed partial class InsightsViewModel : ObservableObject
 
     [ObservableProperty] private int _days = 28;
 
+    /// <summary>What the daily chart shows: "views" or "watch" (watch time in hours).</summary>
+    [ObservableProperty] private string _metric = "views";
+
     /// <summary>Null for the whole channel.</summary>
     [ObservableProperty] private string? _videoId;
 
@@ -50,6 +53,13 @@ public sealed partial class InsightsViewModel : ObservableObject
     }
 
     partial void OnDaysChanged(int value) => _ = LoadAsync();
+
+    partial void OnMetricChanged(string value) => OnPropertyChanged(nameof(DailySeries));
+
+    partial void OnDailyChanged(IReadOnlyList<DailyMetric> value) => OnPropertyChanged(nameof(DailySeries));
+
+    /// <summary>The daily chart's values for <see cref="Metric"/>: views, or watch time in hours (one decimal).</summary>
+    public IReadOnlyList<double> DailySeries => Daily.Select(d => Metric == "watch" ? Math.Round(d.WatchTimeSeconds / 3600, 1) : d.Views).ToList();
 
     partial void OnVideoIdChanged(string? value) => _ = LoadAsync();
 

@@ -175,9 +175,7 @@ public sealed partial class App : Application
                 settings.RecentSearches = recents.ToList();
                 settingsStore.Save(settings);
             });
-        var analyticsVm = new AnalyticsViewModel(shell, api);
         var videos = new VideosPage(localizer, videosVm, uploadsVm, () => window.Window.Content?.XamlRoot);
-        var analytics = new AnalyticsPage(localizer, analyticsVm);
         var encodePage = new EncodePage(localizer, encode);
         var timeline = new TimelinePage(localizer);
         var captionsVm = new CaptionsViewModel(shell, api, captionsApi, transcriber);
@@ -190,8 +188,7 @@ public sealed partial class App : Application
         window.AddPage("uploads", localizer["studio.tab.upload"], Symbol.Upload, uploads.Root);
         window.AddPage("videos", localizer["studio.tab.videos"], Symbol.List, videos.Root);
         window.AddPage("captions", localizer["studio.tab.captions"], Symbol.ClosedCaption, captions.Root);
-        window.AddPage("analytics", localizer["studio.tab.analytics"], Symbol.Calculator, analytics.Root);
-        window.AddPage("reports", localizer["studio.tab.reports"], Symbol.ViewAll, insights.Root);
+        window.AddPage("analytics", localizer["studio.tab.analytics"], Symbol.ViewAll, insights.Root);
         window.AddPage("brand", localizer["studio.tab.brand"], Symbol.People, brand.Root);
         window.AddPage("encode", localizer["studio.tab.encode"], Symbol.Video, encodePage.Root);
         window.AddPage("timeline", localizer["studio.tab.timeline"], Symbol.Edit, timeline.Root);
@@ -201,13 +198,12 @@ public sealed partial class App : Application
         bool SceneOk() => tabName switch
         {
             "captions" => scene == "captions-editor" ? captionsVm.Editor != null : captionsVm.Drafts != null,
-            "reports" => scene == "reports-video" ? insightsVm.Retention != null : insightsVm.Summary != null,
+            "analytics" => scene == "analytics-video" ? insightsVm.Retention != null : insightsVm.Summary != null,
             "brand" => scene == "brand-team" ? institutionVm.State != null && !institutionVm.CanEdit : institutionVm.State is { CanEdit: true },
             _ => scene != "preencode" || uploadsVm.Items.Any(i => preEncoder?.StatusOf(i.Id) != null),
         };
-        // Demo screenshots use the whole screen of the CI desktop.
-        if (demo && window.Window.AppWindow.Presenter is Microsoft.UI.Windowing.OverlappedPresenter presenter) presenter.Maximize();
         window.Window.Activate();
+        if (demo) SizeForScreenshots(window.Window.AppWindow);
         window.Window.Closed += (_, _) => uploadsVm.Dispose();
 
         _refresh = ui.CreateTimer();
@@ -241,7 +237,7 @@ public sealed partial class App : Application
                 else if (scene == "signout") window.AskSignOut();
                 else if (scene == "addpasskey") _ = window.AddPasskeyAsync();
                 else if (scene.StartsWith("captions", StringComparison.Ordinal)) captions.RunScene(scene);
-                else if (scene == "reports-video" && insightsVm.VideoStats.FirstOrDefault() is { } top) insightsVm.VideoId = top.VideoId;
+                else if (scene == "analytics-video" && insightsVm.VideoStats.FirstOrDefault() is { } top) insightsVm.VideoId = top.VideoId;
                 else if (scene == "brand-team" && shell.Channels.FirstOrDefault(c => c.Role != ChannelRole.Owner) is { } managed) institutionVm.Switch(managed);
                 else if (scene == "preencode")
                 {
@@ -271,6 +267,23 @@ public sealed partial class App : Application
                 Exit();
             };
             _endTimer.Start();
+        }
+    }
+
+    /// <summary>
+    /// Demo screenshots: 1280x800 like the Linux captures when the desktop has room, otherwise maximised,
+    /// so the CI capture of the window shows each page's content.
+    /// </summary>
+    private static void SizeForScreenshots(Microsoft.UI.Windowing.AppWindow appWindow)
+    {
+        var area = Microsoft.UI.Windowing.DisplayArea.GetFromWindowId(appWindow.Id, Microsoft.UI.Windowing.DisplayAreaFallback.Primary).WorkArea;
+        if (area.Width >= 1280 && area.Height >= 800)
+        {
+            appWindow.MoveAndResize(new global::Windows.Graphics.RectInt32(area.X, area.Y, 1280, 800));
+        }
+        else if (appWindow.Presenter is Microsoft.UI.Windowing.OverlappedPresenter presenter)
+        {
+            presenter.Maximize();
         }
     }
 }

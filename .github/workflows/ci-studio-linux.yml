@@ -52,26 +52,24 @@ jobs:
           run en videos shell edit-en artifacts/studio "" edit
           run ar videos shell bulk-ar artifacts/studio "" bulk
           run en videos shell delete-en artifacts/studio "" delete
-          run ar analytics shell analytics-ar artifacts/studio
-          run en analytics shell analytics-en artifacts/studio
           run en timeline "" timeline-en artifacts/studio
           run ar timeline "" timeline-ar artifacts/studio
           run ar encode encode:$PWD/source.mp4 encode-ar artifacts/studio
           run en encode encode:$PWD/source.mp4 encode-en artifacts/studio
-          # Studio screens (E19): captions and the cue editor, reports, channels and brand kit, pre-encode; dark and light.
+          # Studio screens (E19): captions and the cue editor, analytics, channels and brand kit, pre-encode; dark and light.
           for theme in dark light; do
             for lang in ar en; do
               AUN_THEME=$theme run $lang captions shell captions-$lang-$theme artifacts/studio
               AUN_THEME=$theme run $lang captions shell captions-editor-$lang-$theme artifacts/studio "" captions-editor
-              AUN_THEME=$theme run $lang reports shell reports-$lang-$theme artifacts/studio
-              AUN_THEME=$theme run $lang reports shell reports-video-$lang-$theme artifacts/studio "" reports-video
+              AUN_THEME=$theme run $lang analytics shell analytics-$lang-$theme artifacts/studio
+              AUN_THEME=$theme run $lang analytics shell analytics-video-$lang-$theme artifacts/studio "" analytics-video
               AUN_THEME=$theme run $lang brand shell brand-$lang-$theme artifacts/studio
               AUN_THEME=$theme run $lang brand shell brand-team-$lang-$theme artifacts/studio "" brand-team
               AUN_THEME=$theme AUN_STAGE_DIR=$PWD/staged run $lang uploads shell preencode-$lang-$theme artifacts/studio "" preencode
             done
           done
           grep -h AUTOMATION artifacts/studio/*.log
-          test "$(cat artifacts/studio/*.log | grep -c 'RESULT PASS')" = 49
+          test "$(cat artifacts/studio/*.log | grep -c 'RESULT PASS')" = 47
           # Screen readers (Orca reads AT-SPI): named controls on the shell, search, upload and rows.
           grep -P "^button\tSign in$" artifacts/studio/signin-en.atspi.txt
           grep -P "\tChannel$" artifacts/studio/shell-en.atspi.txt
@@ -80,7 +78,7 @@ jobs:
           grep -P "^button\tTranscribe on the server$" artifacts/studio/captions-en-dark.atspi.txt
           grep -P "^button\tSave and publish$" artifacts/studio/captions-editor-en-dark.atspi.txt
           grep -P "^button\tحفظ ونشر$" artifacts/studio/captions-editor-ar-dark.atspi.txt
-          grep -P "^button\tExport CSV$" artifacts/studio/reports-video-en-dark.atspi.txt
+          grep -P "^button\tExport CSV$" artifacts/studio/analytics-video-en-dark.atspi.txt
           grep -P "^button\tSave brand kit$" artifacts/studio/brand-en-dark.atspi.txt
           grep "Only the owner can change it" artifacts/studio/brand-team-en-dark.atspi.txt
           grep -P "^check box\tPre-encode renditions on this computer$" artifacts/studio/preencode-en-dark.atspi.txt
