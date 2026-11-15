@@ -53,4 +53,20 @@ public static class Ui
         row.Append(control);
         return row;
     }
+
+    public static Gtk.Label Heading(string text)
+    {
+        var h = Label(text);
+        h.AddCssClass("heading");
+        return h;
+    }
+
+    /// <summary>A padded card (Adwaita "card" plus the app's padding class).</summary>
+    public static Gtk.Box Card(int spacing = 8)
+    {
+        var b = Gtk.Box.New(Gtk.Orientation.Vertical, spacing);
+        b.AddCssClass("card");
+        b.AddCssClass("aun-pad");
+        return b;
+    }
 }

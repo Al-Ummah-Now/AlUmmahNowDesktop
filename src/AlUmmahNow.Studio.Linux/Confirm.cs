@@ -20,3 +20,13 @@ public static class Confirm
         return done.Task;
     }
 }
+
+/// <summary>Confirmations asked by view models by i18n key: "&lt;key&gt;.heading", "&lt;key&gt;" (body) and "&lt;key&gt;.ok".</summary>
+public static class ConfirmKeys
+{
+    public static Func<string, object[], Task<bool>> For(Gtk.Widget parent, AlUmmahNow.App.I18n.Localizer l) => (key, args) =>
+    {
+        var shown = args.Select(a => a is string s && s.StartsWith("studio.", StringComparison.Ordinal) ? (object)l[s] : a).ToArray();
+        return Confirm.AskAsync(parent, l[key + ".heading"], l.Format(key, shown), l[key + ".ok"], l["common.cancel"]);
+    };
+}

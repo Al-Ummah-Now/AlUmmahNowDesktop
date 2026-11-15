@@ -79,6 +79,21 @@ public sealed class UploadPage
         actions.Append(_start);
         _clear = Ui.Button(l["studio.upload.clear"], () => _vm.ClearStaged(), "flat");
         actions.Append(_clear);
+        if (_vm.PreEncodeAvailable)
+        {
+            // D11: opt-in, off by default. The server checks the files and encodes itself when they don't arrive in time.
+            var preEncode = Gtk.CheckButton.NewWithLabel(l["studio.upload.preEncode"]);
+            preEncode.SetActive(_vm.PreEncode);
+            preEncode.OnToggled += (_, _) => _vm.PreEncode = preEncode.GetActive();
+            var pre = Gtk.Box.New(Gtk.Orientation.Vertical, 2);
+            pre.Append(preEncode);
+            var hint = Ui.Label(l["studio.upload.preEncodeHint"], dim: true);
+            hint.SetMarginStart(28);
+            pre.Append(hint);
+            page.Append(pre);
+            if (Environment.GetEnvironmentVariable("AUN_SCENE") == "preencode") preEncode.SetActive(true);
+        }
+
         page.Append(actions);
 
         // Queue
@@ -398,6 +413,7 @@ public sealed class UploadPage
         private readonly Gtk.Label _status = Ui.Label("", dim: true);
         private readonly Gtk.Box _buttons = Gtk.Box.New(Gtk.Orientation.Horizontal, 4);
         private UploadPhase? _phase;
+        private bool _preRunning;
 
         public QueueRow(UploadPage page, string id)
         {
@@ -425,10 +441,14 @@ public sealed class UploadPage
             _bar.SetFraction(item.Fraction);
             var phase = l["studio.phase." + item.Phase.ToString().ToLowerInvariant()];
             var amount = l.Format("studio.upload.progress", Formats.Bytes(item.SentBytes, CultureInfo.InvariantCulture), Formats.Bytes(item.TotalBytes, CultureInfo.InvariantCulture));
-            _status.SetText(item.Phase == UploadPhase.Uploading ? phase + " · " + amount : phase);
+            var pre = _page._vm.PreEncoder?.StatusOf(_id);
+            var preText = pre == null ? null : PreEncodeText(l, pre);
+            _status.SetText((item.Phase == UploadPhase.Uploading ? phase + " · " + amount : phase) + (preText == null ? "" : " · " + preText));
             Ui.Named(_bar, item.Title + " · " + phase);
-            if (_phase == item.Phase) return;
+            var preRunning = pre is { IsRunning: true };
+            if (_phase == item.Phase && _preRunning == preRunning) return;
             _phase = item.Phase;
+            _preRunning = preRunning;
             Ui.Clear(_buttons);
             var vm = _page._vm;
             switch (item.Phase)
@@ -450,7 +470,11 @@ public sealed class UploadPage
                     _buttons.Append(Cancel(item));
                     break;
             }
+
+            if (preRunning) _buttons.Append(Ui.Named(Ui.Button(l["studio.upload.preEncodeStop"], () => vm.PreEncoder?.Cancel(_id), "flat"), l.Format("studio.upload.preEncodeStopFor", item.Title)));
         }
+
+        internal static string PreEncodeText(Localizer l, PreEncodeStatus s) => l.Format(s.LabelKey, l.Number(s.Percent));
 
         private Gtk.Button Cancel(UploadSnapshot item) => Ui.Button(_page._l["studio.upload.cancel"], async () =>
         {

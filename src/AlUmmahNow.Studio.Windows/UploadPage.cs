@@ -89,6 +89,21 @@ internal sealed class UploadPage
             return Task.CompletedTask;
         });
         actions.Children.Add(_clear);
+        if (_vm.PreEncodeAvailable)
+        {
+            // D11: opt-in, off by default. The server checks the files and encodes itself when they don't arrive in time.
+            var preEncode = new CheckBox { Content = l["studio.upload.preEncode"], IsChecked = _vm.PreEncode };
+            AutomationProperties.SetAutomationId(preEncode, "PreEncode");
+            AutomationProperties.SetHelpText(preEncode, l["studio.upload.preEncodeHint"]);
+            preEncode.Checked += (_, _) => _vm.PreEncode = true;
+            preEncode.Unchecked += (_, _) => _vm.PreEncode = false;
+            var pre = new StackPanel { Spacing = 2 };
+            pre.Children.Add(preEncode);
+            pre.Children.Add(new TextBlock { Text = l["studio.upload.preEncodeHint"], Opacity = 0.8, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(28, 0, 0, 0) });
+            Root.Children.Add(pre);
+            if (Environment.GetEnvironmentVariable("AUN_SCENE") == "preencode") preEncode.IsChecked = true;
+        }
+
         Root.Children.Add(actions);
 
         var queueTitle = new TextBlock { Text = l["studio.upload.queue"], Style = (Style)Application.Current.Resources["SubtitleTextBlockStyle"] };
@@ -346,6 +361,7 @@ internal sealed class UploadPage
         private readonly ProgressBar _bar = new() { Minimum = 0, Maximum = 1, VerticalAlignment = VerticalAlignment.Center };
         private readonly StackPanel _buttons = new() { Orientation = Orientation.Horizontal, Spacing = 4 };
         private UploadPhase? _phase;
+        private bool _preRunning;
 
         public QueueRow(UploadPage page, string id)
         {
@@ -374,10 +390,14 @@ internal sealed class UploadPage
             _bar.Value = item.Fraction;
             var phase = l["studio.phase." + item.Phase.ToString().ToLowerInvariant()];
             var amount = l.Format("studio.upload.progress", Formats.Bytes(item.SentBytes, CultureInfo.InvariantCulture), Formats.Bytes(item.TotalBytes, CultureInfo.InvariantCulture));
-            _status.Text = item.Phase == UploadPhase.Uploading ? phase + " · " + amount : phase;
+            var pre = _page._vm.PreEncoder?.StatusOf(_id);
+            var preText = pre == null ? "" : " · " + l.Format(pre.LabelKey, l.Number(pre.Percent));
+            _status.Text = (item.Phase == UploadPhase.Uploading ? phase + " · " + amount : phase) + preText;
             AutomationProperties.SetName(_bar, item.Title + " · " + phase);
-            if (_phase == item.Phase) return;
+            var preRunning = pre is { IsRunning: true };
+            if (_phase == item.Phase && _preRunning == preRunning) return;
             _phase = item.Phase;
+            _preRunning = preRunning;
             _buttons.Children.Clear();
             var vm = _page._vm;
             switch (item.Phase)
@@ -398,6 +418,14 @@ internal sealed class UploadPage
                     _buttons.Children.Add(Act(l["studio.upload.pause"], () => vm.Pause(_id)));
                     _buttons.Children.Add(Cancel(item));
                     break;
+            }
+
+            if (preRunning)
+            {
+                var stop = new Button { Content = l["studio.upload.preEncodeStop"] };
+                AutomationProperties.SetName(stop, l.Format("studio.upload.preEncodeStopFor", item.Title));
+                stop.Click += (_, _) => vm.PreEncoder?.Cancel(_id);
+                _buttons.Children.Add(stop);
             }
         }
 

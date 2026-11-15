@@ -10,7 +10,7 @@ permissions:
 jobs:
   studio-windows:
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -66,6 +66,35 @@ jobs:
           ./scripts/windows-studio-scenario.ps1 $exe en analytics shell analytics-en $out
           ./scripts/windows-studio-scenario.ps1 $exe ar timeline "" timeline-ar $out
           ./scripts/windows-studio-scenario.ps1 $exe en encode "encode:$source" encode-en $out
+          # Studio screens (E19): dark in both languages for every screen, light for the busiest ones.
+          $screens = @()
+          foreach ($theme in "dark","light") {
+            $env:AUN_THEME = $theme
+            foreach ($lang in "ar","en") {
+              $runs = @(@("captions-editor","captions","captions-editor"), @("reports-video","reports","reports-video"), @("brand","brand",""))
+              if ($theme -eq "dark") { $runs += @(@("captions","captions",""), @("reports","reports",""), @("brand-team","brand","brand-team"), @("preencode","uploads","preencode")) }
+              foreach ($r in $runs) {
+                $n = "$($r[0])-$lang-$theme"
+                if ($r[2] -eq "preencode") { $env:AUN_STAGE_DIR = $stage }
+                ./scripts/windows-studio-scenario.ps1 $exe $lang $r[1] shell $n $out "" $r[2]
+                $env:AUN_STAGE_DIR = ""
+                $screens += $n
+              }
+            }
+          }
+          $env:AUN_THEME = ""
+          foreach ($n in $screens) {
+            if (-not (Select-String -Quiet "RESULT PASS" "artifacts/studio/$n.txt")) { throw "$n failed" }
+            if (Test-Path "artifacts/studio/$n.txt.hang.txt") { throw "$n did not exit" }
+          }
+          if (-not (Select-String -Quiet "`tCaptionsServerStart`tTranscribe on the server" artifacts/studio/captions-en-dark.uia.txt)) { throw "captions server button not exposed" }
+          if (-not (Select-String -Quiet -SimpleMatch "Edit the Arabic captions" artifacts/studio/captions-en-dark.uia.txt)) { throw "draft edit buttons have no accessible names" }
+          if (-not (Select-String -Quiet -SimpleMatch "Text of line 1" artifacts/studio/captions-editor-en-dark.uia.txt)) { throw "cue text boxes have no accessible names" }
+          if (-not (Select-String -Quiet -SimpleMatch "Start line 1 earlier" artifacts/studio/captions-editor-en-dark.uia.txt)) { throw "nudge buttons have no accessible names" }
+          if (-not (Select-String -Quiet "`tReportsScope`tShow" artifacts/studio/reports-en-dark.uia.txt)) { throw "reports scope has no accessible name" }
+          if (-not (Select-String -Quiet -SimpleMatch "Switch to Masjid Media Team" artifacts/studio/brand-en-dark.uia.txt)) { throw "channel switch buttons have no accessible names" }
+          if (-not (Select-String -Quiet -SimpleMatch "Only the owner can change it" artifacts/studio/brand-team-en-dark.uia.txt)) { throw "read-only brand kit not announced" }
+          if (-not (Select-String -Quiet "`tPreEncode`tPre-encode renditions on this computer" artifacts/studio/preencode-en-dark.uia.txt)) { throw "pre-encode option not exposed" }
           foreach ($n in "uploads-ar","signin-ar","signin-en","shell-ar","shell-en","accounts-en","signout-ar","addpasskey-en","addpasskey-ar","upload-staged-ar","upload-staged-en","videos-ar","videos-en","search-ar","edit-en","bulk-ar","delete-en","analytics-ar","analytics-en","timeline-ar","encode-en") {
             if (-not (Select-String -Quiet "RESULT PASS" "artifacts/studio/$n.txt")) { throw "$n failed" }
             if (Test-Path "artifacts/studio/$n.txt.hang.txt") { throw "$n did not exit" }

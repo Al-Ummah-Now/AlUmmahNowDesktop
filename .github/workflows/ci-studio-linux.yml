@@ -58,13 +58,32 @@ jobs:
           run ar timeline "" timeline-ar artifacts/studio
           run ar encode encode:$PWD/source.mp4 encode-ar artifacts/studio
           run en encode encode:$PWD/source.mp4 encode-en artifacts/studio
+          # Studio screens (E19): captions and the cue editor, reports, channels and brand kit, pre-encode; dark and light.
+          for theme in dark light; do
+            for lang in ar en; do
+              AUN_THEME=$theme run $lang captions shell captions-$lang-$theme artifacts/studio
+              AUN_THEME=$theme run $lang captions shell captions-editor-$lang-$theme artifacts/studio "" captions-editor
+              AUN_THEME=$theme run $lang reports shell reports-$lang-$theme artifacts/studio
+              AUN_THEME=$theme run $lang reports shell reports-video-$lang-$theme artifacts/studio "" reports-video
+              AUN_THEME=$theme run $lang brand shell brand-$lang-$theme artifacts/studio
+              AUN_THEME=$theme run $lang brand shell brand-team-$lang-$theme artifacts/studio "" brand-team
+              AUN_THEME=$theme AUN_STAGE_DIR=$PWD/staged run $lang uploads shell preencode-$lang-$theme artifacts/studio "" preencode
+            done
+          done
           grep -h AUTOMATION artifacts/studio/*.log
-          test "$(cat artifacts/studio/*.log | grep -c 'RESULT PASS')" = 21
+          test "$(cat artifacts/studio/*.log | grep -c 'RESULT PASS')" = 49
           # Screen readers (Orca reads AT-SPI): named controls on the shell, search, upload and rows.
           grep -P "^button\tSign in$" artifacts/studio/signin-en.atspi.txt
           grep -P "\tChannel$" artifacts/studio/shell-en.atspi.txt
           grep -P "^check box\tSeerah" artifacts/studio/videos-en.atspi.txt
           grep -P "^button\tUpload 3 videos$" artifacts/studio/upload-staged-en.atspi.txt
+          grep -P "^button\tTranscribe on the server$" artifacts/studio/captions-en-dark.atspi.txt
+          grep -P "^button\tSave and publish$" artifacts/studio/captions-editor-en-dark.atspi.txt
+          grep -P "^button\tحفظ ونشر$" artifacts/studio/captions-editor-ar-dark.atspi.txt
+          grep -P "^button\tExport CSV$" artifacts/studio/reports-video-en-dark.atspi.txt
+          grep -P "^button\tSave brand kit$" artifacts/studio/brand-en-dark.atspi.txt
+          grep "Only the owner can change it" artifacts/studio/brand-team-en-dark.atspi.txt
+          grep -P "^check box\tPre-encode renditions on this computer$" artifacts/studio/preencode-en-dark.atspi.txt
           gst-discoverer-1.0 source.mp4.out.mp4 | tee artifacts/studio/discover.txt
           grep -qi 'h.264' artifacts/studio/discover.txt
           ! grep -qi '4:4:4' artifacts/studio/discover.txt

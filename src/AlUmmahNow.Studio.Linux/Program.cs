@@ -13,6 +13,8 @@ using AlUmmahNow.Studio.Shell;
 using AlUmmahNow.Studio.Upload;
 using AlUmmahNow.Studio.Videos;
 using AlUmmahNow.Studio.Analytics;
+using AlUmmahNow.Studio.Captions;
+using AlUmmahNow.Studio.Institution;
 
 // Settings and logs follow the XDG base directories.
 string XdgDir(string variable, string fallback)
@@ -51,11 +53,24 @@ var userAgent = "AlUmmahNowStudioLinux/" + version;
 IStudioAccounts accounts;
 IApiTransport transport;
 Func<string, IUploadService> uploadServiceFor;
+ICaptionsApi captionsApi;
+IInstitutionApi institutionApi;
+IInsightsApi insightsApi;
+// On-device transcription and pre-encoding need Core's whisper and HLS packaging (v0.4); until then they stay hidden.
+IOnDeviceTranscriber? transcriber = null;
+PreEncodeCoordinator? preEncoder = null;
 if (demo)
 {
     accounts = new DemoAccounts();
     transport = new DemoTransport();
     uploadServiceFor = account => new SimulatedUploadService(account, TimeSpan.FromMilliseconds(250));
+    var demoServices = new DemoStudioServices();
+    captionsApi = demoServices;
+    institutionApi = demoServices;
+    insightsApi = demoServices;
+    transcriber = new DemoTranscriber();
+    var demoMedia = new DemoRenditionPackaging();
+    preEncoder = new PreEncodeCoordinator(() => new LocalRenditionJob(demoMedia, demoMedia, demoMedia, demoServices), Path.Combine(stateDir, "demo-renditions"));
 }
 else
 {
@@ -63,6 +78,11 @@ else
     accounts = core;
     transport = new CoreApiTransport(core, environment.VideosApi, userAgent, localizer.Language);
     uploadServiceFor = account => new CoreUploadService(core, environment.VideosApi, userAgent, Path.Combine(stateDir, "uploads"), account);
+    var session = new AccountsAuthSession(core);
+    var services = new StudioServicesClient(new StudioHttpClient(environment.VideosApi, session.GetAccessTokenAsync, userAgent, localizer.Language));
+    captionsApi = services;
+    institutionApi = services;
+    insightsApi = services;
 }
 
 var api = new StudioApiClient(transport);
@@ -74,9 +94,15 @@ var exitCode = 0;
 app.OnActivate += (_, _) =>
 {
     Gtk.Widget.SetDefaultDirection(localizer.IsRtl ? Gtk.TextDirection.Rtl : Gtk.TextDirection.Ltr);
+    // AUN_THEME=dark|light forces a scheme (CI screenshots); otherwise the desktop's preference applies.
+    var theme = Environment.GetEnvironmentVariable("AUN_THEME");
+    Adw.StyleManager.GetDefault().SetColorScheme(theme == "dark" ? Adw.ColorScheme.ForceDark : theme == "light" ? Adw.ColorScheme.ForceLight : Adw.ColorScheme.Default);
+    var css = Gtk.CssProvider.New();
+    css.LoadFromString(".aun-pad { padding: 12px 14px; }");
+    Gtk.StyleContext.AddProviderForDisplay(Gdk.Display.GetDefault()!, css, 600);
     // The view-model posts its updates to the GTK main loop's synchronization context.
     var shell = new StudioShellViewModel(accounts, api);
-    var uploadsVm = new UploadsViewModel(shell, api, uploadServiceFor, Path.Combine(stateDir, demo ? "demo" : "studio"));
+    var uploadsVm = new UploadsViewModel(shell, api, uploadServiceFor, Path.Combine(stateDir, demo ? "demo" : "studio")) { PreEncoder = preEncoder };
     var banner = demo ? localizer["studio.shell.demo"] : environment.Name != "prod" ? localizer.Format("studio.shell.environment", environment.Name.ToUpperInvariant()) : null;
     var window = new StudioWindow(app, localizer, shell, banner);
 
@@ -98,12 +124,30 @@ app.OnActivate += (_, _) =>
     var analytics = new AnalyticsPage(localizer, analyticsVm);
     var encodePage = new EncodePage(localizer, encode);
     var timeline = new TimelinePage(localizer);
+    var captionsVm = new CaptionsViewModel(shell, api, captionsApi, transcriber);
+    var captions = new CaptionsPage(localizer, captionsVm, window.Window);
+    var insightsVm = new InsightsViewModel(shell, api, insightsApi);
+    var insights = new InsightsPage(localizer, insightsVm, window.Window);
+    var institutionVm = new InstitutionViewModel(shell, institutionApi);
+    var brand = new BrandPage(localizer, institutionVm, window.Window);
     window.AddPage("uploads", localizer["studio.tab.upload"], "document-send-symbolic", uploads.Root);
     window.AddPage("videos", localizer["studio.tab.videos"], "view-list-symbolic", videos.Root);
+    window.AddPage("captions", localizer["studio.tab.captions"], "media-view-subtitles-symbolic", captions.Root);
     window.AddPage("analytics", localizer["studio.tab.analytics"], "power-profile-performance-symbolic", analytics.Root);
+    window.AddPage("reports", localizer["studio.tab.reports"], "x-office-spreadsheet-symbolic", insights.Root);
+    window.AddPage("brand", localizer["studio.tab.brand"], "applications-graphics-symbolic", brand.Root);
     window.AddPage("encode", localizer["studio.tab.encode"], "media-record-symbolic", encodePage.Root);
     window.AddPage("timeline", localizer["studio.tab.timeline"], "video-x-generic-symbolic", timeline.Root);
     window.ShowPage(tabName);
+
+    // Studio screens (E19): the scene's data actually rendered, not only the shell.
+    bool SceneOk() => tabName switch
+    {
+        "captions" => scene == "captions-editor" ? captionsVm.Editor != null : captionsVm.Drafts != null,
+        "reports" => scene == "reports-video" ? insightsVm.Retention != null : insightsVm.Summary != null,
+        "brand" => scene == "brand-team" ? institutionVm.State != null && !institutionVm.CanEdit : institutionVm.State is { CanEdit: true },
+        _ => scene != "preencode" || uploadsVm.Items.Any(i => preEncoder?.StatusOf(i.Id) != null),
+    };
     window.Window.Present();
 
     GLib.Functions.TimeoutAdd(0, 300, () =>
@@ -130,6 +174,10 @@ app.OnActivate += (_, _) =>
         GLib.Functions.TimeoutAdd(0, 4000, () =>
         {
             if (scene == "accounts") window.OpenAccountMenu();
+            else if (scene.StartsWith("captions", StringComparison.Ordinal)) captions.RunScene(scene);
+            else if (scene == "reports-video" && insightsVm.VideoStats.FirstOrDefault() is { } top) insightsVm.VideoId = top.VideoId;
+            else if (scene == "brand-team" && shell.Channels.FirstOrDefault(c => c.Role != ChannelRole.Owner) is { } managed) institutionVm.Switch(managed);
+            else if (scene == "preencode") uploadsVm.Start();
             else if (scene == "signout") window.AskSignOut();
             else videos.RunScene(scene);
             return false;
@@ -146,7 +194,9 @@ app.OnActivate += (_, _) =>
             var pass = automation.StartsWith("encode:", StringComparison.Ordinal) ? encoded
                 : automation == "shell" ? shell.State == ShellState.Ready && shell.ActiveChannel != null
                 : uploadsDone || tabName != "uploads";
-            Log.For("automation").Info($"AUTOMATION {tabName} scene={scene} shell={shell.State} channel={shell.ActiveChannel?.Id} accounts={shell.AccountList.Count} uploads={items.Count} uploadsDone={uploadsDone} encode={automationJob?.Status} encoder={automationJob?.UsedEncoder?.Name} error={automationJob?.Error} RESULT {(pass ? "PASS" : "FAIL")}");
+            var sceneOk = SceneOk();
+            pass = pass && sceneOk;
+            Log.For("automation").Info($"AUTOMATION {tabName} scene={scene} sceneOk={sceneOk} shell={shell.State} channel={shell.ActiveChannel?.Id} accounts={shell.AccountList.Count} uploads={items.Count} uploadsDone={uploadsDone} encode={automationJob?.Status} encoder={automationJob?.UsedEncoder?.Name} error={automationJob?.Error} RESULT {(pass ? "PASS" : "FAIL")}");
             exitCode = pass ? 0 : 3;
             app.Quit();
             return false;
