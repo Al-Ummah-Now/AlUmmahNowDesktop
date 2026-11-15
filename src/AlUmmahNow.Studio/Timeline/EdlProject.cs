@@ -189,6 +189,12 @@ public static class EdlProject
 /// <summary>Editor times and file names, the same on every platform.</summary>
 public static class EditorTime
 {
+    /// <summary>
+    /// The time axis is never mirrored: 0:00 sits on the left in Arabic too, as on the Mac editor and in video editors
+    /// generally. Only the toolbars, the clip list and labels follow the interface direction.
+    /// </summary>
+    public const bool TimeIsRtl = false;
+
     /// <summary>Saved projects are Core's EDL JSON.</summary>
     public const string ProjectExtension = ".aunedit";
 

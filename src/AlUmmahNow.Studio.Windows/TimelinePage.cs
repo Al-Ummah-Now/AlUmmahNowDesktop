@@ -14,7 +14,8 @@ namespace AlUmmahNow.Studio.WindowsApp;
 
 /// <summary>
 /// The editor (E19 19.5): add videos, cut them on one video track, export an MP4 with MediaComposition and queue it
-/// for upload. The timeline is drawn (mirrored in Arabic); the clip list under it gives the same clips to the keyboard
+/// for upload. The timeline is drawn with time running left to right in both languages (only the toolbars, labels and
+/// clip list follow Arabic's direction); the clip list under it gives the same clips to the keyboard
 /// and to screen readers.
 /// </summary>
 internal sealed class TimelinePage
@@ -89,7 +90,7 @@ internal sealed class TimelinePage
         _doneRow.Children.Add(Ui.Button(l["studio.editor.upload"], QueueUpload, accent: true));
         _doneRow.Visibility = Visibility.Collapsed;
 
-        // The canvas computes mirrored coordinates itself, so it must not be mirrored again.
+        // Time runs left to right in both languages, so the canvas is never mirrored by the page's RTL flow.
         _canvas = new Canvas
         {
             Height = TrackTop + TrackHeight + 16,
@@ -226,7 +227,7 @@ internal sealed class TimelinePage
         Draw();
     }
 
-    private TimelineViewport Viewport() => TimelineViewport.Fit(_vm.Timeline.DurationMs, Math.Max(1, _canvas.ActualWidth), _l.IsRtl);
+    private TimelineViewport Viewport() => TimelineViewport.Fit(_vm.Timeline.DurationMs, Math.Max(1, _canvas.ActualWidth), EditorTime.TimeIsRtl);
 
     private void Draw()
     {
@@ -244,7 +245,7 @@ internal sealed class TimelinePage
             Canvas.SetLeft(tick, x);
             Canvas.SetTop(tick, major ? 4 : 12);
             _canvas.Children.Add(tick);
-            if (major) Place(new TextBlock { Text = EditorTime.Format(ms), FontSize = 11, Foreground = dim }, x + (_l.IsRtl ? -4 : 4), 2, _l.IsRtl);
+            if (major) Place(new TextBlock { Text = EditorTime.Format(ms), FontSize = 11, Foreground = dim }, x + 4, 2, alignEnd: false);
         }
 
         var fill = Ui.Brush("AccentFillColorDefaultBrush");
@@ -268,7 +269,8 @@ internal sealed class TimelinePage
                 Padding = new Thickness(8, 6, 8, 6),
                 Child = new StackPanel
                 {
-                    FlowDirection = _l.IsRtl ? FlowDirection.RightToLeft : FlowDirection.LeftToRight,
+                    // Labels start at the clip's start (its left edge); Arabic names still shape right to left inside.
+                    FlowDirection = FlowDirection.LeftToRight,
                     Children =
                     {
                         new TextBlock { Text = Name(c), Foreground = onFill, TextTrimming = TextTrimming.CharacterEllipsis, TextReadingOrder = TextReadingOrder.DetectFromContent },
@@ -322,8 +324,9 @@ internal sealed class TimelinePage
     {
         var shift = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(global::Windows.System.VirtualKey.Shift).HasFlag(global::Windows.UI.Core.CoreVirtualKeyStates.Down);
         var step = shift ? 1000 : 100;
-        var forward = _l.IsRtl ? global::Windows.System.VirtualKey.Left : global::Windows.System.VirtualKey.Right;
-        var back = _l.IsRtl ? global::Windows.System.VirtualKey.Right : global::Windows.System.VirtualKey.Left;
+        // Time runs left to right in both languages, so Right always moves forward.
+        var forward = global::Windows.System.VirtualKey.Right;
+        var back = global::Windows.System.VirtualKey.Left;
         if (e.Key == forward) _vm.Seek(_vm.PlayheadMs + step);
         else if (e.Key == back) _vm.Seek(_vm.PlayheadMs - step);
         else if (e.Key == global::Windows.System.VirtualKey.Delete) _vm.Delete();

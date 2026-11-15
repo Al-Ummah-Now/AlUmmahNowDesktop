@@ -149,6 +149,15 @@ public class TimelineTests
         Assert.Equal(988, rtl.ToX(0), 6);
     }
 
+    [Fact]
+    public void Editor_time_axis_runs_left_to_right_in_every_language()
+    {
+        // Matches the Mac editor and video editors generally: 0:00 on the left, in Arabic too.
+        var v = TimelineViewport.Fit(60_000, 1000, EditorTime.TimeIsRtl);
+        Assert.True(v.ToX(0) < v.ToX(60_000));
+        Assert.Equal(30_000, v.ToMs(v.ToX(30_000)));
+    }
+
     [Theory]
     [InlineData(0, "0:00.0")]
     [InlineData(61_250, "1:01.2")]

@@ -8,7 +8,8 @@ namespace AlUmmahNow.Studio.Linux;
 
 /// <summary>
 /// The editor (E19 19.5): add videos, cut them on one video track, export an MP4 with GStreamer Editing Services and
-/// queue it for upload. The timeline is drawn (mirrored in Arabic); the clip list under it gives the same clips to the
+/// queue it for upload. The timeline is drawn with time running left to right in both languages (only the toolbars,
+/// labels and clip list follow Arabic's direction); the clip list under it gives the same clips to the
 /// keyboard and to screen readers.
 /// </summary>
 public sealed class TimelinePage
@@ -126,8 +127,9 @@ public sealed class TimelinePage
         keys.OnKeyPressed += (_, a) =>
         {
             var step = (a.State & Gdk.ModifierType.ShiftMask) != 0 ? 1000 : 100;
-            var forward = _l.IsRtl ? Gdk.Constants.KEY_Left : Gdk.Constants.KEY_Right;
-            var back = _l.IsRtl ? Gdk.Constants.KEY_Right : Gdk.Constants.KEY_Left;
+            // Time runs left to right in both languages, so Right always moves forward.
+            var forward = Gdk.Constants.KEY_Right;
+            var back = Gdk.Constants.KEY_Left;
             if (a.Keyval == forward) _vm.Seek(_vm.PlayheadMs + step);
             else if (a.Keyval == back) _vm.Seek(_vm.PlayheadMs - step);
             else if (a.Keyval == Gdk.Constants.KEY_Delete) _vm.Delete();
@@ -245,12 +247,12 @@ public sealed class TimelinePage
         _area.QueueDraw();
     }
 
-    private TimelineViewport Viewport() => TimelineViewport.Fit(_vm.Timeline.DurationMs, Math.Max(1, _area.GetWidth()), _l.IsRtl);
+    private TimelineViewport Viewport() => TimelineViewport.Fit(_vm.Timeline.DurationMs, Math.Max(1, _area.GetWidth()), EditorTime.TimeIsRtl);
 
     private void Draw(Cairo.Context cr, int width, int height)
     {
         var dark = Adw.StyleManager.GetDefault().GetDark();
-        var v = TimelineViewport.Fit(_vm.Timeline.DurationMs, width, _l.IsRtl);
+        var v = TimelineViewport.Fit(_vm.Timeline.DurationMs, width, EditorTime.TimeIsRtl);
         var fg = dark ? (0.92, 0.92, 0.92) : (0.12, 0.12, 0.12);
 
         // Ruler: a tick every second or every five, labelled every 5 or 10.
@@ -263,7 +265,7 @@ public sealed class TimelinePage
             var major = ms % (step * 5) == 0;
             cr.Rectangle(x, major ? 4 : 12, 1, major ? RulerHeight - 4 : RulerHeight - 12);
             cr.Fill();
-            if (major) Text(cr, Time(ms), x + (_l.IsRtl ? -4 : 4), 2, fg, 0.7, alignEnd: _l.IsRtl, small: true);
+            if (major) Text(cr, Time(ms), x + 4, 2, fg, 0.7, alignEnd: false, small: true);
         }
 
         var names = _vm.SourceNames;
@@ -289,9 +291,10 @@ public sealed class TimelinePage
             cr.Save();
             cr.Rectangle(left + 6, TrackTop, Math.Max(0, w - 12), TrackHeight);
             cr.Clip();
-            var start = _l.IsRtl ? left + w - 8 : left + 8;
-            Text(cr, Name(c), start, TrackTop + 8, (1, 1, 1), 1, alignEnd: _l.IsRtl);
-            Text(cr, Time(c.TimelineDurationMs), start, TrackTop + 34, (1, 1, 1), 0.8, alignEnd: _l.IsRtl, small: true);
+            // Labels start at the clip's start (its left edge); Arabic names still shape right to left inside.
+            var start = left + 8;
+            Text(cr, Name(c), start, TrackTop + 8, (1, 1, 1), 1, alignEnd: false);
+            Text(cr, Time(c.TimelineDurationMs), start, TrackTop + 34, (1, 1, 1), 0.8, alignEnd: false, small: true);
             cr.Restore();
         }
 

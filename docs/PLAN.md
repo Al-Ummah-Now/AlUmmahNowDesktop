@@ -33,6 +33,8 @@ desktop apps. Do not use net9-only APIs in `App` or `CoreBridge`.
   (GES through a small P/Invoke, since Gir.Core has no binding), Media Foundation and MediaComposition on
   Windows. Every editor edit is a Core `edl_apply_json` call, so cuts behave the same in every app.
   Demo mode swaps only the server; `AUN_REAL_MEDIA=1` also makes a demo pre-encode use the real encoders.
+- **The editor's time axis runs left to right in Arabic too** (0:00 on the left), like the Mac editor and video
+  editors generally. Only the toolbars, labels and clip list follow the interface direction.
 
 - **Tizen playback** uses `Tizen.Multimedia.Player`. "AVPlay" in the spec is the Web API name; the .NET
   equivalent is this player. `tizen50` keeps Samsung's 2019+ TVs in range (Epic 15.9). The viewer compiles
