@@ -31,7 +31,7 @@ jobs:
           LIBGL_ALWAYS_SOFTWARE: "1"
         run: |
           mkdir -p artifacts/studio watched
-          truncate -s 2M watched/lecture-one.mp4 watched/lecture-two.mov
+          truncate -s 2M watched/talk-one.mp4 watched/talk-two.mov
           gst-launch-1.0 -e videotestsrc num-buffers=150 ! video/x-raw,width=640,height=360,framerate=30/1 ! x264enc ! mp4mux name=m ! filesink location=$PWD/source.mp4 \
             audiotestsrc num-buffers=220 ! audioconvert ! avenc_aac ! m.
           # dbus-run-session gives each run an accessibility bus, so the AT-SPI dump sees the app.
@@ -43,7 +43,7 @@ jobs:
           run en uploads shell shell-en artifacts/studio
           run en uploads shell accounts-en artifacts/studio "" accounts
           run ar uploads shell signout-ar artifacts/studio "" signout
-          mkdir -p staged && truncate -s 1500K "staged/درس 1.mp4" "staged/درس 2.mp4" "staged/lesson 10.mp4"
+          mkdir -p staged && truncate -s 1500K "staged/مرئي 1.mp4" "staged/مرئي 2.mp4" "staged/video 10.mp4"
           AUN_STAGE_DIR=$PWD/staged run ar uploads shell upload-staged-ar artifacts/studio
           AUN_STAGE_DIR=$PWD/staged run en uploads shell upload-staged-en artifacts/studio
           run ar videos shell videos-ar artifacts/studio

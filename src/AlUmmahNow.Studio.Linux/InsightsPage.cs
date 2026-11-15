@@ -92,6 +92,7 @@ public sealed class InsightsPage
         _retentionBox.Append(_retention.Area);
         _retentionBox.Append(_retentionSummary);
         page.Append(_retentionBox);
+        _saved.SetVisible(false);
         page.Append(_saved);
 
         _vm.PropertyChanged += (_, _) => Render();
@@ -139,7 +140,7 @@ public sealed class InsightsPage
             _syncing = false;
         }
 
-        _status.SetText(_vm.IsLoading ? _l["studio.shell.loading"] : _vm.ErrorKey is { } k ? _l[k] : _vm.Daily.Count == 0 ? _l["studio.analytics.empty"] : "");
+        Ui.Status(_status, _vm.IsLoading ? _l["studio.shell.loading"] : _vm.ErrorKey is { } k ? _l[k] : _vm.Daily.Count == 0 ? _l["studio.analytics.empty"] : null);
 
         Ui.Clear(_cards);
         if (_vm.VideoId == null && _vm.Summary is { } s)
@@ -242,7 +243,7 @@ public sealed class InsightsPage
             var target = await dialog.SaveAsync(_window);
             if (target?.GetPath() is not { } path) return;
             await File.WriteAllBytesAsync(path, file.Bytes);
-            _saved.SetText(_l.Format("studio.insights.saved", Path.GetFileName(path)));
+            Ui.Status(_saved, _l.Format("studio.insights.saved", Path.GetFileName(path)));
         }
         catch (GLib.GException)
         {
@@ -250,7 +251,7 @@ public sealed class InsightsPage
         }
         catch (IOException)
         {
-            _saved.SetText(_l["studio.insights.saveFailed"]);
+            Ui.Status(_saved, _l["studio.insights.saveFailed"]);
         }
     }
 }

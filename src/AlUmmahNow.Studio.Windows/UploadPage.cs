@@ -73,8 +73,8 @@ internal sealed class UploadPage
         Root.Children.Add(watchRow);
         Root.Children.Add(_error);
 
-        var expander = new Expander { Header = l["studio.upload.forAll"], IsExpanded = true, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch, Content = BuildDefaults() };
-        Root.Children.Add(expander);
+        _forAll = new Expander { Header = l["studio.upload.forAll"], IsExpanded = true, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch, Content = BuildDefaults() };
+        Root.Children.Add(_forAll);
 
         AutomationProperties.SetHeadingLevel(_stagedTitle, AutomationHeadingLevel.Level2);
         Root.Children.Add(_stagedTitle);
@@ -140,6 +140,11 @@ internal sealed class UploadPage
     }
 
     public StackPanel Root { get; }
+
+    private readonly Expander _forAll;
+
+    /// <summary>CI screenshots: fold "Set for all" so the queue is in view.</summary>
+    public void ShowQueue() => _forAll.IsExpanded = false;
 
     private UploadDefaults D => _vm.Defaults;
 

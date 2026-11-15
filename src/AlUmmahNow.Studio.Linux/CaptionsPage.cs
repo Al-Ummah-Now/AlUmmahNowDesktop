@@ -140,11 +140,9 @@ public sealed class CaptionsPage
             _syncing = false;
         }
 
-        _status.SetText(_vm.IsLoading ? _l["studio.shell.loading"] : _vm.Videos.Count == 0 ? _l["studio.captions.noVideos"] : "");
-        _error.SetText(_vm.ErrorKey is { } e ? _l[e] : "");
-        _error.SetVisible(_vm.ErrorKey != null);
-        _notice.SetText(_vm.NoticeKey is { } n ? _l[n] : "");
-        _notice.SetVisible(_vm.NoticeKey != null);
+        Ui.Status(_status, _vm.IsLoading ? _l["studio.shell.loading"] : _vm.Videos.Count == 0 ? _l["studio.captions.noVideos"] : null);
+        Ui.Status(_error, _vm.ErrorKey is { } e ? _l[e] : null);
+        Ui.Status(_notice, _vm.NoticeKey is { } n ? _l[n] : null);
 
         Ui.Clear(_drafts);
         var drafts = _vm.Drafts?.Drafts ?? Array.Empty<CaptionDraftSummary>();
@@ -157,7 +155,7 @@ public sealed class CaptionsPage
 
         if (_vm.Minutes is { } m)
         {
-            _minutes.SetText(m.Unlimited ? _l["studio.captions.minutes.unlimited"]
+            Ui.Status(_minutes, m.Unlimited ? _l["studio.captions.minutes.unlimited"]
                 : m.HasNoPlan ? _l["studio.captions.minutes.none"]
                 : m.MinutesNeeded is { } need ? _l.Format("studio.captions.minutes.needed", _l.Number((long)Math.Ceiling(need)), _l.Number((long)Math.Floor(m.Remaining ?? 0)))
                 : _l.Format("studio.captions.minutes.left", _l.Number((long)Math.Floor(m.Remaining ?? 0))));
@@ -348,10 +346,8 @@ public sealed class CueEditorView
         _redo.SetSensitive(_vm.CanRedo);
         _save.SetSensitive(_vm.IsDirty && !_vm.IsSaving);
         _publish.SetSensitive(!_vm.IsSaving);
-        _error.SetText(_vm.ErrorKey is { } e ? _l[e] : "");
-        _error.SetVisible(_vm.ErrorKey != null);
-        _notice.SetText(_vm.NoticeKey is { } n && !_vm.IsDirty ? _l[n] : "");
-        _notice.SetVisible(_vm.NoticeKey != null && !_vm.IsDirty);
+        Ui.Status(_error, _vm.ErrorKey is { } e ? _l[e] : null);
+        Ui.Status(_notice, _vm.NoticeKey is { } n && !_vm.IsDirty ? _l[n] : null);
 
         // Rebuilding while typing would steal focus: only rebuild when the list itself changed shape.
         var list = _vm.Cues;

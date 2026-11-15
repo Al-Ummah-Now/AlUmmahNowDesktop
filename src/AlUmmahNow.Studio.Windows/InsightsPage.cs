@@ -14,7 +14,7 @@ internal sealed class InsightsPage
     private readonly Func<string, Task<string?>> _pickSave;
     private readonly ComboBox _scope;
     private readonly TextBlock _status = Ui.Text("", dim: true);
-    private readonly StackPanel _cards = Ui.Row(12);
+    private readonly Grid _cards = new() { ColumnSpacing = 12 };
     private readonly BarChart _daily;
     private readonly TextBlock _dailySummary = Ui.Text("", dim: true);
     private readonly Grid _dailyTable = new() { ColumnSpacing = 24, RowSpacing = 2 };
@@ -131,6 +131,7 @@ internal sealed class InsightsPage
         _status.Text = _vm.IsLoading ? _l["studio.shell.loading"] : _vm.ErrorKey is { } k ? _l[k] : _vm.Daily.Count == 0 ? _l["studio.analytics.empty"] : "";
 
         _cards.Children.Clear();
+        _cards.ColumnDefinitions.Clear();
         if (_vm.VideoId == null && _vm.Summary is { } s)
         {
             Card(_l["studio.insights.totalViews"], _l.Number(s.TotalViews));
@@ -227,8 +228,10 @@ internal sealed class InsightsPage
 
     private void Card(string label, string value)
     {
+        // Equal columns that share the width, so five cards fit in Arabic and English alike.
         var card = Ui.Card(2);
-        card.MinWidth = 150;
+        _cards.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        Grid.SetColumn(card, _cards.ColumnDefinitions.Count - 1);
         card.Children.Add(new TextBlock { Text = value, Style = (Style)Application.Current.Resources["SubtitleTextBlockStyle"] });
         card.Children.Add(Ui.Text(label, dim: true));
         AutomationProperties.SetName(card, label + ": " + value);

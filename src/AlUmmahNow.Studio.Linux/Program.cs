@@ -177,7 +177,11 @@ app.OnActivate += (_, _) =>
             else if (scene.StartsWith("captions", StringComparison.Ordinal)) captions.RunScene(scene);
             else if (scene == "reports-video" && insightsVm.VideoStats.FirstOrDefault() is { } top) insightsVm.VideoId = top.VideoId;
             else if (scene == "brand-team" && shell.Channels.FirstOrDefault(c => c.Role != ChannelRole.Owner) is { } managed) institutionVm.Switch(managed);
-            else if (scene == "preencode") uploadsVm.Start();
+            else if (scene == "preencode")
+            {
+                uploadsVm.Start();
+                uploads.ShowQueue();
+            }
             else if (scene == "signout") window.AskSignOut();
             else videos.RunScene(scene);
             return false;

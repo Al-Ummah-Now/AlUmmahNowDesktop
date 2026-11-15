@@ -194,8 +194,8 @@ public sealed class BrandPage
             row.Append(text);
             if (ReferenceEquals(c, _vm.Active) || c.Id == _vm.Active?.Id)
             {
-                var active = Ui.Label(_l["studio.channels.active"], start: false);
-                active.AddCssClass("accent");
+                var active = Ui.Label(_l["studio.channels.active"], dim: true, start: false);
+                active.SetWrap(false);
                 active.SetValign(Gtk.Align.Center);
                 row.Append(active);
             }
@@ -209,13 +209,10 @@ public sealed class BrandPage
             _channels.Append(row);
         }
 
-        _status.SetText(_vm.IsLoading ? _l["studio.shell.loading"] : "");
-        _readOnly.SetText(_vm.State != null && !_vm.CanEdit ? _l["studio.brand.readOnly"] : "");
-        _readOnly.SetVisible(_vm.State != null && !_vm.CanEdit);
-        _error.SetText(_vm.ErrorKey is { } e ? _l[e] : "");
-        _error.SetVisible(_vm.ErrorKey != null);
-        _notice.SetText(_vm.NoticeKey is { } n && !_vm.IsDirty ? _l[n] : "");
-        _notice.SetVisible(_vm.NoticeKey != null && !_vm.IsDirty);
+        Ui.Status(_status, _vm.IsLoading ? _l["studio.shell.loading"] : null);
+        Ui.Status(_readOnly, _vm.State != null && !_vm.CanEdit ? _l["studio.brand.readOnly"] : null);
+        Ui.Status(_error, _vm.ErrorKey is { } e ? _l[e] : null);
+        Ui.Status(_notice, _vm.NoticeKey is { } n && !_vm.IsDirty ? _l[n] : null);
 
         var k = _vm.Kit;
         var lib = _vm.Library;

@@ -64,10 +64,10 @@ public sealed class UploadPage
         page.Append(_error);
 
         // Set for all
-        var expander = Gtk.Expander.New(l["studio.upload.forAll"]);
-        expander.SetExpanded(true);
-        expander.SetChild(BuildDefaults());
-        page.Append(expander);
+        _forAll = Gtk.Expander.New(l["studio.upload.forAll"]);
+        _forAll.SetExpanded(true);
+        _forAll.SetChild(BuildDefaults());
+        page.Append(_forAll);
 
         // Staged
         _stagedTitle.AddCssClass("heading");
@@ -127,6 +127,11 @@ public sealed class UploadPage
     }
 
     public Gtk.ScrolledWindow Root { get; }
+
+    private readonly Gtk.Expander _forAll;
+
+    /// <summary>CI screenshots: fold "Set for all" so the queue is in view.</summary>
+    public void ShowQueue() => _forAll.SetExpanded(false);
 
     private UploadDefaults D => _vm.Defaults;
 

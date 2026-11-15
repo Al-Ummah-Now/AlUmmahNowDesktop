@@ -205,6 +205,8 @@ public sealed partial class App : Application
             "brand" => scene == "brand-team" ? institutionVm.State != null && !institutionVm.CanEdit : institutionVm.State is { CanEdit: true },
             _ => scene != "preencode" || uploadsVm.Items.Any(i => preEncoder?.StatusOf(i.Id) != null),
         };
+        // Demo screenshots use the whole screen of the CI desktop.
+        if (demo && window.Window.AppWindow.Presenter is Microsoft.UI.Windowing.OverlappedPresenter presenter) presenter.Maximize();
         window.Window.Activate();
         window.Window.Closed += (_, _) => uploadsVm.Dispose();
 
@@ -241,7 +243,11 @@ public sealed partial class App : Application
                 else if (scene.StartsWith("captions", StringComparison.Ordinal)) captions.RunScene(scene);
                 else if (scene == "reports-video" && insightsVm.VideoStats.FirstOrDefault() is { } top) insightsVm.VideoId = top.VideoId;
                 else if (scene == "brand-team" && shell.Channels.FirstOrDefault(c => c.Role != ChannelRole.Owner) is { } managed) institutionVm.Switch(managed);
-                else if (scene == "preencode") uploadsVm.Start();
+                else if (scene == "preencode")
+                {
+                    uploadsVm.Start();
+                    uploads.ShowQueue();
+                }
                 else videos.RunScene(scene);
             };
             _sceneTimer.Start();

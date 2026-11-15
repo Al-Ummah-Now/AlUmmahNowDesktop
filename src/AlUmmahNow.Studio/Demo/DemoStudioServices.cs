@@ -207,7 +207,7 @@ public sealed class DemoStudioServices : ICaptionsApi, IInstitutionApi, IInsight
         return Task.FromResult(new VideoStats
         {
             VideoId = videoId,
-            Title = DemoTitles.ElementAtOrDefault(n - 1) ?? videoId,
+            Title = DemoTransport.VideoTitles.ElementAtOrDefault(n - 1) ?? videoId,
             Views = 1200 - (n * 130),
             RangeViews = daily.Sum(d => d.Views),
             RangeLikes = 40 - (n * 4),
@@ -236,12 +236,6 @@ public sealed class DemoStudioServices : ICaptionsApi, IInstitutionApi, IInsight
             WatchTimeSeconds = (36000 + ((i * 1700) % 9000)) * scale,
         }).ToList();
     }
-
-    private static readonly string[] DemoTitles =
-    {
-        "تفسير سورة الكهف — الحلقة الأولى", "Seerah: the early years in Makkah", "أحكام الصيام للمبتدئين", "Arabic grammar, part 3",
-        "خطبة الجمعة: الصبر", "Hadith of the week: intentions", "قصص الأنبياء: يونس عليه السلام", "Q&A: prayer while travelling",
-    };
 
     // Renditions
 

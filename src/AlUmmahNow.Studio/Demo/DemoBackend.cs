@@ -63,14 +63,16 @@ public sealed class DemoTransport : IApiTransport
     private readonly List<Dictionary<string, object?>> _videos;
     private readonly List<(Dictionary<string, object?> Video, DateTimeOffset At, string Status)> _deleted = new();
 
+    /// <summary>The demo channel's videos, shared with the demo captions and reports.</summary>
+    public static readonly IReadOnlyList<string> VideoTitles = new[]
+    {
+        "تأملات في سورة الكهف — الجزء الأول", "Seerah: the early years in Makkah", "أحكام الصيام للمبتدئين", "Arabic grammar, part 3",
+        "خطبة الجمعة: الصبر", "Hadith of the week: intentions", "قصص الأنبياء: يونس عليه السلام", "Q&A: prayer while travelling",
+    };
+
     public DemoTransport()
     {
-        string[] titles =
-        {
-            "تأملات في سورة الكهف — الجزء الأول", "Seerah: the early years in Makkah", "أحكام الصيام للمبتدئين", "Arabic grammar, part 3",
-            "خطبة الجمعة: الصبر", "Hadith of the week: intentions", "قصص الأنبياء: يونس عليه السلام", "Q&A: prayer while travelling",
-        };
-        _videos = titles.Select((t, i) => new Dictionary<string, object?>
+        _videos = VideoTitles.Select((t, i) => new Dictionary<string, object?>
         {
             ["id"] = "demo-v" + (i + 1),
             ["title"] = t,
