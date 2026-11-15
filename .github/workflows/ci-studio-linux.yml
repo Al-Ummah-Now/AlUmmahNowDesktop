@@ -28,6 +28,9 @@ jobs:
         env:
           GDK_BACKEND: x11
           GSK_RENDERER: cairo
+          # Repaint every frame: under Xvfb the cairo renderer's partial repaints leave stale pixels (bits of
+          # replaced buttons) in the captures.
+          GSK_DEBUG: full-redraw
           LIBGL_ALWAYS_SOFTWARE: "1"
         run: |
           mkdir -p artifacts/studio watched

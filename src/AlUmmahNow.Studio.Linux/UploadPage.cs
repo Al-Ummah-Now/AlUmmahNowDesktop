@@ -480,10 +480,8 @@ public sealed class UploadPage
             }
 
             if (preRunning) _buttons.Append(Ui.Named(Ui.Button(l["studio.upload.preEncodeStop"], () => vm.PreEncoder?.Cancel(_id), "flat"), l.Format("studio.upload.preEncodeStopFor", item.Title)));
-            // The buttons change width and the bar moves: redraw the whole window, since the cairo renderer leaves
-            // bits of the old buttons behind when only the row is redrawn.
-            if (Root.GetNative() is Gtk.Widget window) window.QueueDraw();
-            else Root.QueueDraw();
+            // The buttons change width: redraw the whole row so no part of the old ones is left on screen.
+            Root.QueueDraw();
         }
 
         internal static string PreEncodeText(Localizer l, PreEncodeStatus s) => l.Format(s.LabelKey, l.Number(s.Percent));
