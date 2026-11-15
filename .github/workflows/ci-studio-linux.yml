@@ -82,18 +82,30 @@ jobs:
           for theme in dark light; do
             for lang in ar en; do
               AUN_THEME=$theme run $lang timeline "" editor-$lang-$theme artifacts/studio "" editor
+              # Titles (19.5 + 19.9): a bilingual lower third in the demo brand kit's look and a centred title.
+              AUN_THEME=$theme run $lang timeline "" editor-titles-$lang-$theme artifacts/studio "" editor-titles
             done
           done
           AUN_EXIT_AFTER=60 AUN_EXPORT_TO=$PWD/edited.mp4 run en timeline export editor-export-en artifacts/studio "" editor
+          # A titled export: the app checks the lower third's box colour in the exported picture.
+          AUN_EXIT_AFTER=70 AUN_EXPORT_TO=$PWD/titled.mp4 run ar timeline export editor-titles-export-ar artifacts/studio "" editor-titles
           mkdir -p real && cp source.mp4 real/talk.mp4
           AUN_EXIT_AFTER=60 AUN_REAL_MEDIA=1 AUN_STAGE_DIR=$PWD/real run en uploads preencode preencode-real-en artifacts/studio "" preencode
           grep -h AUTOMATION artifacts/studio/*.log
-          test "$(cat artifacts/studio/*.log | grep -c 'RESULT PASS')" = 53
+          test "$(cat artifacts/studio/*.log | grep -c 'RESULT PASS')" = 58
+          grep "TITLE CHECK" artifacts/studio/editor-titles-export-ar.log | grep -q "; ok"
+          grep -q "titles=2 titleInExport=True" artifacts/studio/editor-titles-export-ar.log
+          grep -P "^button\tUpdate text$" artifacts/studio/editor-titles-en-dark.atspi.txt
+          grep -P "^button\tحدّث النص$" artifacts/studio/editor-titles-ar-dark.atspi.txt
+          grep -q "Arabic text" artifacts/studio/editor-titles-en-dark.atspi.txt
+          grep -q "(Lower third)" artifacts/studio/editor-titles-en-dark.atspi.txt
           grep -P "^button\tSplit at playhead$" artifacts/studio/editor-en-dark.atspi.txt
           grep -P "^button\tقسّم عند المؤشر$" artifacts/studio/editor-ar-dark.atspi.txt
           grep -q "opening" artifacts/studio/editor-en-dark.atspi.txt
           gst-discoverer-1.0 edited.mp4 | tee artifacts/studio/edited-discover.txt
           grep -qi 'h.264' artifacts/studio/edited-discover.txt
+          gst-discoverer-1.0 titled.mp4 | tee artifacts/studio/titled-discover.txt
+          grep -q 'Duration: 0:00:0[78]' artifacts/studio/titled-discover.txt
           grep -qi 'aac\|mpeg-4 aac' artifacts/studio/edited-discover.txt
           grep -q 'Duration: 0:00:0[78]' artifacts/studio/edited-discover.txt
           # Screen readers (Orca reads AT-SPI): named controls on the shell, search, upload and rows.

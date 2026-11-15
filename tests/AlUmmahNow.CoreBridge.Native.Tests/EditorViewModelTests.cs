@@ -234,7 +234,7 @@ public sealed class EditorViewModelTests : IDisposable
         Assert.False(vm.IsExporting);
     }
 
-    private sealed class FakeProbe : IMediaProbe
+    internal sealed class FakeProbe : IMediaProbe
     {
         public Task<MediaSourceInfo> ProbeAsync(string path, CancellationToken cancellationToken) =>
             Task.FromResult(path.EndsWith(".m4a", StringComparison.Ordinal)
@@ -247,17 +247,21 @@ public sealed class EditorViewModelTests : IDisposable
                 });
     }
 
-    private sealed class FakeRenderer : ITimelineRenderer
+    internal sealed class FakeRenderer : ITimelineRenderer
     {
         public FlattenedTimeline? Rendered { get; private set; }
 
+        /// <summary>The title overlays handed to the renderer, with whether each image existed then.</summary>
+        public IReadOnlyList<(TitleOverlay Overlay, bool Existed)> Titles { get; private set; } = Array.Empty<(TitleOverlay, bool)>();
+
         public bool Fail { get; set; }
 
-        public Task RenderAsync(FlattenedTimeline timeline, ProjectSettings settings, string output, IProgress<double> progress, CancellationToken cancellationToken)
+        public Task RenderAsync(FlattenedTimeline timeline, ProjectSettings settings, IReadOnlyList<TitleOverlay> titles, string output, IProgress<double> progress, CancellationToken cancellationToken)
         {
             File.WriteAllBytes(output, new byte[] { 1, 2, 3 });
             if (Fail) throw new InvalidOperationException("encoder missing");
             Rendered = timeline;
+            Titles = titles.Select(t => (t, File.Exists(t.ImagePath))).ToList();
             progress.Report(0.5);
             return Task.CompletedTask;
         }

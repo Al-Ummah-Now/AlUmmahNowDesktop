@@ -144,14 +144,16 @@ app.OnActivate += (_, _) =>
         });
     var videos = new VideosPage(localizer, videosVm, uploadsVm, window.Window);
     var encodePage = new EncodePage(localizer, encode);
-    var editorVm = new EditorViewModel(new CoreEdlEditing(), probe, new GesTimelineRenderer());
-    var timeline = new TimelinePage(localizer, editorVm, uploadsVm, window.Window);
+    var titlePainter = new CairoTitlePainter();
+    var editorVm = new EditorViewModel(new CoreEdlEditing(), probe, new GesTimelineRenderer(), painter: titlePainter);
+    var timeline = new TimelinePage(localizer, editorVm, uploadsVm, window.Window, titlePainter);
     var captionsVm = new CaptionsViewModel(shell, api, captionsApi, transcriber);
     var captions = new CaptionsPage(localizer, captionsVm, window.Window);
     var insightsVm = new InsightsViewModel(shell, api, insightsApi);
     var insights = new InsightsPage(localizer, insightsVm, window.Window);
     var institutionVm = new InstitutionViewModel(shell, institutionApi);
     var brand = new BrandPage(localizer, institutionVm, window.Window);
+    EditorBrand.Attach(institutionVm, editorVm);
     window.AddPage("uploads", localizer["studio.tab.upload"], "document-send-symbolic", uploads.Root);
     window.AddPage("videos", localizer["studio.tab.videos"], "view-list-symbolic", videos.Root);
     window.AddPage("captions", localizer["studio.tab.captions"], "media-view-subtitles-symbolic", captions.Root);
@@ -161,12 +163,21 @@ app.OnActivate += (_, _) =>
     window.AddPage("timeline", localizer["studio.tab.timeline"], "video-x-generic-symbolic", timeline.Root);
     window.ShowPage(tabName);
 
+    bool? titleInExport = null;
+
     // Studio screens (E19): the scene's data actually rendered, not only the shell.
     bool SceneOk() => tabName switch
     {
         "captions" => scene == "captions-editor" ? captionsVm.Editor != null : captionsVm.Drafts != null,
         "analytics" => scene == "analytics-video" ? insightsVm.Retention != null : insightsVm.Summary != null,
-"timeline" => scene != "editor" || editorVm.Clips.Count >= 3,
+        "timeline" => scene switch
+        {
+            "editor" => editorVm.Clips.Count >= 3,
+            // Titles: both titles placed, in the brand kit's look with its logo, and (export) drawn into the video.
+            "editor-titles" => editorVm.Clips.Count >= 3 && editorVm.Titles.Count == EditorScenes.Titles.Count && editorVm.BrandLogo != null
+                && editorVm.TitlesOnScreen.Count == 1 && (automation != "export" || titleInExport == true),
+            _ => true,
+        },
         "brand" => scene == "brand-team" ? institutionVm.State != null && !institutionVm.CanEdit : institutionVm.State is { CanEdit: true },
         _ => scene != "preencode" || uploadsVm.Items.Any(i => preEncoder?.StatusOf(i.Id) != null),
     };
@@ -205,17 +216,53 @@ app.OnActivate += (_, _) =>
                 uploads.ShowQueue();
             }
             else if (scene == "signout") window.AskSignOut();
-            else if (scene == "editor") _ = RunEditorSceneAsync();
+            else if (scene == "editor" || scene == "editor-titles") _ = RunEditorSceneAsync();
             else videos.RunScene(scene);
             return false;
         });
     }
 
-    // CI: the editor scene, then (AUN_EXPORT_TO) a real export of the cut timeline through GES.
+    // CI: the editor scene, then (AUN_EXPORT_TO) a real export of the cut timeline through GES. With titles, the
+    // exported picture is checked where the lower third's box should be.
     async Task RunEditorSceneAsync()
     {
-        await timeline.RunSceneAsync((Environment.GetEnvironmentVariable("AUN_EDITOR_FILES") ?? "").Split('|', StringSplitOptions.RemoveEmptyEntries));
-        if (Environment.GetEnvironmentVariable("AUN_EXPORT_TO") is { Length: > 0 } output) await editorVm.ExportAsync(output);
+        var files = (Environment.GetEnvironmentVariable("AUN_EDITOR_FILES") ?? "").Split('|', StringSplitOptions.RemoveEmptyEntries);
+        if (scene == "editor-titles")
+        {
+            // The titles take the brand kit's look: wait for it (and its logo) to arrive.
+            for (var i = 0; i < 50 && editorVm.BrandLogo == null; i++) await Task.Delay(100);
+            await timeline.RunTitlesSceneAsync(files);
+        }
+        else
+        {
+            await timeline.RunSceneAsync(files);
+        }
+
+        if (Environment.GetEnvironmentVariable("AUN_EXPORT_TO") is { Length: > 0 } output && await editorVm.ExportAsync(output) is { } exported && scene == "editor-titles")
+        {
+            try
+            {
+                var s = editorVm.Settings;
+                var frame = await TimelinePage.FrameOfAsync(exported, editorVm.Timeline.DurationMs, EditorScenes.PreviewMs, s.Width, s.Height);
+                using var picture = new Cairo.ImageSurface(frame);
+                titleInExport = ExportCheck.TitleDrawn(editorVm, (x, y) => Pixel(picture, x, y), out var detail);
+                Log.For("automation").Info("TITLE CHECK " + detail);
+            }
+            catch (Exception ex)
+            {
+                Log.For("automation").Error("title check failed", ex);
+                titleInExport = false;
+            }
+        }
+    }
+
+    static (byte R, byte G, byte B) Pixel(Cairo.ImageSurface surface, int x, int y)
+    {
+        surface.Flush();
+        var data = surface.GetData();
+        var i = (Math.Clamp(y, 0, surface.Height - 1) * surface.Stride) + (Math.Clamp(x, 0, surface.Width - 1) * 4);
+        // ARGB32 in native (little-endian) order: B, G, R, A.
+        return (data[i + 2], data[i + 1], data[i]);
     }
 
     if (exitAfter > 0)
@@ -233,7 +280,7 @@ app.OnActivate += (_, _) =>
                 : uploadsDone || tabName != "uploads";
             var sceneOk = SceneOk();
             pass = pass && sceneOk;
-            Log.For("automation").Info($"AUTOMATION {tabName} scene={scene} sceneOk={sceneOk} shell={shell.State} channel={shell.ActiveChannel?.Id} accounts={shell.AccountList.Count} uploads={items.Count} uploadsDone={uploadsDone} encode={automationJob?.Status} encoder={automationJob?.UsedEncoder?.Name} error={automationJob?.Error} clips={editorVm.Clips.Count} exported={editorVm.ExportedPath} editorError={editorVm.ErrorKey}:{editorVm.ErrorDetail} preEncode={preEncoded} RESULT {(pass ? "PASS" : "FAIL")}");
+            Log.For("automation").Info($"AUTOMATION {tabName} scene={scene} sceneOk={sceneOk} shell={shell.State} channel={shell.ActiveChannel?.Id} accounts={shell.AccountList.Count} uploads={items.Count} uploadsDone={uploadsDone} encode={automationJob?.Status} encoder={automationJob?.UsedEncoder?.Name} error={automationJob?.Error} clips={editorVm.Clips.Count} titles={editorVm.Titles.Count} titleInExport={titleInExport} exported={editorVm.ExportedPath} editorError={editorVm.ErrorKey}:{editorVm.ErrorDetail} preEncode={preEncoded} RESULT {(pass ? "PASS" : "FAIL")}");
             exitCode = pass ? 0 : 3;
             app.Quit();
             return false;

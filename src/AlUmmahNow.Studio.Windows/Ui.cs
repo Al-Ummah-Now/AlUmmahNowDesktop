@@ -39,11 +39,16 @@ internal static class Ui
         };
     }
 
-    public static Button Button(string text, Action click, bool accent = false, string? name = null)
+    /// <summary>
+    /// A text button. <paramref name="name"/> replaces its text for screen readers (a fuller label);
+    /// <paramref name="id"/> is the UI Automation id CI finds it by.
+    /// </summary>
+    public static Button Button(string text, Action click, bool accent = false, string? name = null, string? id = null)
     {
         var b = new Button { Content = text };
         if (accent) b.Style = (Style)Application.Current.Resources["AccentButtonStyle"];
         if (name != null) AutomationProperties.SetName(b, name);
+        if (id != null) AutomationProperties.SetAutomationId(b, id);
         b.Click += (_, _) => click();
         return b;
     }

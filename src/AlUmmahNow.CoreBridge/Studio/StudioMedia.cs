@@ -158,6 +158,23 @@ namespace AlUmmahNow.CoreBridge.Studio
             w.WriteEndObject();
         });
 
+        /// <summary>Adds an on-screen title to a title track.</summary>
+        public static string AddTitle(string trackId, EdlTitle title) => Op("addTitle", w =>
+        {
+            w.WriteString("trackId", trackId);
+            w.WritePropertyName("title");
+            title.Write(w);
+        });
+
+        /// <summary>Replaces the title with the same id: moves, retimes, rewords or restyles it.</summary>
+        public static string SetTitle(EdlTitle title) => Op("setTitle", w =>
+        {
+            w.WritePropertyName("title");
+            title.Write(w);
+        });
+
+        public static string RemoveTitle(string titleId) => Op("removeTitle", w => w.WriteString("titleId", titleId));
+
         private static string Op(string name, Action<System.Text.Json.Utf8JsonWriter> fields) => CaptionJson.Write(w =>
         {
             w.WriteStartObject();
@@ -170,14 +187,18 @@ namespace AlUmmahNow.CoreBridge.Studio
     /// <summary><c>edl_flatten_json</c>: clips in timeline order, ready for MediaComposition / GES.</summary>
     public sealed class FlattenedTimeline
     {
-        public FlattenedTimeline(long durationMs, IReadOnlyList<FlatTrack> tracks)
+        public FlattenedTimeline(long durationMs, IReadOnlyList<FlatTrack> tracks, IReadOnlyList<EdlTitle>? titles = null)
         {
             DurationMs = durationMs;
             Tracks = tracks;
+            Titles = titles ?? System.Array.Empty<EdlTitle>();
         }
 
         public long DurationMs { get; }
         public IReadOnlyList<FlatTrack> Tracks { get; }
+
+        /// <summary>Titles of the title tracks that aren't muted, in time order. They never lengthen the export.</summary>
+        public IReadOnlyList<EdlTitle> Titles { get; }
 
         public static FlattenedTimeline Parse(string json)
         {
@@ -193,12 +214,121 @@ namespace AlUmmahNow.CoreBridge.Studio
                         J.Str(c, "clipId") ?? "", J.Str(c, "sourceId") ?? "", J.Str(c, "path") ?? "",
                         J.Long(c, "inMs"), J.Long(c, "outMs"), J.Long(c, "timelineStartMs"),
                         J.NumOrNull(c, "speed") ?? 1, J.NumOrNull(c, "volume") ?? 1)).ToList())).ToList();
-                return new FlattenedTimeline(J.Long(r, "durationMs"), tracks);
+                var titles = J.Array(r, "titles").Select(t => EdlTitle.Read(t, J.Str(t, "titleId"), J.Str(t, "trackId"))).ToList();
+                return new FlattenedTimeline(J.Long(r, "durationMs"), tracks, titles);
             }
             catch (JsonException ex)
             {
                 throw new EdlEditException(EdlErrorKind.Other, "Flattened timeline is not valid JSON", ex);
             }
+        }
+    }
+
+    /// <summary>Where a title sits in the picture (Core <c>TitlePosition</c>).</summary>
+    public enum TitlePosition { Top, Center, LowerThird }
+
+    /// <summary>A title's look as the project stores it (Core <c>TitleStyle</c>): colours are <c>#rrggbb</c>.</summary>
+    public sealed class EdlTitleStyle : IEquatable<EdlTitleStyle>
+    {
+        public EdlTitleStyle(string fontFamily, double sizePt, string color, string? background, TitlePosition position)
+        {
+            FontFamily = fontFamily;
+            SizePt = sizePt;
+            Color = color;
+            Background = background;
+            Position = position;
+        }
+
+        public string FontFamily { get; }
+        public double SizePt { get; }
+        public string Color { get; }
+        public string? Background { get; }
+        public TitlePosition Position { get; }
+
+        public static string PositionName(TitlePosition p) => p switch { TitlePosition.Top => "top", TitlePosition.Center => "center", _ => "lowerThird" };
+
+        public bool Equals(EdlTitleStyle? o) =>
+            o != null && o.FontFamily == FontFamily && o.SizePt.Equals(SizePt) && o.Color == Color && o.Background == Background && o.Position == Position;
+
+        public override bool Equals(object? obj) => Equals(obj as EdlTitleStyle);
+
+        public override int GetHashCode() => (FontFamily, SizePt, Color, Background, Position).GetHashCode();
+    }
+
+    /// <summary>
+    /// An on-screen title (Core <c>TitleClip</c>, and <c>FlatTitle</c> in a flattened timeline): shown from
+    /// <see cref="StartMs"/> for <see cref="DurationMs"/>. <see cref="Text"/> maps a locale to its text, so one title
+    /// can carry Arabic and English.
+    /// </summary>
+    public sealed class EdlTitle
+    {
+        public EdlTitle(string id, long startMs, long durationMs, IReadOnlyDictionary<string, string> text, EdlTitleStyle style, string trackId = "")
+        {
+            Id = id;
+            StartMs = startMs;
+            DurationMs = durationMs;
+            Text = text;
+            Style = style;
+            TrackId = trackId;
+        }
+
+        public string Id { get; }
+        public string TrackId { get; }
+        public long StartMs { get; }
+        public long DurationMs { get; }
+        public long EndMs => StartMs + DurationMs;
+        public IReadOnlyDictionary<string, string> Text { get; }
+        public EdlTitleStyle Style { get; }
+
+        public EdlTitle With(long? startMs = null, long? durationMs = null, IReadOnlyDictionary<string, string>? text = null, EdlTitleStyle? style = null) =>
+            new EdlTitle(Id, startMs ?? StartMs, durationMs ?? DurationMs, text ?? Text, style ?? Style, TrackId);
+
+        /// <summary>The text in a locale, or "".</summary>
+        public string In(string locale) => Text.TryGetValue(locale, out var t) ? t : "";
+
+        internal static EdlTitle Read(JsonElement t, string? id, string? trackId)
+        {
+            var text = new SortedDictionary<string, string>(StringComparer.Ordinal);
+            if (t.TryGetProperty("text", out var map) && map.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var p in map.EnumerateObject())
+                {
+                    if (p.Value.ValueKind == JsonValueKind.String) text[p.Name] = p.Value.GetString() ?? "";
+                }
+            }
+
+            var s = t.TryGetProperty("style", out var st) ? st : default;
+            var style = new EdlTitleStyle(
+                J.Str(s, "fontFamily") ?? "",
+                J.NumOrNull(s, "sizePt") ?? 28,
+                J.Str(s, "color") ?? "#ffffff",
+                J.Str(s, "background"),
+                J.Str(s, "position") switch { "top" => TitlePosition.Top, "center" => TitlePosition.Center, _ => TitlePosition.LowerThird });
+            return new EdlTitle(id ?? J.Str(t, "id") ?? "", J.Long(t, "startMs"), J.Long(t, "durationMs"), text, style, trackId ?? "");
+        }
+
+        /// <summary>Core's <c>TitleClip</c> JSON (no unknown fields: Core refuses them).</summary>
+        internal void Write(Utf8JsonWriter w)
+        {
+            w.WriteStartObject();
+            w.WriteString("id", Id);
+            w.WriteNumber("startMs", StartMs);
+            w.WriteNumber("durationMs", DurationMs);
+            w.WriteStartObject("text");
+            foreach (var pair in Text.OrderBy(p => p.Key, StringComparer.Ordinal))
+            {
+                if (!string.IsNullOrEmpty(pair.Value)) w.WriteString(pair.Key, pair.Value);
+            }
+
+            w.WriteEndObject();
+            w.WriteStartObject("style");
+            w.WriteString("fontFamily", Style.FontFamily);
+            w.WriteNumber("sizePt", Style.SizePt);
+            w.WriteString("color", Style.Color);
+            if (Style.Background != null) w.WriteString("background", Style.Background);
+            w.WriteString("position", EdlTitleStyle.PositionName(Style.Position));
+            w.WriteEndObject();
+            w.WriteEndObject();
         }
     }
 

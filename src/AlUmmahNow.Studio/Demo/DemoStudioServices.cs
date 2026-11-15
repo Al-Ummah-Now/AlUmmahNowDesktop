@@ -178,7 +178,15 @@ public sealed class DemoStudioServices : ICaptionsApi, IInstitutionApi, IInsight
         }
     }
 
-    public Task<byte[]> AssetDataAsync(string assetId, string? channelId, CancellationToken cancellationToken = default) => Task.FromResult(Array.Empty<byte>());
+    public Task<byte[]> AssetDataAsync(string assetId, string? channelId, CancellationToken cancellationToken = default)
+    {
+        if (assetId != "asset-logo") return Task.FromResult(Array.Empty<byte>());
+        using var stream = typeof(DemoStudioServices).Assembly.GetManifestResourceStream("AlUmmahNow.Studio.Demo.demo-logo.png");
+        if (stream == null) return Task.FromResult(Array.Empty<byte>());
+        using var copy = new MemoryStream();
+        stream.CopyTo(copy);
+        return Task.FromResult(copy.ToArray());
+    }
 
     public Task DeleteAssetAsync(string assetId, CancellationToken cancellationToken = default)
     {

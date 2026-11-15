@@ -101,6 +101,22 @@ public sealed partial class InstitutionViewModel : ObservableObject
         }
     }
 
+    /// <summary>The saved kit's logo image, or null when it has none or it can't be fetched (titles then go without).</summary>
+    public async Task<byte[]?> LogoAsync(CancellationToken cancellationToken = default)
+    {
+        if (State?.Kit.Logo is not { Length: > 0 } logo) return null;
+        try
+        {
+            var bytes = await _api.AssetDataAsync(logo, ChannelHeader, cancellationToken).ConfigureAwait(true);
+            return bytes.Length > 0 ? bytes : null;
+        }
+        catch (Exception ex) when (ex is StudioApiException or RateLimitedException or HttpRequestException or AuthRequiredException)
+        {
+            Logger.Warn("brand logo did not load", ex);
+            return null;
+        }
+    }
+
     /// <summary>Changes one field of the edited kit (the page passes a changed copy).</summary>
     public void Edit(Action<BrandKit> change)
     {

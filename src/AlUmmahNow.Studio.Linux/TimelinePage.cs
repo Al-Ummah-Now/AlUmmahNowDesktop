@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using AlUmmahNow.App.I18n;
+using AlUmmahNow.CoreBridge.Logging;
 using AlUmmahNow.CoreBridge.Studio;
 using AlUmmahNow.Studio.Timeline;
 using AlUmmahNow.Studio.Upload;
@@ -10,13 +11,18 @@ namespace AlUmmahNow.Studio.Linux;
 /// The editor (E19 19.5): add videos, cut them on one video track, export an MP4 with GStreamer Editing Services and
 /// queue it for upload. The timeline is drawn with time running left to right in both languages (only the toolbars,
 /// labels and clip list follow Arabic's direction); the clip list under it gives the same clips to the
-/// keyboard and to screen readers.
+/// keyboard and to screen readers. Titles and lower thirds sit on their own lane under the clips, are previewed over
+/// the picture at the playhead, and are drawn into the export with the same painter.
 /// </summary>
 public sealed class TimelinePage
 {
     private const double RulerHeight = 22;
     private const double TrackTop = 30;
     private const double TrackHeight = 64;
+    private const double TitleTop = TrackTop + TrackHeight + 8;
+    private const double TitleHeight = 34;
+    private const int PreviewWidth = 384;
+    private const int PreviewHeight = 216;
 
     private readonly Localizer _l;
     private readonly EditorViewModel _vm;
@@ -24,6 +30,20 @@ public sealed class TimelinePage
     private readonly Gtk.Window _window;
     private readonly Gtk.DrawingArea _area = Gtk.DrawingArea.New();
     private readonly Gtk.ListBox _clips = Gtk.ListBox.New();
+    private readonly Gtk.ListBox _titles = Gtk.ListBox.New();
+    private readonly Gtk.Label _titlesEmpty;
+    private readonly Gtk.DrawingArea _preview = Gtk.DrawingArea.New();
+    private readonly Gtk.Entry _arabic = Gtk.Entry.New();
+    private readonly Gtk.Entry _english = Gtk.Entry.New();
+    private readonly Gtk.DropDown _kind;
+    private readonly CairoTitlePainter _painter;
+    private readonly string _frameFile = Path.Combine(Path.GetTempPath(), "aun-editor-frame-" + Environment.ProcessId + ".png");
+    private GdkPixbuf.Pixbuf? _frame;
+    private (string Project, long Ms)? _frameKey;
+    private (string Project, long Ms)? _frameWanted;
+    private bool _frameBusy;
+    private uint _frameTimer;
+    private string? _shownTitleId;
     private readonly Gtk.Label _empty;
     private readonly Gtk.Label _position;
     private readonly Gtk.Label _error;
@@ -34,12 +54,14 @@ public sealed class TimelinePage
     private readonly Dictionary<string, Gtk.Button> _buttons = new();
     private bool _rendering;
 
-    public TimelinePage(Localizer l, EditorViewModel vm, UploadsViewModel uploads, Gtk.Window window)
+    public TimelinePage(Localizer l, EditorViewModel vm, UploadsViewModel uploads, Gtk.Window window, CairoTitlePainter painter)
     {
         _l = l;
         _vm = vm;
         _uploads = uploads;
         _window = window;
+        _painter = painter;
+        _kind = Gtk.DropDown.NewFromStrings(new[] { l["studio.editor.titleKind.title"], l["studio.editor.titleKind.lowerThird"] });
         Root = Ui.Page(12);
 
         var project = Gtk.Box.New(Gtk.Orientation.Horizontal, 8);
@@ -92,8 +114,58 @@ public sealed class TimelinePage
         _doneRow.SetVisible(false);
         Root.Append(_doneRow);
 
+        // The picture at the playhead with its titles, and the title editor beside it.
+        var stage = Gtk.Box.New(Gtk.Orientation.Horizontal, 16);
+        var previewBox = Gtk.Box.New(Gtk.Orientation.Vertical, 6);
+        previewBox.Append(Ui.Label(l["studio.editor.preview"], dim: true));
+        _preview.SetContentWidth(PreviewWidth);
+        _preview.SetContentHeight(PreviewHeight);
+        _preview.SetDrawFunc((_, cr, w, h) => DrawPreview(cr, w, h));
+        _preview.SetTooltipText(l["studio.editor.previewName"]);
+        previewBox.Append(_preview);
+        stage.Append(previewBox);
+
+        var panel = Gtk.Box.New(Gtk.Orientation.Vertical, 8);
+        panel.SetHexpand(true);
+        panel.Append(Ui.Heading(l["studio.editor.titles"]));
+        _kind.SetSelected(1);
+        _kind.OnNotify += (_, e) =>
+        {
+            if (_rendering || e.Pspec.GetName() != "selected" || _vm.SelectedTitle == null) return;
+            _vm.SetTitleKind(Kind());
+        };
+        panel.Append(Ui.Labelled(l["studio.editor.titleKind"], _kind));
+        // Each box keeps its language's direction whatever the interface language is.
+        // The entry's text child follows the interface direction, so align each box's text to its language's start.
+        _arabic.SetDirection(Gtk.TextDirection.Rtl);
+        _arabic.SetAlignment(l.IsRtl ? 0f : 1f);
+        _arabic.SetHexpand(true);
+        _english.SetDirection(Gtk.TextDirection.Ltr);
+        _english.SetAlignment(l.IsRtl ? 1f : 0f);
+        _english.SetHexpand(true);
+        _arabic.OnActivate += (_, _) => SubmitTitle();
+        _english.OnActivate += (_, _) => SubmitTitle();
+        panel.Append(Ui.Labelled(l["studio.editor.titleArabic"], _arabic));
+        panel.Append(Ui.Labelled(l["studio.editor.titleEnglish"], _english));
+        var titleTools = Gtk.FlowBox.New();
+        titleTools.SetSelectionMode(Gtk.SelectionMode.None);
+        titleTools.SetColumnSpacing(8);
+        titleTools.SetRowSpacing(8);
+        titleTools.SetMaxChildrenPerLine(8);
+        titleTools.Append(Add("addTitle", Ui.Button(l["studio.editor.addTitle"], SubmitTitle, "suggested-action")));
+        titleTools.Append(Add("saveTitle", Ui.Button(l["studio.editor.saveTitle"], SubmitTitle, "suggested-action")));
+        titleTools.Append(Add("newTitle", Ui.Button(l["studio.editor.newTitle"], () => _vm.SelectTitle(null))));
+        titleTools.Append(Add("titleStart", Ui.Button(l["studio.editor.titleStart"], () => _vm.TitleStartToPlayhead())));
+        titleTools.Append(Add("titleEnd", Ui.Button(l["studio.editor.titleEnd"], () => _vm.TitleEndToPlayhead())));
+        titleTools.Append(Add("titleMove", Ui.Button(l["studio.editor.titleMove"], () => _vm.MoveTitleToPlayhead())));
+        titleTools.Append(Add("removeTitle", Ui.Button(l["studio.editor.removeTitle"], () => _vm.RemoveTitle(), "destructive-action")));
+        panel.Append(titleTools);
+        panel.Append(Ui.Label(l["studio.editor.titleBrand"], dim: true));
+        stage.Append(panel);
+        Root.Append(stage);
+
         var frame = Gtk.Frame.New(null);
-        _area.SetContentHeight((int)(TrackTop + TrackHeight + 16));
+        _area.SetContentHeight((int)(TitleTop + TitleHeight + 12));
         _area.SetHexpand(true);
         _area.SetFocusable(true);
         _area.SetDrawFunc((_, cr, w, h) => Draw(cr, w, h));
@@ -104,23 +176,57 @@ public sealed class TimelinePage
         click.OnPressed += (_, a) =>
         {
             _area.GrabFocus();
-            _vm.ClickAt(Viewport().ToMs(a.X));
+            var ms = Viewport().ToMs(a.X);
+            if (a.Y >= TitleTop - 4) _vm.ClickTitleAt(ms);
+            else _vm.ClickAt(ms);
         };
         _area.AddController(click);
         var drag = Gtk.GestureDrag.New();
         double startX = 0;
         string? dragged = null;
+        string? draggedTitle = null;
+        var grip = TitleGrip.None;
         drag.OnDragBegin += (_, a) =>
         {
             startX = a.StartX;
-            dragged = _vm.ClipAt(Viewport().ToMs(a.StartX))?.ClipId;
+            var v = Viewport();
+            var ms = v.ToMs(a.StartX);
+            dragged = null;
+            draggedTitle = null;
+            grip = TitleGrip.None;
+            if (a.StartY >= TitleTop - 4)
+            {
+                // The selected title's edges win, so a short title can still be retimed.
+                var title = _vm.SelectedTitle is { } s && TitleHit.At(v, s, a.StartX) != TitleGrip.None ? s : _vm.Titles.FirstOrDefault(t => TitleHit.At(v, t, a.StartX) != TitleGrip.None);
+                if (title != null)
+                {
+                    draggedTitle = title.Id;
+                    grip = TitleHit.At(v, title, a.StartX);
+                }
+            }
+            else
+            {
+                dragged = _vm.ClipAt(ms)?.ClipId;
+            }
         };
         drag.OnDragEnd += (_, a) =>
         {
-            // A drag of a few pixels is a click; a longer one moves the clip by that much time.
-            if (dragged == null || Math.Abs(a.OffsetX) < 6 || _vm.Selected is not { } c || c.ClipId != dragged) return;
+            // A drag of a few pixels is a click; a longer one moves the clip or title by that much time.
+            if (Math.Abs(a.OffsetX) < 6) return;
             var v = Viewport();
-            _vm.MoveTo(c.TimelineStartMs + (v.ToMs(startX + a.OffsetX) - v.ToMs(startX)));
+            var delta = v.ToMs(startX + a.OffsetX) - v.ToMs(startX);
+            if (draggedTitle != null)
+            {
+                if (_vm.Titles.FirstOrDefault(t => t.Id == draggedTitle) is not { } t) return;
+                _vm.SelectTitle(t.Id);
+                if (grip == TitleGrip.Start) _vm.RetimeTitle(t.StartMs + delta, t.EndMs);
+                else if (grip == TitleGrip.End) _vm.RetimeTitle(t.StartMs, t.EndMs + delta);
+                else _vm.MoveTitleTo(t.StartMs + delta);
+                return;
+            }
+
+            if (dragged == null || _vm.Selected is not { } c || c.ClipId != dragged) return;
+            _vm.MoveTo(c.TimelineStartMs + delta);
         };
         _area.AddController(drag);
         var keys = Gtk.EventControllerKey.New();
@@ -132,7 +238,11 @@ public sealed class TimelinePage
             var back = Gdk.Constants.KEY_Left;
             if (a.Keyval == forward) _vm.Seek(_vm.PlayheadMs + step);
             else if (a.Keyval == back) _vm.Seek(_vm.PlayheadMs - step);
-            else if (a.Keyval == Gdk.Constants.KEY_Delete) _vm.Delete();
+            else if (a.Keyval == Gdk.Constants.KEY_Delete)
+            {
+                if (_vm.SelectedTitle != null) _vm.RemoveTitle();
+                else _vm.Delete();
+            }
             else if (a.Keyval == Gdk.Constants.KEY_s && (a.State & Gdk.ModifierType.ControlMask) == 0) _vm.Split();
             else return false;
             return true;
@@ -149,8 +259,12 @@ public sealed class TimelinePage
         Root.Append(_empty);
         Root.Append(Ui.Label(l["studio.editor.hint"], dim: true));
 
-        var clipsHeading = Ui.Heading(l["studio.editor.clips"]);
-        Root.Append(clipsHeading);
+        // Clips and titles side by side, each a list the keyboard and screen readers can use.
+        var lists = Gtk.Box.New(Gtk.Orientation.Horizontal, 16);
+        lists.SetHomogeneous(true);
+        lists.SetVexpand(true);
+        var clipsColumn = Gtk.Box.New(Gtk.Orientation.Vertical, 8);
+        clipsColumn.Append(Ui.Heading(l["studio.editor.clips"]));
         _clips.AddCssClass("boxed-list");
         _clips.SetSelectionMode(Gtk.SelectionMode.Single);
         _clips.OnRowSelected += (_, a) =>
@@ -165,7 +279,30 @@ public sealed class TimelinePage
         scroll.SetChild(_clips);
         scroll.SetVexpand(true);
         scroll.SetPolicy(Gtk.PolicyType.Never, Gtk.PolicyType.Automatic);
-        Root.Append(scroll);
+        clipsColumn.Append(scroll);
+        lists.Append(clipsColumn);
+
+        var titlesColumn = Gtk.Box.New(Gtk.Orientation.Vertical, 8);
+        titlesColumn.Append(Ui.Heading(l["studio.editor.titles"]));
+        _titlesEmpty = Ui.Label(l["studio.editor.titlesEmpty"], dim: true);
+        titlesColumn.Append(_titlesEmpty);
+        _titles.AddCssClass("boxed-list");
+        _titles.SetSelectionMode(Gtk.SelectionMode.Single);
+        _titles.OnRowSelected += (_, a) =>
+        {
+            if (_rendering || a.Row is not { } row) return;
+            var title = _vm.Titles.ElementAtOrDefault(row.GetIndex());
+            if (title == null) return;
+            _vm.Seek(title.StartMs);
+            _vm.SelectTitle(title.Id);
+        };
+        var titlesScroll = Gtk.ScrolledWindow.New();
+        titlesScroll.SetChild(_titles);
+        titlesScroll.SetVexpand(true);
+        titlesScroll.SetPolicy(Gtk.PolicyType.Never, Gtk.PolicyType.Automatic);
+        titlesColumn.Append(titlesScroll);
+        lists.Append(titlesColumn);
+        Root.Append(lists);
 
         _vm.PropertyChanged += OnChanged;
         Render();
@@ -183,6 +320,32 @@ public sealed class TimelinePage
             _vm.Split();
             _vm.ClickAt(_vm.PlayheadMs + 400);
         }
+    }
+
+    /// <summary>CI scene: the cut, then a bilingual lower third and a centred title; the playhead on the lower third.</summary>
+    public async Task RunTitlesSceneAsync(IReadOnlyList<string> files)
+    {
+        await RunSceneAsync(files);
+        foreach (var (ms, kind, ar, en) in EditorScenes.Titles)
+        {
+            _vm.Seek(ms);
+            _vm.AddTitle(kind, ar, en);
+        }
+
+        _vm.Seek(EditorScenes.PreviewMs);
+        _vm.SelectTitle(_vm.TitlesOnScreen.FirstOrDefault()?.Id);
+    }
+
+    /// <summary>The picture at <paramref name="ms"/> of a file (CI checks the export), as a PNG.</summary>
+    public static Task<string> FrameOfAsync(string video, long durationMs, long ms, int width, int height)
+    {
+        var timeline = new FlattenedTimeline(durationMs, new[] { new FlatTrack("v", "video", false, new[] { new FlatClip("c", "s", video, 0, durationMs, 0, 1, 1) }) });
+        var png = Path.Combine(Path.GetTempPath(), "aun-export-frame-" + Environment.ProcessId + ".png");
+        return Task.Run(() =>
+        {
+            GesTimelineRenderer.SaveFrame(timeline, Array.Empty<TitleOverlay>(), ms, width, height, png, CancellationToken.None);
+            return png;
+        });
     }
 
     private Gtk.Button Add(string name, Gtk.Button button)
@@ -215,6 +378,21 @@ public sealed class TimelinePage
             _buttons["add"].SetSensitive(!busy);
             _buttons["open"].SetSensitive(!busy);
             _buttons["new"].SetSensitive(!busy && (clips.Count > 0 || _vm.CanUndo));
+            var title = _vm.SelectedTitle;
+            _buttons["addTitle"].SetVisible(title == null);
+            _buttons["addTitle"].SetSensitive(!busy && _vm.CanAddTitle);
+            _buttons["saveTitle"].SetVisible(title != null);
+            _buttons["saveTitle"].SetSensitive(!busy);
+            foreach (var name in new[] { "newTitle", "titleStart", "titleEnd", "titleMove", "removeTitle" }) _buttons[name].SetSensitive(!busy && title != null);
+            if (title?.Id != _shownTitleId)
+            {
+                // Selecting a title shows its text; leaving it clears the boxes for the next one.
+                _shownTitleId = title?.Id;
+                _arabic.SetText(title?.In("ar") ?? "");
+                _english.SetText(title?.In("en") ?? "");
+            }
+
+            if (title != null) _kind.SetSelected(TitleTemplates.KindOf(title) == TitleKind.Title ? 0u : 1u);
 
             _empty.SetVisible(clips.Count == 0);
             _position.SetText(_l.Format("studio.editor.playhead", Localizer.IsolateLtr(Time(_vm.PlayheadMs))) + " · " +
@@ -238,6 +416,21 @@ public sealed class TimelinePage
             var selected = _vm.Selected is { } s ? clips.ToList().FindIndex(c => c.ClipId == s.ClipId) : -1;
             if (selected >= 0) _clips.SelectRow(_clips.GetRowAtIndex(selected));
             else _clips.UnselectAll();
+
+            var titles = _vm.Titles;
+            _titlesEmpty.SetVisible(titles.Count == 0);
+            _titles.RemoveAll();
+            foreach (var item in titles)
+            {
+                var kind = _l[TitleTemplates.KindOf(item) == TitleKind.Title ? "studio.editor.titleKind.title" : "studio.editor.titleKind.lowerThird"];
+                var label = Ui.Label(_l.LineStart + _l.Format("studio.editor.titleItem", Localizer.Isolate(TitleTemplates.Label(item, _l.Language)), kind, Localizer.IsolateLtr(Time(item.StartMs)), Localizer.IsolateLtr(Time(item.EndMs))));
+                label.AddCssClass("aun-pad");
+                _titles.Append(label);
+            }
+
+            var selectedTitle = title != null ? titles.ToList().FindIndex(t => t.Id == title.Id) : -1;
+            if (selectedTitle >= 0) _titles.SelectRow(_titles.GetRowAtIndex(selectedTitle));
+            else _titles.UnselectAll();
         }
         finally
         {
@@ -245,6 +438,100 @@ public sealed class TimelinePage
         }
 
         _area.QueueDraw();
+        _preview.QueueDraw();
+        RequestFrame();
+    }
+
+    private TitleKind Kind() => _kind.GetSelected() == 0 ? TitleKind.Title : TitleKind.LowerThird;
+
+    private void SubmitTitle()
+    {
+        if (_vm.SelectedTitle != null) _vm.SetTitleText(_arabic.GetText(), _english.GetText());
+        else if (_vm.AddTitle(Kind(), _arabic.GetText(), _english.GetText())) _shownTitleId = _vm.SelectedTitleId;
+    }
+
+    /// <summary>Asks GES for the picture at the playhead, at most one at a time; the newest request wins.</summary>
+    private void RequestFrame()
+    {
+        if (_vm.Clips.Count == 0)
+        {
+            _frame = null;
+            _frameKey = null;
+            return;
+        }
+
+        var key = (_vm.Project, _vm.PlayheadMs);
+        if (_frameKey == key || _frameWanted == key) return;
+        _frameWanted = key;
+        if (_frameTimer != 0) GLib.Functions.SourceRemove(_frameTimer);
+        _frameTimer = GLib.Functions.TimeoutAdd(0, 150, () =>
+        {
+            _frameTimer = 0;
+            _ = GrabFrameAsync();
+            return false;
+        });
+    }
+
+    private async Task GrabFrameAsync()
+    {
+        if (_frameBusy || _frameWanted is not { } key) return;
+        _frameBusy = true;
+        try
+        {
+            var settings = _vm.Settings;
+            var height = PreviewHeight * 2;
+            var width = Math.Max(2, (int)Math.Round(height * (double)settings.Width / Math.Max(1, settings.Height)));
+            var timeline = _vm.Timeline;
+            await Task.Run(() => GesTimelineRenderer.SaveFrame(timeline, Array.Empty<TitleOverlay>(), key.Ms, width, height, _frameFile, CancellationToken.None));
+            _frame = GdkPixbuf.Pixbuf.NewFromFile(_frameFile);
+            _frameKey = key;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException || ex is GLib.GException || ex is IOException || ex is DllNotFoundException || ex is NotSupportedException)
+        {
+            // The preview still shows the titles, over black.
+            Log.For("editor").Warn("no preview frame", ex);
+            _frame = null;
+            _frameKey = key;
+        }
+        finally
+        {
+            _frameBusy = false;
+        }
+
+        _preview.QueueDraw();
+        if (_frameWanted is { } wanted && wanted != _frameKey) _ = GrabFrameAsync();
+    }
+
+    /// <summary>The picture at the playhead, letterboxed to the project's shape, with the titles shown there.</summary>
+    private void DrawPreview(Cairo.Context cr, int w, int h)
+    {
+        cr.SetSourceRgb(0, 0, 0);
+        cr.Rectangle(0, 0, w, h);
+        cr.Fill();
+        var settings = _vm.Settings;
+        var scale = Math.Min(w / (double)Math.Max(1, settings.Width), h / (double)Math.Max(1, settings.Height));
+        var fw = settings.Width * scale;
+        var fh = settings.Height * scale;
+        var x = (w - fw) / 2;
+        var y = (h - fh) / 2;
+        if (_frame != null && _vm.Clips.Count > 0)
+        {
+            cr.Save();
+            cr.Translate(x, y);
+            cr.Scale(fw / _frame.Width, fh / _frame.Height);
+            Gdk.Functions.CairoSetSourcePixbuf(cr, _frame, 0, 0);
+            cr.Paint();
+            cr.Restore();
+        }
+
+        cr.Save();
+        cr.Rectangle(x, y, fw, fh);
+        cr.Clip();
+        cr.Translate(x, y);
+        cr.Scale(scale, scale);
+        var decor = _vm.Decor;
+        foreach (var title in _vm.TitlesOnScreen) _painter.Paint(cr, title, decor, settings.Width, settings.Height);
+        cr.Restore();
     }
 
     private TimelineViewport Viewport() => TimelineViewport.Fit(_vm.Timeline.DurationMs, Math.Max(1, _area.GetWidth()), EditorTime.TimeIsRtl);
@@ -295,6 +582,31 @@ public sealed class TimelinePage
             var start = left + 8;
             Text(cr, Name(c), start, TrackTop + 8, (1, 1, 1), 1, alignEnd: false);
             Text(cr, Time(c.TimelineDurationMs), start, TrackTop + 34, (1, 1, 1), 0.8, alignEnd: false, small: true);
+            cr.Restore();
+        }
+
+        // The title lane: time still runs left to right; each label shapes in its own direction inside its block.
+        foreach (var t in _vm.Titles)
+        {
+            var a = v.ToX(t.StartMs);
+            var b = v.ToX(t.EndMs);
+            var left = Math.Min(a, b) + 1;
+            var w = Math.Max(2, Math.Abs(b - a) - 2);
+            cr.SetSourceRgb(0.42, 0.33, 0.62);
+            RoundRect(cr, left, TitleTop, w, TitleHeight, 5);
+            cr.Fill();
+            if (t.Id == _vm.SelectedTitleId)
+            {
+                cr.SetSourceRgb(1, 0.63, 0.22);
+                cr.LineWidth = 3;
+                RoundRect(cr, left + 1.5, TitleTop + 1.5, w - 3, TitleHeight - 3, 4);
+                cr.Stroke();
+            }
+
+            cr.Save();
+            cr.Rectangle(left + 6, TitleTop, Math.Max(0, w - 12), TitleHeight);
+            cr.Clip();
+            Text(cr, TitleTemplates.Label(t, _l.Language), left + 8, TitleTop + 8, (1, 1, 1), 1, alignEnd: false, small: true);
             cr.Restore();
         }
 

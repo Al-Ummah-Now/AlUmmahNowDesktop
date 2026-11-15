@@ -95,6 +95,10 @@ jobs:
               $n = "editor-$lang-$theme"
               ./scripts/windows-studio-scenario.ps1 $exe $lang timeline "" $n $out "" editor
               $screens += $n
+              # Titles (19.5 + 19.9): a bilingual lower third in the demo brand kit's look and a centred title.
+              $n = "editor-titles-$lang-$theme"
+              ./scripts/windows-studio-scenario.ps1 $exe $lang timeline "" $n $out "" editor-titles
+              $screens += $n
             }
           }
           $env:AUN_THEME = ""
@@ -102,6 +106,11 @@ jobs:
           $env:AUN_EXIT_AFTER_SECS = "70"
           $env:AUN_EXPORT_TO = Join-Path (Get-Location) "edited.mp4"
           ./scripts/windows-studio-scenario.ps1 $exe en timeline export editor-export-en $out "" editor
+          # A titled export: the app checks the lower third's box colour in the exported picture.
+          $env:AUN_EXIT_AFTER_SECS = "80"
+          $env:AUN_EXPORT_TO = Join-Path (Get-Location) "titled.mp4"
+          ./scripts/windows-studio-scenario.ps1 $exe ar timeline export editor-titles-export-ar $out "" editor-titles
+          if (Test-Path "artifacts/studio/editor-titles-export-ar.txt.titles.txt") { Get-Content "artifacts/studio/editor-titles-export-ar.txt.titles.txt" }
           $env:AUN_EXPORT_TO = ""
           $real = (New-Item -ItemType Directory -Force real).FullName
           # Big enough (about 15 MB) that the simulated upload is still running when the pre-encode starts.
@@ -110,7 +119,7 @@ jobs:
           $env:AUN_REAL_MEDIA = "1"; $env:AUN_STAGE_DIR = $real
           ./scripts/windows-studio-scenario.ps1 $exe en uploads preencode preencode-real-en $out "" preencode
           $env:AUN_REAL_MEDIA = ""; $env:AUN_STAGE_DIR = ""; $env:AUN_EXIT_AFTER_SECS = ""
-          $screens += "editor-export-en", "preencode-real-en"
+          $screens += "editor-export-en", "editor-titles-export-ar", "preencode-real-en"
           foreach ($n in $screens) {
             if (-not (Select-String -Quiet "RESULT PASS" "artifacts/studio/$n.txt")) { throw "$n failed" }
             if (Test-Path "artifacts/studio/$n.txt.hang.txt") { throw "$n did not exit" }
@@ -124,6 +133,11 @@ jobs:
           if (-not (Select-String -Quiet -SimpleMatch "Only the owner can change it" artifacts/studio/brand-team-en-dark.uia.txt)) { throw "read-only brand kit not announced" }
           if (-not (Select-String -Quiet -SimpleMatch "Split at playhead" artifacts/studio/editor-en-dark.uia.txt)) { throw "editor tools not exposed" }
           if (-not (Select-String -Quiet -SimpleMatch "opening" artifacts/studio/editor-en-dark.uia.txt)) { throw "editor clip list not exposed" }
+          if (-not (Select-String -Quiet -SimpleMatch "titleInExport=True" artifacts/studio/editor-titles-export-ar.txt)) { throw "the lower third is not in the exported video" }
+          if (-not (Select-String -Quiet "`tEditorSaveTitle`tUpdate text" artifacts/studio/editor-titles-en-dark.uia.txt)) { throw "title editor not exposed" }
+          if (-not (Select-String -Quiet "`tEditorSaveTitle`tحدّث النص" artifacts/studio/editor-titles-ar-dark.uia.txt)) { throw "Arabic title editor not exposed" }
+          if (-not (Select-String -Quiet -SimpleMatch "Arabic text" artifacts/studio/editor-titles-en-dark.uia.txt)) { throw "title text boxes have no accessible names" }
+          if (-not (Select-String -Quiet -SimpleMatch "(Lower third)" artifacts/studio/editor-titles-en-dark.uia.txt)) { throw "titles list not exposed" }
           ffmpeg -hide_banner -i edited.mp4 2>&1 | Select-String "Video:|Audio:|Duration" | Tee-Object artifacts/studio/edited-discover.txt
           if (-not (Select-String -Quiet "h264" artifacts/studio/edited-discover.txt)) { throw "export is not H.264" }
           if (-not (Select-String -Quiet "aac" artifacts/studio/edited-discover.txt)) { throw "export has no AAC audio" }
