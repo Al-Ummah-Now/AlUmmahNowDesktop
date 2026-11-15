@@ -108,7 +108,15 @@ public sealed class GesTimelineRenderer : ITimelineRenderer
             cancellationToken.ThrowIfCancellationRequested();
             gst_element_seek_simple(pipeline, FormatTime, SeekFlush | SeekAccurate, Math.Max(0, ms) * (long)NsPerMs);
             if (gst_element_get_state(pipeline, out _, out _, wait) == StateChangeFailure) throw new InvalidOperationException("The preview did not seek");
-            if (!ges_pipeline_save_thumbnail(pipeline, width, height, "image/png", png, IntPtr.Zero)) throw new InvalidOperationException("No preview frame");
+            // The sink can still be settling after the seek; the frame usually arrives within a few tries.
+            for (var attempt = 0; ; attempt++)
+            {
+                if (ges_pipeline_save_thumbnail(pipeline, width, height, "image/png", png, IntPtr.Zero)) break;
+                if (attempt == 10) throw new InvalidOperationException("No preview frame");
+                cancellationToken.ThrowIfCancellationRequested();
+                Thread.Sleep(150);
+                gst_element_get_state(pipeline, out _, out _, wait);
+            }
         }
         finally
         {

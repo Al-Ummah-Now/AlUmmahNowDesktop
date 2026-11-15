@@ -136,9 +136,12 @@ public sealed class TimelinePage
         };
         panel.Append(Ui.Labelled(l["studio.editor.titleKind"], _kind));
         // Each box keeps its language's direction whatever the interface language is.
+        // The entry's text child follows the interface direction, so align each box's text to its language's start.
         _arabic.SetDirection(Gtk.TextDirection.Rtl);
+        _arabic.SetAlignment(l.IsRtl ? 0f : 1f);
         _arabic.SetHexpand(true);
         _english.SetDirection(Gtk.TextDirection.Ltr);
+        _english.SetAlignment(l.IsRtl ? 1f : 0f);
         _english.SetHexpand(true);
         _arabic.OnActivate += (_, _) => SubmitTitle();
         _english.OnActivate += (_, _) => SubmitTitle();

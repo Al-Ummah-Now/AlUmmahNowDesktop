@@ -139,7 +139,7 @@ public static class TitleLayout
         var hasBox = style.Background != null && !minimal;
         var safeX = width * 0.05;
         var pad = hasBox ? px * 0.45 : 0;
-        var accentW = !centered && hasBox && decor.Style == LowerThirdStyle.Bar ? Math.Max(2, px * 0.16) : 0;
+        var accentW = !centered && hasBox && decor.Style == LowerThirdStyle.Bar ? Math.Max(2, Math.Max(px * 0.3, width * 0.012)) : 0;
         var gap = px * 0.15;
         var logoGap = px * 0.4;
         var aspect = Math.Clamp(logoAspect ?? 0, 0, 2.5);
