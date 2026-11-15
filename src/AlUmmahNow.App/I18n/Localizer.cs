@@ -110,10 +110,11 @@ namespace AlUmmahNow.App.I18n
         public static string Isolate(string text) => "⁨" + text + "⁩";
 
         /// <summary>
-        /// Wraps text in a left-to-right isolate: Latin-only values such as sizes ("1.5 MB") keep their order
-        /// inside an Arabic line.
+        /// Wraps text in a left-to-right isolate: Latin-only values such as sizes ("1.5 MB") and dates ("2026-11-09")
+        /// keep their order inside an Arabic line. The LRMs inside do the same job where isolates are not honoured
+        /// (WinUI's text engine), so digits after Arabic words are not turned around.
         /// </summary>
-        public static string IsolateLtr(string text) => "⁦" + text + "⁩";
+        public static string IsolateLtr(string text) => "\u2066\u200E" + text + "\u200E\u2069";
 
         /// <summary>
         /// A mark (RLM or LRM) that starts a line in the interface's direction. Toolkits that pick a label's direction

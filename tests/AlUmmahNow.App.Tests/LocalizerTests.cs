@@ -16,7 +16,7 @@ public class LocalizerTests
     [Fact]
     public void Sizes_are_isolated_left_to_right()
     {
-        Assert.Equal("\u20661.5 MB\u2069", Localizer.IsolateLtr("1.5 MB"));
+        Assert.Equal("\u2066\u200E1.5 MB\u200E\u2069", Localizer.IsolateLtr("1.5 MB"));
     }
 
     [Fact]
