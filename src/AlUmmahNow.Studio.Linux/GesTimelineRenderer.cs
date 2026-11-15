@@ -7,44 +7,33 @@ namespace AlUmmahNow.Studio.Linux;
 
 /// <summary>
 /// Renders the flattened edit list with GStreamer Editing Services: one layer of URI clips at their timeline
-/// positions (gaps render black and silent), encoded to MP4 with H.264 and AAC at the project's size and rate.
+/// positions (gaps render black and silent), encoded to MP4 with H.264 and AAC at the project's size and rate. Titles
+/// are picture-sized transparent PNGs on a layer above the video. The same timeline gives the editor's preview frames.
 /// Gir.Core 0.8.1 has no GES binding, so the few calls needed are declared here.
 /// </summary>
 public sealed class GesTimelineRenderer : ITimelineRenderer
 {
     private const ulong NsPerMs = 1_000_000;
+    private const int PipelineModePreview = 3; // GES_PIPELINE_MODE_PREVIEW_AUDIO | GES_PIPELINE_MODE_PREVIEW_VIDEO
     private const int PipelineModeRender = 1 << 2; // GES_PIPELINE_MODE_RENDER
+    private const int StatePaused = 3;
+    private const int SeekFlush = 1 << 0;
+    private const int SeekAccurate = 1 << 1;
+    private const int StateChangeFailure = 0;
     private const int StatePlaying = 4;
     private const int StateNull = 1;
     private const int FormatTime = 3;
     private const int MessageEos = 1 << 0;
     private const int MessageError = 1 << 1;
 
-    public Task RenderAsync(FlattenedTimeline timeline, ProjectSettings settings, string output, IProgress<double> progress, CancellationToken cancellationToken) =>
+    public Task RenderAsync(FlattenedTimeline timeline, ProjectSettings settings, IReadOnlyList<TitleOverlay> titles, string output, IProgress<double> progress, CancellationToken cancellationToken) =>
         Task.Run(async () =>
         {
             if (!ges_init()) throw new InvalidOperationException("GStreamer Editing Services is not available");
-            var track = timeline.Tracks.FirstOrDefault(t => t.Kind == "video" && t.Clips.Count > 0) ?? throw new InvalidOperationException("Nothing to export");
-            var gesTimeline = ges_timeline_new_audio_video();
+            var gesTimeline = Build(timeline, titles, cancellationToken);
             var pipeline = IntPtr.Zero;
             try
             {
-                var layer = ges_timeline_append_layer(gesTimeline);
-                foreach (var clip in track.Clips)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    if (Math.Abs(clip.Speed - 1) > 0.001) throw new NotSupportedException("Speed changes are not supported in exports yet");
-                    if (!EdlProject.IsLocalMediaPath(clip.Path)) throw new InvalidOperationException("Not a local video file: " + Path.GetFileName(clip.Path));
-                    var uri = new Uri(Path.GetFullPath(clip.Path)).AbsoluteUri;
-                    var ges = ges_uri_clip_new(uri);
-                    if (ges == IntPtr.Zero) throw new InvalidOperationException("Could not open " + Path.GetFileName(clip.Path));
-                    ges_timeline_element_set_start(ges, (ulong)clip.TimelineStartMs * NsPerMs);
-                    ges_timeline_element_set_inpoint(ges, (ulong)clip.InMs * NsPerMs);
-                    ges_timeline_element_set_duration(ges, (ulong)(clip.OutMs - clip.InMs) * NsPerMs);
-                    if (!ges_layer_add_clip(layer, ges)) throw new InvalidOperationException("Could not place " + clip.ClipId);
-                }
-
-                ges_timeline_commit_sync(gesTimeline);
                 pipeline = ges_pipeline_new();
                 ges_pipeline_set_timeline(pipeline, gesTimeline);
                 gesTimeline = IntPtr.Zero; // the pipeline owns it now
@@ -97,6 +86,82 @@ public sealed class GesTimelineRenderer : ITimelineRenderer
             progress.Report(1);
         }, cancellationToken);
 
+    /// <summary>
+    /// Saves the picture at <paramref name="ms"/> as a PNG of the given size (the editor's preview; titles are drawn
+    /// over it live). Throws when the frame can't be made.
+    /// </summary>
+    public static void SaveFrame(FlattenedTimeline timeline, IReadOnlyList<TitleOverlay> titles, long ms, int width, int height, string png, CancellationToken cancellationToken)
+    {
+        if (!ges_init()) throw new InvalidOperationException("GStreamer Editing Services is not available");
+        var gesTimeline = Build(timeline, titles, cancellationToken);
+        var pipeline = ges_pipeline_new();
+        try
+        {
+            ges_pipeline_set_timeline(pipeline, gesTimeline);
+            gesTimeline = IntPtr.Zero;
+            ges_pipeline_preview_set_video_sink(pipeline, gst_element_factory_make("fakesink", null));
+            ges_pipeline_preview_set_audio_sink(pipeline, gst_element_factory_make("fakesink", null));
+            if (!ges_pipeline_set_mode(pipeline, PipelineModePreview)) throw new InvalidOperationException("Could not start the preview");
+            const ulong wait = 10_000_000_000; // 10 s
+            gst_element_set_state(pipeline, StatePaused);
+            if (gst_element_get_state(pipeline, out _, out _, wait) == StateChangeFailure) throw new InvalidOperationException("The preview did not start");
+            cancellationToken.ThrowIfCancellationRequested();
+            gst_element_seek_simple(pipeline, FormatTime, SeekFlush | SeekAccurate, Math.Max(0, ms) * (long)NsPerMs);
+            if (gst_element_get_state(pipeline, out _, out _, wait) == StateChangeFailure) throw new InvalidOperationException("The preview did not seek");
+            if (!ges_pipeline_save_thumbnail(pipeline, width, height, "image/png", png, IntPtr.Zero)) throw new InvalidOperationException("No preview frame");
+        }
+        finally
+        {
+            gst_element_set_state(pipeline, StateNull);
+            gst_object_unref(pipeline);
+            if (gesTimeline != IntPtr.Zero) gst_object_unref(gesTimeline);
+        }
+    }
+
+    /// <summary>Titles on the top layer (GES draws lower priorities over higher), the clips under them.</summary>
+    private static IntPtr Build(FlattenedTimeline timeline, IReadOnlyList<TitleOverlay> titles, CancellationToken cancellationToken)
+    {
+        var track = timeline.Tracks.FirstOrDefault(t => t.Kind == "video" && t.Clips.Count > 0) ?? throw new InvalidOperationException("Nothing to export");
+        var gesTimeline = ges_timeline_new_audio_video();
+        try
+        {
+            var titleLayer = titles.Count > 0 ? ges_timeline_append_layer(gesTimeline) : IntPtr.Zero;
+            var layer = ges_timeline_append_layer(gesTimeline);
+            foreach (var clip in track.Clips)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (Math.Abs(clip.Speed - 1) > 0.001) throw new NotSupportedException("Speed changes are not supported in exports yet");
+                if (!EdlProject.IsLocalMediaPath(clip.Path)) throw new InvalidOperationException("Not a local video file: " + Path.GetFileName(clip.Path));
+                Place(layer, clip.Path, clip.TimelineStartMs, clip.InMs, clip.OutMs - clip.InMs, clip.ClipId);
+            }
+
+            foreach (var title in titles)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                Place(titleLayer, title.ImagePath, title.StartMs, 0, title.DurationMs, "title");
+            }
+
+            ges_timeline_commit_sync(gesTimeline);
+            return gesTimeline;
+        }
+        catch
+        {
+            gst_object_unref(gesTimeline);
+            throw;
+        }
+    }
+
+    private static void Place(IntPtr layer, string path, long startMs, long inMs, long durationMs, string what)
+    {
+        var uri = new Uri(Path.GetFullPath(path)).AbsoluteUri;
+        var ges = ges_uri_clip_new(uri);
+        if (ges == IntPtr.Zero) throw new InvalidOperationException("Could not open " + Path.GetFileName(path));
+        ges_timeline_element_set_start(ges, (ulong)startMs * NsPerMs);
+        ges_timeline_element_set_inpoint(ges, (ulong)inMs * NsPerMs);
+        ges_timeline_element_set_duration(ges, (ulong)durationMs * NsPerMs);
+        if (!ges_layer_add_clip(layer, ges)) throw new InvalidOperationException("Could not place " + what);
+    }
+
     /// <summary>MP4 (ISO) with H.264 at the project's size and rate and AAC stereo at the project's sample rate.</summary>
     public static string VideoRestriction(ProjectSettings s) =>
         string.Create(CultureInfo.InvariantCulture, $"video/x-raw,width={s.Width},height={s.Height},framerate={Rate(s.Fps)},pixel-aspect-ratio=1/1");
@@ -148,6 +213,12 @@ public sealed class GesTimelineRenderer : ITimelineRenderer
     [DllImport(Ges)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool ges_pipeline_set_timeline(IntPtr pipeline, IntPtr timeline);
     [DllImport(Ges)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool ges_pipeline_set_render_settings(IntPtr pipeline, [MarshalAs(UnmanagedType.LPUTF8Str)] string outputUri, IntPtr profile);
     [DllImport(Ges)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool ges_pipeline_set_mode(IntPtr pipeline, int mode);
+    [DllImport(Ges)] private static extern void ges_pipeline_preview_set_video_sink(IntPtr pipeline, IntPtr sink);
+    [DllImport(Ges)] private static extern void ges_pipeline_preview_set_audio_sink(IntPtr pipeline, IntPtr sink);
+    [DllImport(Ges)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool ges_pipeline_save_thumbnail(IntPtr pipeline, int width, int height, [MarshalAs(UnmanagedType.LPUTF8Str)] string format, [MarshalAs(UnmanagedType.LPUTF8Str)] string location, IntPtr error);
+    [DllImport(GstLib)] private static extern IntPtr gst_element_factory_make([MarshalAs(UnmanagedType.LPUTF8Str)] string factory, [MarshalAs(UnmanagedType.LPUTF8Str)] string? name);
+    [DllImport(GstLib)] private static extern int gst_element_get_state(IntPtr element, out int state, out int pending, ulong timeout);
+    [DllImport(GstLib)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool gst_element_seek_simple(IntPtr element, int format, int flags, long position);
     [DllImport(GstLib)] private static extern IntPtr gst_caps_from_string([MarshalAs(UnmanagedType.LPUTF8Str)] string text);
     [DllImport(GstLib)] private static extern int gst_element_set_state(IntPtr element, int state);
     [DllImport(GstLib)] private static extern IntPtr gst_element_get_bus(IntPtr element);

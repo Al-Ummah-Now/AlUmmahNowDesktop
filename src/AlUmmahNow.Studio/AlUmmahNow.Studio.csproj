@@ -7,4 +7,8 @@
     <PackageReference Include="CommunityToolkit.Mvvm" />
     <ProjectReference Include="..\AlUmmahNow.CoreBridge\AlUmmahNow.CoreBridge.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- The demo channel's logo (CI screenshots): the site's lantern favicon, as supplied. -->
+    <EmbeddedResource Include="Demo\demo-logo.png" LogicalName="AlUmmahNow.Studio.Demo.demo-logo.png" />
+  </ItemGroup>
 </Project>

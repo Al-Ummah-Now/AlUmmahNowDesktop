@@ -201,8 +201,9 @@ public sealed partial class App : Application
             });
         var videos = new VideosPage(localizer, videosVm, uploadsVm, () => window.Window.Content?.XamlRoot);
         var encodePage = new EncodePage(localizer, encode);
-        var editorVm = new EditorViewModel(new CoreEdlEditing(), probe, new MediaCompositionRenderer());
-        var timeline = new TimelinePage(localizer, editorVm, uploadsVm, PickFilesAsync, () => PickFileAsync(new[] { EditorTime.ProjectExtension, ".json" }), PickSaveAsAsync);
+        var titlePainter = new GdiTitlePainter();
+        var editorVm = new EditorViewModel(new CoreEdlEditing(), probe, new MediaCompositionRenderer(), painter: titlePainter);
+        var timeline = new TimelinePage(localizer, editorVm, uploadsVm, PickFilesAsync, () => PickFileAsync(new[] { EditorTime.ProjectExtension, ".json" }), PickSaveAsAsync, titlePainter);
         var captionsVm = new CaptionsViewModel(shell, api, captionsApi, transcriber);
         var captions = new CaptionsPage(localizer, captionsVm, () => window.Window.Content?.XamlRoot, () => PickFileAsync(UploadPlanner.VideoExtensions));
         var insightsVm = new InsightsViewModel(shell, api, insightsApi);
@@ -210,6 +211,7 @@ public sealed partial class App : Application
         var institutionVm = new InstitutionViewModel(shell, institutionApi);
         var brand = new BrandPage(localizer, institutionVm, () => window.Window.Content?.XamlRoot,
             () => PickFileAsync(new[] { ".png", ".jpg", ".jpeg", ".webp", ".mp4", ".mov", ".mp3", ".m4a", ".wav" }));
+        EditorBrand.Attach(institutionVm, editorVm);
         window.AddPage("uploads", localizer["studio.tab.upload"], Symbol.Upload, uploads.Root);
         window.AddPage("videos", localizer["studio.tab.videos"], Symbol.List, videos.Root);
         window.AddPage("captions", localizer["studio.tab.captions"], Symbol.ClosedCaption, captions.Root);
@@ -219,12 +221,21 @@ public sealed partial class App : Application
         window.AddPage("timeline", localizer["studio.tab.timeline"], Symbol.Edit, timeline.Root);
         window.ShowPage(tabName);
 
+        bool? titleInExport = null;
+
         // Studio screens (E19): the scene's data actually rendered, not only the shell.
         bool SceneOk() => tabName switch
         {
             "captions" => scene == "captions-editor" ? captionsVm.Editor != null : captionsVm.Drafts != null,
             "analytics" => scene == "analytics-video" ? insightsVm.Retention != null : insightsVm.Summary != null,
-            "timeline" => scene != "editor" || editorVm.Clips.Count >= 3,
+            "timeline" => scene switch
+            {
+                "editor" => editorVm.Clips.Count >= 3,
+                // Titles: both titles placed, in the brand kit's look with its logo, and (export) drawn into the video.
+                "editor-titles" => editorVm.Clips.Count >= 3 && editorVm.Titles.Count == EditorScenes.Titles.Count && editorVm.BrandLogo != null
+                    && editorVm.TitlesOnScreen.Count == 1 && (automation != "export" || titleInExport == true),
+                _ => true,
+            },
             "brand" => scene == "brand-team" ? institutionVm.State != null && !institutionVm.CanEdit : institutionVm.State is { CanEdit: true },
             _ => scene != "preencode" || uploadsVm.Items.Any(i => preEncoder.StatusOf(i.Id) != null),
         };
@@ -262,7 +273,7 @@ public sealed partial class App : Application
                 if (scene == "accounts") window.OpenAccountMenu();
                 else if (scene == "signout") window.AskSignOut();
                 else if (scene == "addpasskey") _ = window.AddPasskeyAsync();
-                else if (scene == "editor") _ = RunEditorSceneAsync();
+                else if (scene == "editor" || scene == "editor-titles") _ = RunEditorSceneAsync();
                 else if (scene.StartsWith("captions", StringComparison.Ordinal)) captions.RunScene(scene);
                 else if (scene == "analytics-video" && insightsVm.VideoStats.FirstOrDefault() is { } top) insightsVm.VideoId = top.VideoId;
                 else if (scene == "brand-team" && shell.Channels.FirstOrDefault(c => c.Role != ChannelRole.Owner) is { } managed) institutionVm.Switch(managed);
@@ -277,10 +288,42 @@ public sealed partial class App : Application
         }
 
         // CI: the editor scene, then (AUN_EXPORT_TO) a real export of the cut timeline through MediaComposition.
+        // With titles, the exported picture is checked where the lower third's box should be.
         async Task RunEditorSceneAsync()
         {
-            await timeline.RunSceneAsync((Environment.GetEnvironmentVariable("AUN_EDITOR_FILES") ?? "").Split('|', StringSplitOptions.RemoveEmptyEntries));
-            if (Environment.GetEnvironmentVariable("AUN_EXPORT_TO") is { Length: > 0 } output) await editorVm.ExportAsync(output);
+            var files = (Environment.GetEnvironmentVariable("AUN_EDITOR_FILES") ?? "").Split('|', StringSplitOptions.RemoveEmptyEntries);
+            if (scene == "editor-titles")
+            {
+                // The titles take the brand kit's look: wait for it (and its logo) to arrive.
+                for (var i = 0; i < 50 && editorVm.BrandLogo == null; i++) await Task.Delay(100);
+                await timeline.RunTitlesSceneAsync(files);
+            }
+            else
+            {
+                await timeline.RunSceneAsync(files);
+            }
+
+            if (Environment.GetEnvironmentVariable("AUN_EXPORT_TO") is { Length: > 0 } output && await editorVm.ExportAsync(output) is { } exported && scene == "editor-titles")
+            {
+                try
+                {
+                    var s = editorVm.Settings;
+                    var timelineOfExport = new FlattenedTimeline(editorVm.Timeline.DurationMs, new[] { new FlatTrack("v", "video", false, new[] { new FlatClip("c", "s", exported, 0, editorVm.Timeline.DurationMs, 0, 1, 1) }) });
+                    using var stream = await MediaCompositionRenderer.FrameAsync(timelineOfExport, EditorScenes.PreviewMs, s.Width, s.Height, CancellationToken.None);
+                    using var picture = new System.Drawing.Bitmap(stream.AsStream());
+                    titleInExport = ExportCheck.TitleDrawn(editorVm, (x, y) =>
+                    {
+                        var c = picture.GetPixel(Math.Clamp(x, 0, picture.Width - 1), Math.Clamp(y, 0, picture.Height - 1));
+                        return (c.R, c.G, c.B);
+                    }, out var detail);
+                    File.AppendAllText(ResultPath + ".titles.txt", "TITLE CHECK " + detail + "\n");
+                }
+                catch (Exception ex)
+                {
+                    File.AppendAllText(ResultPath + ".titles.txt", "TITLE CHECK failed: " + LogScrubber.Scrub(ex.ToString()) + "\n");
+                    titleInExport = false;
+                }
+            }
         }
 
         if (exitAfter > 0)
@@ -300,7 +343,7 @@ public sealed partial class App : Application
                     : uploadsDone || tabName != "uploads";
                 var sceneOk = SceneOk();
                 pass = pass && sceneOk;
-                File.WriteAllText(ResultPath, $"AUTOMATION {tabName} scene={scene} sceneOk={sceneOk} shell={shell.State} channel={shell.ActiveChannel?.Id} accounts={shell.AccountList.Count} uploads={snapshot.Count} uploadsDone={uploadsDone} encode={job?.Status} encoder={job?.UsedEncoder?.Name} error={job?.Error} clips={editorVm.Clips.Count} exported={editorVm.ExportedPath} editorError={editorVm.ErrorKey}:{editorVm.ErrorDetail} preEncode={preEncoded} RESULT {(pass ? "PASS" : "FAIL")}");
+                File.WriteAllText(ResultPath, $"AUTOMATION {tabName} scene={scene} sceneOk={sceneOk} shell={shell.State} channel={shell.ActiveChannel?.Id} accounts={shell.AccountList.Count} uploads={snapshot.Count} uploadsDone={uploadsDone} encode={job?.Status} encoder={job?.UsedEncoder?.Name} error={job?.Error} clips={editorVm.Clips.Count} titles={editorVm.Titles.Count} titleInExport={titleInExport} exported={editorVm.ExportedPath} editorError={editorVm.ErrorKey}:{editorVm.ErrorDetail} preEncode={preEncoded} RESULT {(pass ? "PASS" : "FAIL")}");
                 Exit();
             };
             _endTimer.Start();

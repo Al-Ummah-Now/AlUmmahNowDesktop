@@ -11,17 +11,23 @@ namespace AlUmmahNow.Studio.Timeline;
 /// ripple delete, join and move clips; every edit is a Core <c>edl_apply_json</c> call so the rules match every app.
 /// Undo and redo keep whole project snapshots. Export renders <c>edl_flatten_json</c> on the platform's media stack, and
 /// the result can go straight into the upload queue.
+/// Titles and lower thirds (19.5 with the 19.9 brand kit) sit on a title track: add, reword, move, retime and remove
+/// are Core edits too (<c>addTitle</c>, <c>setTitle</c>, <c>removeTitle</c>), so they undo like every other edit.
 /// </summary>
 public sealed partial class EditorViewModel : ObservableObject
 {
     /// <summary>Clips can't be cut or trimmed shorter than this.</summary>
     public const long MinClipMs = 100;
 
+    /// <summary>A new title's length when the video allows it.</summary>
+    public const long DefaultTitleMs = 4000;
+
     private static readonly Logger Logger = Log.For("editor");
 
     private readonly IEdlEditing _edl;
     private readonly IMediaProbe _probe;
     private readonly ITimelineRenderer _renderer;
+    private readonly ITitlePainter? _painter;
     private readonly Func<DateTimeOffset> _now;
     private readonly SnapshotHistory<string> _history;
     private string _saved;
@@ -37,12 +43,18 @@ public sealed partial class EditorViewModel : ObservableObject
     [ObservableProperty] private bool _isExporting;
     [ObservableProperty] private double _exportProgress;
     [ObservableProperty] private string? _exportedPath;
+    [ObservableProperty] private string? _selectedTitleId;
 
-    public EditorViewModel(IEdlEditing edl, IMediaProbe probe, ITimelineRenderer renderer, Func<DateTimeOffset>? now = null)
+    /// <summary>The account's saved brand kit: new titles take its colours, and drawing takes its template and logo.</summary>
+    [ObservableProperty] private BrandKit _brand = new();
+    [ObservableProperty] private byte[]? _brandLogo;
+
+    public EditorViewModel(IEdlEditing edl, IMediaProbe probe, ITimelineRenderer renderer, Func<DateTimeOffset>? now = null, ITitlePainter? painter = null)
     {
         _edl = edl;
         _probe = probe;
         _renderer = renderer;
+        _painter = painter;
         _now = now ?? (() => DateTimeOffset.UtcNow);
         _saved = EdlProject.New("project-" + _now().ToUnixTimeMilliseconds(), "", _now());
         _history = new SnapshotHistory<string>(_saved);
@@ -65,8 +77,23 @@ public sealed partial class EditorViewModel : ObservableObject
 
     public IReadOnlyDictionary<string, string> SourceNames { get; private set; } = new Dictionary<string, string>();
 
-    /// <summary>The clip under the playhead, or the selected one.</summary>
-    public FlatClip? Target => Selected ?? ClipAt(PlayheadMs);
+    /// <summary>The selected clip, else the clip under the playhead; none while a title is selected.</summary>
+    public FlatClip? Target => Selected ?? (SelectedTitleId == null ? ClipAt(PlayheadMs) : null);
+
+    public IReadOnlyList<EdlTitle> Titles => Timeline.Titles;
+
+    /// <summary>The export size and rate: titles are laid out on a picture of this size.</summary>
+    public ProjectSettings Settings => EdlProject.Settings(Project);
+
+    public EdlTitle? SelectedTitle => Titles.FirstOrDefault(t => t.Id == SelectedTitleId);
+
+    /// <summary>The titles shown at the playhead (the preview draws these).</summary>
+    public IReadOnlyList<EdlTitle> TitlesOnScreen => TitleLayout.At(Titles, PlayheadMs);
+
+    public TitleDecor Decor => TitleDecor.From(Brand, BrandLogo);
+
+    /// <summary>A title can start at the playhead when there is video after it and no title there already.</summary>
+    public bool CanAddTitle => Clips.Count > 0 && Timeline.DurationMs - PlayheadMs >= MinClipMs && !Titles.Any(t => PlayheadMs >= t.StartMs && PlayheadMs < t.EndMs);
 
     public bool CanSplit => ClipAt(PlayheadMs) is { } c && PlayheadMs - c.TimelineStartMs >= MinClipMs && End(c) - PlayheadMs >= MinClipMs;
 
@@ -149,11 +176,15 @@ public sealed partial class EditorViewModel : ObservableObject
         return Edit(EdlOp.Trim(c.ClipId, c.InMs, newOut), select: c.ClipId);
     }
 
-    /// <summary>Removes the target clip and closes the gap.</summary>
+    /// <summary>
+    /// Removes the target clip and closes the gap. With titles, the clip's span is cut from every track, so titles move
+    /// back with their video (one across the cut is trimmed, one inside it goes with the clip).
+    /// </summary>
     public bool Delete()
     {
         if (Target is not { } c) return false;
-        var ok = Edit(EdlOp.RippleDeleteClip(c.ClipId), select: null);
+        var op = Titles.Count > 0 ? EdlOp.RippleDeleteRange(c.TimelineStartMs, End(c)) : EdlOp.RippleDeleteClip(c.ClipId);
+        var ok = Edit(op, select: null);
         if (ok) PlayheadMs = Math.Min(PlayheadMs, Timeline.DurationMs);
         return ok;
     }
@@ -193,11 +224,99 @@ public sealed partial class EditorViewModel : ObservableObject
         return true;
     }
 
+    /// <summary>
+    /// Adds a title at the playhead in the brand kit's look: up to <see cref="DefaultTitleMs"/>, stopping at the end of
+    /// the video or the next title. Arabic, English or both; empty lines are left out.
+    /// </summary>
+    public bool AddTitle(TitleKind kind, string? arabic, string? english)
+    {
+        var text = TitleText(null, arabic, english);
+        if (text == null) return false;
+        if (Clips.Count == 0) return false;
+        var start = PlayheadMs;
+        var next = Titles.Where(t => t.StartMs > start).Select(t => t.StartMs).DefaultIfEmpty(long.MaxValue).Min();
+        var end = Math.Min(Math.Min(start + DefaultTitleMs, Timeline.DurationMs), next);
+        if (Titles.Any(t => start >= t.StartMs && start < t.EndMs) || end - start < MinClipMs)
+        {
+            Fail("studio.editor.error.titleRoom", null);
+            return false;
+        }
+
+        var (project, track) = EdlProject.EnsureTitleTrack(Project);
+        var id = NewId("title", project);
+        var title = new EdlTitle(id, start, end - start, text, TitleTemplates.StyleFor(kind, Brand), track);
+        var next2 = TryApply(project, EdlOp.AddTitle(track, title));
+        if (next2 == null) return false;
+        Commit(next2);
+        SelectTitle(id);
+        ErrorKey = null;
+        return true;
+    }
+
+    /// <summary>Rewords the selected title; other languages it carries stay.</summary>
+    public bool SetTitleText(string? arabic, string? english)
+    {
+        if (SelectedTitle is not { } t) return false;
+        var text = TitleText(t, arabic, english);
+        return text != null && SetTitle(t.With(text: text));
+    }
+
+    /// <summary>Makes the selected title a centred title or a lower third, restyled from the current brand kit.</summary>
+    public bool SetTitleKind(TitleKind kind) =>
+        SelectedTitle is { } t && SetTitle(t.With(style: TitleTemplates.StyleFor(kind, Brand)));
+
+    /// <summary>Moves the selected title, keeping its length, within the video.</summary>
+    public bool MoveTitleTo(long startMs)
+    {
+        if (SelectedTitle is not { } t) return false;
+        var start = Math.Clamp(startMs, 0, Math.Max(0, Timeline.DurationMs - t.DurationMs));
+        return Retime(t, start, start + t.DurationMs);
+    }
+
+    public bool MoveTitleToPlayhead() => MoveTitleTo(PlayheadMs);
+
+    /// <summary>Starts the selected title at the playhead; its end stays.</summary>
+    public bool TitleStartToPlayhead() => SelectedTitle is { } t && Retime(t, PlayheadMs, t.EndMs);
+
+    /// <summary>Ends the selected title at the playhead; its start stays.</summary>
+    public bool TitleEndToPlayhead() => SelectedTitle is { } t && Retime(t, t.StartMs, PlayheadMs);
+
+    /// <summary>Gives the selected title new times (dragging an edge on the timeline).</summary>
+    public bool RetimeTitle(long startMs, long endMs) => SelectedTitle is { } t && Retime(t, startMs, endMs);
+
+    public bool RemoveTitle()
+    {
+        if (SelectedTitle is not { } t) return false;
+        var next = TryApply(Project, EdlOp.RemoveTitle(t.Id));
+        if (next == null) return false;
+        Commit(next);
+        SelectedTitleId = null;
+        ErrorKey = null;
+        return true;
+    }
+
+    public void SelectTitle(string? titleId)
+    {
+        SelectedTitleId = titleId != null && Titles.Any(t => t.Id == titleId) ? titleId : null;
+        if (SelectedTitleId != null) SelectedClipId = null;
+    }
+
+    /// <summary>A click on the title lane: moves the playhead and selects the title there (or none).</summary>
+    public void ClickTitleAt(long ms)
+    {
+        Seek(ms);
+        SelectTitle(Titles.FirstOrDefault(t => ms >= t.StartMs && ms < t.EndMs)?.Id);
+    }
+
     public void Undo() => _history.Undo();
 
     public void Redo() => _history.Redo();
 
-    public void Select(string? clipId) => SelectedClipId = clipId;
+    public void Select(string? clipId)
+    {
+        SelectedClipId = clipId;
+        if (clipId != null) SelectedTitleId = null;
+    }
 
     public void Seek(long ms) => PlayheadMs = Math.Clamp(ms, 0, Timeline.DurationMs);
 
@@ -205,6 +324,7 @@ public sealed partial class EditorViewModel : ObservableObject
     public void ClickAt(long ms)
     {
         Seek(ms);
+        SelectedTitleId = null;
         SelectedClipId = ClipAt(PlayheadMs)?.ClipId;
     }
 
@@ -214,6 +334,7 @@ public sealed partial class EditorViewModel : ObservableObject
         _saved = EdlProject.New("project-" + _now().ToUnixTimeMilliseconds(), "", _now());
         _history.Reset(_saved);
         SelectedClipId = null;
+        SelectedTitleId = null;
         PlayheadMs = 0;
         ExportedPath = null;
     }
@@ -235,6 +356,7 @@ public sealed partial class EditorViewModel : ObservableObject
             _saved = json;
             _history.Reset(json);
             SelectedClipId = null;
+            SelectedTitleId = null;
             PlayheadMs = 0;
             ErrorKey = null;
             return true;
@@ -273,11 +395,42 @@ public sealed partial class EditorViewModel : ObservableObject
         ExportProgress = 0;
         ExportedPath = null;
         ErrorKey = null;
+        // Progress reports arrive posted; one landing after the render finished must not pull the bar back.
+        var gate = new object();
+        var finished = false;
+        var progress = new Progress<double>(p =>
+        {
+            lock (gate)
+            {
+                if (!finished) ExportProgress = p;
+            }
+        });
+        string? titlesDir = null;
         try
         {
             var timeline = _edl.Flatten(Project);
-            await _renderer.RenderAsync(timeline, EdlProject.Settings(Project), output, new Progress<double>(p => ExportProgress = p), _export.Token).ConfigureAwait(true);
-            ExportProgress = 1;
+            var settings = EdlProject.Settings(Project);
+            var overlays = new List<TitleOverlay>();
+            var titles = TitleLayout.ForExport(timeline);
+            if (titles.Count > 0 && _painter != null)
+            {
+                titlesDir = Directory.CreateTempSubdirectory("aun-titles-").FullName;
+                var decor = Decor;
+                foreach (var t in titles)
+                {
+                    var png = Path.Combine(titlesDir, overlays.Count.ToString("D3", System.Globalization.CultureInfo.InvariantCulture) + ".png");
+                    _painter.WritePng(t, decor, settings.Width, settings.Height, png);
+                    overlays.Add(new TitleOverlay(png, t.StartMs, t.DurationMs));
+                }
+            }
+
+            await _renderer.RenderAsync(timeline, settings, overlays, output, progress, _export.Token).ConfigureAwait(true);
+            lock (gate)
+            {
+                finished = true;
+                ExportProgress = 1;
+            }
+
             ExportedPath = output;
             return output;
         }
@@ -295,6 +448,8 @@ public sealed partial class EditorViewModel : ObservableObject
         }
         finally
         {
+            lock (gate) finished = true;
+            if (titlesDir != null) TryDeleteDirectory(titlesDir);
             IsExporting = false;
             _export.Dispose();
             _export = null;
@@ -305,7 +460,13 @@ public sealed partial class EditorViewModel : ObservableObject
 
     partial void OnSelectedClipIdChanged(string? value) => RaiseCommands();
 
+    partial void OnSelectedTitleIdChanged(string? value) => RaiseCommands();
+
     partial void OnPlayheadMsChanged(long value) => RaiseCommands();
+
+    partial void OnBrandChanged(BrandKit value) => OnPropertyChanged(nameof(Decor));
+
+    partial void OnBrandLogoChanged(byte[]? value) => OnPropertyChanged(nameof(Decor));
 
     partial void OnIsExportingChanged(bool value) => OnPropertyChanged(nameof(CanExport));
 
@@ -360,9 +521,11 @@ public sealed partial class EditorViewModel : ObservableObject
         }
 
         if (SelectedClipId != null && Clips.All(c => c.ClipId != SelectedClipId)) SelectedClipId = null;
+        if (SelectedTitleId != null && Titles.All(t => t.Id != SelectedTitleId)) SelectedTitleId = null;
         if (PlayheadMs > Timeline.DurationMs) PlayheadMs = Timeline.DurationMs;
         OnPropertyChanged(nameof(Project));
         OnPropertyChanged(nameof(Clips));
+        OnPropertyChanged(nameof(Titles));
         OnPropertyChanged(nameof(CanUndo));
         OnPropertyChanged(nameof(CanRedo));
         OnPropertyChanged(nameof(IsDirty));
@@ -378,6 +541,62 @@ public sealed partial class EditorViewModel : ObservableObject
         OnPropertyChanged(nameof(CanTrimStart));
         OnPropertyChanged(nameof(CanTrimEnd));
         OnPropertyChanged(nameof(CanJoin));
+        OnPropertyChanged(nameof(SelectedTitle));
+        OnPropertyChanged(nameof(TitlesOnScreen));
+        OnPropertyChanged(nameof(CanAddTitle));
+    }
+
+    private bool SetTitle(EdlTitle title)
+    {
+        var next = TryApply(Project, EdlOp.SetTitle(title));
+        if (next == null) return false;
+        Commit(next);
+        SelectTitle(title.Id);
+        ErrorKey = null;
+        return true;
+    }
+
+    /// <summary>Titles stay inside the video, at least <see cref="MinClipMs"/> long, and never cover another title.</summary>
+    private bool Retime(EdlTitle t, long startMs, long endMs)
+    {
+        startMs = Math.Max(0, startMs);
+        endMs = Math.Min(endMs, Timeline.DurationMs);
+        if (endMs - startMs < MinClipMs)
+        {
+            Fail("studio.editor.error.titleLength", null);
+            return false;
+        }
+
+        if (Titles.Any(o => o.Id != t.Id && o.TrackId == t.TrackId && startMs < o.EndMs && o.StartMs < endMs))
+        {
+            Fail("studio.editor.error.titleOverlap", null);
+            return false;
+        }
+
+        if (startMs == t.StartMs && endMs == t.EndMs) return true;
+        return SetTitle(t.With(startMs: startMs, durationMs: endMs - startMs));
+    }
+
+    /// <summary>The title's text with Arabic and English replaced; null (and a message) when nothing is left.</summary>
+    private IReadOnlyDictionary<string, string>? TitleText(EdlTitle? current, string? arabic, string? english)
+    {
+        var text = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        if (current != null)
+        {
+            foreach (var pair in current.Text) text[pair.Key] = pair.Value;
+        }
+
+        void Put(string locale, string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) text.Remove(locale);
+            else text[locale] = value.Trim();
+        }
+
+        Put("ar", arabic);
+        Put("en", english);
+        if (text.Values.Any(v => !string.IsNullOrWhiteSpace(v))) return text;
+        Fail("studio.editor.error.titleText", null);
+        return null;
     }
 
     private FlatClip? Next(FlatClip c)
@@ -397,6 +616,20 @@ public sealed partial class EditorViewModel : ObservableObject
         }
         while (project.Contains("\"" + id + "\"", StringComparison.Ordinal));
         return id;
+    }
+
+    private static void TryDeleteDirectory(string path)
+    {
+        try
+        {
+            Directory.Delete(path, true);
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
     }
 
     private static void TryDelete(string path)

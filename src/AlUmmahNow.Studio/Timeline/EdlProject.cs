@@ -12,7 +12,8 @@ public sealed record ProjectSettings(int Width, int Height, double Fps, int Samp
 public interface ITimelineRenderer
 {
     /// <summary>Progress 0…1. Throws on failure; a cancelled render throws <see cref="OperationCanceledException"/>.</summary>
-    Task RenderAsync(FlattenedTimeline timeline, ProjectSettings settings, string output, IProgress<double> progress, CancellationToken cancellationToken);
+    /// <remarks><paramref name="titles"/> are picture-sized transparent PNGs laid over the video at their times.</remarks>
+    Task RenderAsync(FlattenedTimeline timeline, ProjectSettings settings, IReadOnlyList<TitleOverlay> titles, string output, IProgress<double> progress, CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -76,6 +77,26 @@ public static class EdlProject
         }
 
         return project.ToJsonString();
+    }
+
+    /// <summary>
+    /// The first unlocked title track (a project from another app may already have one), adding
+    /// <see cref="TitleTemplates.TrackId"/> when there is none, so new titles have a place.
+    /// </summary>
+    public static (string Json, string TrackId) EnsureTitleTrack(string json)
+    {
+        var project = Parse(json);
+        var tracks = project["tracks"] as JsonArray ?? new JsonArray();
+        project["tracks"] = tracks;
+        foreach (var t in tracks.OfType<JsonObject>())
+        {
+            if (t["kind"]?.GetValue<string>() == "title" && t["locked"]?.GetValue<bool>() != true && t["muted"]?.GetValue<bool>() != true && t["id"]?.GetValue<string>() is { Length: > 0 } id) return (json, id);
+        }
+
+        var trackId = TitleTemplates.TrackId;
+        while (tracks.Any(t => t?["id"]?.GetValue<string>() == trackId)) trackId += "_";
+        tracks.Add(new JsonObject { ["id"] = trackId, ["kind"] = "title" });
+        return (project.ToJsonString(), trackId);
     }
 
     public static ProjectSettings Settings(string json)
