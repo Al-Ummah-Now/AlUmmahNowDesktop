@@ -212,8 +212,8 @@ internal sealed class TimelinePage
             _clips.Items.Clear();
             foreach (var c in clips)
             {
-                var text = _l.Format("studio.editor.clip", Localizer.Isolate(Name(c)), Localizer.IsolateLtr(EditorTime.Format(c.TimelineStartMs)), Localizer.IsolateLtr(EditorTime.Format(EditorViewModel.End(c))));
-                _clips.Items.Add(new TextBlock { Text = text, TextReadingOrder = TextReadingOrder.DetectFromContent });
+                var text = _l.LineStart + _l.Format("studio.editor.clip", Localizer.Isolate(Name(c)), Localizer.IsolateLtr(EditorTime.Format(c.TimelineStartMs)), Localizer.IsolateLtr(EditorTime.Format(EditorViewModel.End(c))));
+                _clips.Items.Add(new TextBlock { Text = text });
             }
 
             _clips.SelectedIndex = _vm.Selected is { } s ? clips.ToList().FindIndex(c => c.ClipId == s.ClipId) : -1;

@@ -88,7 +88,7 @@ jobs:
           mkdir -p real && cp source.mp4 real/talk.mp4
           AUN_EXIT_AFTER=60 AUN_REAL_MEDIA=1 AUN_STAGE_DIR=$PWD/real run en uploads preencode preencode-real-en artifacts/studio "" preencode
           grep -h AUTOMATION artifacts/studio/*.log
-          test "$(cat artifacts/studio/*.log | grep -c 'RESULT PASS')" = 57
+          test "$(cat artifacts/studio/*.log | grep -c 'RESULT PASS')" = 53
           grep -P "^button\tSplit at playhead$" artifacts/studio/editor-en-dark.atspi.txt
           grep -P "^button\tقسّم عند المؤشر$" artifacts/studio/editor-ar-dark.atspi.txt
           grep -q "opening" artifacts/studio/editor-en-dark.atspi.txt

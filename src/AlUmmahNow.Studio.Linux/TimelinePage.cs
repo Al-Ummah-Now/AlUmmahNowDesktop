@@ -228,7 +228,7 @@ public sealed class TimelinePage
             _clips.RemoveAll();
             foreach (var c in clips)
             {
-                var label = Ui.Label(_l.Format("studio.editor.clip", Localizer.Isolate(Name(c)), Localizer.IsolateLtr(Time(c.TimelineStartMs)), Localizer.IsolateLtr(Time(EditorViewModel.End(c)))));
+                var label = Ui.Label(_l.LineStart + _l.Format("studio.editor.clip", Localizer.Isolate(Name(c)), Localizer.IsolateLtr(Time(c.TimelineStartMs)), Localizer.IsolateLtr(Time(EditorViewModel.End(c)))));
                 label.AddCssClass("aun-pad");
                 _clips.Append(label);
             }
