@@ -9,5 +9,6 @@
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio" />
     <ProjectReference Include="..\..\src\AlUmmahNow.Studio\AlUmmahNow.Studio.csproj" />
+    <ProjectReference Include="..\..\src\AlUmmahNow.App\AlUmmahNow.App.csproj" />
   </ItemGroup>
 </Project>

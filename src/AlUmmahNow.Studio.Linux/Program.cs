@@ -74,6 +74,10 @@ var exitCode = 0;
 app.OnActivate += (_, _) =>
 {
     Gtk.Widget.SetDefaultDirection(localizer.IsRtl ? Gtk.TextDirection.Rtl : Gtk.TextDirection.Ltr);
+    // CI screenshots: force Light or Dark (AUN_COLOR_SCHEME=light|dark); otherwise follow the system.
+    var colorScheme = Environment.GetEnvironmentVariable("AUN_COLOR_SCHEME");
+    if (colorScheme == "dark") Adw.StyleManager.GetDefault().SetColorScheme(Adw.ColorScheme.ForceDark);
+    else if (colorScheme == "light") Adw.StyleManager.GetDefault().SetColorScheme(Adw.ColorScheme.ForceLight);
     // The view-model posts its updates to the GTK main loop's synchronization context.
     var shell = new StudioShellViewModel(accounts, api);
     var uploadsVm = new UploadsViewModel(shell, api, uploadServiceFor, Path.Combine(stateDir, demo ? "demo" : "studio"));
@@ -130,6 +134,7 @@ app.OnActivate += (_, _) =>
         GLib.Functions.TimeoutAdd(0, 4000, () =>
         {
             if (scene == "accounts") window.OpenAccountMenu();
+            else if (scene == "channels") window.OpenChannelPicker();
             else if (scene == "signout") window.AskSignOut();
             else videos.RunScene(scene);
             return false;

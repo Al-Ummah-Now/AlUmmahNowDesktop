@@ -62,7 +62,7 @@ jobs:
           test "$(cat artifacts/studio/*.log | grep -c 'RESULT PASS')" = 21
           # Screen readers (Orca reads AT-SPI): named controls on the shell, search, upload and rows.
           grep -P "^button\tSign in$" artifacts/studio/signin-en.atspi.txt
-          grep -P "\tChannel$" artifacts/studio/shell-en.atspi.txt
+          grep -P "\tActing as " artifacts/studio/shell-en.atspi.txt
           grep -P "^check box\tSeerah" artifacts/studio/videos-en.atspi.txt
           grep -P "^button\tUpload 3 videos$" artifacts/studio/upload-staged-en.atspi.txt
           gst-discoverer-1.0 source.mp4.out.mp4 | tee artifacts/studio/discover.txt
@@ -73,3 +73,45 @@ jobs:
         with:
           name: studio-linux
           path: artifacts/studio
+
+  # "Acting as" picker screenshots for review: closed and open, en/ar, desktop/narrow, light/dark.
+  acting-as-shots:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Fetch AlUmmahNow.Core
+        shell: bash
+        run: ./scripts/fetch-core.sh
+      - name: Install GTK, libadwaita, GStreamer
+        uses: ./.github/actions/apt-install
+        with:
+          packages: libgtk-4-1 libadwaita-1-0 xvfb imagemagick openbox gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good libsecret-1-0 fonts-noto-core python3-pyatspi at-spi2-core dbus-x11 libgl1-mesa-dri adwaita-icon-theme
+      - run: dotnet build src/AlUmmahNow.Studio.Linux -c Release
+      - name: Capture
+        env:
+          GDK_BACKEND: x11
+          GSK_RENDERER: cairo
+          LIBGL_ALWAYS_SOFTWARE: "1"
+        run: |
+          mkdir -p artifacts/acting-as
+          for lang in en ar; do for width in desktop narrow; do for theme in light dark; do for scene in active open; do
+            if [ $width = narrow ]; then screen=400x800; else screen=1280x800; fi
+            [ $scene = open ] && s=channels || s=""
+            AUN_WINDOW_SIZE=$screen AUN_COLOR_SCHEME=$theme dbus-run-session -- xvfb-run -a -s "-screen 0 ${screen}x24" \
+              scripts/studio-scenario.sh $lang uploads shell "picker-$scene-$lang-$width-$theme" artifacts/acting-as "" "$s" \
+              > "artifacts/acting-as/picker-$scene-$lang-$width-$theme.log" 2>&1 || true
+          done; done; done; done
+          grep -h AUTOMATION artifacts/acting-as/*.log
+          test "$(cat artifacts/acting-as/*.log | grep -c 'RESULT PASS')" = 16
+          grep -P "\tActing as$" artifacts/acting-as/picker-open-en-desktop-light.atspi.txt
+          grep -P "\tMasjid Media Team · Channel · Editor$" artifacts/acting-as/picker-open-en-desktop-light.atspi.txt
+          grep -P "\tMasjid Media Team · قناة · محرّر$" artifacts/acting-as/picker-open-ar-desktop-light.atspi.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: studio-linux-acting-as
+          path: artifacts/acting-as

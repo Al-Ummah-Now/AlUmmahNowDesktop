@@ -17,15 +17,18 @@ public sealed class StudioWindow
     private readonly StudioShellViewModel _shell;
     private readonly Gtk.Stack _body = Gtk.Stack.New();
     private readonly Adw.ViewStack _pages = Adw.ViewStack.New();
-    private readonly Gtk.DropDown _channelPicker = Gtk.DropDown.NewFromStrings(Array.Empty<string>());
-    private readonly Gtk.Box _channelBox = Gtk.Box.New(Gtk.Orientation.Horizontal, 6);
+    private readonly Gtk.MenuButton _channelPicker = Gtk.MenuButton.New();
+    private readonly Gtk.Box _channelMenu = Gtk.Box.New(Gtk.Orientation.Vertical, 2);
+    private readonly Gtk.Popover _channelPopover = Gtk.Popover.New();
+    private readonly Dictionary<string, Gdk.Texture> _logos = new();
+    private readonly HashSet<string> _logosLoading = new();
+    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(20) };
     private readonly Gtk.MenuButton _accountButton = Gtk.MenuButton.New();
     private readonly Gtk.Box _accountMenu = Gtk.Box.New(Gtk.Orientation.Vertical, 4);
     private readonly Gtk.Popover _accountPopover = Gtk.Popover.New();
     private readonly Adw.StatusPage _reauth = Adw.StatusPage.New();
     private readonly Adw.StatusPage _error = Adw.StatusPage.New();
     private readonly Gtk.Label _signInError = Ui.Label("", dim: true, start: false);
-    private bool _syncingPicker;
 
     public StudioWindow(Adw.Application app, Localizer l, StudioShellViewModel shell, string? banner)
     {
@@ -33,6 +36,9 @@ public sealed class StudioWindow
         _shell = shell;
         Window = Adw.ApplicationWindow.New(app);
         Window.SetDefaultSize(1280, 800);
+        // CI screenshots: a narrow window (e.g. 400x800).
+        if (Environment.GetEnvironmentVariable("AUN_WINDOW_SIZE") is { Length: > 0 } size && size.Split('x') is { Length: 2 } wh
+            && int.TryParse(wh[0], out var w) && int.TryParse(wh[1], out var h)) Window.SetDefaultSize(w, h);
         Window.SetTitle(l["studio.name"]);
 
         var header = Adw.HeaderBar.New();
@@ -41,14 +47,17 @@ public sealed class StudioWindow
         switcher.SetPolicy(Adw.ViewSwitcherPolicy.Wide);
         header.SetTitleWidget(switcher);
 
-        _channelBox.Append(Ui.Labelled(l["studio.shell.channel"], _channelPicker));
-        _channelPicker.OnNotify += (_, e) =>
-        {
-            if (_syncingPicker || e.Pspec.GetName() != "selected") return;
-            var i = (int)_channelPicker.GetSelected();
-            if (i >= 0 && i < _shell.Channels.Count) _shell.SelectChannel(_shell.Channels[i]);
-        };
-        header.PackStart(_channelBox);
+        // "Acting as" picker: the active channel's logo, name and "Channel" tag; the menu lists every
+        // channel the same way under an "Acting as" heading.
+        _channelMenu.SetMarginStart(6);
+        _channelMenu.SetMarginEnd(6);
+        _channelMenu.SetMarginTop(6);
+        _channelMenu.SetMarginBottom(6);
+        _channelPopover.SetChild(_channelMenu);
+        _channelPicker.SetPopover(_channelPopover);
+        _channelPicker.AddCssClass("flat");
+        Ui.Named(_channelPicker, l[ActingAs.HeadingKey]);
+        header.PackStart(_channelPicker);
 
         _accountMenu.SetMarginStart(6);
         _accountMenu.SetMarginEnd(6);
@@ -83,6 +92,9 @@ public sealed class StudioWindow
         _pages.AddTitledWithIcon(page, name, title, icon);
 
     public void ShowPage(string name) => _pages.SetVisibleChildName(name);
+
+    /// <summary>For CI screenshots: open the "Acting as" picker.</summary>
+    public void OpenChannelPicker() => _channelPicker.Popup();
 
     /// <summary>For CI screenshots: open the account menu.</summary>
     public void OpenAccountMenu() => _accountButton.Popup();
@@ -166,18 +178,80 @@ public sealed class StudioWindow
 
     private void RenderChannels()
     {
-        _channelBox.SetVisible(_shell.Channels.Count > 0);
-        _syncingPicker = true;
+        var channels = _shell.Channels;
+        var active = _shell.ActiveChannel;
+        _channelPicker.SetVisible(channels.Count > 0);
+        _channelPicker.SetChild(active == null ? Gtk.Label.New(_l[ActingAs.HeadingKey]) : IdentityRow(active, 24));
+        Ui.Named(_channelPicker, active == null ? _l[ActingAs.HeadingKey] : _l.Format(ActingAs.ButtonNameKey, active.Name));
+
+        Ui.Clear(_channelMenu);
+        var heading = Gtk.Label.New(_l[ActingAs.HeadingKey]);
+        heading.SetXalign(0);
+        heading.AddCssClass("heading");
+        heading.SetMarginStart(6);
+        heading.SetMarginBottom(4);
+        _channelMenu.Append(heading);
+        foreach (var channel in channels)
+        {
+            var row = IdentityRow(channel, 32);
+            var check = Gtk.Image.NewFromIconName("object-select-symbolic");
+            check.SetOpacity(ReferenceEquals(channel, active) ? 1 : 0);
+            check.SetHexpand(true);
+            check.SetHalign(Gtk.Align.End);
+            row.Append(check);
+            var pick = Gtk.Button.New();
+            pick.SetChild(row);
+            pick.AddCssClass("flat");
+            Ui.Named(pick, ActingAs.OptionText(channel, k => _l[k]));
+            pick.OnClicked += (_, _) =>
+            {
+                _channelPopover.Popdown();
+                _shell.SelectChannel(channel);
+            };
+            _channelMenu.Append(pick);
+        }
+    }
+
+    /// <summary>Logo (initials until the picture loads), name and the small "Channel" tag.</summary>
+    private Gtk.Box IdentityRow(StudioChannel channel, int logoSize)
+    {
+        var row = Gtk.Box.New(Gtk.Orientation.Horizontal, 8);
+        var logo = Adw.Avatar.New(logoSize, channel.Name, true);
+        if (channel.AvatarUrl is { Length: > 0 } url)
+        {
+            if (_logos.TryGetValue(url, out var texture)) logo.SetCustomImage(texture);
+            else _ = LoadLogoAsync(url);
+        }
+        row.Append(logo);
+        var text = Gtk.Box.New(Gtk.Orientation.Vertical, 0);
+        text.SetValign(Gtk.Align.Center);
+        var name = Gtk.Label.New(channel.Name);
+        name.SetXalign(0);
+        name.SetEllipsize(Pango.EllipsizeMode.End);
+        name.SetMaxWidthChars(24);
+        var tag = Gtk.Label.New(ActingAs.ChannelTag(channel, k => _l[k]));
+        tag.SetXalign(0);
+        tag.AddCssClass("caption");
+        tag.AddCssClass("dim-label");
+        text.Append(name);
+        text.Append(tag);
+        row.Append(text);
+        return row;
+    }
+
+    private async Task LoadLogoAsync(string url)
+    {
+        if (!_logosLoading.Add(url)) return;
         try
         {
-            var names = _shell.Channels.Select(c => c.Role == ChannelRole.Owner ? c.Name : c.Name + " · " + _l["studio.shell.channelRole." + c.Role.ToString().ToLowerInvariant()]).ToArray();
-            _channelPicker.SetModel(Gtk.StringList.New(names));
-            var index = _shell.ActiveChannel is { } a ? _shell.Channels.ToList().IndexOf(a) : -1;
-            _channelPicker.SetSelected(index >= 0 ? (uint)index : uint.MaxValue);
+            var data = await Http.GetByteArrayAsync(url);
+            _logos[url] = Gdk.Texture.NewFromBytes(GLib.Bytes.New(data));
+            RenderChannels();
         }
-        finally
+        catch (Exception ex) when (ex is HttpRequestException || ex is TaskCanceledException || ex is GLib.GException)
         {
-            _syncingPicker = false;
+            // A logo that doesn't load leaves the initials.
+            Logger.Warn("channel logo did not load", ex);
         }
     }
 

@@ -47,6 +47,8 @@ jobs:
           ./scripts/windows-studio-scenario.ps1 $exe ar uploads shell shell-ar $out
           ./scripts/windows-studio-scenario.ps1 $exe en uploads shell shell-en $out
           ./scripts/windows-studio-scenario.ps1 $exe en uploads shell accounts-en $out "" accounts
+          ./scripts/windows-studio-scenario.ps1 $exe en uploads shell channels-en $out "" channels
+          ./scripts/windows-studio-scenario.ps1 $exe ar uploads shell channels-ar $out "" channels
           ./scripts/windows-studio-scenario.ps1 $exe ar uploads shell signout-ar $out "" signout
           ./scripts/windows-studio-scenario.ps1 $exe en uploads shell addpasskey-en $out "" addpasskey
           ./scripts/windows-studio-scenario.ps1 $exe ar uploads shell addpasskey-ar $out "" addpasskey
@@ -66,7 +68,7 @@ jobs:
           ./scripts/windows-studio-scenario.ps1 $exe en analytics shell analytics-en $out
           ./scripts/windows-studio-scenario.ps1 $exe ar timeline "" timeline-ar $out
           ./scripts/windows-studio-scenario.ps1 $exe en encode "encode:$source" encode-en $out
-          foreach ($n in "uploads-ar","signin-ar","signin-en","shell-ar","shell-en","accounts-en","signout-ar","addpasskey-en","addpasskey-ar","upload-staged-ar","upload-staged-en","videos-ar","videos-en","search-ar","edit-en","bulk-ar","delete-en","analytics-ar","analytics-en","timeline-ar","encode-en") {
+          foreach ($n in "uploads-ar","signin-ar","signin-en","shell-ar","shell-en","accounts-en","channels-en","channels-ar","signout-ar","addpasskey-en","addpasskey-ar","upload-staged-ar","upload-staged-en","videos-ar","videos-en","search-ar","edit-en","bulk-ar","delete-en","analytics-ar","analytics-en","timeline-ar","encode-en") {
             if (-not (Select-String -Quiet "RESULT PASS" "artifacts/studio/$n.txt")) { throw "$n failed" }
             if (Test-Path "artifacts/studio/$n.txt.hang.txt") { throw "$n did not exit" }
           }
@@ -80,7 +82,9 @@ jobs:
           if (-not (Select-String -Quiet -SimpleMatch "`tAddPasskey`tAdd a passkey" artifacts/studio/accounts-en.uia.txt)) { throw "'Add a passkey' not in the account menu" }
           if (-not (Select-String -Quiet -SimpleMatch "Passkey added" artifacts/studio/addpasskey-en.uia.txt)) { throw "no 'Passkey added' dialog" }
           if (-not (Select-String -Quiet -SimpleMatch "أُضيف مفتاح المرور" artifacts/studio/addpasskey-ar.uia.txt)) { throw "no Arabic 'Passkey added' dialog" }
-          if (-not (Select-String -Quiet "`tChannelPicker`tChannel" artifacts/studio/shell-en.uia.txt)) { throw "channel picker has no accessible name" }
+          if (-not (Select-String -Quiet "`tChannelPicker`tActing as" artifacts/studio/shell-en.uia.txt)) { throw "'Acting as' picker has no accessible name" }
+          if (-not (Select-String -Quiet -SimpleMatch "Masjid Media Team · Channel · Editor" artifacts/studio/channels-en.uia.txt)) { throw "channel options are not tagged 'Channel'" }
+          if (-not (Select-String -Quiet -SimpleMatch "Masjid Media Team · قناة · محرّر" artifacts/studio/channels-ar.uia.txt)) { throw "Arabic channel options are not tagged «قناة»" }
           if (-not (Select-String -Quiet "`tAccountMenu`tAccount: Amina Studio" artifacts/studio/shell-en.uia.txt)) { throw "account menu has no accessible name" }
           if (-not (Select-String -Quiet "Sign out of" artifacts/studio/accounts-en.uia.txt)) { throw "account menu items not exposed" }
           if (-not (Select-String -Quiet "`tVideoSearch`tSearch your videos" artifacts/studio/videos-en.uia.txt)) { throw "video search has no accessible name" }

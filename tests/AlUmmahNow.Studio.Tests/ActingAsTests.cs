@@ -1,0 +1,58 @@
+using AlUmmahNow.App.I18n;
+using AlUmmahNow.CoreBridge.Studio;
+using AlUmmahNow.Studio.Shell;
+using Xunit;
+
+namespace AlUmmahNow.Studio.Tests;
+
+/// <summary>The "Acting as" picker wording (YouTube/Facebook pattern, same as the website).</summary>
+public sealed class ActingAsTests
+{
+    private static StudioChannel Channel(ChannelRole role, string name = "Masjid Media Team") =>
+        new("c1", name, "masjidmedia", null, false, role, Array.Empty<string>(), false);
+
+    [Theory]
+    [InlineData("en", "Acting as", "Channel")]
+    [InlineData("ar", "تتصرّف باسم", "قناة")]
+    public void HeadingAndChannelTag(string language, string heading, string tag)
+    {
+        var l = new Localizer(language);
+        Assert.Equal(heading, l[ActingAs.HeadingKey]);
+        Assert.Equal(heading + " Masjid Media Team", l.Format(ActingAs.ButtonNameKey, "Masjid Media Team"));
+        Assert.Equal(tag, ActingAs.ChannelTag(Channel(ChannelRole.Owner), k => l[k]));
+    }
+
+    [Theory]
+    [InlineData("en", "Masjid Media Team · Channel · Editor")]
+    [InlineData("ar", "Masjid Media Team · قناة · محرّر")]
+    public void NonOwnersSeeTheirRoleAfterTheTag(string language, string expected) =>
+        Assert.Equal(expected, ActingAs.OptionText(Channel(ChannelRole.Editor), k => new Localizer(language)[k]));
+
+    [Fact]
+    public void OptionsNeverShowTheHandle()
+    {
+        var l = new Localizer("en");
+        Assert.DoesNotContain("@", ActingAs.OptionText(Channel(ChannelRole.Owner), k => l[k]));
+        Assert.DoesNotContain("masjidmedia", ActingAs.OptionText(Channel(ChannelRole.Admin), k => l[k]));
+    }
+
+    [Theory]
+    [InlineData("en")]
+    [InlineData("ar")]
+    public void NoIdentityIsCalledNone(string language)
+    {
+        var l = new Localizer(language);
+        foreach (var key in new[] { ActingAs.HeadingKey, ActingAs.ButtonNameKey, ActingAs.ChannelTagKey })
+        {
+            var text = l[key];
+            Assert.NotEqual(key, text);
+            Assert.DoesNotContain("no channel", text, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("without", text, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("بدون", text);
+        }
+    }
+
+    [Fact]
+    public void ArabicNeverSaysFidyu() =>
+        Assert.DoesNotContain(new Localizer().Bundle("ar").Values, v => v.Contains("فيديو"));
+}

@@ -25,6 +25,7 @@ internal sealed class StudioWindow
     private readonly NavigationView _nav;
     private readonly Dictionary<string, FrameworkElement> _pages = new();
     private readonly ComboBox _channelPicker;
+    private readonly TextBlock _channelHeading;
     private readonly DropDownButton _accountButton;
     private readonly MenuFlyout _accountMenu = new() { Placement = Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.BottomEdgeAlignedRight };
     private bool _syncingPicker;
@@ -35,8 +36,9 @@ internal sealed class StudioWindow
         _shell = shell;
         _direction = l.IsRtl ? FlowDirection.RightToLeft : FlowDirection.LeftToRight;
 
-        _channelPicker = new ComboBox { MinWidth = 220, VerticalAlignment = VerticalAlignment.Center, PlaceholderText = l["studio.shell.channel"] };
-        AutomationProperties.SetName(_channelPicker, l["studio.shell.channel"]);
+        // "Acting as" picker: each channel shows its logo, name and a small "Channel" tag.
+        _channelPicker = new ComboBox { MinWidth = 240, VerticalAlignment = VerticalAlignment.Center, PlaceholderText = l[ActingAs.HeadingKey] };
+        AutomationProperties.SetName(_channelPicker, l[ActingAs.HeadingKey]);
         AutomationProperties.SetAutomationId(_channelPicker, "ChannelPicker");
         _channelPicker.SelectionChanged += (_, _) =>
         {
@@ -49,6 +51,8 @@ internal sealed class StudioWindow
         AutomationProperties.SetAutomationId(_accountButton, "AccountMenu");
 
         var bar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new Thickness(0, 0, 12, 0) };
+        _channelHeading = new TextBlock { Text = l[ActingAs.HeadingKey], VerticalAlignment = VerticalAlignment.Center, Opacity = 0.8 };
+        bar.Children.Add(_channelHeading);
         bar.Children.Add(_channelPicker);
         bar.Children.Add(_accountButton);
 
@@ -220,8 +224,11 @@ internal sealed class StudioWindow
         _syncingPicker = true;
         try
         {
-            _channelPicker.Visibility = _shell.Channels.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-            _channelPicker.ItemsSource = _shell.Channels.Select(c => c.Role == ChannelRole.Owner ? c.Name : c.Name + " · " + _l["studio.shell.channelRole." + c.Role.ToString().ToLowerInvariant()]).ToList();
+            var visibility = _shell.Channels.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+            _channelPicker.Visibility = visibility;
+            _channelHeading.Visibility = visibility;
+            _channelPicker.Items.Clear();
+            foreach (var channel in _shell.Channels) _channelPicker.Items.Add(ChannelItem(channel));
             _channelPicker.SelectedIndex = _shell.ActiveChannel is { } a ? _shell.Channels.ToList().IndexOf(a) : -1;
         }
         finally
@@ -229,6 +236,25 @@ internal sealed class StudioWindow
             _syncingPicker = false;
         }
     }
+
+    /// <summary>Logo (initials until the picture loads), name and the small "Channel" tag.</summary>
+    private ComboBoxItem ChannelItem(StudioChannel channel)
+    {
+        var logo = new PersonPicture { DisplayName = channel.Name, Width = 28, Height = 28 };
+        if (Uri.TryCreate(channel.AvatarUrl, UriKind.Absolute, out var url)) logo.ProfilePicture = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(url) { DecodePixelWidth = 56 };
+        var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+        text.Children.Add(new TextBlock { Text = channel.Name, TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 220 });
+        text.Children.Add(new TextBlock { Text = ActingAs.ChannelTag(channel, k => _l[k]), Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"], Opacity = 0.7 });
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        row.Children.Add(logo);
+        row.Children.Add(text);
+        var item = new ComboBoxItem { Content = row, Tag = channel.Id };
+        AutomationProperties.SetName(item, ActingAs.OptionText(channel, k => _l[k]));
+        return item;
+    }
+
+    /// <summary>For CI screenshots: open the "Acting as" picker.</summary>
+    public void OpenChannelPicker() => _channelPicker.IsDropDownOpen = true;
 
     private void RenderAccounts()
     {
