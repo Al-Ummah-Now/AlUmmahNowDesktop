@@ -104,7 +104,9 @@ jobs:
           ./scripts/windows-studio-scenario.ps1 $exe en timeline export editor-export-en $out "" editor
           $env:AUN_EXPORT_TO = ""
           $real = (New-Item -ItemType Directory -Force real).FullName
-          Copy-Item source.mp4 "$real/talk.mp4"
+          # Big enough (about 15 MB) that the simulated upload is still running when the pre-encode starts.
+          ffmpeg -hide_banner -loglevel error -y -f lavfi -i testsrc2=duration=20:size=1280x720:rate=30 -f lavfi -i sine=frequency=440:duration=20 -c:v libx264 -b:v 6M -pix_fmt yuv420p -c:a aac "$real/talk.mp4"
+          $env:AUN_EXIT_AFTER_SECS = "150"
           $env:AUN_REAL_MEDIA = "1"; $env:AUN_STAGE_DIR = $real
           ./scripts/windows-studio-scenario.ps1 $exe en uploads preencode preencode-real-en $out "" preencode
           $env:AUN_REAL_MEDIA = ""; $env:AUN_STAGE_DIR = ""; $env:AUN_EXIT_AFTER_SECS = ""
