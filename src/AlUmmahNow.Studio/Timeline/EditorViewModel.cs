@@ -225,6 +225,13 @@ public sealed partial class EditorViewModel : ObservableObject
         {
             var json = _edl.Load(await File.ReadAllTextAsync(path).ConfigureAwait(true));
             _edl.Flatten(json);
+            // Sources must be local files on this computer (see EdlProject.IsLocalMediaPath).
+            if (EdlProject.SourcePaths(json).FirstOrDefault(p => !EdlProject.IsLocalMediaPath(p)) is { } bad)
+            {
+                Fail("studio.editor.error.source", Path.GetFileName(bad));
+                return false;
+            }
+
             _saved = json;
             _history.Reset(json);
             SelectedClipId = null;

@@ -109,6 +109,39 @@ public static class EdlProject
         return names;
     }
 
+    /// <summary>
+    /// True for an existing, fully qualified local file. Project files can come from anyone, so a source on a UNC or
+    /// device path (which would make Windows authenticate to that host), a URI, or a missing file is never opened.
+    /// </summary>
+    public static bool IsLocalMediaPath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return false;
+        if (path.StartsWith(@"\\", StringComparison.Ordinal) || path.StartsWith("//", StringComparison.Ordinal) || path.Contains("://", StringComparison.Ordinal)) return false;
+        if (!Path.IsPathFullyQualified(path)) return false;
+        try
+        {
+            var info = new FileInfo(path);
+            return info.Exists && (info.Attributes & (FileAttributes.Directory | FileAttributes.Device)) == 0;
+        }
+        catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is ArgumentException || ex is NotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>Every source path in the project.</summary>
+    public static IReadOnlyList<string> SourcePaths(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        var paths = new List<string>();
+        if (doc.RootElement.TryGetProperty("sources", out var s) && s.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var src in s.EnumerateArray()) paths.Add(src.TryGetProperty("path", out var p) && p.ValueKind == JsonValueKind.String ? p.GetString() ?? "" : "");
+        }
+
+        return paths;
+    }
+
     /// <summary>Stamps <c>metadata.updatedAtMs</c>.</summary>
     public static string Touch(string json, DateTimeOffset now)
     {

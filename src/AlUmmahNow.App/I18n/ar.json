@@ -672,5 +672,6 @@
   "studio.editor.error.refused": "لا يمكن إجراء هذا التعديل هنا.",
   "studio.editor.error.open": "لا يمكن فتح {0} في هذا المحرر.",
   "studio.editor.error.save": "تعذّر حفظ {0}.",
-  "studio.editor.error.export": "لم يكتمل التصدير: {0}"
+  "studio.editor.error.export": "لم يكتمل التصدير: {0}",
+  "studio.editor.error.source": "{0} ليس ملف مرئي على هذا الحاسوب. أضف المرئي من جديد."
 }

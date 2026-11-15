@@ -27,6 +27,7 @@ public sealed class MediaCompositionRenderer : ITimelineRenderer
                 composition.Clips.Add(MediaClip.CreateFromColor(global::Windows.UI.Color.FromArgb(255, 0, 0, 0), TimeSpan.FromMilliseconds(clip.TimelineStartMs - at)));
             }
 
+            if (!EdlProject.IsLocalMediaPath(clip.Path)) throw new InvalidOperationException("Not a local video file: " + Path.GetFileName(clip.Path));
             var file = await StorageFile.GetFileFromPathAsync(Path.GetFullPath(clip.Path));
             var media = await MediaClip.CreateFromFileAsync(file);
             media.TrimTimeFromStart = TimeSpan.FromMilliseconds(clip.InMs);

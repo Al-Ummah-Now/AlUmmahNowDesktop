@@ -672,5 +672,6 @@
   "studio.editor.error.refused": "That edit isn't possible here.",
   "studio.editor.error.open": "{0} is not a project this editor can open.",
   "studio.editor.error.save": "{0} could not be saved.",
-  "studio.editor.error.export": "The export did not finish: {0}"
+  "studio.editor.error.export": "The export did not finish: {0}",
+  "studio.editor.error.source": "{0} isn't a video file on this computer. Add the video again."
 }

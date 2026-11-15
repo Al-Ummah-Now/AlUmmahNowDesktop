@@ -1,3 +1,4 @@
+using System.Text.Json;
 using AlUmmahNow.CoreBridge.Native.Studio;
 using AlUmmahNow.CoreBridge.Studio;
 using AlUmmahNow.Studio.Timeline;
@@ -15,11 +16,56 @@ public sealed class EditorViewModelTests : IDisposable
 
     private EditorViewModel Make() => new(new CoreEdlEditing(), new FakeProbe(), _renderer, () => DateTimeOffset.FromUnixTimeMilliseconds(1_700_000_000_000));
 
+    /// <summary>An (empty) file in the test folder; the fake probe decides what it contains.</summary>
+    private string Media(string name)
+    {
+        var path = Path.Combine(_dir, name);
+        File.WriteAllBytes(path, new byte[] { 0 });
+        return path;
+    }
+
     private async Task<EditorViewModel> WithTwoVideos()
     {
         var vm = Make();
-        await vm.AddVideosAsync(new[] { "/media/talk.mp4", "/media/walk.mp4" });
+        await vm.AddVideosAsync(new[] { Media("talk.mp4"), Media("walk.mp4") });
         return vm;
+    }
+
+    private string SavedProjectWithSource(string sourcePath)
+    {
+        var json = CoreStudioMediaTests.Project.Replace("/media/cam.mp4", JsonEncodedText.Encode(sourcePath).ToString(), StringComparison.Ordinal);
+        var file = Path.Combine(_dir, "shared" + EditorTime.ProjectExtension);
+        File.WriteAllText(file, json);
+        return file;
+    }
+
+    [Theory]
+    [InlineData(@"\\attacker.example\share\cam.mp4")]
+    [InlineData("//attacker.example/share/cam.mp4")]
+    [InlineData("smb://attacker.example/share/cam.mp4")]
+    [InlineData("relative/cam.mp4")]
+    public async Task ProjectsWithNonLocalSourcesAreRefused(string source)
+    {
+        var vm = Make();
+        Assert.False(await vm.OpenAsync(SavedProjectWithSource(source)));
+        Assert.Equal("studio.editor.error.source", vm.ErrorKey);
+        Assert.Empty(vm.Clips);
+    }
+
+    [Fact]
+    public async Task ProjectsWithMissingSourcesAreRefused()
+    {
+        var vm = Make();
+        Assert.False(await vm.OpenAsync(SavedProjectWithSource(Path.Combine(_dir, "gone.mp4"))));
+        Assert.Equal("studio.editor.error.source", vm.ErrorKey);
+    }
+
+    [Fact]
+    public async Task ProjectsWithLocalSourcesOpen()
+    {
+        var vm = Make();
+        Assert.True(await vm.OpenAsync(SavedProjectWithSource(Media("cam.mp4"))));
+        Assert.Equal(2, vm.Clips.Count);
     }
 
     [Fact]
@@ -40,7 +86,7 @@ public sealed class EditorViewModelTests : IDisposable
     public async Task FilesWithoutVideoAreSkippedWithAMessage()
     {
         var vm = Make();
-        await vm.AddVideosAsync(new[] { "/media/voice.m4a", "/media/talk.mp4" });
+        await vm.AddVideosAsync(new[] { Media("voice.m4a"), Media("talk.mp4") });
         Assert.Single(vm.Clips);
         Assert.Equal("studio.editor.error.noVideo", vm.ErrorKey);
         Assert.Equal("voice.m4a", vm.ErrorDetail);

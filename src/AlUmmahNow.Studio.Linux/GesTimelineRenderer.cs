@@ -34,6 +34,7 @@ public sealed class GesTimelineRenderer : ITimelineRenderer
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     if (Math.Abs(clip.Speed - 1) > 0.001) throw new NotSupportedException("Speed changes are not supported in exports yet");
+                    if (!EdlProject.IsLocalMediaPath(clip.Path)) throw new InvalidOperationException("Not a local video file: " + Path.GetFileName(clip.Path));
                     var uri = new Uri(Path.GetFullPath(clip.Path)).AbsoluteUri;
                     var ges = ges_uri_clip_new(uri);
                     if (ges == IntPtr.Zero) throw new InvalidOperationException("Could not open " + Path.GetFileName(clip.Path));
