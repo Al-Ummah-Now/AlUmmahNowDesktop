@@ -95,7 +95,7 @@ internal sealed class TimelinePage
         projectButtons.Children.Add(Add("open", Ui.Button(l["studio.editor.open"], () => _ = OpenAsync())));
         projectButtons.Children.Add(Add("save", Ui.Button(l["studio.editor.save"], () => _ = SaveAsync())));
         projectButtons.Children.Add(Add("export", Ui.Button(l["studio.editor.export"], () => _ = ExportAsync())));
-        projectButtons.Children.Add(Add("add", Ui.Button(l["studio.editor.addVideos"], () => _ = AddVideosAsync(), accent: true, name: "EditorAddVideos")));
+        projectButtons.Children.Add(Add("add", Ui.Button(l["studio.editor.addVideos"], () => _ = AddVideosAsync(), accent: true, id: "EditorAddVideos")));
         Grid.SetColumn(projectButtons, 1);
         project.Children.Add(projectButtons);
 
@@ -151,8 +151,8 @@ internal sealed class TimelinePage
         panel.Children.Add(_arabic);
         panel.Children.Add(_english);
         var titleRow1 = Ui.Row();
-        titleRow1.Children.Add(Add("addTitle", Ui.Button(l["studio.editor.addTitle"], SubmitTitle, accent: true, name: "EditorAddTitle")));
-        titleRow1.Children.Add(Add("saveTitle", Ui.Button(l["studio.editor.saveTitle"], SubmitTitle, accent: true, name: "EditorSaveTitle")));
+        titleRow1.Children.Add(Add("addTitle", Ui.Button(l["studio.editor.addTitle"], SubmitTitle, accent: true, id: "EditorAddTitle")));
+        titleRow1.Children.Add(Add("saveTitle", Ui.Button(l["studio.editor.saveTitle"], SubmitTitle, accent: true, id: "EditorSaveTitle")));
         titleRow1.Children.Add(Add("newTitle", Ui.Button(l["studio.editor.newTitle"], () => _vm.SelectTitle(null))));
         titleRow1.Children.Add(Add("removeTitle", Ui.Button(l["studio.editor.removeTitle"], () => _vm.RemoveTitle())));
         var titleRow2 = Ui.Row();
