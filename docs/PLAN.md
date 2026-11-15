@@ -11,7 +11,7 @@ Spec: `docs/native-apps/EPICS.md` in the AlUmmahNow monorepo (§1–4, Epics 15,
 | `src/AlUmmahNow.Windows` | net9.0-windows | Viewer: WinUI 3, Windows.Media.Playback, SMTC |
 | `src/AlUmmahNow.Linux` | net9.0 | Viewer: GTK 4 and libadwaita through Gir.Core, GStreamer, MPRIS |
 | `src/AlUmmahNow.Tizen` | tizen | Samsung TV viewer: NUI, 10-foot UI |
-| `src/AlUmmahNow.Studio` | net9.0 | Shared Studio logic: upload queue, folder watch, encode queue, timeline model |
+| `src/AlUmmahNow.Studio` | net9.0 | Shared Studio logic: upload queue, folder watch, encode queue, editor (Core edit list) |
 | `src/AlUmmahNow.Studio.Windows` | net9.0-windows | Studio surface: WinUI 3, Media Foundation |
 | `src/AlUmmahNow.Studio.Linux` | net9.0 | Studio surface: GTK 4, GStreamer |
 | `spikes/` | | Throwaway validation (D9) |
@@ -27,6 +27,12 @@ desktop apps. Do not use net9-only APIs in `App` or `CoreBridge`.
   gives identical Arabic rendering on every platform and avoids sideloading differences.
 - **Dependencies not yet available** sit behind interfaces: the core (`ICatalogClient`, upload engine),
   sign-in (needs a registered native client from Epic 9), and Fanous tokens (placeholders from spec §3).
+
+- **Studio media runs on Core plus the platform stack.** Core 0.4 supplies probing, the HLS ladder and
+  packaging, whisper models and the edit list (EDL). Each platform encodes: GStreamer and GES on Linux
+  (GES through a small P/Invoke, since Gir.Core has no binding), Media Foundation and MediaComposition on
+  Windows. Every editor edit is a Core `edl_apply_json` call, so cuts behave the same in every app.
+  Demo mode swaps only the server; `AUN_REAL_MEDIA=1` also makes a demo pre-encode use the real encoders.
 
 - **Tizen playback** uses `Tizen.Multimedia.Player`. "AVPlay" in the spec is the Web API name; the .NET
   equivalent is this player. `tizen50` keeps Samsung's 2019+ TVs in range (Epic 15.9). The viewer compiles

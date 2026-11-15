@@ -44,6 +44,11 @@ jobs:
           [IO.File]::WriteAllBytes("$watch/talk-one.mp4", (New-Object byte[] 2000000))
           ffmpeg -hide_banner -loglevel error -y -f lavfi -i testsrc=duration=5:size=640x360:rate=30 -f lavfi -i sine=frequency=440:duration=5 -c:v libx264 -pix_fmt yuv420p -c:a aac source.mp4
           $source = (Resolve-Path source.mp4).Path
+          # Editor sources: an English and an Arabic file name, so clip labels are checked in both directions.
+          $editor = (New-Item -ItemType Directory -Force editor).FullName
+          Copy-Item source.mp4 "$editor/opening.mp4"
+          ffmpeg -hide_banner -loglevel error -y -f lavfi -i testsrc2=duration=3:size=640x360:rate=30 -f lavfi -i sine=frequency=660:duration=3 -c:v libx264 -pix_fmt yuv420p -c:a aac "$editor/سوق دمشق.mp4"
+          $env:AUN_EDITOR_FILES = "$editor/opening.mp4|$editor/سوق دمشق.mp4"
           $exe = (Resolve-Path "src/AlUmmahNow.Studio.Windows/bin/x64/Release/net9.0-windows10.0.22621.0/win-x64/AlUmmahNowStudio.exe").Path
           ./scripts/windows-studio-scenario.ps1 $exe ar uploads "" uploads-ar $out $watch
           ./scripts/windows-studio-scenario.ps1 $exe ar timeline "" signin-ar $out "" "" 0
@@ -83,7 +88,27 @@ jobs:
               }
             }
           }
+          # Editor (19.5): the cut timeline in both languages and themes.
+          foreach ($theme in "dark","light") {
+            $env:AUN_THEME = $theme
+            foreach ($lang in "ar","en") {
+              $n = "editor-$lang-$theme"
+              ./scripts/windows-studio-scenario.ps1 $exe $lang timeline "" $n $out "" editor
+              $screens += $n
+            }
+          }
           $env:AUN_THEME = ""
+          # A real MediaComposition export of the cut, and a real pre-encode (Media Foundation per rung, Core packaging).
+          $env:AUN_EXIT_AFTER_SECS = "70"
+          $env:AUN_EXPORT_TO = Join-Path (Get-Location) "edited.mp4"
+          ./scripts/windows-studio-scenario.ps1 $exe en timeline export editor-export-en $out "" editor
+          $env:AUN_EXPORT_TO = ""
+          $real = (New-Item -ItemType Directory -Force real).FullName
+          Copy-Item source.mp4 "$real/talk.mp4"
+          $env:AUN_REAL_MEDIA = "1"; $env:AUN_STAGE_DIR = $real
+          ./scripts/windows-studio-scenario.ps1 $exe en uploads preencode preencode-real-en $out "" preencode
+          $env:AUN_REAL_MEDIA = ""; $env:AUN_STAGE_DIR = ""; $env:AUN_EXIT_AFTER_SECS = ""
+          $screens += "editor-export-en", "preencode-real-en"
           foreach ($n in $screens) {
             if (-not (Select-String -Quiet "RESULT PASS" "artifacts/studio/$n.txt")) { throw "$n failed" }
             if (Test-Path "artifacts/studio/$n.txt.hang.txt") { throw "$n did not exit" }
@@ -95,6 +120,12 @@ jobs:
           if (-not (Select-String -Quiet "`tAnalyticsScope`tShow" artifacts/studio/analytics-en-dark.uia.txt)) { throw "analytics scope has no accessible name" }
           if (-not (Select-String -Quiet -SimpleMatch "Switch to Masjid Media Team" artifacts/studio/brand-en-dark.uia.txt)) { throw "channel switch buttons have no accessible names" }
           if (-not (Select-String -Quiet -SimpleMatch "Only the owner can change it" artifacts/studio/brand-team-en-dark.uia.txt)) { throw "read-only brand kit not announced" }
+          if (-not (Select-String -Quiet -SimpleMatch "Split at playhead" artifacts/studio/editor-en-dark.uia.txt)) { throw "editor tools not exposed" }
+          if (-not (Select-String -Quiet -SimpleMatch "opening" artifacts/studio/editor-en-dark.uia.txt)) { throw "editor clip list not exposed" }
+          ffmpeg -hide_banner -i edited.mp4 2>&1 | Select-String "Video:|Audio:|Duration" | Tee-Object artifacts/studio/edited-discover.txt
+          if (-not (Select-String -Quiet "h264" artifacts/studio/edited-discover.txt)) { throw "export is not H.264" }
+          if (-not (Select-String -Quiet "aac" artifacts/studio/edited-discover.txt)) { throw "export has no AAC audio" }
+          if (-not (Select-String -Quiet "Duration: 00:00:0[78]" artifacts/studio/edited-discover.txt)) { throw "export length is not the 8 s cut" }
           if (-not (Select-String -Quiet "`tPreEncode`tPre-encode renditions on this computer" artifacts/studio/preencode-en-dark.uia.txt)) { throw "pre-encode option not exposed" }
           foreach ($n in "uploads-ar","signin-ar","signin-en","shell-ar","shell-en","accounts-en","signout-ar","addpasskey-en","addpasskey-ar","upload-staged-ar","upload-staged-en","videos-ar","videos-en","search-ar","edit-en","bulk-ar","delete-en","timeline-ar","encode-en") {
             if (-not (Select-String -Quiet "RESULT PASS" "artifacts/studio/$n.txt")) { throw "$n failed" }

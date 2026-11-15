@@ -15,6 +15,8 @@ using AlUmmahNow.Studio.Videos;
 using AlUmmahNow.Studio.Analytics;
 using AlUmmahNow.Studio.Captions;
 using AlUmmahNow.Studio.Institution;
+using AlUmmahNow.Studio.Engines;
+using AlUmmahNow.Studio.Timeline;
 
 // Settings and logs follow the XDG base directories.
 string XdgDir(string variable, string fallback)
@@ -25,6 +27,7 @@ string XdgDir(string variable, string fallback)
 
 var configDir = XdgDir("XDG_CONFIG_HOME", ".config");
 var stateDir = XdgDir("XDG_STATE_HOME", Path.Combine(".local", "state"));
+var dataDir = XdgDir("XDG_DATA_HOME", Path.Combine(".local", "share"));
 Log.AddSink(TextWriterLogSink.StandardError());
 Log.AddSink(new FileLogSink(Path.Combine(stateDir, "logs", "studio.log")));
 var log = Log.For("app");
@@ -56,9 +59,14 @@ Func<string, IUploadService> uploadServiceFor;
 ICaptionsApi captionsApi;
 IInstitutionApi institutionApi;
 IInsightsApi insightsApi;
-// On-device transcription and pre-encoding need Core's whisper and HLS packaging (v0.4); until then they stay hidden.
-IOnDeviceTranscriber? transcriber = null;
-PreEncodeCoordinator? preEncoder = null;
+IOnDeviceTranscriber transcriber;
+IRenditionsApi renditionsApi;
+// Media work always runs on Core and this machine's GStreamer: probing, the HLS ladder and packaging (D11), whisper
+// models (D10) and the edit list (19.5). Demo mode only swaps the server for canned data.
+var probe = new CoreMediaProbe();
+var modelsDir = Environment.GetEnvironmentVariable("AUN_MODELS_DIR") is { Length: > 0 } md ? md : Path.Combine(dataDir, "models");
+// AUN_REAL_MEDIA=1 runs a demo pre-encode on the real encoder and packaging (CI); otherwise demo media is simulated.
+var realMedia = !demo || Environment.GetEnvironmentVariable("AUN_REAL_MEDIA") == "1";
 if (demo)
 {
     accounts = new DemoAccounts();
@@ -68,9 +76,9 @@ if (demo)
     captionsApi = demoServices;
     institutionApi = demoServices;
     insightsApi = demoServices;
-    transcriber = new DemoTranscriber();
-    var demoMedia = new DemoRenditionPackaging();
-    preEncoder = new PreEncodeCoordinator(() => new LocalRenditionJob(demoMedia, demoMedia, demoMedia, demoServices), Path.Combine(stateDir, "demo-renditions"));
+    renditionsApi = demoServices;
+    // Screenshots show an installed model without downloading one; AUN_MODELS_DIR uses real models.
+    transcriber = Environment.GetEnvironmentVariable("AUN_MODELS_DIR") is { Length: > 0 } ? new CoreOnDeviceTranscriber(modelsDir) : new DemoTranscriber();
 }
 else
 {
@@ -83,6 +91,21 @@ else
     captionsApi = services;
     institutionApi = services;
     insightsApi = services;
+    renditionsApi = services;
+    transcriber = new CoreOnDeviceTranscriber(modelsDir);
+}
+
+PreEncodeCoordinator preEncoder;
+if (realMedia)
+{
+    var packaging = new CoreRenditionPackaging();
+    var rungEncoder = new GStreamerRungEncoder();
+    preEncoder = new PreEncodeCoordinator(() => new LocalRenditionJob(probe, rungEncoder, packaging, renditionsApi) { EncoderName = $"Al Ummah Now Studio {version} (Linux)" }, Path.Combine(stateDir, "renditions"));
+}
+else
+{
+    var demoMedia = new DemoRenditionPackaging();
+    preEncoder = new PreEncodeCoordinator(() => new LocalRenditionJob(demoMedia, demoMedia, demoMedia, renditionsApi), Path.Combine(stateDir, "demo-renditions"));
 }
 
 var api = new StudioApiClient(transport);
@@ -121,7 +144,8 @@ app.OnActivate += (_, _) =>
         });
     var videos = new VideosPage(localizer, videosVm, uploadsVm, window.Window);
     var encodePage = new EncodePage(localizer, encode);
-    var timeline = new TimelinePage(localizer);
+    var editorVm = new EditorViewModel(new CoreEdlEditing(), probe, new GesTimelineRenderer());
+    var timeline = new TimelinePage(localizer, editorVm, uploadsVm, window.Window);
     var captionsVm = new CaptionsViewModel(shell, api, captionsApi, transcriber);
     var captions = new CaptionsPage(localizer, captionsVm, window.Window);
     var insightsVm = new InsightsViewModel(shell, api, insightsApi);
@@ -142,6 +166,7 @@ app.OnActivate += (_, _) =>
     {
         "captions" => scene == "captions-editor" ? captionsVm.Editor != null : captionsVm.Drafts != null,
         "analytics" => scene == "analytics-video" ? insightsVm.Retention != null : insightsVm.Summary != null,
+"timeline" => scene != "editor" || editorVm.Clips.Count >= 3,
         "brand" => scene == "brand-team" ? institutionVm.State != null && !institutionVm.CanEdit : institutionVm.State is { CanEdit: true },
         _ => scene != "preencode" || uploadsVm.Items.Any(i => preEncoder?.StatusOf(i.Id) != null),
     };
@@ -180,9 +205,17 @@ app.OnActivate += (_, _) =>
                 uploads.ShowQueue();
             }
             else if (scene == "signout") window.AskSignOut();
+            else if (scene == "editor") _ = RunEditorSceneAsync();
             else videos.RunScene(scene);
             return false;
         });
+    }
+
+    // CI: the editor scene, then (AUN_EXPORT_TO) a real export of the cut timeline through GES.
+    async Task RunEditorSceneAsync()
+    {
+        await timeline.RunSceneAsync((Environment.GetEnvironmentVariable("AUN_EDITOR_FILES") ?? "").Split('|', StringSplitOptions.RemoveEmptyEntries));
+        if (Environment.GetEnvironmentVariable("AUN_EXPORT_TO") is { Length: > 0 } output) await editorVm.ExportAsync(output);
     }
 
     if (exitAfter > 0)
@@ -192,12 +225,15 @@ app.OnActivate += (_, _) =>
             var items = uploadsVm.Items;
             var uploadsDone = items.Count > 0 && items.All(i => i.Phase == UploadPhase.Done);
             var encoded = automationJob == null || automationJob.Status == EncodeStatus.Completed;
+            var preEncoded = items.Select(i => preEncoder.StatusOf(i.Id)?.Outcome).FirstOrDefault(o => o != null);
             var pass = automation.StartsWith("encode:", StringComparison.Ordinal) ? encoded
                 : automation == "shell" ? shell.State == ShellState.Ready && shell.ActiveChannel != null
+                : automation == "export" ? editorVm.ExportedPath is { } exported && new FileInfo(exported).Length > 0
+                : automation == "preencode" ? preEncoded == RenditionOutcomeKind.Ready
                 : uploadsDone || tabName != "uploads";
             var sceneOk = SceneOk();
             pass = pass && sceneOk;
-            Log.For("automation").Info($"AUTOMATION {tabName} scene={scene} sceneOk={sceneOk} shell={shell.State} channel={shell.ActiveChannel?.Id} accounts={shell.AccountList.Count} uploads={items.Count} uploadsDone={uploadsDone} encode={automationJob?.Status} encoder={automationJob?.UsedEncoder?.Name} error={automationJob?.Error} RESULT {(pass ? "PASS" : "FAIL")}");
+            Log.For("automation").Info($"AUTOMATION {tabName} scene={scene} sceneOk={sceneOk} shell={shell.State} channel={shell.ActiveChannel?.Id} accounts={shell.AccountList.Count} uploads={items.Count} uploadsDone={uploadsDone} encode={automationJob?.Status} encoder={automationJob?.UsedEncoder?.Name} error={automationJob?.Error} clips={editorVm.Clips.Count} exported={editorVm.ExportedPath} editorError={editorVm.ErrorKey}:{editorVm.ErrorDetail} preEncode={preEncoded} RESULT {(pass ? "PASS" : "FAIL")}");
             exitCode = pass ? 0 : 3;
             app.Quit();
             return false;
