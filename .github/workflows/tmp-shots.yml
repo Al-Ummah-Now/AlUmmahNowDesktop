@@ -1,0 +1,101 @@
+name: TEMP review shots (throwaway branch, not for merge)
+on:
+  push:
+permissions:
+  contents: read
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Fetch AlUmmahNow.Core
+        shell: bash
+        run: ./scripts/fetch-core.sh
+      - name: Install GTK, libadwaita
+        uses: ./.github/actions/apt-install
+        with:
+          packages: libgtk-4-1 libadwaita-1-0 xvfb imagemagick openbox gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good libsecret-1-0 fonts-noto-core at-spi2-core dbus-x11 libgl1-mesa-dri adwaita-icon-theme xdotool x11-utils
+      - run: dotnet build src/AlUmmahNow.Studio.Linux -c Release
+      - name: Viewport frames, pointer parked off the window
+        env:
+          GDK_BACKEND: x11
+          GSK_RENDERER: cairo
+          LIBGL_ALWAYS_SOFTWARE: "1"
+        run: |
+          mkdir -p shots
+          cat > shot.sh <<'SH'
+          # usage: shot.sh <name>; AUN_* set by the caller
+          export AUN_AUTOMATION=shell AUN_EXIT_AFTER=40 AUN_DEMO=1 AUN_STORE_SHOT=1 AUN_SIMULATE_UPLOADS=1
+          export XDG_CONFIG_HOME=$(mktemp -d) XDG_STATE_HOME=$(mktemp -d)
+          openbox &
+          sleep 2
+          dotnet src/AlUmmahNow.Studio.Linux/bin/Release/net9.0/alummahnow-studio.dll &
+          app=$!
+          sleep 15
+          xdotool mousemove 1590 990
+          sleep 3
+          win=$(xdotool search --onlyvisible --name "Al Ummah Now Studio" | head -1)
+          import -window "$win" -frame "shots/linux-$1-top.png"
+          # End of the page: wheel down over the content, then park the pointer again and let the overlay scrollbar fade.
+          xdotool mousemove 800 600
+          for i in $(seq 1 30); do xdotool click 5; sleep 0.05; done
+          xdotool mousemove 1590 990
+          sleep 4
+          import -window "$win" -frame "shots/linux-$1-end.png"
+          xdotool getmouselocation
+          wait $app
+          SH
+          for lang in en ar; do for theme in light dark; do
+            s() { dbus-run-session -- xvfb-run -a -s "-screen 0 1600x1000x24" bash shot.sh "$1" > "shots/linux-$1.log" 2>&1 || true; }
+            AUN_LANG=$lang AUN_THEME=$theme AUN_TAB=uploads s on-$lang-$theme
+            AUN_LANG=$lang AUN_THEME=$theme AUN_TAB=uploads AUN_DEMO_FEATURES_OFF=upload,analytics s off-$lang-$theme
+            AUN_LANG=$lang AUN_THEME=$theme AUN_TAB=uploads AUN_DEMO_FEATURES_OFF=upload,analytics AUN_SCENE=emptychannel s off-emptychannel-$lang-$theme
+            AUN_LANG=$lang AUN_THEME=$theme AUN_TAB=uploads AUN_SCENE=scheduled s schedule-on-$lang-$theme
+            AUN_LANG=$lang AUN_THEME=$theme AUN_TAB=uploads AUN_DEMO_FEATURES_OFF=bulkSchedule AUN_SCENE=scheduled s schedule-off-$lang-$theme
+          done; done
+          grep -h "RESULT" shots/*.log || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shots-linux
+          path: shots
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Fetch AlUmmahNow.Core
+        shell: bash
+        run: ./scripts/fetch-core.sh
+      - name: Build Studio
+        run: dotnet build src/AlUmmahNow.Studio.Windows -c Release -p:Platform=x64
+      - name: Viewport frames, pointer parked off the window
+        shell: pwsh
+        run: |
+          ./scripts/set-resolution.ps1 1920 1080
+          Add-Type -AssemblyName System.Drawing, System.Windows.Forms
+          $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $out = (New-Item -ItemType Directory -Force shots).FullName
+          $exe = (Resolve-Path "src/AlUmmahNow.Studio.Windows/bin/x64/Release/net9.0-windows10.0.22621.0/win-x64/AlUmmahNowStudio.exe").Path
+          $env:AUN_DEMO = "1"; $env:AUN_AUTOMATION = "shell"; $env:AUN_SIMULATE_UPLOADS = "1"; $env:AUN_TAB = "uploads"; $env:AUN_STAGE_DIR = ""; $env:AUN_WATCH_DIR = ""
+          $runs = @(
+            @("on", "", ""), @("off", "upload,analytics", ""), @("off-emptychannel", "upload,analytics", "emptychannel"),
+            @("schedule-on", "", "scheduled"), @("schedule-off", "bulkSchedule", "scheduled"))
+          foreach ($lang in "en","ar") { foreach ($theme in "light","dark") { foreach ($r in $runs) {
+            [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(($b.Right - 1), ($b.Bottom - 1))
+            $env:AUN_LANG = $lang; $env:AUN_THEME = $theme; $env:AUN_DEMO_FEATURES_OFF = $r[1]; $env:AUN_SCENE = $r[2]
+            ./scripts/store-shot.ps1 $exe "windows-$($r[0])-$lang-$theme" $out
+          } } }
+          exit 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shots-windows
+          path: shots
