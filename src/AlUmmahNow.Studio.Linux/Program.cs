@@ -78,7 +78,13 @@ app.OnActivate += (_, _) =>
     var theme = Environment.GetEnvironmentVariable("AUN_THEME");
     if (theme is "dark" or "light") Adw.StyleManager.GetDefault().SetColorScheme(theme == "dark" ? Adw.ColorScheme.ForceDark : Adw.ColorScheme.ForceLight);
     // The view-model posts its updates to the GTK main loop's synchronization context.
-    var shell = new StudioShellViewModel(accounts, api, new FeaturesClient(transport));
+    var shell = new StudioShellViewModel(accounts, api, new FeaturesClient(transport),
+            profiles: new ProfileClient(transport), language: localizer.Language,
+            knownNames: settings.AccountNames, saveNames: names =>
+            {
+                settings.AccountNames = names.ToDictionary(kv => kv.Key, kv => kv.Value);
+                settingsStore.Save(settings);
+            });
     var uploadsVm = new UploadsViewModel(shell, api, uploadServiceFor, Path.Combine(stateDir, demo ? "demo" : "studio"));
     var banner = demo ? localizer["studio.shell.demo"] : environment.Name != "prod" ? localizer.Format("studio.shell.environment", environment.Name.ToUpperInvariant()) : null;
     var window = new StudioWindow(app, localizer, shell, banner);
@@ -141,6 +147,9 @@ app.OnActivate += (_, _) =>
         {
             if (scene == "accounts") window.OpenAccountMenu();
             else if (scene == "signout") window.AskSignOut();
+            else if (scene == "scheduled") uploads.RunScene(scene);
+            // The demo's second channel has no videos: the Videos empty state.
+            else if (scene == "emptychannel") shell.SelectChannel(shell.Channels.ElementAtOrDefault(1));
             else videos.RunScene(scene);
             return false;
         });
@@ -156,7 +165,7 @@ app.OnActivate += (_, _) =>
             var pass = automation.StartsWith("encode:", StringComparison.Ordinal) ? encoded
                 : automation == "shell" ? shell.State == ShellState.Ready && shell.ActiveChannel != null
                 : uploadsDone || tabName != "uploads";
-            Log.For("automation").Info($"AUTOMATION {tabName} page={pages.Current} upload={pages.IsVisible(StudioPages.Uploads)} analytics={pages.IsVisible(StudioPages.Analytics)} scene={scene} shell={shell.State} channel={shell.ActiveChannel?.Id} accounts={shell.AccountList.Count} uploads={items.Count} uploadsDone={uploadsDone} encode={automationJob?.Status} encoder={automationJob?.UsedEncoder?.Name} error={automationJob?.Error} RESULT {(pass ? "PASS" : "FAIL")}");
+            Log.For("automation").Info($"AUTOMATION {tabName} page={pages.Current} upload={pages.IsVisible(StudioPages.Uploads)} analytics={pages.IsVisible(StudioPages.Analytics)} bulkSchedule={uploadsVm.BulkScheduleOn} scene={scene} shell={shell.State} channel={shell.ActiveChannel?.Id} accounts={shell.AccountList.Count} uploads={items.Count} uploadsDone={uploadsDone} encode={automationJob?.Status} encoder={automationJob?.UsedEncoder?.Name} error={automationJob?.Error} RESULT {(pass ? "PASS" : "FAIL")}");
             exitCode = pass ? 0 : 3;
             app.Quit();
             return false;

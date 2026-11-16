@@ -91,7 +91,13 @@ public sealed partial class App : Application
         }
 
         var api = new StudioApiClient(transport);
-        var shell = new StudioShellViewModel(accounts, api, new FeaturesClient(transport));
+        var shell = new StudioShellViewModel(accounts, api, new FeaturesClient(transport),
+            profiles: new ProfileClient(transport), language: localizer.Language,
+            knownNames: settings.AccountNames, saveNames: names =>
+            {
+                settings.AccountNames = names.ToDictionary(kv => kv.Key, kv => kv.Value);
+                settingsStore.Save(settings);
+            });
         _uploads = new UploadsViewModel(shell, api, uploadServiceFor, Path.Combine(dataRoot, demo ? "demo" : "studio"));
         var uploadsVm = _uploads;
         var encode = new EncodeQueue(new MediaFoundationEncodeBackend());
@@ -187,6 +193,9 @@ public sealed partial class App : Application
                 if (scene == "accounts") window.OpenAccountMenu();
                 else if (scene == "signout") window.AskSignOut();
                 else if (scene == "addpasskey") _ = window.AddPasskeyAsync();
+                else if (scene == "scheduled") uploads.RunScene(scene);
+                // The demo's second channel has no videos: the Videos empty state.
+                else if (scene == "emptychannel") shell.SelectChannel(shell.Channels.ElementAtOrDefault(1));
                 else videos.RunScene(scene);
             };
             _sceneTimer.Start();
@@ -204,7 +213,7 @@ public sealed partial class App : Application
                 var pass = job != null ? job.Status == EncodeStatus.Completed
                     : automation == "shell" ? shell.State == ShellState.Ready && shell.ActiveChannel != null
                     : uploadsDone || tabName != "uploads";
-                File.WriteAllText(ResultPath, $"AUTOMATION {tabName} page={pages.Current} upload={pages.IsVisible(StudioPages.Uploads)} analytics={pages.IsVisible(StudioPages.Analytics)} scene={scene} shell={shell.State} channel={shell.ActiveChannel?.Id} accounts={shell.AccountList.Count} uploads={snapshot.Count} uploadsDone={uploadsDone} encode={job?.Status} encoder={job?.UsedEncoder?.Name} error={job?.Error} RESULT {(pass ? "PASS" : "FAIL")}");
+                File.WriteAllText(ResultPath, $"AUTOMATION {tabName} page={pages.Current} upload={pages.IsVisible(StudioPages.Uploads)} analytics={pages.IsVisible(StudioPages.Analytics)} bulkSchedule={uploadsVm.BulkScheduleOn} scene={scene} shell={shell.State} channel={shell.ActiveChannel?.Id} accounts={shell.AccountList.Count} uploads={snapshot.Count} uploadsDone={uploadsDone} encode={job?.Status} encoder={job?.UsedEncoder?.Name} error={job?.Error} RESULT {(pass ? "PASS" : "FAIL")}");
                 Exit();
             };
             _endTimer.Start();

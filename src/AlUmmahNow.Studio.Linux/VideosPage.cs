@@ -132,6 +132,7 @@ public sealed class VideosPage
                 case nameof(VideosViewModel.Items): RenderList(); break;
                 case nameof(VideosViewModel.Selected): RenderSelection(); break;
                 case nameof(VideosViewModel.IsLoading): RenderLoading(); break;
+                case nameof(VideosViewModel.ShowEmpty): RenderEmpty(); break;
                 case nameof(VideosViewModel.Deleted): RenderDeleted(); break;
                 case nameof(VideosViewModel.ErrorKey): _error.SetText(_vm.ErrorKey is { } k ? _l[k] : ""); break;
                 case nameof(VideosViewModel.NoticeKey):
@@ -280,10 +281,15 @@ public sealed class VideosPage
         }
 
         _list.SetVisible(_vm.Items.Count > 0);
-        _empty.SetVisible(_vm.Items.Count == 0 && !_vm.IsLoading);
-        _empty.SetText(_vm.Query.Length > 0 ? _l.Format("studio.videos.noResults", _vm.Query) : _l["studio.videos.empty"]);
+        RenderEmpty();
         _more.SetVisible(_vm.HasMore);
         RenderSelection();
+    }
+
+    private void RenderEmpty()
+    {
+        _empty.SetVisible(_vm.ShowEmpty);
+        _empty.SetText(_vm.Query.Length > 0 ? _l.Format("studio.videos.noResults", _vm.Query) : _l["studio.videos.empty"]);
     }
 
     private string Meta(StudioVideo v)

@@ -113,6 +113,14 @@ public sealed class UploadPage
 
     public Gtk.ScrolledWindow Root { get; }
 
+    private Gtk.DropDown? _visibility;
+
+    /// <summary>CI screenshots: "scheduled" picks Scheduled, showing the schedule fields.</summary>
+    public void RunScene(string scene)
+    {
+        if (scene == "scheduled") _visibility?.SetSelected(2);
+    }
+
     private UploadDefaults D => _vm.Defaults;
 
     private Gtk.Widget BuildDefaults()
@@ -193,7 +201,7 @@ public sealed class UploadPage
         Add(_l["studio.upload.language"], language);
 
         var visibilities = new[] { UploadVisibility.Private, UploadVisibility.Public, UploadVisibility.Scheduled };
-        var visibility = Gtk.DropDown.NewFromStrings(visibilities.Select(v => _l["studio.upload.visibility." + v.ToString().ToLowerInvariant()]).ToArray());
+        var visibility = _visibility = Gtk.DropDown.NewFromStrings(visibilities.Select(v => _l["studio.upload.visibility." + v.ToString().ToLowerInvariant()]).ToArray());
         visibility.OnNotify += (_, e) =>
         {
             if (e.Pspec.GetName() != "selected") return;
@@ -223,7 +231,14 @@ public sealed class UploadPage
         };
         _scheduleRow.Append(Ui.Labelled(_l["studio.upload.scheduleStart"], _scheduleStart));
         _scheduleRow.Append(scheduleError);
-        _scheduleRow.Append(Ui.Labelled(_l["studio.upload.scheduleEvery"], _scheduleEvery));
+        // "Every … hours" across a batch is bulk scheduling: hidden when bulkSchedule is off.
+        var every = Ui.Labelled(_l["studio.upload.scheduleEvery"], _scheduleEvery);
+        every.SetVisible(_vm.BulkScheduleOn);
+        _vm.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(UploadsViewModel.BulkScheduleOn)) every.SetVisible(_vm.BulkScheduleOn);
+        };
+        _scheduleRow.Append(every);
         _scheduleRow.SetVisible(false);
         grid.Attach(_scheduleRow, 1, row++, 1, 1);
 

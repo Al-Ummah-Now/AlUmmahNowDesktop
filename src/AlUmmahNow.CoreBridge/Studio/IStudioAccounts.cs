@@ -30,8 +30,11 @@ namespace AlUmmahNow.CoreBridge.Studio
         /// <summary>The refresh token was rejected: sign in again.</summary>
         public bool NeedsReauth { get; }
 
-        /// <summary>What to show for the account: display name, else email, else the id.</summary>
-        public string Label => !string.IsNullOrWhiteSpace(DisplayName) ? DisplayName! : !string.IsNullOrWhiteSpace(Email) ? Email! : UserId;
+        /// <summary>
+        /// What to show for the account before its profile is read: the token's name, else email, else the id; never an
+        /// @handle. The Studio shell shows <c>StudioShellViewModel.NameOf</c>, which prefers the profile's resolved name.
+        /// </summary>
+        public string Label => AccountName.Label(DisplayName, Email, UserId);
     }
 
     public enum SignInMode

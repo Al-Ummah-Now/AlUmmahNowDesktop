@@ -126,6 +126,14 @@ internal sealed class UploadPage
 
     public StackPanel Root { get; }
 
+    private ComboBox? _visibility;
+
+    /// <summary>CI screenshots: "scheduled" picks Scheduled, showing the schedule fields.</summary>
+    public void RunScene(string scene)
+    {
+        if (scene == "scheduled" && _visibility != null) _visibility.SelectedIndex = 2;
+    }
+
     private UploadDefaults D => _vm.Defaults;
 
     /// <summary>The title-pattern hint; its {n} examples use the UI digits (the token itself writes 0–9).</summary>
@@ -176,7 +184,7 @@ internal sealed class UploadPage
             _vm.ApplyDefaults();
         };
         var visibilities = new[] { UploadVisibility.Private, UploadVisibility.Public, UploadVisibility.Scheduled };
-        var visibility = new ComboBox { Header = _l["studio.upload.visibility"], ItemsSource = visibilities.Select(v => _l["studio.upload.visibility." + v.ToString().ToLowerInvariant()]).ToList(), SelectedIndex = 0, MinWidth = 160 };
+        var visibility = _visibility = new ComboBox { Header = _l["studio.upload.visibility"], ItemsSource = visibilities.Select(v => _l["studio.upload.visibility." + v.ToString().ToLowerInvariant()]).ToList(), SelectedIndex = 0, MinWidth = 160 };
         visibility.SelectionChanged += (_, _) =>
         {
             D.Visibility = visibilities[Math.Max(0, visibility.SelectedIndex)];
@@ -205,6 +213,12 @@ internal sealed class UploadPage
             if (double.IsNaN(every.Value)) return;
             D.ScheduleInterval = TimeSpan.FromHours(every.Value);
             _vm.ApplyDefaults();
+        };
+        // "Every … hours" across a batch is bulk scheduling: hidden when bulkSchedule is off.
+        every.Visibility = _vm.BulkScheduleOn ? Visibility.Visible : Visibility.Collapsed;
+        _vm.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(UploadsViewModel.BulkScheduleOn)) every.Visibility = _vm.BulkScheduleOn ? Visibility.Visible : Visibility.Collapsed;
         };
         var scheduleFields = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
         scheduleFields.Children.Add(start);

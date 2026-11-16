@@ -75,7 +75,11 @@ public sealed partial class AnalyticsViewModel : ObservableObject
     {
         if (_shell.ActiveChannel is not { } channel)
         {
+            // Supersede any load still in flight for the previous channel, and stop its spinner.
+            Interlocked.Increment(ref _generation);
             Data = null;
+            ErrorKey = null;
+            IsLoading = false;
             return;
         }
 
@@ -108,6 +112,15 @@ public sealed partial class AnalyticsViewModel : ObservableObject
             }
 
             _ = _shell.RefreshFeaturesAsync(force: true);
+        }
+        catch (RateLimitedException ex)
+        {
+            Logger.Warn("analytics rate limited", ex);
+            if (gen == _generation) ErrorKey = "studio.analytics.failed";
+        }
+        catch (OperationCanceledException)
+        {
+            // Nothing to show for a cancelled load; the finally block stops the spinner.
         }
         catch (StudioApiException ex)
         {

@@ -145,7 +145,7 @@ internal sealed class StudioWindow
             ShellState.Loading => Status(_l["studio.shell.loading"], null, new ProgressRing { IsActive = true }),
             ShellState.NoChannel => Status(_l["studio.shell.noChannelTitle"], _l["studio.shell.noChannelBody"], Action(_l["studio.shell.retry"], () => _ = _shell.RetryAsync())),
             ShellState.Error => Status(_l["studio.shell.errorTitle"], _shell.ErrorKey is { } e ? _l[e] : null, Action(_l["studio.shell.retry"], () => _ = _shell.RetryAsync())),
-            ShellState.NeedsReauth => Status(_l["studio.shell.reauthTitle"], _l.Format("studio.shell.reauthBody", Localizer.Isolate(_shell.ActiveAccount?.Label ?? "")), SignInActions()),
+            ShellState.NeedsReauth => Status(_l["studio.shell.reauthTitle"], _l.Format("studio.shell.reauthBody", Localizer.Isolate(_shell.ActiveAccountName ?? "")), SignInActions()),
             _ => _nav,
         });
         RenderChannels();
@@ -268,18 +268,18 @@ internal sealed class StudioWindow
     {
         var active = _shell.ActiveAccount;
         _accountButton.Visibility = _shell.AccountList.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-        _accountButton.Content = active?.Label ?? _l["studio.shell.account"];
-        AutomationProperties.SetName(_accountButton, active == null ? _l["studio.shell.account"] : _l.Format("studio.shell.accountMenu", active.Label));
+        _accountButton.Content = (active == null ? null : _shell.NameOf(active)) ?? _l["studio.shell.account"];
+        AutomationProperties.SetName(_accountButton, active == null ? _l["studio.shell.account"] : _l.Format("studio.shell.accountMenu", _shell.NameOf(active)));
         _accountMenu.Items.Clear();
         foreach (var account in _shell.AccountList)
         {
             var isActive = account.UserId == active?.UserId;
             var item = new ToggleMenuFlyoutItem
             {
-                Text = _l.Join(account.Label, account.NeedsReauth ? _l["studio.shell.needsReauth"] : null),
+                Text = _l.Join(_shell.NameOf(account), account.NeedsReauth ? _l["studio.shell.needsReauth"] : null),
                 IsChecked = isActive,
             };
-            AutomationProperties.SetName(item, _l.Format("studio.shell.switchTo", account.Label));
+            AutomationProperties.SetName(item, _l.Format("studio.shell.switchTo", _shell.NameOf(account)));
             item.Click += (_, _) => _ = _shell.SwitchAccountAsync(account.UserId);
             _accountMenu.Items.Add(item);
         }
@@ -300,7 +300,7 @@ internal sealed class StudioWindow
         _accountMenu.Items.Add(new MenuFlyoutSeparator());
         foreach (var account in _shell.AccountList)
         {
-            var signOut = new MenuFlyoutItem { Text = _l.Format("studio.shell.signOutOf", account.Label) };
+            var signOut = new MenuFlyoutItem { Text = _l.Format("studio.shell.signOutOf", _shell.NameOf(account)) };
             signOut.Click += (_, _) => _ = SignOutAsync(account);
             _accountMenu.Items.Add(signOut);
         }
@@ -309,7 +309,7 @@ internal sealed class StudioWindow
     private async Task SignOutAsync(StudioAccount account)
     {
         if (Window.Content?.XamlRoot is not { } root) return;
-        var ok = await Confirm.AskAsync(root, _direction, _l.Format("studio.shell.signOutTitle", Localizer.Isolate(account.Label)), _l["studio.shell.signOutBody"], _l["auth.signOut"], _l["common.cancel"]);
+        var ok = await Confirm.AskAsync(root, _direction, _l.Format("studio.shell.signOutTitle", Localizer.Isolate(_shell.NameOf(account))), _l["studio.shell.signOutBody"], _l["auth.signOut"], _l["common.cancel"]);
         if (!ok) return;
         try
         {
