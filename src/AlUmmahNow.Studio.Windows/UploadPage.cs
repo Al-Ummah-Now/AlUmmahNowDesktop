@@ -190,7 +190,7 @@ internal sealed class UploadPage
         var start = new TextBox { Header = _l["studio.upload.scheduleStart"], Text = Formats.ToLocalInput(D.ScheduleStart.Value), MinWidth = 220 };
         start.TextChanged += (_, _) =>
         {
-            var t = Formats.ParseLocal(start.Text);
+            var t = Formats.ParseLocal(Localizer.NormalizeDigits(start.Text));
             start.Description = t == null ? _l["studio.upload.scheduleInvalid"] : null;
             if (t == null) return;
             D.ScheduleStart = t;
@@ -294,7 +294,7 @@ internal sealed class UploadPage
             title.TextChanged += (_, _) => _vm.RenameStaged(plan.FilePath, title.Text);
             var meta = new TextBlock
             {
-                Text = Localizer.Isolate(file) + " · " + Formats.Bytes(plan.Size, CultureInfo.InvariantCulture) + (plan.PublishAt is { } at ? " · " + _l.Format("studio.upload.publishesAt", Formats.ToLocalInput(at)) : ""),
+                Text = Localizer.Isolate(file) + " · " + _l.Bytes(plan.Size) + (plan.PublishAt is { } at ? " · " + _l.Format("studio.upload.publishesAt", _l.DateTime(at)) : ""),
                 Opacity = 0.8,
                 VerticalAlignment = VerticalAlignment.Center,
                 TextTrimming = TextTrimming.CharacterEllipsis,
@@ -373,7 +373,7 @@ internal sealed class UploadPage
             _title.Text = item.Title;
             _bar.Value = item.Fraction;
             var phase = l["studio.phase." + item.Phase.ToString().ToLowerInvariant()];
-            var amount = l.Format("studio.upload.progress", Formats.Bytes(item.SentBytes, CultureInfo.InvariantCulture), Formats.Bytes(item.TotalBytes, CultureInfo.InvariantCulture));
+            var amount = l.Format("studio.upload.progress", l.Bytes(item.SentBytes), l.Bytes(item.TotalBytes));
             _status.Text = item.Phase == UploadPhase.Uploading ? phase + " · " + amount : phase;
             AutomationProperties.SetName(_bar, item.Title + " · " + phase);
             if (_phase == item.Phase) return;

@@ -23,6 +23,9 @@ namespace AlUmmahNow.CoreBridge.Passkeys
         /// <summary>The dialog offers "Sign in another way" (the browser sign-in).</summary>
         public bool OfferOtherWay { get; }
 
+        /// <summary>The most passkeys an account may hold (server limit behind "passkey.error.limit").</summary>
+        public const int MaxPasskeys = 10;
+
         public bool ShowsDialog => MessageKey != null;
 
         /// <summary>Maps a failed sign-in (<paramref name="signIn"/>) or "Add a passkey".</summary>

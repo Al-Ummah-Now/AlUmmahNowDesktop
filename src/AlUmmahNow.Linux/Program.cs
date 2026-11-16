@@ -36,7 +36,7 @@ var exitAfter = int.TryParse(Environment.GetEnvironmentVariable("AUN_EXIT_AFTER"
 var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
 http.DefaultRequestHeaders.UserAgent.ParseAdd("AlUmmahNowLinux/0.1");
 var catalog = new HttpCatalogClient(http, environment.VideosApi);
-var localizer = new Localizer(settings.Language) { EasternNumerals = settings.EasternNumerals };
+var localizer = new Localizer(settings.Language);
 var navigator = new Navigator();
 var authSession = new PkceAuthSession(http, environment.AuthIssuer, environment.ViewerClientId, new LibSecretStore("alummahnow"), new ShellBrowserLauncher(), localizer["auth.browser.done"]);
 var auth = new AuthViewModel(authSession);

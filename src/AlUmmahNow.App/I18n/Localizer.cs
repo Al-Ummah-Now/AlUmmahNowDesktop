@@ -8,14 +8,21 @@ using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace AlUmmahNow.App.I18n
 {
-    /// <summary>Holds the active language and formats text, numbers and durations for it.</summary>
+    /// <summary>
+    /// Holds the active language and is the one display formatter of the apps: every number, count, date,
+    /// time, duration, percentage, file size and amount of money shown to people goes through it.
+    /// Arabic always shows Eastern Arabic (Hindi) numerals ٠–٩ with the Arabic separators ٫ ٬ ٪, whatever
+    /// the operating system's region or digit settings (owner decision 2026-11-15). Text is formatted with
+    /// the invariant culture and the digits are then mapped, so the output is the same on every machine.
+    /// English keeps Arabic numerals 0–9. Ids, URLs, version numbers, CSV/ISO wire values and text that
+    /// people type stay as typed; <see cref="NormalizeDigits"/> turns typed ٠–٩ back into 0–9.
+    /// </summary>
     public sealed class Localizer : ObservableObject
     {
         public static readonly IReadOnlyList<string> SupportedLanguages = new[] { "ar", "en" };
 
         private readonly Dictionary<string, IReadOnlyDictionary<string, string>> _bundles = new();
         private string _language;
-        private bool _easternNumerals;
 
         public Localizer(string language = "ar")
         {
@@ -40,15 +47,6 @@ namespace AlUmmahNow.App.I18n
 
         public bool IsRtl => _language == "ar";
 
-        public bool EasternNumerals
-        {
-            get => _easternNumerals;
-            set
-            {
-                if (SetProperty(ref _easternNumerals, value)) LanguageChanged?.Invoke(this, EventArgs.Empty);
-            }
-        }
-
         public IReadOnlyDictionary<string, string> Bundle(string language) => _bundles[language];
 
         public string this[string key] =>
@@ -56,17 +54,40 @@ namespace AlUmmahNow.App.I18n
             : _bundles["en"].TryGetValue(key, out var fallback) ? fallback
             : key;
 
-        public string Format(string key, params object[] args) =>
-            string.Format(CultureInfo.InvariantCulture, this[key], args);
+        /// <summary>
+        /// The message for <paramref name="key"/> with its {0}… placeholders filled. Number arguments are
+        /// formatted with <see cref="Number(long)"/> or <see cref="Decimal"/>; text arguments are used as given.
+        /// </summary>
+        public string Format(string key, params object[] args)
+        {
+            var shown = new object[args.Length];
+            for (var i = 0; i < args.Length; i++) shown[i] = Shown(args[i]);
+            return string.Format(CultureInfo.InvariantCulture, this[key], shown);
+        }
 
+        private object Shown(object arg) => arg switch
+        {
+            int v => Number(v),
+            long v => Number(v),
+            short v => Number(v),
+            uint v => Number(v),
+            double v => Decimal(v),
+            float v => Decimal(v),
+            decimal v => Decimal((double)v),
+            _ => arg,
+        };
+
+        /// <summary>A whole number with grouping: "1,234" / "١٬٢٣٤".</summary>
         public string Number(long value) => Digits(value.ToString("N0", CultureInfo.InvariantCulture));
 
-        /// <summary>A number with at most one decimal ("1.5", "١٫٥" with Eastern numerals).</summary>
-        public string Decimal(double value)
+        /// <summary>A number with at most one decimal ("1.5", "١٫٥" in Arabic).</summary>
+        public string Decimal(double value) => Digits(value.ToString("#,0.#", CultureInfo.InvariantCulture));
+
+        /// <summary>A share of 1 as a percentage: 0.25 → "25%" / "٢٥٪".</summary>
+        public string Percent(double fraction, int decimals = 0)
         {
-            var text = value.ToString("#,0.#", CultureInfo.InvariantCulture);
-            if (_easternNumerals && _language == "ar") text = text.Replace('.', '٫');
-            return Digits(text);
+            var format = decimals <= 0 ? "#,0" : "#,0." + new string('#', decimals);
+            return Digits((fraction * 100).ToString(format, CultureInfo.InvariantCulture) + "%");
         }
 
         /// <summary>Axis labels: 950, 1.2K, 3M ("١٫٢ ألف" in Arabic).</summary>
@@ -78,12 +99,20 @@ namespace AlUmmahNow.App.I18n
             return Decimal(value);
         }
 
-        /// <summary>A day for chart labels: "11 Nov" / "11 نوفمبر".</summary>
+        /// <summary>A day for chart labels: "11 Nov" / "١١ نوفمبر".</summary>
         public string ShortDate(DateTime date)
         {
             var month = date.ToString("MMM", _language == "ar" ? Arabic : CultureInfo.InvariantCulture);
             return Digits(date.Day.ToString(CultureInfo.InvariantCulture)) + " " + month;
         }
+
+        /// <summary>A calendar day in local time: "2026-11-15" / "٢٠٢٦-١١-١٥".</summary>
+        public string Date(DateTimeOffset value) =>
+            Isolate(Digits(value.ToLocalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)));
+
+        /// <summary>A day and time in local time: "2026-11-15 14:30" / "٢٠٢٦-١١-١٥ ١٤:٣٠".</summary>
+        public string DateTime(DateTimeOffset value) =>
+            Isolate(Digits(value.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)));
 
         private static readonly CultureInfo Arabic = ArabicMonths();
 
@@ -106,16 +135,85 @@ namespace AlUmmahNow.App.I18n
             return Isolate(Digits(text));
         }
 
-        /// <summary>Wraps text in Unicode first-strong isolates so embedded runs cannot reorder neighbours.</summary>
-        public static string Isolate(string text) => "⁨" + text + "⁩";
+        /// <summary>A timecode (player position, frame time), same shape as <see cref="Duration"/>.</summary>
+        public string Duration(TimeSpan value) => Duration(value.TotalSeconds);
 
+        /// <summary>A playback speed: "1.5x" / "١٫٥x".</summary>
+        public string Speed(double rate) => Digits(rate.ToString("0.##", CultureInfo.InvariantCulture)) + "x";
+
+        /// <summary>A rendition label: "1080p" / "١٠٨٠p", or the bitrate when the height is unknown.</summary>
+        public string Quality(int height, long bandwidth) => height > 0
+            ? Digits(height.ToString(CultureInfo.InvariantCulture)) + "p"
+            : Format("unit.kbps", bandwidth / 1000);
+
+        /// <summary>A file size: "12.3 MB" / "١٢٫٣ م.ب".</summary>
+        public string Bytes(long bytes)
+        {
+            string[] units = { "unit.b", "unit.kb", "unit.mb", "unit.gb", "unit.tb" };
+            double v = Math.Max(0, bytes);
+            var u = 0;
+            while (v >= 1024 && u < units.Length - 1)
+            {
+                v /= 1024;
+                u++;
+            }
+
+            return Format(units[u], Digits(v.ToString(u == 0 ? "0" : "0.0", CultureInfo.InvariantCulture)));
+        }
+
+        /// <summary>
+        /// An amount of money. Arabic puts the Arabic currency name after the amount ("١٢٫٦٩ دولار أمريكي"),
+        /// never «US$»; English uses the symbol ("$12.69") or the code for other currencies ("EUR 12.69").
+        /// </summary>
+        public string Money(decimal amount, string currency)
+        {
+            var code = (currency ?? "").ToUpperInvariant();
+            var number = Math.Abs(amount).ToString("#,0.00", CultureInfo.InvariantCulture);
+            var sign = amount < 0 ? "-" : "";
+            if (_language == "ar")
+            {
+                var name = this["currency." + code];
+                return sign + Digits(number) + " " + (name == "currency." + code ? code : name);
+            }
+
+            return code == "USD" ? sign + "$" + number : sign + code + " " + number;
+        }
+
+        /// <summary>Wraps text in Unicode first-strong isolates so embedded runs cannot reorder neighbours.</summary>
+        public static string Isolate(string text) => "\u2068" + text + "\u2069";
+
+        /// <summary>Typed Eastern Arabic ٠–٩ and Persian ۰–۹ digits become 0–9 (for parsing input).</summary>
+        public static string NormalizeDigits(string? text)
+        {
+            if (string.IsNullOrEmpty(text)) return text ?? "";
+            var sb = new StringBuilder(text!.Length);
+            foreach (var c in text)
+            {
+                if (c >= '\u0660' && c <= '\u0669') sb.Append((char)('0' + (c - '\u0660')));
+                else if (c >= '\u06F0' && c <= '\u06F9') sb.Append((char)('0' + (c - '\u06F0')));
+                else if (c == '\u066B') sb.Append('.');
+                else if (c == '\u066C') sb.Append(',');
+                else sb.Append(c);
+            }
+
+            return sb.ToString();
+        }
+
+        /// <summary>Maps invariant-formatted number text to the language's digits and separators.</summary>
         private string Digits(string text)
         {
-            if (!_easternNumerals || _language != "ar") return text;
+            if (_language != "ar") return text;
             var sb = new StringBuilder(text.Length);
             foreach (var c in text)
             {
-                sb.Append(c >= '0' && c <= '9' ? (char)('٠' + (c - '0')) : c == ',' ? '٬' : c);
+                sb.Append(c switch
+                {
+                    >= '0' and <= '9' => (char)('\u0660' + (c - '0')),
+                    ',' => '\u066C',
+                    '.' => '\u066B',
+                    '%' => '\u066A',
+                    _ => c,
+                });
             }
 
             return sb.ToString();

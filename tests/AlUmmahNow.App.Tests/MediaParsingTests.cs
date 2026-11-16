@@ -14,7 +14,7 @@ public class MediaParsingTests
     {
         const string master = "https://cdn/bcdn_token=abc&expires=1&token_path=%2Fid%2F/id/playlist.m3u8";
         var v = HlsPlaylist.ParseVariants(Master, master);
-        Assert.Equal(new[] { "360p", "240p" }, v.Select(x => x.Label));
+        Assert.Equal(new[] { 360, 240 }, v.Select(x => x.Height));
         Assert.Equal("https://cdn/bcdn_token=abc&expires=1&token_path=%2Fid%2F/id/360p/video.m3u8", v[0].Url);
         Assert.Equal(817800, v[0].Bandwidth);
     }
