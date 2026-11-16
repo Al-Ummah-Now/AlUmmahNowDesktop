@@ -110,7 +110,7 @@
   "studio.upload.titleFor": "Title for {0}",
   "studio.upload.forAll": "Set for all",
   "studio.upload.titlePattern": "Title",
-  "studio.upload.titlePatternHint": "Use {filename}, {n} (1, 2, 3…) and {date} to build each title.",
+  "studio.upload.titlePatternHint": "Use {{filename}}, {{n}} ({0}, {1}, {2}…) and {{date}} to build each title.",
   "studio.upload.description": "Description",
   "studio.upload.category": "Category",
   "studio.upload.language": "Language",

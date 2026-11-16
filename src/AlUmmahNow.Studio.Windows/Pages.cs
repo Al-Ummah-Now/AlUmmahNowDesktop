@@ -62,7 +62,7 @@ internal sealed class EncodePage
                 EncodeStatus.Canceled => _l["studio.encode.canceled"],
                 _ => _l["studio.status.queued"],
             };
-            var name = Path.GetFileName(job.Request.Source) + " · " + _l["studio.preset." + job.Request.Preset.Key];
+            var name = _l.Join(Localizer.Isolate(Path.GetFileName(job.Request.Source)), _l["studio.preset." + job.Request.Preset.Key]);
             var encoder = job.UsedEncoder is { } e ? " " + _l[e.Kind == EncoderKind.Hardware ? "studio.encode.hardware" : "studio.encode.software"] : "";
             _rows.Children.Add(Rows.Progress(name, job.Progress, status + encoder));
         }

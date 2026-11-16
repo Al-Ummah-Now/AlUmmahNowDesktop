@@ -221,7 +221,7 @@ internal sealed class StudioWindow
         try
         {
             _channelPicker.Visibility = _shell.Channels.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-            _channelPicker.ItemsSource = _shell.Channels.Select(c => c.Role == ChannelRole.Owner ? c.Name : c.Name + " · " + _l["studio.shell.channelRole." + c.Role.ToString().ToLowerInvariant()]).ToList();
+            _channelPicker.ItemsSource = _shell.Channels.Select(c => c.Role == ChannelRole.Owner ? c.Name : c.Name + _l.Separator + _l["studio.shell.channelRole." + c.Role.ToString().ToLowerInvariant()]).ToList();
             _channelPicker.SelectedIndex = _shell.ActiveChannel is { } a ? _shell.Channels.ToList().IndexOf(a) : -1;
         }
         finally
@@ -242,7 +242,7 @@ internal sealed class StudioWindow
             var isActive = account.UserId == active?.UserId;
             var item = new ToggleMenuFlyoutItem
             {
-                Text = account.Label + (account.NeedsReauth ? " · " + _l["studio.shell.needsReauth"] : ""),
+                Text = _l.Join(account.Label, account.NeedsReauth ? _l["studio.shell.needsReauth"] : null),
                 IsChecked = isActive,
             };
             AutomationProperties.SetName(item, _l.Format("studio.shell.switchTo", account.Label));

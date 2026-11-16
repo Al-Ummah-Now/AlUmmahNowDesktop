@@ -252,4 +252,30 @@ public sealed class AnalyticsViewModelTests
         // Last 7 days = 4 to 10 November, both ends counted
         Assert.Equal("2026-11-04T00:00:00Z", t.Calls("get_AnalyticsChannelGet").Last().Query["dateFrom"]);
     }
+
+    [Fact]
+    public async Task TopVideosUseTheCreatorsTitleForEachLanguage()
+    {
+        var accounts = new FakeAccounts();
+        accounts.Saved.Add(new StudioAccount("u1", null, "A", null, null, false));
+        accounts.ActiveId = "u1";
+        var t = new FakeTransport();
+        t.Responses["get_ChannelAccessList"] = _ => FakeTransport.Json(new { data = new[] { new { id = "c1", userId = "u1", name = "C", isMain = true, role = "owner", capabilities = Array.Empty<string>() } } });
+        t.Responses["get_AnalyticsChannelGet"] = _ => FakeTransport.Json(new
+        {
+            topPerformingVideos = new[] { new { videoId = "v1", title = "Friday khutbah", views = 12 }, new { videoId = "v2", title = "Q&A", views = 5 } },
+            recentMetrics = Array.Empty<object>(),
+        });
+        t.Responses["get_VideosList"] = _ => FakeTransport.Json(new
+        {
+            data = new object[] { new { id = "v1", title = "Friday khutbah", channelId = "c1", titleLocalized = new { en = "Friday khutbah", ar = "خطبة الجمعة" } } },
+        });
+        var api = new StudioApiClient(t);
+        var shell = new StudioShellViewModel(accounts, api);
+        var vm = new AnalyticsViewModel(shell, api);
+        await shell.InitializeAsync();
+        await vm.LoadAsync();
+        Assert.Equal(new[] { "خطبة الجمعة", "Q&A" }, vm.Data!.TopVideos.Select(v => v.TitleFor("ar")));
+        Assert.Equal(new[] { "Friday khutbah", "Q&A" }, vm.Data!.TopVideos.Select(v => v.TitleFor("en")));
+    }
 }

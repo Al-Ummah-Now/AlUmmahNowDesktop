@@ -170,7 +170,7 @@ public sealed class StudioWindow
         _syncingPicker = true;
         try
         {
-            var names = _shell.Channels.Select(c => c.Role == ChannelRole.Owner ? c.Name : c.Name + " · " + _l["studio.shell.channelRole." + c.Role.ToString().ToLowerInvariant()]).ToArray();
+            var names = _shell.Channels.Select(c => c.Role == ChannelRole.Owner ? c.Name : c.Name + _l.Separator + _l["studio.shell.channelRole." + c.Role.ToString().ToLowerInvariant()]).ToArray();
             _channelPicker.SetModel(Gtk.StringList.New(names));
             var index = _shell.ActiveChannel is { } a ? _shell.Channels.ToList().IndexOf(a) : -1;
             _channelPicker.SetSelected(index >= 0 ? (uint)index : uint.MaxValue);
@@ -191,7 +191,7 @@ public sealed class StudioWindow
         foreach (var account in _shell.AccountList)
         {
             var isActive = account.UserId == active?.UserId;
-            var text = account.Label + (account.NeedsReauth ? " · " + _l["studio.shell.needsReauth"] : "");
+            var text = _l.Join(account.Label, account.NeedsReauth ? _l["studio.shell.needsReauth"] : null);
             var row = Gtk.Box.New(Gtk.Orientation.Horizontal, 6);
             var pick = Gtk.Button.NewWithLabel(isActive ? "✓ " + text : text);
             pick.SetHexpand(true);

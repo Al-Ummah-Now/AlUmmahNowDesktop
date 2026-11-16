@@ -52,6 +52,10 @@ namespace AlUmmahNow.CoreBridge.Studio
         public string Title { get; set; } = "";
         public string Description { get; set; } = "";
         public IReadOnlyDictionary<string, string> TitleLocalized { get; set; } = new Dictionary<string, string>();
+
+        /// <summary>The title in <paramref name="language"/> when the creator gave one, else the original title.</summary>
+        public string TitleFor(string language) => LocalizedTitle.Pick(Title, TitleLocalized, language);
+
         public string? ThumbnailUrl { get; set; }
         public string ChannelId { get; set; } = "";
         public bool IsPublic { get; set; }
@@ -195,16 +199,28 @@ namespace AlUmmahNow.CoreBridge.Studio
 
     public sealed class TopVideo
     {
-        public TopVideo(string id, string title, long views)
+        public TopVideo(string id, string title, long views, IReadOnlyDictionary<string, string>? titleLocalized = null)
         {
             Id = id;
             Title = title;
             Views = views;
+            TitleLocalized = titleLocalized ?? new Dictionary<string, string>();
         }
 
         public string Id { get; }
         public string Title { get; }
         public long Views { get; }
+        public IReadOnlyDictionary<string, string> TitleLocalized { get; }
+
+        /// <summary>The title in <paramref name="language"/> when the creator gave one, else the original title.</summary>
+        public string TitleFor(string language) => LocalizedTitle.Pick(Title, TitleLocalized, language);
+    }
+
+    /// <summary>Picks a per-language title (empty variants count as missing).</summary>
+    public static class LocalizedTitle
+    {
+        public static string Pick(string fallback, IReadOnlyDictionary<string, string> localized, string language) =>
+            localized.TryGetValue(language, out var value) && !string.IsNullOrWhiteSpace(value) ? value : fallback;
     }
 
     public sealed class ChannelAnalytics

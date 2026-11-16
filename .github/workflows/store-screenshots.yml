@@ -61,19 +61,26 @@ jobs:
           $stage = (New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/staged").FullName
           foreach ($n in "Friday khutbah.mp4", "Morning recitation.mp4", "Q&A part 2.mp4") { [IO.File]::WriteAllBytes("$stage/$n", (New-Object byte[] 1500000)) }
           $env:AUN_DEMO = "1"; $env:AUN_AUTOMATION = "shell"; $env:AUN_SIMULATE_UPLOADS = "1"; $env:AUN_SCENE = ""
-          foreach ($lang in "en", "ar") {
-            $env:AUN_LANG = $lang
-            $env:AUN_STAGE_DIR = $stage; $env:AUN_TAB = "uploads"
-            ./scripts/store-shot.ps1 $exe "upload-$lang" $out
-            $env:AUN_STAGE_DIR = ""
-            foreach ($tab in "videos", "analytics") { $env:AUN_TAB = $tab; ./scripts/store-shot.ps1 $exe "$tab-$lang" $out }
+          # Studio follows the Windows app appearance (Settings > Personalization > Colors), so each
+          # theme is set there before the app starts.
+          $personalize = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
+          New-Item -Force -Path $personalize | Out-Null
+          foreach ($theme in "dark", "light") {
+            Set-ItemProperty -Path $personalize -Name AppsUseLightTheme -Type DWord -Value ([int]($theme -eq "light"))
+            foreach ($lang in "en", "ar") {
+              $env:AUN_LANG = $lang
+              $env:AUN_STAGE_DIR = $stage; $env:AUN_TAB = "uploads"
+              ./scripts/store-shot.ps1 $exe "upload-$lang-$theme" $out
+              $env:AUN_STAGE_DIR = ""
+              foreach ($tab in "videos", "analytics") { $env:AUN_TAB = $tab; ./scripts/store-shot.ps1 $exe "$tab-$lang-$theme" $out }
+            }
           }
       - name: Check every shot passed and is a Store size
         shell: pwsh
         run: |
           Add-Type -AssemblyName System.Drawing
           $shots = Get-ChildItem shots -Recurse -Filter *.png
-          if ($shots.Count -ne 10) { throw "expected 10 screenshots, got $($shots.Count)" }
+          if ($shots.Count -ne 16) { throw "expected 16 screenshots, got $($shots.Count)" }
           foreach ($s in $shots) {
             $txt = [IO.Path]::ChangeExtension($s.FullName, ".txt")
             if (-not (Select-String -Quiet "RESULT PASS" $txt)) { Get-Content $txt -ErrorAction SilentlyContinue; throw "$($s.Name): scenario failed" }

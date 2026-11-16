@@ -29,7 +29,7 @@ public sealed class EncodePage
         foreach (var job in _encode.Jobs.ToList())
         {
             var row = Gtk.Box.New(Gtk.Orientation.Horizontal, 12);
-            var name = Gtk.Label.New(Path.GetFileName(job.Request.Source) + " · " + _l["studio.preset." + job.Request.Preset.Key]);
+            var name = Gtk.Label.New(_l.Join(Localizer.Isolate(Path.GetFileName(job.Request.Source)), _l["studio.preset." + job.Request.Preset.Key]));
             name.SetHalign(Gtk.Align.Start);
             name.SetSizeRequest(320, -1);
             var bar = Gtk.ProgressBar.New();
