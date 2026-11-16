@@ -7,6 +7,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Controls;
+using Windows.Globalization.NumberFormatting;
 using Path = System.IO.Path;
 
 namespace AlUmmahNow.Studio.WindowsApp;
@@ -27,6 +28,9 @@ internal sealed class UploadPage
     private readonly Button _start = new() { Style = (Style)Application.Current.Resources["AccentButtonStyle"] };
     private readonly Button _clear;
     private readonly StackPanel _queue = new() { Spacing = 8 };
+    // Rows with nothing to show collapse: an empty row or blank text still takes the page spacing.
+    private readonly StackPanel _watchRow = new() { Orientation = Orientation.Horizontal, Spacing = 8 };
+    private readonly StackPanel _stagedActions = new() { Orientation = Orientation.Horizontal, Spacing = 8 };
     private readonly TextBlock _queueEmpty;
     private readonly InfoBar _error = new() { Severity = InfoBarSeverity.Error, IsClosable = true };
     private readonly TextBlock _watching = new() { Opacity = 0.8, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap };
@@ -61,7 +65,7 @@ internal sealed class UploadPage
             rememberWatchFolder(f);
         }));
         Root.Children.Add(add);
-        var watchRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        var watchRow = _watchRow;
         watchRow.Children.Add(_watching);
         _stopWatching = Button(l["studio.upload.stopWatching"], () =>
         {
@@ -79,7 +83,7 @@ internal sealed class UploadPage
         AutomationProperties.SetHeadingLevel(_stagedTitle, AutomationHeadingLevel.Level2);
         Root.Children.Add(_stagedTitle);
         Root.Children.Add(_staged);
-        var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        var actions = _stagedActions;
         AutomationProperties.SetAutomationId(_start, "StartUpload");
         _start.Click += (_, _) => _vm.Start();
         actions.Children.Add(_start);
@@ -198,7 +202,7 @@ internal sealed class UploadPage
 
         D.TimeZone = Formats.LocalTimeZone();
         D.ScheduleStart ??= DateTimeOffset.Now.Date.AddDays(1).AddHours(9);
-        var start = new TextBox { Header = _l["studio.upload.scheduleStart"], Text = Formats.ToLocalInput(D.ScheduleStart.Value), MinWidth = 220 };
+        var start = new TextBox { Header = _l["studio.upload.scheduleStart"], Text = _l.InputDigits(Formats.ToLocalInput(D.ScheduleStart.Value)), MinWidth = 220 };
         start.TextChanged += (_, _) =>
         {
             var t = Formats.ParseLocal(Localizer.NormalizeDigits(start.Text));
@@ -208,6 +212,8 @@ internal sealed class UploadPage
             _vm.ApplyDefaults();
         };
         var every = new NumberBox { Header = _l["studio.upload.scheduleEvery"], Value = D.ScheduleInterval.TotalHours, Minimum = 0, Maximum = 24 * 30, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Inline, SmallChange = 1 };
+        // The hours in the UI's digits: ٠–٩ in Arabic (the formatter also reads typed ٠–٩ back).
+        if (_l.Language == "ar") every.NumberFormatter = new DecimalFormatter { NumeralSystem = "Arab", FractionDigits = 0, IntegerDigits = 1, IsGrouped = false };
         every.ValueChanged += (_, _) =>
         {
             if (double.IsNaN(every.Value)) return;
@@ -285,6 +291,7 @@ internal sealed class UploadPage
     {
         _watching.Text = _vm.WatchFolder is { } f ? _l.Format("studio.upload.watchingFolder", Localizer.Isolate(f)) : "";
         _stopWatching.Visibility = _vm.WatchFolder != null ? Visibility.Visible : Visibility.Collapsed;
+        _watchRow.Visibility = _stopWatching.Visibility;
     }
 
     private void RenderStaged()
@@ -292,7 +299,7 @@ internal sealed class UploadPage
         var staged = _vm.Staged;
         _start.Content = staged.Count == 1 ? _l["studio.upload.startOne"] : _l.Format("studio.upload.start", staged.Count);
         _start.IsEnabled = _vm.CanStart;
-        _start.Visibility = _clear.Visibility = staged.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        _start.Visibility = _clear.Visibility = _stagedActions.Visibility = _staged.Visibility = staged.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         _stagedTitle.Text = staged.Count > 0
             ? _l.Format("studio.upload.stagedTitle", staged.Count)
             : _l.Format("studio.upload.stagedEmpty", Localizer.Isolate(_shell.ActiveChannel?.Name ?? ""));
@@ -333,6 +340,7 @@ internal sealed class UploadPage
     {
         var items = _vm.Items;
         _queueEmpty.Visibility = items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        _queue.Visibility = items.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         var seen = new HashSet<string>();
         foreach (var item in items)
         {

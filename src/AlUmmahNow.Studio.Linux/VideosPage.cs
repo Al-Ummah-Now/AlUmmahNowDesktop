@@ -41,7 +41,7 @@ public sealed class VideosPage
 
         // Search and filter
         var top = Gtk.Box.New(Gtk.Orientation.Horizontal, 8);
-        _search.SetPlaceholderText(l["studio.videos.search"]);
+        // The visible label names the field (AT-SPI labelled-by), so no placeholder repeats it.
         _search.SetHexpand(true);
         _search.SetSearchDelay(0);
         top.Append(Ui.Labelled(l["studio.videos.search"], _search));
@@ -74,9 +74,12 @@ public sealed class VideosPage
         {
             if (a.Row.GetName() is { Length: > 0 } text) _vm.Search.Submit(text);
         };
+        // Empty status lines are hidden, not blank: a blank label still takes a line and the page spacing.
+        _suggestionCount.SetVisible(false);
         page.Append(_suggestionCount);
         page.Append(_suggestions);
         _error.AddCssClass("error");
+        _error.SetVisible(false);
         page.Append(_error);
 
         // Selection actions
@@ -134,7 +137,10 @@ public sealed class VideosPage
                 case nameof(VideosViewModel.IsLoading): RenderLoading(); break;
                 case nameof(VideosViewModel.ShowEmpty): RenderEmpty(); break;
                 case nameof(VideosViewModel.Deleted): RenderDeleted(); break;
-                case nameof(VideosViewModel.ErrorKey): _error.SetText(_vm.ErrorKey is { } k ? _l[k] : ""); break;
+                case nameof(VideosViewModel.ErrorKey):
+                    _error.SetText(_vm.ErrorKey is { } k ? _l[k] : "");
+                    _error.SetVisible(_vm.ErrorKey != null);
+                    break;
                 case nameof(VideosViewModel.NoticeKey):
                     if (_vm.NoticeKey is { } n) _toasts.AddToast(Adw.Toast.New(_l[n]));
                     break;
@@ -210,6 +216,7 @@ public sealed class VideosPage
 
         _suggestions.SetVisible(items.Count > 0);
         _suggestionCount.SetText(!empty && items.Count > 0 ? _l.Format("studio.videos.suggestions", items.Count) : "");
+        _suggestionCount.SetVisible(!empty && items.Count > 0);
     }
 
     private void RenderLoading()
@@ -251,6 +258,9 @@ public sealed class VideosPage
         _selectionLabel.SetText(_l.Format("studio.videos.selected", n));
     }
 
+    /// <summary>Where a check button's label starts, from its own start edge.</summary>
+    private const int CheckLabelInset = 28;
+
     private void RenderList()
     {
         while (_list.GetRowAtIndex(0) is { } r) _list.Remove(r);
@@ -269,7 +279,10 @@ public sealed class VideosPage
             var text = Gtk.Box.New(Gtk.Orientation.Vertical, 2);
             text.SetHexpand(true);
             text.Append(check);
-            text.Append(Ui.Label(Meta(v), dim: true));
+            var meta = Ui.Label(Meta(v), dim: true);
+            // Lines the meta up with the title, past the check indicator (Adwaita: 3px padding, 20px check, 4px gap).
+            meta.SetMarginStart(CheckLabelInset);
+            text.Append(meta);
             row.Append(text);
             var edit = Ui.Button(_l["studio.videos.edit"], () => _ = EditAsync(v), "flat");
             Ui.Named(edit, _l.Format("studio.videos.editOne", v.TitleFor(_l.Language)));

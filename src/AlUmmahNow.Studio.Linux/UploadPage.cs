@@ -21,6 +21,9 @@ public sealed class UploadPage
     private readonly Gtk.Button _start = Gtk.Button.NewWithLabel("");
     private readonly Gtk.Button _clear;
     private readonly Gtk.Box _queue = Gtk.Box.New(Gtk.Orientation.Vertical, 8);
+    // Rows with nothing to show are hidden: an empty box or blank label still takes the page spacing.
+    private readonly Gtk.Box _watchRow = Gtk.Box.New(Gtk.Orientation.Horizontal, 8);
+    private readonly Gtk.Box _stagedActions = Gtk.Box.New(Gtk.Orientation.Horizontal, 8);
     private readonly Gtk.Label _queueEmpty;
     private readonly Gtk.Label _error = Ui.Label("");
     private readonly Gtk.Label _watching = Ui.Label("", dim: true);
@@ -51,7 +54,7 @@ public sealed class UploadPage
         add.Append(_recursive);
         add.Append(Ui.Button(l["studio.upload.watch"], () => _ = PickWatchFolderAsync(rememberWatchFolder)));
         page.Append(add);
-        var watchRow = Gtk.Box.New(Gtk.Orientation.Horizontal, 8);
+        var watchRow = _watchRow;
         watchRow.Append(_watching);
         _stopWatching = Ui.Button(l["studio.upload.stopWatching"], () =>
         {
@@ -61,6 +64,7 @@ public sealed class UploadPage
         watchRow.Append(_stopWatching);
         page.Append(watchRow);
         _error.AddCssClass("error");
+        _error.SetVisible(false);
         page.Append(_error);
 
         // Set for all
@@ -73,7 +77,7 @@ public sealed class UploadPage
         _stagedTitle.AddCssClass("heading");
         page.Append(_stagedTitle);
         page.Append(_staged);
-        var actions = Gtk.Box.New(Gtk.Orientation.Horizontal, 8);
+        var actions = _stagedActions;
         _start.AddCssClass("suggested-action");
         _start.OnClicked += (_, _) => _vm.Start();
         actions.Append(_start);
@@ -85,7 +89,9 @@ public sealed class UploadPage
         var queueHeader = Gtk.Box.New(Gtk.Orientation.Horizontal, 8);
         var queueTitle = Ui.Label(l["studio.upload.queue"]);
         queueTitle.AddCssClass("heading");
-        queueTitle.SetHexpand(true);
+        // One line, with Clear finished beside it (as on Windows), not wrapped against the far edge.
+        queueTitle.SetWrap(false);
+        queueTitle.SetValign(Gtk.Align.Center);
         queueHeader.Append(queueTitle);
         queueHeader.Append(Ui.Button(l["studio.upload.clearFinished"], () => _vm.ClearFinished(), "flat"));
         page.Append(queueHeader);
@@ -100,7 +106,10 @@ public sealed class UploadPage
                 case nameof(UploadsViewModel.Staged): RenderStaged(); break;
                 case nameof(UploadsViewModel.Items): RenderQueue(); break;
                 case nameof(UploadsViewModel.Playlists): RenderPlaylists(); break;
-                case nameof(UploadsViewModel.ErrorKey): _error.SetText(_vm.ErrorKey is { } k ? _l[k] : ""); break;
+                case nameof(UploadsViewModel.ErrorKey):
+                    _error.SetText(_vm.ErrorKey is { } k ? _l[k] : "");
+                    _error.SetVisible(_vm.ErrorKey != null);
+                    break;
                 case nameof(UploadsViewModel.WatchFolder): RenderWatching(); break;
             }
         };
@@ -114,6 +123,9 @@ public sealed class UploadPage
     public Gtk.ScrolledWindow Root { get; }
 
     private Gtk.DropDown? _visibility;
+
+    /// <summary>GTK_INPUT_ERROR: the "input" handler took care of the value itself.</summary>
+    private const int GtkInputError = -1;
 
     /// <summary>CI screenshots: "scheduled" picks Scheduled, showing the schedule fields.</summary>
     public void RunScene(string scene)
@@ -213,7 +225,8 @@ public sealed class UploadPage
 
         D.TimeZone = Formats.LocalTimeZone();
         D.ScheduleStart ??= DateTimeOffset.Now.Date.AddDays(1).AddHours(9);
-        _scheduleStart.SetText(Formats.ToLocalInput(D.ScheduleStart.Value));
+        // Prefilled in the UI's digits (٠–٩ in Arabic); typed digits of either kind read back.
+        _scheduleStart.SetText(_l.InputDigits(Formats.ToLocalInput(D.ScheduleStart.Value)));
         var scheduleError = Ui.Label("");
         _scheduleStart.OnChanged += (_, _) =>
         {
@@ -222,6 +235,23 @@ public sealed class UploadPage
             if (t == null) return;
             D.ScheduleStart = t;
             _vm.ApplyDefaults();
+        };
+        // The hours show in the UI's digits; typed ٠–٩ are read back (GTK's own parser only knows 0–9).
+        _scheduleEvery.SetUpdatePolicy(Gtk.SpinButtonUpdatePolicy.IfValid);
+        _scheduleEvery.OnOutput += (spin, _) =>
+        {
+            spin.SetText(_l.Number((long)Math.Round(spin.GetValue())));
+            return true;
+        };
+        _scheduleEvery.OnInput += (spin, _) =>
+        {
+            if (double.TryParse(Localizer.NormalizeDigits(spin.GetText()).Replace(",", ""), NumberStyles.Float,
+                    CultureInfo.InvariantCulture, out var typed))
+            {
+                spin.SetValue(typed);
+            }
+
+            return GtkInputError; // The value is set above; GTK then re-shows it through OnOutput.
         };
         _scheduleEvery.SetValue(D.ScheduleInterval.TotalHours);
         _scheduleEvery.OnValueChanged += (_, _) =>
@@ -292,6 +322,7 @@ public sealed class UploadPage
     {
         _watching.SetText(_vm.WatchFolder is { } f ? _l.Format("studio.upload.watchingFolder", Localizer.Isolate(f)) : "");
         _stopWatching.SetVisible(_vm.WatchFolder != null);
+        _watchRow.SetVisible(_vm.WatchFolder != null);
     }
 
     private void RenderStaged()
@@ -301,6 +332,8 @@ public sealed class UploadPage
         _start.SetSensitive(_vm.CanStart);
         _start.SetVisible(staged.Count > 0);
         _clear.SetVisible(staged.Count > 0);
+        _stagedActions.SetVisible(staged.Count > 0);
+        _staged.SetVisible(staged.Count > 0);
         _stagedTitle.SetText(staged.Count > 0
             ? _l.Format("studio.upload.stagedTitle", staged.Count)
             : _l.Format("studio.upload.stagedEmpty", Localizer.Isolate(_shell.ActiveChannel?.Name ?? "")));
@@ -334,6 +367,7 @@ public sealed class UploadPage
     {
         var items = _vm.Items;
         _queueEmpty.SetVisible(items.Count == 0);
+        _queue.SetVisible(items.Count > 0);
         var seen = new HashSet<string>();
         foreach (var item in items)
         {

@@ -87,6 +87,9 @@ app.OnActivate += (_, _) =>
             });
     var uploadsVm = new UploadsViewModel(shell, api, uploadServiceFor, Path.Combine(stateDir, demo ? "demo" : "studio"));
     var banner = demo ? localizer["studio.shell.demo"] : environment.Name != "prod" ? localizer.Format("studio.shell.environment", environment.Name.ToUpperInvariant()) : null;
+    // Review and store screenshots (AUN_STORE_SHOT=1, as on Windows) show the demo data without the notice:
+    // real users never see it.
+    if (demo && Environment.GetEnvironmentVariable("AUN_STORE_SHOT") == "1") banner = null;
     var window = new StudioWindow(app, localizer, shell, banner);
 
     uploadsVm.Watch(Environment.GetEnvironmentVariable("AUN_WATCH_DIR") is { Length: > 0 } dir ? dir : settings.WatchFolder);

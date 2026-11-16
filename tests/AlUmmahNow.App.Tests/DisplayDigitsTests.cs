@@ -133,6 +133,16 @@ public class DisplayDigitsTests
     public void Typed_digits_are_normalised(string typed, string expected) =>
         Assert.Equal(expected, Localizer.NormalizeDigits(typed));
 
+    [Theory]
+    [InlineData("ar", "٢٠٢٦-١١-١٧ ٠٩:٠٠")]
+    [InlineData("en", "2026-11-17 09:00")]
+    public void Prefilled_input_uses_the_ui_digits_and_reads_back(string language, string shown)
+    {
+        var l = new Localizer(language);
+        Assert.Equal(shown, l.InputDigits("2026-11-17 09:00"));
+        Assert.Equal("2026-11-17 09:00", Localizer.NormalizeDigits(l.InputDigits("2026-11-17 09:00")));
+    }
+
     /// <summary>Allowed outside the Localizer: wire, file, log and media-pipeline formats, never shown to people.</summary>
     private static readonly Dictionary<string, string> NotDisplay = new()
     {

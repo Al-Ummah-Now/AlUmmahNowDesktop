@@ -200,6 +200,12 @@ namespace AlUmmahNow.App.I18n
         /// <summary>Wraps text in Unicode first-strong isolates so embedded runs cannot reorder neighbours.</summary>
         public static string Isolate(string text) => "\u2068" + text + "\u2069";
 
+        /// <summary>
+        /// Prefilled input text ("2026-11-17 09:00") in the UI's digits: ٠–٩ in Arabic. No isolates, so the
+        /// field's text reads back through <see cref="NormalizeDigits"/>.
+        /// </summary>
+        public string InputDigits(string text) => Digits(text);
+
         /// <summary>Typed Eastern Arabic ٠–٩ and Persian ۰–۹ digits become 0–9 (for parsing input).</summary>
         public static string NormalizeDigits(string? text)
         {
