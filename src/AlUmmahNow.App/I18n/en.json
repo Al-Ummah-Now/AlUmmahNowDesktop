@@ -43,7 +43,6 @@
   "studio.tab.encode": "Encode",
   "studio.tab.timeline": "Timeline",
   "studio.upload.watch": "Watch folder",
-  "studio.upload.simulated": "Preview: uploads are simulated until sign-in is available.",
   "studio.status.queued": "Queued",
   "studio.status.uploading": "Uploading",
   "studio.status.paused": "Paused",

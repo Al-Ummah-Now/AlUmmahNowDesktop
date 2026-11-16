@@ -26,6 +26,8 @@ public sealed class StudioWindow
     private readonly Adw.StatusPage _error = Adw.StatusPage.New();
     private readonly Gtk.Label _signInError = Ui.Label("", dim: true, start: false);
     private bool _syncingPicker;
+    private StudioPages? _studioPages;
+    private bool _syncingPages;
 
     public StudioWindow(Adw.Application app, Localizer l, StudioShellViewModel shell, string? banner)
     {
@@ -83,6 +85,38 @@ public sealed class StudioWindow
         _pages.AddTitledWithIcon(page, name, title, icon);
 
     public void ShowPage(string name) => _pages.SetVisibleChildName(name);
+
+    /// <summary>Hidden-when-off pages: a page whose feature is off leaves the view switcher, and the window shows <see cref="StudioPages.Current"/>.</summary>
+    public void UsePages(StudioPages pages)
+    {
+        _studioPages = pages;
+        _pages.OnNotify += (_, e) =>
+        {
+            if (_syncingPages || e.Pspec.GetName() != "visible-child-name") return;
+            if (_pages.GetVisibleChildName() is { Length: > 0 } name) pages.Select(name);
+        };
+        pages.Changed += (_, _) => ApplyPages();
+        ApplyPages();
+    }
+
+    private void ApplyPages()
+    {
+        if (_studioPages is not { } pages) return;
+        _syncingPages = true;
+        try
+        {
+            foreach (var name in StudioPages.All)
+            {
+                if (_pages.GetChildByName(name) is { } child) _pages.GetPage(child).SetVisible(pages.IsVisible(name));
+            }
+
+            if (_pages.GetVisibleChildName() != pages.Current) _pages.SetVisibleChildName(pages.Current);
+        }
+        finally
+        {
+            _syncingPages = false;
+        }
+    }
 
     /// <summary>For CI screenshots: open the account menu.</summary>
     public void OpenAccountMenu() => _accountButton.Popup();

@@ -157,6 +157,8 @@ namespace AlUmmahNow.CoreBridge.Studio
                 if (root.ValueKind == JsonValueKind.Object)
                 {
                     if (root.TryGetProperty("error", out var e) && e.ValueKind == JsonValueKind.String) code = e.GetString();
+                    // Gated routes answer { "success": false, "code": "feature_off" }.
+                    if (code == null && root.TryGetProperty("code", out var c) && c.ValueKind == JsonValueKind.String) code = c.GetString();
                     if (root.TryGetProperty("reason", out var r) && r.ValueKind == JsonValueKind.String) reason = r.GetString();
                     if (root.TryGetProperty("segment", out var s) && s.ValueKind == JsonValueKind.Number && s.TryGetInt32(out var si)) segment = si;
                     if (root.TryGetProperty("missing", out var m) && m.ValueKind == JsonValueKind.Array)

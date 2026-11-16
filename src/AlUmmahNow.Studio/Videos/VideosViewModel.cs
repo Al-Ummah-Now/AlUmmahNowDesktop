@@ -281,6 +281,12 @@ public sealed partial class VideosViewModel : ObservableObject
             case AuthRequiredException:
                 _shell.ReportAuthRequired();
                 return true;
+            case StudioApiException { HidesFeature: true } off:
+                // 404 feature_off / 402: the feature isn't this person's. No text; the features re-read hides its entry point.
+                Logger.Info(key + ": feature off: " + off.Message);
+                ErrorKey = null;
+                _ = _shell.RefreshFeaturesAsync(force: true);
+                return true;
             case StudioApiException api:
                 Logger.Warn(key, api);
                 ErrorKey = api.Status == 403 ? "studio.videos.notAllowed" : api.Status == null ? "studio.error.offline" : key;

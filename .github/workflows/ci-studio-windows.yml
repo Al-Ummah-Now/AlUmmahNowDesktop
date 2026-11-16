@@ -66,7 +66,19 @@ jobs:
           ./scripts/windows-studio-scenario.ps1 $exe en analytics shell analytics-en $out
           ./scripts/windows-studio-scenario.ps1 $exe ar timeline "" timeline-ar $out
           ./scripts/windows-studio-scenario.ps1 $exe en encode "encode:$source" encode-en $out
-          foreach ($n in "uploads-ar","signin-ar","signin-en","shell-ar","shell-en","accounts-en","signout-ar","addpasskey-en","addpasskey-ar","upload-staged-ar","upload-staged-en","videos-ar","videos-en","search-ar","edit-en","bulk-ar","delete-en","analytics-ar","analytics-en","timeline-ar","encode-en") {
+          # Hidden when off (owner rule 2026-11-16): no upload in the tier and analytics feature_off leave no tab.
+          $env:AUN_DEMO_FEATURES_OFF = "upload,analytics"
+          ./scripts/windows-studio-scenario.ps1 $exe en uploads shell features-off-en $out
+          ./scripts/windows-studio-scenario.ps1 $exe ar uploads shell features-off-ar $out
+          $env:AUN_DEMO_FEATURES_OFF = ""
+          foreach ($n in "features-off-en","features-off-ar") {
+            if (-not (Select-String -Quiet -SimpleMatch "page=videos upload=False analytics=False" "artifacts/studio/$n.txt")) { throw "$n still shows Upload or Analytics" }
+            if (Select-String -Quiet -SimpleMatch "`tPage_uploads`t" "artifacts/studio/$n.uia.txt") { throw "$n exposes the Upload tab" }
+            if (Select-String -Quiet -SimpleMatch "`tPage_analytics`t" "artifacts/studio/$n.uia.txt") { throw "$n exposes the Analytics tab" }
+          }
+          if (-not (Select-String -Quiet -SimpleMatch "page=uploads upload=True analytics=True" "artifacts/studio/shell-en.txt")) { throw "shell-en lost Upload or Analytics" }
+          if (-not (Select-String -Quiet -SimpleMatch "`tPage_uploads`t" "artifacts/studio/shell-en.uia.txt")) { throw "shell-en has no Upload tab" }
+          foreach ($n in "features-off-en","features-off-ar","uploads-ar","signin-ar","signin-en","shell-ar","shell-en","accounts-en","signout-ar","addpasskey-en","addpasskey-ar","upload-staged-ar","upload-staged-en","videos-ar","videos-en","search-ar","edit-en","bulk-ar","delete-en","analytics-ar","analytics-en","timeline-ar","encode-en") {
             if (-not (Select-String -Quiet "RESULT PASS" "artifacts/studio/$n.txt")) { throw "$n failed" }
             if (Test-Path "artifacts/studio/$n.txt.hang.txt") { throw "$n did not exit" }
           }

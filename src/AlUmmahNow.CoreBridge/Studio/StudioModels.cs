@@ -277,8 +277,38 @@ namespace AlUmmahNow.CoreBridge.Studio
         /// <summary>No answer from the server (offline, DNS, reset); worth retrying.</summary>
         public bool IsNetwork { get; private set; }
 
-        public static StudioApiException FromServer(string message, int status, string? code, IReadOnlyList<string>? missing = null, string? reason = null, int? segment = null) =>
-            new StudioApiException(message, status) { Code = code, Missing = missing ?? Array.Empty<string>(), Reason = reason, Segment = segment };
+        public static StudioApiException FromServer(string message, int status, string? code, IReadOnlyList<string>? missing = null, string? reason = null, int? segment = null, Exception? inner = null) =>
+            new StudioApiException(message, status, inner) { Code = code, Missing = missing ?? Array.Empty<string>(), Reason = reason, Segment = segment };
+
+        /// <summary>404 <c>feature_off</c>: the feature is off, unconfigured or outside the tier. Hide the entry point; say nothing.</summary>
+        public bool IsFeatureOff => Status == 404 && Code == "feature_off";
+
+        /// <summary>
+        /// The answer means "this person doesn't get this feature": 404 <c>feature_off</c>, 402 or <c>upgrade_required</c>.
+        /// The UI hides the entry point and shows no text (no upsell, no "not in your plan").
+        /// </summary>
+        public bool HidesFeature => IsFeatureOff || Status == 402 || Code == "upgrade_required";
+
+        /// <summary>The <c>code</c> (or <c>error.code</c>) of a JSON error body, or null.</summary>
+        public static string? CodeFromBody(string? body)
+        {
+            if (string.IsNullOrWhiteSpace(body)) return null;
+            var text = body!.Trim();
+            if (!text.StartsWith("{", StringComparison.Ordinal)) return null;
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(text);
+                var root = doc.RootElement;
+                if (root.ValueKind != System.Text.Json.JsonValueKind.Object) return null;
+                if (root.TryGetProperty("code", out var c) && c.ValueKind == System.Text.Json.JsonValueKind.String) return c.GetString();
+                if (root.TryGetProperty("error", out var e) && e.ValueKind == System.Text.Json.JsonValueKind.Object && e.TryGetProperty("code", out var ec) && ec.ValueKind == System.Text.Json.JsonValueKind.String) return ec.GetString();
+                return null;
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                return null;
+            }
+        }
 
         public static StudioApiException Network(string message, Exception inner) => new StudioApiException(message, null, inner) { IsNetwork = true };
 

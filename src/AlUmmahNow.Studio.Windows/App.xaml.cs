@@ -32,6 +32,9 @@ public sealed partial class App : Application
     public App()
     {
         InitializeComponent();
+        // CI and screenshots: AUN_THEME=dark|light; otherwise Studio follows Windows. Only settable here, before any window.
+        var theme = Environment.GetEnvironmentVariable("AUN_THEME");
+        if (theme is "dark" or "light") RequestedTheme = theme == "dark" ? ApplicationTheme.Dark : ApplicationTheme.Light;
         UnhandledException += (_, e) =>
         {
             Log.For("app").Error("unhandled exception", e.Exception);
@@ -75,7 +78,7 @@ public sealed partial class App : Application
         if (demo)
         {
             accounts = new DemoAccounts();
-            transport = new DemoTransport();
+            transport = new DemoTransport(DemoTransport.FeaturesOff(Environment.GetEnvironmentVariable("AUN_DEMO_FEATURES_OFF")));
             uploadServiceFor = account => new SimulatedUploadService(account, TimeSpan.FromMilliseconds(250));
         }
         else
@@ -88,7 +91,7 @@ public sealed partial class App : Application
         }
 
         var api = new StudioApiClient(transport);
-        var shell = new StudioShellViewModel(accounts, api);
+        var shell = new StudioShellViewModel(accounts, api, new FeaturesClient(transport));
         _uploads = new UploadsViewModel(shell, api, uploadServiceFor, Path.Combine(dataRoot, demo ? "demo" : "studio"));
         var uploadsVm = _uploads;
         var encode = new EncodeQueue(new MediaFoundationEncodeBackend());
@@ -136,15 +139,22 @@ public sealed partial class App : Application
         var analyticsVm = new AnalyticsViewModel(shell, api);
         var videos = new VideosPage(localizer, videosVm, uploadsVm, () => window.Window.Content?.XamlRoot);
         var analytics = new AnalyticsPage(localizer, analyticsVm);
+        // Upload (creator tier) and Analytics (feature_off) are left out of the navigation when off.
+        var pages = new StudioPages(shell, analyticsVm, tabName);
         var encodePage = new EncodePage(localizer, encode);
         var timeline = new TimelinePage(localizer);
-        window.AddPage("uploads", localizer["studio.tab.upload"], Symbol.Upload, uploads.Root);
-        window.AddPage("videos", localizer["studio.tab.videos"], Symbol.List, videos.Root);
-        window.AddPage("analytics", localizer["studio.tab.analytics"], Symbol.Calculator, analytics.Root);
-        window.AddPage("encode", localizer["studio.tab.encode"], Symbol.Video, encodePage.Root);
-        window.AddPage("timeline", localizer["studio.tab.timeline"], Symbol.Edit, timeline.Root);
-        window.ShowPage(tabName);
+        window.AddPage(StudioPages.Uploads, localizer["studio.tab.upload"], Symbol.Upload, uploads.Root);
+        window.AddPage(StudioPages.Videos, localizer["studio.tab.videos"], Symbol.List, videos.Root);
+        window.AddPage(StudioPages.Analytics, localizer["studio.tab.analytics"], Symbol.Calculator, analytics.Root);
+        window.AddPage(StudioPages.Encode, localizer["studio.tab.encode"], Symbol.Video, encodePage.Root);
+        window.AddPage(StudioPages.Timeline, localizer["studio.tab.timeline"], Symbol.Edit, timeline.Root);
+        window.UsePages(pages);
         window.Window.Activate();
+        // Features are re-read when Studio comes back to the foreground (at most once a minute).
+        window.Window.Activated += (sender, e) =>
+        {
+            if (e.WindowActivationState != WindowActivationState.Deactivated) _ = shell.RefreshFeaturesAsync();
+        };
         window.Window.Closed += (_, _) => uploadsVm.Dispose();
 
         _refresh = ui.CreateTimer();
@@ -194,7 +204,7 @@ public sealed partial class App : Application
                 var pass = job != null ? job.Status == EncodeStatus.Completed
                     : automation == "shell" ? shell.State == ShellState.Ready && shell.ActiveChannel != null
                     : uploadsDone || tabName != "uploads";
-                File.WriteAllText(ResultPath, $"AUTOMATION {tabName} scene={scene} shell={shell.State} channel={shell.ActiveChannel?.Id} accounts={shell.AccountList.Count} uploads={snapshot.Count} uploadsDone={uploadsDone} encode={job?.Status} encoder={job?.UsedEncoder?.Name} error={job?.Error} RESULT {(pass ? "PASS" : "FAIL")}");
+                File.WriteAllText(ResultPath, $"AUTOMATION {tabName} page={pages.Current} upload={pages.IsVisible(StudioPages.Uploads)} analytics={pages.IsVisible(StudioPages.Analytics)} scene={scene} shell={shell.State} channel={shell.ActiveChannel?.Id} accounts={shell.AccountList.Count} uploads={snapshot.Count} uploadsDone={uploadsDone} encode={job?.Status} encoder={job?.UsedEncoder?.Name} error={job?.Error} RESULT {(pass ? "PASS" : "FAIL")}");
                 Exit();
             };
             _endTimer.Start();

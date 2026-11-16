@@ -28,6 +28,8 @@ internal sealed class StudioWindow
     private readonly DropDownButton _accountButton;
     private readonly MenuFlyout _accountMenu = new() { Placement = Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.BottomEdgeAlignedRight };
     private bool _syncingPicker;
+    private StudioPages? _studioPages;
+    private bool _syncingPages;
 
     public StudioWindow(Localizer l, StudioShellViewModel shell, string? banner)
     {
@@ -61,7 +63,11 @@ internal sealed class StudioWindow
         };
         _nav.SelectionChanged += (_, e) =>
         {
-            if (e.SelectedItem is NavigationViewItem item && item.Tag is string name && _pages.TryGetValue(name, out var page)) _nav.Content = new ScrollViewer { Content = page };
+            if (e.SelectedItem is NavigationViewItem item && item.Tag is string name && _pages.TryGetValue(name, out var page))
+            {
+                _nav.Content = new ScrollViewer { Content = page };
+                if (!_syncingPages) _studioPages?.Select(name);
+            }
         };
 
         var root = new Grid { FlowDirection = _direction };
@@ -88,8 +94,36 @@ internal sealed class StudioWindow
 
     public void ShowPage(string name)
     {
-        var item = _nav.MenuItems.OfType<NavigationViewItem>().FirstOrDefault(i => (string)i.Tag == name) ?? _nav.MenuItems.OfType<NavigationViewItem>().FirstOrDefault();
+        var item = _nav.MenuItems.OfType<NavigationViewItem>().FirstOrDefault(i => (string)i.Tag == name && i.Visibility == Visibility.Visible)
+            ?? _nav.MenuItems.OfType<NavigationViewItem>().FirstOrDefault(i => i.Visibility == Visibility.Visible);
         _nav.SelectedItem = item;
+    }
+
+    /// <summary>Hidden-when-off pages: a tab whose feature is off is collapsed, and the window shows <see cref="StudioPages.Current"/>.</summary>
+    public void UsePages(StudioPages pages)
+    {
+        _studioPages = pages;
+        pages.Changed += (_, _) => ApplyPages();
+        ApplyPages();
+    }
+
+    private void ApplyPages()
+    {
+        if (_studioPages is not { } pages) return;
+        _syncingPages = true;
+        try
+        {
+            foreach (var item in _nav.MenuItems.OfType<NavigationViewItem>())
+            {
+                item.Visibility = item.Tag is string name && !pages.IsVisible(name) ? Visibility.Collapsed : Visibility.Visible;
+            }
+
+            if ((_nav.SelectedItem as NavigationViewItem)?.Tag as string != pages.Current) ShowPage(pages.Current);
+        }
+        finally
+        {
+            _syncingPages = false;
+        }
     }
 
     /// <summary>For CI screenshots: open the account menu.</summary>

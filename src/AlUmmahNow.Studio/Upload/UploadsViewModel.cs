@@ -205,6 +205,12 @@ public sealed partial class UploadsViewModel : ObservableObject, IDisposable
             Playlists = Playlists.Append(p).ToList();
             return p;
         }
+        catch (StudioApiException ex) when (ex.HidesFeature)
+        {
+            Logger.Info("playlist not created: feature off: " + ex.Message);
+            _ = _shell.RefreshFeaturesAsync(force: true);
+            return null;
+        }
         catch (StudioApiException ex)
         {
             Logger.Warn("playlist not created", ex);
@@ -259,6 +265,13 @@ public sealed partial class UploadsViewModel : ObservableObject, IDisposable
         catch (AuthRequiredException)
         {
             _shell.ReportAuthRequired();
+        }
+        catch (StudioApiException ex) when (ex.HidesFeature)
+        {
+            // Scheduling or another detail is off for this person (404 feature_off / 402): drop it quietly, no retry.
+            Logger.Info("an upload detail is off: " + ex.Message);
+            _steps.Remove(uploadId);
+            _ = _shell.RefreshFeaturesAsync(force: true);
         }
         catch (StudioApiException ex)
         {
