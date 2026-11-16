@@ -9,7 +9,7 @@ openbox &
 sleep 2
 # Review shots: a compositor, so translucent menus show the window behind them, blurred.
 if [ -n "${AUN_COMPOSITOR:-}" ] && command -v picom >/dev/null; then
-  picom --backend xrender --blur-method kernel --blur-kern 11x11gaussian --blur-background >/dev/null 2>&1 &
+  picom --backend xrender --blur-method kernel --blur-kern 15x15gaussian --blur-background >/dev/null 2>&1 &
   sleep 1
 fi
 dotnet src/AlUmmahNow.Studio.Linux/bin/Release/net9.0/alummahnow-studio.dll &

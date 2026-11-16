@@ -97,6 +97,8 @@ jobs:
       - name: Acting as picker review shots (window only; en/ar, default/minimum size, Light/Dark, closed/open)
         shell: pwsh
         run: |
+          # The runner's screen is 1024x768: too small for the default window.
+          ./scripts/set-resolution.ps1 1920 1080
           $out = (New-Item -ItemType Directory -Force artifacts/acting-as).FullName
           $exe = (Resolve-Path "src/AlUmmahNow.Studio.Windows/bin/x64/Release/net9.0-windows10.0.22621.0/win-x64/AlUmmahNowStudio.exe").Path
           $failed = @()

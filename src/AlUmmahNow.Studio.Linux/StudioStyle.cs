@@ -10,16 +10,16 @@ public static class StudioStyle
 {
     private const string Css = @"
 popover.glass > contents {
-  background-color: alpha(@popover_bg_color, 0.78);
+  background-color: alpha(@popover_bg_color, 0.9);
   border: 1px solid alpha(white, 0.55);
   box-shadow: 0 0 18px 2px alpha(#d9b25f, 0.38), 0 6px 18px alpha(black, 0.22);
 }
 popover.glass > arrow {
-  background-color: alpha(@popover_bg_color, 0.78);
+  background-color: alpha(@popover_bg_color, 0.9);
   border: 1px solid alpha(white, 0.55);
 }
 .card {
-  background-color: alpha(@card_bg_color, 0.78);
+  background-color: alpha(@card_bg_color, 0.9);
   border: 1px solid alpha(white, 0.45);
   box-shadow: 0 0 14px 1px alpha(#d9b25f, 0.30), 0 2px 6px alpha(black, 0.12);
 }
