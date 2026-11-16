@@ -18,7 +18,7 @@ public class HomeViewModelTests
         v.DurationSeconds = 20;
         var meta = new VideoCardViewModel(v, new Localizer("ar")).Meta;
         Assert.Equal(3, meta.Count(c => c == '\u2068') - 1);
-        Assert.StartsWith("\u2068QA Nasheeds\u2069 · \u2068", meta);
+        Assert.StartsWith("\u2068QA Nasheeds\u2069 \u2022 \u2068", meta);
     }
 
     [Fact]
