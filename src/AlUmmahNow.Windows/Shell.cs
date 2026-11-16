@@ -324,7 +324,7 @@ public sealed class Shell
         var options = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
         var time = new TextBlock { VerticalAlignment = VerticalAlignment.Center };
         options.Children.Add(time);
-        options.Children.Add(Selector("player.speed", WatchViewModel.Speeds.Select(s => s.ToString("0.##x", CultureInfo.InvariantCulture)).ToList(),
+        options.Children.Add(Selector("player.speed", WatchViewModel.Speeds.Select(s => _localizer.Speed(s)).ToList(),
             WatchViewModel.Speeds.ToList().IndexOf(vm.Speed), i => vm.SelectSpeed(WatchViewModel.Speeds[i])));
         options.Children.Add(Selector("player.quality", vm.Qualities.Select((q, i) => i == 0 ? _localizer["player.quality.auto"] : q.Label).ToList(),
             vm.Qualities.IndexOf(vm.Quality!), i => vm.SelectQuality(vm.Qualities[i])));

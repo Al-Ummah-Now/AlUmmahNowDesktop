@@ -309,11 +309,11 @@ internal sealed class AdminWindow
         if (outcome.MessageKey is not { } key) return;
         if (!outcome.OfferOtherWay)
         {
-            await Dialogs.MessageAsync(_root.XamlRoot, Direction, L["passkey.error.title"], L[key], L["passkey.ok"]);
+            await Dialogs.MessageAsync(_root.XamlRoot, Direction, L["passkey.error.title"], L.Format(key, PasskeyOutcome.MaxPasskeys), L["passkey.ok"]);
             return;
         }
 
-        if (await Dialogs.ConfirmAsync(_root.XamlRoot, Direction, L["passkey.error.title"], L[key], L["passkey.otherWay"], L["passkey.ok"])) await SignInAsync();
+        if (await Dialogs.ConfirmAsync(_root.XamlRoot, Direction, L["passkey.error.title"], L.Format(key, PasskeyOutcome.MaxPasskeys), L["passkey.otherWay"], L["passkey.ok"])) await SignInAsync();
     }
 
     private Task<bool> OnUiAsync(Func<Task<bool>> show)
@@ -347,7 +347,7 @@ internal sealed class AdminWindow
 
     private async Task<bool> StepUpAsync(CancellationToken ct)
     {
-        var go = await Dialogs.ConfirmAsync(_root.XamlRoot, Direction, L["admin.stepup.title"], L["admin.stepup.body"], L["admin.stepup.continue"], L["admin.cancel"]);
+        var go = await Dialogs.ConfirmAsync(_root.XamlRoot, Direction, L["admin.stepup.title"], L.Format("admin.stepup.body", StepUp.MaxAgeSeconds / 60), L["admin.stepup.continue"], L["admin.cancel"]);
         return go && await _c.Auth.StepUpAsync(ct);
     }
 
@@ -702,7 +702,7 @@ internal sealed class AdminWindow
         var panel = new StackPanel { Spacing = 2, Padding = new Thickness(4, 8, 4, 8) };
         var title = new TextBlock { Text = item.Title ?? item.SubjectId, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap, MaxLines = 2 };
         panel.Children.Add(title);
-        var meta = string.Join(" · ", new[] { item.ChannelName, Cause(item), Deadline(item), item.Risk is { } r ? L.Format("admin.row.risk", L.Number((long)Math.Round(r * 100)) + "%") : null }.Where(s => !string.IsNullOrEmpty(s)));
+        var meta = string.Join(" · ", new[] { item.ChannelName, Cause(item), Deadline(item), item.Risk is { } r ? L.Format("admin.row.risk", L.Percent(r)) : null }.Where(s => !string.IsNullOrEmpty(s)));
         panel.Children.Add(new TextBlock { Text = meta, TextWrapping = TextWrapping.Wrap, Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"] });
         var flags = Flags(item);
         if (flags.Count > 0)
@@ -812,7 +812,7 @@ internal sealed class AdminWindow
         foreach (var f in detail.Findings.OrderByDescending(f => f.Score))
         {
             var label = L.Format("admin.detail.score", ReasonLabel(f.Category), L.Decimal(Math.Round(f.Score, 2)));
-            if (f.AtMs is { } at) label += " · " + L.Format("admin.detail.at", StreamPlayer.Clock(TimeSpan.FromMilliseconds(at)));
+            if (f.AtMs is { } at) label += " · " + L.Format("admin.detail.at", L.Duration(TimeSpan.FromMilliseconds(at)));
             var block = new StackPanel { Spacing = 2 };
             block.Children.Add(new TextBlock { Text = label, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
             foreach (var extra in new[] { f.Rationale, f.Text, f.QuranRef }.Where(s => !string.IsNullOrWhiteSpace(s)))
@@ -833,7 +833,7 @@ internal sealed class AdminWindow
         foreach (var h in detail.History)
         {
             var word = h.Decision != null ? DecidedWord(h.Decision) : h.Status ?? "";
-            var parts = new[] { word, h.ReasonCode != null ? ReasonLabel(h.ReasonCode) : null, h.DecidedByName, h.DecidedAt?.ToLocalTime().ToString("d", L.Language == "ar" ? new System.Globalization.CultureInfo("ar") : System.Globalization.CultureInfo.InvariantCulture) };
+            var parts = new[] { word, h.ReasonCode != null ? ReasonLabel(h.ReasonCode) : null, h.DecidedByName, h.DecidedAt is { } decidedAt ? L.Date(decidedAt) : null };
             _detail.Children.Add(new TextBlock { Text = string.Join(" · ", parts.Where(p => !string.IsNullOrEmpty(p))), TextWrapping = TextWrapping.Wrap });
         }
 
@@ -968,7 +968,7 @@ internal sealed class AdminWindow
 
             Array.Clear(bytes);
             image.Source = bitmap;
-            var at = StreamPlayer.Clock(TimeSpan.FromMilliseconds(frame.AtMs));
+            var at = L.Duration(TimeSpan.FromMilliseconds(frame.AtMs));
             var name = frame.Flagged ? L.Format("admin.media.flagged", at, ReasonLabel(frame.Category ?? "other")) : L.Format("admin.media.frame", at);
             var holder = new Border { Child = image, CornerRadius = new CornerRadius(4), BorderThickness = new Thickness(frame.Flagged ? 2 : 0), BorderBrush = new SolidColorBrush(Colors.IndianRed) };
             AutomationProperties.SetName(holder, name);

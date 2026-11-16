@@ -267,7 +267,7 @@ internal sealed class VideosPage
         var parts = new List<string> { _l["studio.upload.visibility." + (v.IsPublic ? "public" : "private")] };
         if (v.Status is StudioVideoStatus.Processing or StudioVideoStatus.Failed or StudioVideoStatus.Uploading) parts.Add(_l["studio.videos.status." + v.Status.ToString().ToLowerInvariant()]);
         parts.Add(_l.Format("studio.videos.views", _l.Number(v.Views)));
-        if (v.CreatedAt is { } at) parts.Add(at.ToLocalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+        if (v.CreatedAt is { } at) parts.Add(_l.Date(at));
         if (v.Category is { } c) parts.Add(_l["studio.category." + c]);
         return string.Join(" · ", parts);
     }
@@ -288,7 +288,7 @@ internal sealed class VideosPage
             text.Children.Add(new TextBlock
             {
                 Text = d.CanRestore
-                    ? _l.Format("studio.videos.deletedOn", d.DeletedAt.ToLocalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), (d.PurgeAfter ?? d.DeletedAt.AddDays(30)).ToLocalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))
+                    ? _l.Format("studio.videos.deletedOn", _l.Date(d.DeletedAt), _l.Date(d.PurgeAfter ?? d.DeletedAt.AddDays(VideosViewModel.RestoreDays)))
                     : _l["studio.videos.queuedForDeletion"],
                 Opacity = 0.75,
                 FontSize = 12,
@@ -323,7 +323,7 @@ internal sealed class VideosPage
         var title = ids.Count == 1
             ? _l.Format("studio.videos.deleteTitleOne", Localizer.Isolate(_vm.Items.FirstOrDefault(v => v.Id == ids[0])?.Title ?? ""))
             : _l.Format("studio.videos.deleteTitle", ids.Count);
-        if (await Confirm.AskAsync(root, _direction, title, _l["studio.videos.deleteBody"], _l["studio.videos.delete"], _l["common.cancel"])) await _vm.DeleteAsync(ids);
+        if (await Confirm.AskAsync(root, _direction, title, _l.Format("studio.videos.deleteBody", VideosViewModel.RestoreDays), _l["studio.videos.delete"], _l["common.cancel"])) await _vm.DeleteAsync(ids);
     }
 
     private async Task<bool> FormAsync(string title, FrameworkElement form, string action)

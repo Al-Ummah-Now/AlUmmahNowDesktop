@@ -17,7 +17,6 @@ namespace AlUmmahNow.App.Media
         public int Height { get; }
         public long Bandwidth { get; }
         public string Url { get; }
-        public string Label => Height > 0 ? Height.ToString(CultureInfo.InvariantCulture) + "p" : (Bandwidth / 1000).ToString(CultureInfo.InvariantCulture) + " kbps";
     }
 
     public static class HlsPlaylist

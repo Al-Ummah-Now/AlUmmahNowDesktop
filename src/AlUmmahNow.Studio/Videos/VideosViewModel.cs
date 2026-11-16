@@ -13,6 +13,9 @@ namespace AlUmmahNow.Studio.Videos;
 /// </summary>
 public sealed partial class VideosViewModel : ObservableObject
 {
+    /// <summary>Days a soft-deleted video can be restored before it is deleted for good.</summary>
+    public const int RestoreDays = 30;
+
     private static readonly Logger Logger = Log.For("videos");
 
     private readonly StudioShellViewModel _shell;
