@@ -90,14 +90,15 @@ internal sealed class AnalyticsPage
         _top.Children.Clear();
         foreach (var v in _vm.Data?.TopVideos ?? Array.Empty<CoreBridge.Studio.TopVideo>())
         {
-            _top.Children.Add(new TextBlock { Text = v.Title + " · " + _l.Format("studio.videos.views", _l.Number(v.Views)) });
+            _top.Children.Add(new TextBlock { Text = _l.Join(_l.Format("studio.videos.views", _l.Number(v.Views)), Localizer.Isolate(v.TitleFor(_l.Language))), TextTrimming = TextTrimming.CharacterEllipsis });
         }
     }
 
     private void Card(string label, string value)
     {
         var card = new StackPanel { Padding = new Thickness(14, 10, 14, 10), MinWidth = 140, Background = (Brush)Application.Current.Resources["CardBackgroundFillColorDefaultBrush"], CornerRadius = new CornerRadius(6) };
-        card.Children.Add(new TextBlock { Text = value, Style = (Style)Application.Current.Resources["SubtitleTextBlockStyle"] });
+        // Title size so a zero («٠», a single dot in Arabic) still reads clearly as a value.
+        card.Children.Add(new TextBlock { Text = value, Style = (Style)Application.Current.Resources["TitleTextBlockStyle"] });
         card.Children.Add(new TextBlock { Text = label, Opacity = 0.8 });
         AutomationProperties.SetName(card, label + ": " + value);
         _totals.Children.Add(card);

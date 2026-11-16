@@ -42,6 +42,29 @@ public sealed partial class AnalyticsViewModel : ObservableObject
 
     partial void OnDataChanged(ChannelAnalytics? value) => OnPropertyChanged(nameof(Series));
 
+    /// <summary>
+    /// The analytics API sends top videos with their original title only. Their per-language titles come
+    /// from the channel's video list (one request), so the list shows the same titles as the Videos tab.
+    /// On failure the original titles stay.
+    /// </summary>
+    private async Task<IReadOnlyList<TopVideo>> WithLocalizedTitlesAsync(string channelId, IReadOnlyList<TopVideo> top)
+    {
+        if (top.Count == 0 || top.All(v => v.TitleLocalized.Count > 0)) return top;
+        try
+        {
+            var page = await _api.ListVideosAsync(new StudioVideoQuery { ChannelId = channelId, Limit = 100 });
+            var byId = page.Items.GroupBy(v => v.Id).ToDictionary(g => g.Key, g => g.First().TitleLocalized);
+            return top.Select(v => v.TitleLocalized.Count == 0 && byId.TryGetValue(v.Id, out var localized)
+                ? new TopVideo(v.Id, v.Title, v.Views, localized)
+                : v).ToList();
+        }
+        catch (StudioApiException ex)
+        {
+            Logger.Warn("top video titles kept as uploaded", ex);
+            return top;
+        }
+    }
+
     public async Task LoadAsync()
     {
         if (_shell.ActiveChannel is not { } channel)
@@ -58,6 +81,7 @@ public sealed partial class AnalyticsViewModel : ObservableObject
             var to = _now();
             // "Last 28 days" is today and the 27 before it (the API counts both ends)
             var data = await _api.ChannelAnalyticsAsync(channel.Id, to.AddDays(-(Days - 1)), to);
+            data.TopVideos = await WithLocalizedTitlesAsync(channel.Id, data.TopVideos);
             if (gen == _generation) Data = data;
         }
         catch (AuthRequiredException)

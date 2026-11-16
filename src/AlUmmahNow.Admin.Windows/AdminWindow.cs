@@ -702,7 +702,7 @@ internal sealed class AdminWindow
         var panel = new StackPanel { Spacing = 2, Padding = new Thickness(4, 8, 4, 8) };
         var title = new TextBlock { Text = item.Title ?? item.SubjectId, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap, MaxLines = 2 };
         panel.Children.Add(title);
-        var meta = string.Join(" · ", new[] { item.ChannelName, Cause(item), Deadline(item), item.Risk is { } r ? L.Format("admin.row.risk", L.Percent(r)) : null }.Where(s => !string.IsNullOrEmpty(s)));
+        var meta = L.Join((item.ChannelName is { Length: > 0 } channelName ? Localizer.Isolate(channelName) : null), Cause(item), Deadline(item), item.Risk is { } r ? L.Format("admin.row.risk", L.Percent(r)) : null);
         panel.Children.Add(new TextBlock { Text = meta, TextWrapping = TextWrapping.Wrap, Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"] });
         var flags = Flags(item);
         if (flags.Count > 0)
@@ -793,7 +793,7 @@ internal sealed class AdminWindow
         AutomationProperties.SetHeadingLevel(heading, AutomationHeadingLevel.Level2);
         AutomationProperties.SetAutomationId(heading, "DetailTitle");
         _detail.Children.Add(heading);
-        var meta = string.Join(" · ", new[] { item.ChannelName, item.ChannelTrust is { } t ? L.Format("admin.detail.trust", t) : null, Cause(item), Deadline(item) }.Where(s => !string.IsNullOrEmpty(s)));
+        var meta = L.Join((item.ChannelName is { Length: > 0 } channelName ? Localizer.Isolate(channelName) : null), item.ChannelTrust is { } t ? L.Format("admin.detail.trust", t) : null, Cause(item), Deadline(item));
         _detail.Children.Add(new TextBlock { Text = meta, TextWrapping = TextWrapping.Wrap });
 
         _detail.Children.Add(_detailInfo);
@@ -812,7 +812,7 @@ internal sealed class AdminWindow
         foreach (var f in detail.Findings.OrderByDescending(f => f.Score))
         {
             var label = L.Format("admin.detail.score", ReasonLabel(f.Category), L.Decimal(Math.Round(f.Score, 2)));
-            if (f.AtMs is { } at) label += " · " + L.Format("admin.detail.at", L.Duration(TimeSpan.FromMilliseconds(at)));
+            if (f.AtMs is { } at) label += L.Separator + L.Format("admin.detail.at", L.Duration(TimeSpan.FromMilliseconds(at)));
             var block = new StackPanel { Spacing = 2 };
             block.Children.Add(new TextBlock { Text = label, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
             foreach (var extra in new[] { f.Rationale, f.Text, f.QuranRef }.Where(s => !string.IsNullOrWhiteSpace(s)))
@@ -825,7 +825,7 @@ internal sealed class AdminWindow
         {
             _detail.Children.Add(new TextBlock { Text = s.Title, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
             if (!string.IsNullOrWhiteSpace(s.Description)) _detail.Children.Add(new TextBlock { Text = s.Description, TextWrapping = TextWrapping.Wrap });
-            if (s.Tags.Count > 0) _detail.Children.Add(new TextBlock { Text = string.Join(" · ", s.Tags.Select(x => "#" + x)), TextWrapping = TextWrapping.Wrap });
+            if (s.Tags.Count > 0) _detail.Children.Add(new TextBlock { Text = L.Join(s.Tags.Select(x => Localizer.Isolate("#" + x))), TextWrapping = TextWrapping.Wrap });
         }
 
         _detail.Children.Add(Section("admin.detail.history"));
@@ -834,7 +834,7 @@ internal sealed class AdminWindow
         {
             var word = h.Decision != null ? DecidedWord(h.Decision) : h.Status ?? "";
             var parts = new[] { word, h.ReasonCode != null ? ReasonLabel(h.ReasonCode) : null, h.DecidedByName, h.DecidedAt is { } decidedAt ? L.Date(decidedAt) : null };
-            _detail.Children.Add(new TextBlock { Text = string.Join(" · ", parts.Where(p => !string.IsNullOrEmpty(p))), TextWrapping = TextWrapping.Wrap });
+            _detail.Children.Add(new TextBlock { Text = L.Join(parts), TextWrapping = TextWrapping.Wrap });
         }
 
         _detailScroll.ChangeView(null, 0, null, true);

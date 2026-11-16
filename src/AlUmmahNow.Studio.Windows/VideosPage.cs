@@ -235,18 +235,18 @@ internal sealed class VideosPage
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             var check = new CheckBox { IsChecked = _vm.IsSelected(v.Id), MinWidth = 0 };
-            AutomationProperties.SetName(check, _l.Format("studio.videos.select", v.Title));
+            AutomationProperties.SetName(check, _l.Format("studio.videos.select", v.TitleFor(_l.Language)));
             check.Click += (_, _) => _vm.SetSelected(v.Id, check.IsChecked == true);
             var text = new StackPanel();
-            text.Children.Add(new TextBlock { Text = v.Title, TextTrimming = TextTrimming.CharacterEllipsis });
+            text.Children.Add(new TextBlock { Text = v.TitleFor(_l.Language), TextTrimming = TextTrimming.CharacterEllipsis });
             text.Children.Add(new TextBlock { Text = Meta(v), Opacity = 0.75, FontSize = 12 });
             Grid.SetColumn(text, 1);
             var edit = new Button { Content = _l["studio.videos.edit"] };
-            AutomationProperties.SetName(edit, _l.Format("studio.videos.editOne", v.Title));
+            AutomationProperties.SetName(edit, _l.Format("studio.videos.editOne", v.TitleFor(_l.Language)));
             edit.Click += async (_, _) => await EditAsync(v);
             Grid.SetColumn(edit, 2);
             var delete = new Button { Content = _l["studio.videos.delete"] };
-            AutomationProperties.SetName(delete, _l.Format("studio.videos.deleteOne", v.Title));
+            AutomationProperties.SetName(delete, _l.Format("studio.videos.deleteOne", v.TitleFor(_l.Language)));
             delete.Click += async (_, _) => await DeleteAsync(new[] { v.Id });
             Grid.SetColumn(delete, 3);
             grid.Children.Add(check);
@@ -269,7 +269,7 @@ internal sealed class VideosPage
         parts.Add(_l.Format("studio.videos.views", _l.Number(v.Views)));
         if (v.CreatedAt is { } at) parts.Add(_l.Date(at));
         if (v.Category is { } c) parts.Add(_l["studio.category." + c]);
-        return string.Join(" · ", parts);
+        return _l.Join(parts);
     }
 
     private void RenderDeleted()

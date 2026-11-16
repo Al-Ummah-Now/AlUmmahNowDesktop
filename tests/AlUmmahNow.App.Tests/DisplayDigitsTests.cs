@@ -90,6 +90,31 @@ public class DisplayDigitsTests
         Assert.Equal("عنوان clip-2026.mp4", ar.Format("studio.upload.titleFor", "clip-2026.mp4"));
     }
 
+    [Fact]
+    public void Arabic_joins_with_a_bullet_because_the_middle_dot_reads_as_zero()
+    {
+        Assert.Equal("عام • ١٬٢٠٠ مشاهدة", new Localizer("ar").Join("عام", null, "", new Localizer("ar").Format("video.views", 1200)));
+        Assert.Equal("Public · 1,200 views", new Localizer("en").Join("Public", null, "", new Localizer("en").Format("video.views", 1200)));
+    }
+
+    [Fact]
+    public void Title_pattern_examples_use_the_ui_digits()
+    {
+        Assert.Equal("استخدم {filename} و{n} (١، ٢، ٣…) و{date} لتكوين كل عنوان.", new Localizer("ar").Format("studio.upload.titlePatternHint", 1, 2, 3));
+        Assert.Equal("Use {filename}, {n} (1, 2, 3…) and {date} to build each title.", new Localizer("en").Format("studio.upload.titlePatternHint", 1, 2, 3));
+    }
+
+    [Fact]
+    public void Arabic_strings_have_no_ascii_digits_or_middle_dots()
+    {
+        foreach (var (key, value) in new Localizer().Bundle("ar"))
+        {
+            var text = Regex.Replace(value, @"\{\d+\}", "");
+            Assert.False(Regex.IsMatch(text, "[0-9]"), key + ": " + value);
+            Assert.False(text.Contains('·'), key + ": " + value);
+        }
+    }
+
     [Theory]
     [InlineData("٢٠٢٦-١١-١٥ ١٤:٣٠", "2026-11-15 14:30")]
     [InlineData("۱۲۳", "123")]
@@ -120,7 +145,7 @@ public class DisplayDigitsTests
     };
 
     private static readonly Regex Bypass = new(
-        @"ToString\((?!""N""\)|""X8""\))\s*""|ToString\(\s*(System\.Globalization\.)?CultureInfo|(?i:string)\.Format\(|new (System\.Globalization\.)?CultureInfo\(|CultureInfo\.(GetCultureInfo|CurrentCulture|CurrentUICulture)|To(Short|Long)(Date|Time)String|StringFormat=|\{[A-Za-z_.]+:(N|P|C|F|D|0|#)",
+        @"ToString\((?!""N""\)|""X8""\))\s*""|ToString\(\s*(System\.Globalization\.)?CultureInfo|(?i:string)\.Format\(|new (System\.Globalization\.)?CultureInfo\(|CultureInfo\.(GetCultureInfo|CurrentCulture|CurrentUICulture)|To(Short|Long)(Date|Time)String|StringFormat=|\{[A-Za-z_.]+:(N|P|C|F|D|0|#)|""[^""]*·",
         RegexOptions.Compiled);
 
     [Fact]
@@ -143,7 +168,7 @@ public class DisplayDigitsTests
         }
 
         Assert.True(offenders.Count == 0,
-            "Format numbers, dates and times for display with Localizer (Number, Decimal, Percent, Date, DateTime, Duration, Bytes, Money, Format):\n"
+            "Format numbers, dates and times for display with Localizer (Number, Decimal, Percent, Date, DateTime, Duration, Bytes, Money, Format), and join values with Localizer.Join, not \" · \":\n"
             + string.Join("\n", offenders));
     }
 }

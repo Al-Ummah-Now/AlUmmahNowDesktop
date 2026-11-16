@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Text.Json;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -178,6 +179,16 @@ namespace AlUmmahNow.App.I18n
 
             return code == "USD" ? sign + "$" + number : sign + code + " " + number;
         }
+
+        /// <summary>
+        /// Joins values on one line. Arabic uses " • " because the middle dot «·» reads as the Eastern
+        /// Arabic zero «٠»; English keeps " · ". Empty parts are skipped.
+        /// </summary>
+        public string Separator => _language == "ar" ? " \u2022 " : " \u00B7 ";
+
+        public string Join(IEnumerable<string?> parts) => string.Join(Separator, parts.Where(p => !string.IsNullOrEmpty(p)));
+
+        public string Join(params string?[] parts) => Join((IEnumerable<string?>)parts);
 
         /// <summary>Wraps text in Unicode first-strong isolates so embedded runs cannot reorder neighbours.</summary>
         public static string Isolate(string text) => "\u2068" + text + "\u2069";

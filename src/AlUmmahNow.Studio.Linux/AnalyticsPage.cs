@@ -98,10 +98,11 @@ public sealed class AnalyticsPage
         foreach (var v in _vm.Data?.TopVideos ?? Array.Empty<CoreBridge.Studio.TopVideo>())
         {
             var row = Gtk.Box.New(Gtk.Orientation.Horizontal, 8);
-            var t = Ui.Label(v.Title);
+            var views = Ui.Label(_l.Format("studio.videos.views", _l.Number(v.Views)), dim: true);
+            row.Append(views);
+            var t = Ui.Label(Localizer.Isolate(v.TitleFor(_l.Language)));
             t.SetHexpand(true);
             row.Append(t);
-            row.Append(Ui.Label(_l.Format("studio.videos.views", _l.Number(v.Views)), dim: true));
             _top.Append(row);
         }
     }
