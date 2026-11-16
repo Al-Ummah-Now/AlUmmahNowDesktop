@@ -38,7 +38,7 @@ jobs:
           sleep 15
           xdotool mousemove 1590 990
           sleep 3
-          win=$(xdotool search --onlyvisible --name "Al Ummah Now Studio" | head -1)
+          win=$(xdotool search --onlyvisible --pid $app | tail -1)
           import -window "$win" -frame "shots/linux-$1-top.png"
           # End of the page: wheel down over the content, then park the pointer again and let the overlay scrollbar fade.
           xdotool mousemove 800 600
