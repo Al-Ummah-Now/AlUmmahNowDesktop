@@ -141,7 +141,7 @@ internal sealed class UploadPage
     {
         var panel = new StackPanel { Spacing = 10, MaxWidth = 760, HorizontalAlignment = HorizontalAlignment.Left };
 
-        var title = new TextBox { Header = _l["studio.upload.titlePattern"], Text = D.TitlePattern, Description = _l["studio.upload.titlePatternHint"] };
+        var title = new TextBox { Header = _l["studio.upload.titlePattern"], Text = D.TitlePattern, Description = _l.Numerals(_l["studio.upload.titlePatternHint"]) };
         title.TextChanged += (_, _) =>
         {
             D.TitlePattern = title.Text;

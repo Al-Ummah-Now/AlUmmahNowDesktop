@@ -94,6 +94,24 @@ jobs:
           if (-not (Select-String -Quiet "h264" artifacts/studio/discover.txt)) { throw "output is not H.264" }
           # ffmpeg -i with no output file always exits 1; the checks above are the gate.
           exit 0
+      - name: Acting as picker review shots (window only; en/ar, default/minimum size, Light/Dark, closed/open)
+        shell: pwsh
+        run: |
+          $out = (New-Item -ItemType Directory -Force artifacts/acting-as).FullName
+          $exe = (Resolve-Path "src/AlUmmahNow.Studio.Windows/bin/x64/Release/net9.0-windows10.0.22621.0/win-x64/AlUmmahNowStudio.exe").Path
+          $failed = @()
+          foreach ($lang in "en","ar") { foreach ($size in @(@("desktop","1280x800"), @("narrow","1100x720"))) { foreach ($theme in "light","dark") { foreach ($state in "active","open") {
+            $name = "studio-windows-picker-$state-$lang-$($size[0])-$theme"
+            $scene = if ($state -eq "open") { "channels" } else { "" }
+            ./scripts/windows-studio-shot.ps1 $exe $lang $theme $size[1] $scene $name $out
+            if (-not (Select-String -Quiet "RESULT PASS" "$out/$name.txt")) { $failed += $name }
+          } } } }
+          if ($failed.Count -gt 0) { throw "shots failed: $failed" }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: studio-windows-acting-as
+          path: artifacts/acting-as
       - uses: actions/upload-artifact@v4
         if: always()
         with:

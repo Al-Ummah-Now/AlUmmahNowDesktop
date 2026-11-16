@@ -15,7 +15,8 @@ namespace AlUmmahNow.App.I18n
 
         private readonly Dictionary<string, IReadOnlyDictionary<string, string>> _bundles = new();
         private string _language;
-        private bool _easternNumerals;
+        // Owner rule: Arabic UI shows Eastern Arabic digits (٠–٩) everywhere.
+        private bool _easternNumerals = true;
 
         public Localizer(string language = "ar")
         {
@@ -108,6 +109,12 @@ namespace AlUmmahNow.App.I18n
 
         /// <summary>Wraps text in Unicode first-strong isolates so embedded runs cannot reorder neighbours.</summary>
         public static string Isolate(string text) => "⁨" + text + "⁩";
+
+        /// <summary>
+        /// Digits in UI text as the language writes them: ٠–٩ in Arabic. For copy that contains numbers
+        /// (e.g. a hint "(1, 2, 3…)"); never for ids, URLs or codes.
+        /// </summary>
+        public string Numerals(string text) => Digits(text);
 
         private string Digits(string text)
         {

@@ -76,11 +76,25 @@ internal sealed class StudioWindow
         root.Children.Add(_body);
 
         Window = new Window { Title = l["studio.name"], Content = root };
+        // A minimum size instead of a phone layout: nothing clips or truncates at any size it can take.
+        var scale = GetDpiForWindow(WinRT.Interop.WindowNative.GetWindowHandle(Window)) / 96.0;
+        if (Window.AppWindow.Presenter is Microsoft.UI.Windowing.OverlappedPresenter presenter)
+        {
+            presenter.PreferredMinimumWidth = (int)Math.Ceiling(StudioWindowSize.MinWidth * scale);
+            presenter.PreferredMinimumHeight = (int)Math.Ceiling(StudioWindowSize.MinHeight * scale);
+        }
+        var (width, height) = StudioWindowSize.Initial(Environment.GetEnvironmentVariable("AUN_WINDOW_SIZE"));
+        Window.AppWindow.Resize(new global::Windows.Graphics.SizeInt32((int)Math.Ceiling(width * scale), (int)Math.Ceiling(height * scale)));
+        // The caption bar follows the app theme (Light/Dark), not only the Windows setting.
+        Window.AppWindow.TitleBar.PreferredTheme = Microsoft.UI.Windowing.TitleBarTheme.UseDefaultAppMode;
         _shell.PropertyChanged += (_, _) => Render();
         Render();
     }
 
     public Window Window { get; }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern uint GetDpiForWindow(IntPtr hwnd);
 
     public void AddPage(string name, string title, Symbol icon, FrameworkElement page)
     {

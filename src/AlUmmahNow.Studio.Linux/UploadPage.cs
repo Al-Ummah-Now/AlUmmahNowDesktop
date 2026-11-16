@@ -85,6 +85,7 @@ public sealed class UploadPage
         var queueHeader = Gtk.Box.New(Gtk.Orientation.Horizontal, 8);
         var queueTitle = Ui.Label(l["studio.upload.queue"]);
         queueTitle.AddCssClass("heading");
+        queueTitle.SetWrap(false);
         queueTitle.SetHexpand(true);
         queueHeader.Append(queueTitle);
         queueHeader.Append(Ui.Button(l["studio.upload.clearFinished"], () => _vm.ClearFinished(), "flat"));
@@ -155,7 +156,7 @@ public sealed class UploadPage
             D.TitlePattern = title.GetText();
             _vm.ApplyDefaults();
         };
-        Add(_l["studio.upload.titlePattern"], title, _l["studio.upload.titlePatternHint"]);
+        Add(_l["studio.upload.titlePattern"], title, _l.Numerals(_l["studio.upload.titlePatternHint"]));
 
         var description = Gtk.TextView.New();
         description.SetWrapMode(Gtk.WrapMode.WordChar);

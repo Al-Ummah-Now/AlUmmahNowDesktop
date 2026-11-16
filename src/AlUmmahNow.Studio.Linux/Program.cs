@@ -82,6 +82,9 @@ app.OnActivate += (_, _) =>
     var shell = new StudioShellViewModel(accounts, api);
     var uploadsVm = new UploadsViewModel(shell, api, uploadServiceFor, Path.Combine(stateDir, demo ? "demo" : "studio"));
     var banner = demo ? localizer["studio.shell.demo"] : environment.Name != "prod" ? localizer.Format("studio.shell.environment", environment.Name.ToUpperInvariant()) : null;
+    // Store and review screenshots show the demo data the way a signed-in user sees real data.
+    if (demo && Environment.GetEnvironmentVariable("AUN_STORE_SHOT") == "1") banner = null;
+    StudioStyle.Apply();
     var window = new StudioWindow(app, localizer, shell, banner);
 
     uploadsVm.Watch(Environment.GetEnvironmentVariable("AUN_WATCH_DIR") is { Length: > 0 } dir ? dir : settings.WatchFolder);

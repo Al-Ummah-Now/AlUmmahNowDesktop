@@ -7,6 +7,20 @@
       <ResourceDictionary.MergedDictionaries>
         <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
       </ResourceDictionary.MergedDictionaries>
+      <!-- Menus and flyouts: frosted glass. WinUI already draws them with in-app Acrylic (translucent,
+           blurred); give them a thin bright edge with a golden tint. -->
+      <ResourceDictionary.ThemeDictionaries>
+        <ResourceDictionary x:Key="Light">
+          <SolidColorBrush x:Key="ComboBoxDropDownBorderBrush" Color="#B3D9B25F" />
+          <SolidColorBrush x:Key="MenuFlyoutPresenterBorderBrush" Color="#B3D9B25F" />
+          <SolidColorBrush x:Key="FlyoutBorderThemeBrush" Color="#B3D9B25F" />
+        </ResourceDictionary>
+        <ResourceDictionary x:Key="Dark">
+          <SolidColorBrush x:Key="ComboBoxDropDownBorderBrush" Color="#99E8C77A" />
+          <SolidColorBrush x:Key="MenuFlyoutPresenterBorderBrush" Color="#99E8C77A" />
+          <SolidColorBrush x:Key="FlyoutBorderThemeBrush" Color="#99E8C77A" />
+        </ResourceDictionary>
+      </ResourceDictionary.ThemeDictionaries>
     </ResourceDictionary>
   </Application.Resources>
 </Application>

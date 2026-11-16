@@ -32,6 +32,11 @@ public sealed partial class App : Application
     public App()
     {
         InitializeComponent();
+        // Screenshots: force Light or Dark (AUN_COLOR_SCHEME=light|dark); otherwise follow Windows.
+        // RequestedTheme can only be set here, before any window exists.
+        var scheme = Environment.GetEnvironmentVariable("AUN_COLOR_SCHEME");
+        if (scheme == "dark") RequestedTheme = ApplicationTheme.Dark;
+        else if (scheme == "light") RequestedTheme = ApplicationTheme.Light;
         UnhandledException += (_, e) =>
         {
             Log.For("app").Error("unhandled exception", e.Exception);

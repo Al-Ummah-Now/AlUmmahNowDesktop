@@ -56,3 +56,16 @@ public sealed class ActingAsTests
     public void ArabicNeverSaysFidyu() =>
         Assert.DoesNotContain(new Localizer().Bundle("ar").Values, v => v.Contains("فيديو"));
 }
+
+public sealed class StudioWindowSizeTests
+{
+    [Theory]
+    [InlineData(null, 1280, 800)]
+    [InlineData("", 1280, 800)]
+    [InlineData("nonsense", 1280, 800)]
+    [InlineData("400x800", 1100, 800)]
+    [InlineData("1600x900", 1600, 900)]
+    [InlineData("1100x720", 1100, 720)]
+    public void InitialSizeNeverGoesBelowTheMinimum(string? value, int width, int height) =>
+        Assert.Equal((width, height), StudioWindowSize.Initial(value));
+}

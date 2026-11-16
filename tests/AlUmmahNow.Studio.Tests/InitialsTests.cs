@@ -23,13 +23,13 @@ public sealed class InitialsTests
     public void ArabicTakesTheFirstLetterOfTheFirstWord(string name, string expected) => Assert.Equal(expected, Initials.For(name));
 
     [Theory]
-    [InlineData("Masjid Media Team", "MT")]
+    [InlineData("Masjid Media Team", "M")]
     [InlineData("omar", "O")]
-    [InlineData("amina studio", "AS")]
-    [InlineData("Émile Zola", "ÉZ")] // decomposed accent stays with its letter
+    [InlineData("amina studio", "A")]
+    [InlineData("Émile Zola", "É")] // decomposed accent stays with its letter
     [InlineData("Masjid النور", "M")]
     [InlineData("#1 Channel", "C")]
-    public void LatinTakesTwoInitials(string name, string expected) => Assert.Equal(expected, Initials.For(name));
+    public void OtherScriptsTakeOneUpperCaseLetter(string name, string expected) => Assert.Equal(expected, Initials.For(name));
 
     [Theory]
     [InlineData(null)]

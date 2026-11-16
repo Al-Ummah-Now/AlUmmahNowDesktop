@@ -5,8 +5,8 @@ namespace AlUmmahNow.Studio.Shell;
 
 /// <summary>
 /// Initials for a logo placeholder (channel or person). Arabic: the first letter of the first word,
-/// skipping a leading «ال» («قناة النور» → «ق», «الأمة الآن» → «أ»). Scripts with case (Latin, …):
-/// the first letters of the first and last words, upper-cased ("Masjid Media Team" → "MT"). Works on
+/// skipping a leading «ال» («قناة النور» → «ق», «الأمة الآن» → «أ»). Other scripts: the first letter
+/// of the first word, upper-cased ("Masjid Media Team" → "M"); one letter for every name. Works on
 /// grapheme clusters and drops Arabic tashkeel; <c>null</c> only when the name has no letters (show
 /// the generic icon then).
 /// </summary>
@@ -29,10 +29,7 @@ public static class Initials
             return first[0];
         }
 
-        var initials = first[0].ToUpperInvariant();
-        var last = words[words.Count - 1];
-        if (IsCased(first[0]) && words.Count > 1 && IsCased(last[0])) initials += last[0].ToUpperInvariant();
-        return initials;
+        return first[0].ToUpperInvariant();
     }
 
     /// <summary>The word's letters as grapheme clusters (NFC), without Arabic tashkeel or tatweel.</summary>
@@ -66,5 +63,4 @@ public static class Initials
         return (c >= 0x0600 && c <= 0x06FF) || (c >= 0x0750 && c <= 0x077F) || (c >= 0x08A0 && c <= 0x08FF);
     }
 
-    private static bool IsCased(string letter) => letter.ToUpperInvariant() != letter.ToLowerInvariant();
 }

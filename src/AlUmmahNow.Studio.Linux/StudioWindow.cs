@@ -35,10 +35,10 @@ public sealed class StudioWindow
         _l = l;
         _shell = shell;
         Window = Adw.ApplicationWindow.New(app);
-        Window.SetDefaultSize(1280, 800);
-        // CI screenshots: a narrow window (e.g. 400x800).
-        if (Environment.GetEnvironmentVariable("AUN_WINDOW_SIZE") is { Length: > 0 } size && size.Split('x') is { Length: 2 } wh
-            && int.TryParse(wh[0], out var w) && int.TryParse(wh[1], out var h)) Window.SetDefaultSize(w, h);
+        // A minimum size instead of a phone layout: nothing clips or truncates at any size it can take.
+        Window.SetSizeRequest(StudioWindowSize.MinWidth, StudioWindowSize.MinHeight);
+        var (width, height) = StudioWindowSize.Initial(Environment.GetEnvironmentVariable("AUN_WINDOW_SIZE"));
+        Window.SetDefaultSize(width, height);
         Window.SetTitle(l["studio.name"]);
 
         var header = Adw.HeaderBar.New();
@@ -54,6 +54,7 @@ public sealed class StudioWindow
         _channelMenu.SetMarginTop(6);
         _channelMenu.SetMarginBottom(6);
         _channelPopover.SetChild(_channelMenu);
+        _channelPopover.AddCssClass("glass");
         _channelPicker.SetPopover(_channelPopover);
         _channelPicker.AddCssClass("flat");
         Ui.Named(_channelPicker, l[ActingAs.HeadingKey]);
@@ -64,6 +65,7 @@ public sealed class StudioWindow
         _accountMenu.SetMarginTop(6);
         _accountMenu.SetMarginBottom(6);
         _accountPopover.SetChild(_accountMenu);
+        _accountPopover.AddCssClass("glass");
         _accountButton.SetPopover(_accountPopover);
 
         header.PackEnd(_accountButton);

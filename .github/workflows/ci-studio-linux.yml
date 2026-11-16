@@ -74,7 +74,8 @@ jobs:
           name: studio-linux
           path: artifacts/studio
 
-  # "Acting as" picker screenshots for review: closed and open, en/ar, desktop/narrow, light/dark.
+  # "Acting as" picker review shots: closed and open, en/ar, default and minimum window size, Light/Dark.
+  # Demo data without the demo notice (AUN_STORE_SHOT=1); picom blurs what is behind the glass menus.
   acting-as-shots:
     runs-on: ubuntu-latest
     timeout-minutes: 40
@@ -89,17 +90,20 @@ jobs:
       - name: Install GTK, libadwaita, GStreamer
         uses: ./.github/actions/apt-install
         with:
-          packages: libgtk-4-1 libadwaita-1-0 xvfb imagemagick openbox gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good libsecret-1-0 fonts-noto-core python3-pyatspi at-spi2-core dbus-x11 libgl1-mesa-dri adwaita-icon-theme
+          packages: libgtk-4-1 libadwaita-1-0 xvfb imagemagick openbox gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good libsecret-1-0 fonts-noto-core python3-pyatspi at-spi2-core dbus-x11 libgl1-mesa-dri adwaita-icon-theme picom
       - run: dotnet build src/AlUmmahNow.Studio.Linux -c Release
       - name: Capture
         env:
           GDK_BACKEND: x11
           GSK_RENDERER: cairo
           LIBGL_ALWAYS_SOFTWARE: "1"
+          AUN_STORE_SHOT: "1"
+          AUN_COMPOSITOR: "1"
         run: |
           mkdir -p artifacts/acting-as
           for lang in en ar; do for width in desktop narrow; do for theme in light dark; do for scene in active open; do
-            if [ $width = narrow ]; then screen=400x800; else screen=1280x800; fi
+            # "narrow" is the Studio's minimum window size (StudioWindowSize.MinWidth x MinHeight).
+            if [ $width = narrow ]; then screen=1100x720; else screen=1280x800; fi
             [ $scene = open ] && s=channels || s=""
             AUN_WINDOW_SIZE=$screen AUN_COLOR_SCHEME=$theme dbus-run-session -- xvfb-run -a -s "-screen 0 ${screen}x24" \
               scripts/studio-scenario.sh $lang uploads shell "picker-$scene-$lang-$width-$theme" artifacts/acting-as "" "$s" \
