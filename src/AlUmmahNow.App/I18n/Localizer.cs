@@ -84,6 +84,13 @@ namespace AlUmmahNow.App.I18n
         /// <summary>A number with at most one decimal ("1.5", "١٫٥" in Arabic).</summary>
         public string Decimal(double value) => Digits(value.ToString("#,0.#", CultureInfo.InvariantCulture));
 
+        /// <summary>
+        /// A headline total for a stat tile. Zero is a word in Arabic («لا يوجد»): the Eastern Arabic zero «٠»
+        /// is a single dot, which on its own in a tile reads as an empty value.
+        /// </summary>
+        public string Stat(double value, bool decimals = false) =>
+            value == 0 ? this["stat.zero"] : decimals ? Decimal(value) : Number((long)Math.Round(value));
+
         /// <summary>A share of 1 as a percentage: 0.25 → "25%" / "٢٥٪".</summary>
         public string Percent(double fraction, int decimals = 0)
         {

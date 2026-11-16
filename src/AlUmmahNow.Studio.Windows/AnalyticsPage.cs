@@ -64,11 +64,11 @@ internal sealed class AnalyticsPage
         _totals.Children.Clear();
         if (_vm.Data is { } d)
         {
-            Card(_l["studio.analytics.views"], _l.Number(d.Totals.Views));
-            Card(_l["studio.analytics.watchHours"], _l.Decimal(d.Totals.WatchTimeMinutes / 60));
-            Card(_l["studio.analytics.likes"], _l.Number(d.Totals.Likes));
-            Card(_l["studio.analytics.comments"], _l.Number(d.Totals.Comments));
-            Card(_l["studio.analytics.subscribers"], _l.Number(d.Totals.Subscribers));
+            Card(_l["studio.analytics.views"], _l.Stat(d.Totals.Views));
+            Card(_l["studio.analytics.watchHours"], _l.Stat(d.Totals.WatchTimeMinutes / 60, decimals: true));
+            Card(_l["studio.analytics.likes"], _l.Stat(d.Totals.Likes));
+            Card(_l["studio.analytics.comments"], _l.Stat(d.Totals.Comments));
+            Card(_l["studio.analytics.subscribers"], _l.Stat(d.Totals.Subscribers));
         }
 
         var s = _vm.Series;
@@ -97,7 +97,7 @@ internal sealed class AnalyticsPage
     private void Card(string label, string value)
     {
         var card = new StackPanel { Padding = new Thickness(14, 10, 14, 10), MinWidth = 140, Background = (Brush)Application.Current.Resources["CardBackgroundFillColorDefaultBrush"], CornerRadius = new CornerRadius(6) };
-        // Title size so a zero («٠», a single dot in Arabic) still reads clearly as a value.
+        // Title size: the headline totals read first.
         card.Children.Add(new TextBlock { Text = value, Style = (Style)Application.Current.Resources["TitleTextBlockStyle"] });
         card.Children.Add(new TextBlock { Text = label, Opacity = 0.8 });
         AutomationProperties.SetName(card, label + ": " + value);

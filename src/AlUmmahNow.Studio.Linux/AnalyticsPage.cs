@@ -77,11 +77,11 @@ public sealed class AnalyticsPage
         Ui.Clear(_totals);
         if (_vm.Data is { } d)
         {
-            Card(_l["studio.analytics.views"], _l.Number(d.Totals.Views));
-            Card(_l["studio.analytics.watchHours"], _l.Decimal(d.Totals.WatchTimeMinutes / 60));
-            Card(_l["studio.analytics.likes"], _l.Number(d.Totals.Likes));
-            Card(_l["studio.analytics.comments"], _l.Number(d.Totals.Comments));
-            Card(_l["studio.analytics.subscribers"], _l.Number(d.Totals.Subscribers));
+            Card(_l["studio.analytics.views"], _l.Stat(d.Totals.Views));
+            Card(_l["studio.analytics.watchHours"], _l.Stat(d.Totals.WatchTimeMinutes / 60, decimals: true));
+            Card(_l["studio.analytics.likes"], _l.Stat(d.Totals.Likes));
+            Card(_l["studio.analytics.comments"], _l.Stat(d.Totals.Comments));
+            Card(_l["studio.analytics.subscribers"], _l.Stat(d.Totals.Subscribers));
         }
 
         var series = _vm.Series;
