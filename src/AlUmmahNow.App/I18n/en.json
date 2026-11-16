@@ -413,5 +413,6 @@
   "currency.GBP": "pounds sterling",
   "currency.SAR": "Saudi riyals",
   "currency.AED": "UAE dirhams",
-  "currency.EGP": "Egyptian pounds"
+  "currency.EGP": "Egyptian pounds",
+  "stat.zero": "0"
 }

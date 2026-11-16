@@ -98,6 +98,15 @@ public class DisplayDigitsTests
     }
 
     [Fact]
+    public void Zero_stats_read_as_a_word_in_arabic()
+    {
+        Assert.Equal("لا يوجد", new Localizer("ar").Stat(0));
+        Assert.Equal("٣١٣٫٥", new Localizer("ar").Stat(313.5, decimals: true));
+        Assert.Equal("0", new Localizer("en").Stat(0));
+        Assert.Equal("15,046", new Localizer("en").Stat(15046));
+    }
+
+    [Fact]
     public void Title_pattern_examples_use_the_ui_digits()
     {
         Assert.Equal("استخدم {filename} و{n} (١، ٢، ٣…) و{date} لتكوين كل عنوان.", new Localizer("ar").Format("studio.upload.titlePatternHint", 1, 2, 3));

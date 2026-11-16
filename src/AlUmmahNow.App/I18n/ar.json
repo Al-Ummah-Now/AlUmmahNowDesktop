@@ -413,5 +413,6 @@
   "currency.GBP": "جنيه إسترليني",
   "currency.SAR": "ريال سعودي",
   "currency.AED": "درهم إماراتي",
-  "currency.EGP": "جنيه مصري"
+  "currency.EGP": "جنيه مصري",
+  "stat.zero": "لا يوجد"
 }
