@@ -65,15 +65,23 @@ public sealed class DemoTransport : IApiTransport
 
     public DemoTransport()
     {
-        string[] titles =
+        // Original title plus the creator's per-language titles, like the API's titleLocalized.
+        (string Title, string En, string Ar)[] titles =
         {
-            "تأملات في سورة الكهف — الجزء الأول", "Seerah: the early years in Makkah", "أحكام الصيام للمبتدئين", "Arabic grammar, part 3",
-            "خطبة الجمعة: الصبر", "Hadith of the week: intentions", "قصص الأنبياء: يونس عليه السلام", "Q&A: prayer while travelling",
+            ("تأملات في سورة الكهف — الجزء الأول", "Reflections on Surah Al-Kahf, part one", "تأملات في سورة الكهف — الجزء الأول"),
+            ("Seerah: the early years in Makkah", "Seerah: the early years in Makkah", "السيرة: السنوات الأولى في مكة"),
+            ("أحكام الصيام للمبتدئين", "Fasting rulings for beginners", "أحكام الصيام للمبتدئين"),
+            ("Arabic grammar, part 3", "Arabic grammar, part 3", "النحو العربي، الجزء الثالث"),
+            ("خطبة الجمعة: الصبر", "Friday khutbah: patience", "خطبة الجمعة: الصبر"),
+            ("Hadith of the week: intentions", "Hadith of the week: intentions", "حديث الأسبوع: النيات"),
+            ("قصص الأنبياء: يونس عليه السلام", "Stories of the prophets: Yunus", "قصص الأنبياء: يونس عليه السلام"),
+            ("Q&A: prayer while travelling", "Q&A: prayer while travelling", "سؤال وجواب: الصلاة في السفر"),
         };
         _videos = titles.Select((t, i) => new Dictionary<string, object?>
         {
             ["id"] = "demo-v" + (i + 1),
-            ["title"] = t,
+            ["title"] = t.Title,
+            ["titleLocalized"] = new Dictionary<string, string> { ["en"] = t.En, ["ar"] = t.Ar },
             ["description"] = "",
             ["channelId"] = "demo-c1",
             ["isPublic"] = i % 3 != 2,

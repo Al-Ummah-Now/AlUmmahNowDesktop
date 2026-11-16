@@ -155,7 +155,7 @@ public sealed class UploadPage
             D.TitlePattern = title.GetText();
             _vm.ApplyDefaults();
         };
-        Add(_l["studio.upload.titlePattern"], title, _l["studio.upload.titlePatternHint"]);
+        Add(_l["studio.upload.titlePattern"], title, TitlePatternHint(_l));
 
         var description = Gtk.TextView.New();
         description.SetWrapMode(Gtk.WrapMode.WordChar);
@@ -301,8 +301,8 @@ public sealed class UploadPage
             title.SetHexpand(true);
             Ui.Named(title, _l.Format("studio.upload.titleFor", file));
             title.OnChanged += (_, _) => _vm.RenameStaged(plan.FilePath, title.GetText());
-            var meta = Ui.Label(Localizer.Isolate(file) + " · " + _l.Bytes(plan.Size)
-                + (plan.PublishAt is { } at ? " · " + _l.Format("studio.upload.publishesAt", _l.DateTime(at)) : ""), dim: true);
+            var meta = Ui.Label(_l.Join(Localizer.Isolate(file), _l.Bytes(plan.Size),
+                plan.PublishAt is { } at ? _l.Format("studio.upload.publishesAt", _l.DateTime(at)) : null), dim: true);
             meta.SetSizeRequest(320, -1);
             var remove = Gtk.Button.NewWithLabel(_l["studio.upload.remove"]);
             remove.AddCssClass("flat");
@@ -389,6 +389,9 @@ public sealed class UploadPage
         remember(path);
     }
 
+    /// <summary>The title-pattern hint; its {n} examples use the UI digits (the token itself writes 0–9).</summary>
+    private static string TitlePatternHint(Localizer l) => l.Format("studio.upload.titlePatternHint", 1, 2, 3);
+
     private sealed class QueueRow
     {
         private readonly UploadPage _page;
@@ -425,8 +428,8 @@ public sealed class UploadPage
             _bar.SetFraction(item.Fraction);
             var phase = l["studio.phase." + item.Phase.ToString().ToLowerInvariant()];
             var amount = l.Format("studio.upload.progress", l.Bytes(item.SentBytes), l.Bytes(item.TotalBytes));
-            _status.SetText(item.Phase == UploadPhase.Uploading ? phase + " · " + amount : phase);
-            Ui.Named(_bar, item.Title + " · " + phase);
+            _status.SetText(item.Phase == UploadPhase.Uploading ? l.Join(phase, amount) : phase);
+            Ui.Named(_bar, l.Join(Localizer.Isolate(item.Title), phase));
             if (_phase == item.Phase) return;
             _phase = item.Phase;
             Ui.Clear(_buttons);

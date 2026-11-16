@@ -261,7 +261,7 @@ namespace AlUmmahNow.CoreBridge.Studio
                 .OrderBy(m => m.Date)
                 .Select(m => new AnalyticsDay(m.Date!.Value, m.Views, m.Watch))
                 .ToList();
-            var top = Array(root, "topPerformingVideos").Select(v => new TopVideo(Str(v, "videoId") ?? "", Str(v, "title") ?? "", Long(v, "views"))).Where(v => v.Id.Length > 0).ToList();
+            var top = Array(root, "topPerformingVideos").Select(v => new TopVideo(Str(v, "videoId") ?? "", Str(v, "title") ?? "", Long(v, "views"), ReadLocalized(v, "titleLocalized"))).Where(v => v.Id.Length > 0).ToList();
             // The cards are the chosen period's numbers, the sum of the chart (the total* fields are lifetime)
             var days = Array(root, "recentMetrics").ToList();
             return new ChannelAnalytics
@@ -300,10 +300,10 @@ namespace AlUmmahNow.CoreBridge.Studio
         public Task<IReadOnlyList<Suggestion>> SuggestAsync(string text, string? channelId, CancellationToken cancellationToken = default) =>
             _transport.SuggestAsync(text, channelId, 8, cancellationToken);
 
-        internal static StudioVideo ReadVideo(JsonElement v)
+        private static Dictionary<string, string> ReadLocalized(JsonElement v, string name)
         {
             var localized = new Dictionary<string, string>();
-            if (v.TryGetProperty("titleLocalized", out var tl) && tl.ValueKind == JsonValueKind.Object)
+            if (v.TryGetProperty(name, out var tl) && tl.ValueKind == JsonValueKind.Object)
             {
                 foreach (var p in tl.EnumerateObject())
                 {
@@ -311,6 +311,12 @@ namespace AlUmmahNow.CoreBridge.Studio
                 }
             }
 
+            return localized;
+        }
+
+        internal static StudioVideo ReadVideo(JsonElement v)
+        {
+            var localized = ReadLocalized(v, "titleLocalized");
             return new StudioVideo
             {
                 Id = Str(v, "id") ?? "",

@@ -261,9 +261,9 @@ public sealed class VideosPage
             row.SetMarginTop(6);
             row.SetMarginBottom(6);
             // The checkbox's label is the title, so Orca reads "<title>, check box".
-            var check = Gtk.CheckButton.NewWithLabel(v.Title);
+            var check = Gtk.CheckButton.NewWithLabel(v.TitleFor(_l.Language));
             check.SetActive(_vm.IsSelected(v.Id));
-            Ui.Named(check, _l.Format("studio.videos.select", v.Title));
+            Ui.Named(check, _l.Format("studio.videos.select", v.TitleFor(_l.Language)));
             check.OnToggled += (_, _) => _vm.SetSelected(v.Id, check.GetActive());
             var text = Gtk.Box.New(Gtk.Orientation.Vertical, 2);
             text.SetHexpand(true);
@@ -271,10 +271,10 @@ public sealed class VideosPage
             text.Append(Ui.Label(Meta(v), dim: true));
             row.Append(text);
             var edit = Ui.Button(_l["studio.videos.edit"], () => _ = EditAsync(v), "flat");
-            Ui.Named(edit, _l.Format("studio.videos.editOne", v.Title));
+            Ui.Named(edit, _l.Format("studio.videos.editOne", v.TitleFor(_l.Language)));
             row.Append(edit);
             var delete = Ui.Button(_l["studio.videos.delete"], () => _ = DeleteAsync(new[] { v.Id }), "flat");
-            Ui.Named(delete, _l.Format("studio.videos.deleteOne", v.Title));
+            Ui.Named(delete, _l.Format("studio.videos.deleteOne", v.TitleFor(_l.Language)));
             row.Append(delete);
             _list.Append(row);
         }
@@ -293,7 +293,7 @@ public sealed class VideosPage
         parts.Add(_l.Format("studio.videos.views", _l.Number(v.Views)));
         if (v.CreatedAt is { } at) parts.Add(_l.Date(at));
         if (v.Category is { } c) parts.Add(_l["studio.category." + c]);
-        return string.Join(" · ", parts);
+        return _l.Join(parts);
     }
 
     private void RenderDeleted()

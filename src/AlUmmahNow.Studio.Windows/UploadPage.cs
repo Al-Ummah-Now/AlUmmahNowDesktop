@@ -128,6 +128,9 @@ internal sealed class UploadPage
 
     private UploadDefaults D => _vm.Defaults;
 
+    /// <summary>The title-pattern hint; its {n} examples use the UI digits (the token itself writes 0–9).</summary>
+    private static string TitlePatternHint(Localizer l) => l.Format("studio.upload.titlePatternHint", 1, 2, 3);
+
     private static Button Button(string text, Func<Task> click, bool accent = false, string? id = null)
     {
         var b = new Button { Content = text };
@@ -141,7 +144,7 @@ internal sealed class UploadPage
     {
         var panel = new StackPanel { Spacing = 10, MaxWidth = 760, HorizontalAlignment = HorizontalAlignment.Left };
 
-        var title = new TextBox { Header = _l["studio.upload.titlePattern"], Text = D.TitlePattern, Description = _l["studio.upload.titlePatternHint"] };
+        var title = new TextBox { Header = _l["studio.upload.titlePattern"], Text = D.TitlePattern, Description = TitlePatternHint(_l) };
         title.TextChanged += (_, _) =>
         {
             D.TitlePattern = title.Text;
@@ -294,7 +297,7 @@ internal sealed class UploadPage
             title.TextChanged += (_, _) => _vm.RenameStaged(plan.FilePath, title.Text);
             var meta = new TextBlock
             {
-                Text = Localizer.Isolate(file) + " · " + _l.Bytes(plan.Size) + (plan.PublishAt is { } at ? " · " + _l.Format("studio.upload.publishesAt", _l.DateTime(at)) : ""),
+                Text = _l.Join(Localizer.Isolate(file), _l.Bytes(plan.Size), plan.PublishAt is { } at ? _l.Format("studio.upload.publishesAt", _l.DateTime(at)) : null),
                 Opacity = 0.8,
                 VerticalAlignment = VerticalAlignment.Center,
                 TextTrimming = TextTrimming.CharacterEllipsis,
@@ -374,8 +377,8 @@ internal sealed class UploadPage
             _bar.Value = item.Fraction;
             var phase = l["studio.phase." + item.Phase.ToString().ToLowerInvariant()];
             var amount = l.Format("studio.upload.progress", l.Bytes(item.SentBytes), l.Bytes(item.TotalBytes));
-            _status.Text = item.Phase == UploadPhase.Uploading ? phase + " · " + amount : phase;
-            AutomationProperties.SetName(_bar, item.Title + " · " + phase);
+            _status.Text = item.Phase == UploadPhase.Uploading ? l.Join(phase, amount) : phase;
+            AutomationProperties.SetName(_bar, l.Join(Localizer.Isolate(item.Title), phase));
             if (_phase == item.Phase) return;
             _phase = item.Phase;
             _buttons.Children.Clear();
