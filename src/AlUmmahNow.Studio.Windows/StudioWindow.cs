@@ -181,11 +181,11 @@ internal sealed class StudioWindow
         if (outcome.MessageKey is not { } key || Window.Content?.XamlRoot is not { } root) return;
         if (!outcome.OfferOtherWay)
         {
-            await Confirm.TellAsync(root, _direction, _l["passkey.error.title"], _l[key], _l["passkey.ok"]);
+            await Confirm.TellAsync(root, _direction, _l["passkey.error.title"], _l.Format(key, PasskeyOutcome.MaxPasskeys), _l["passkey.ok"]);
             return;
         }
 
-        if (await Confirm.AskAsync(root, _direction, _l["passkey.error.title"], _l[key], _l["passkey.otherWay"], _l["passkey.ok"])) await _shell.SignInAsync(SignInMode.Default);
+        if (await Confirm.AskAsync(root, _direction, _l["passkey.error.title"], _l.Format(key, PasskeyOutcome.MaxPasskeys), _l["passkey.otherWay"], _l["passkey.ok"])) await _shell.SignInAsync(SignInMode.Default);
     }
 
     private Task<bool> OnUiAsync(Func<Task<bool>> show)

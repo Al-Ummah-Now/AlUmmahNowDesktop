@@ -173,7 +173,7 @@ namespace AlUmmahNow.App.ViewModels
             try
             {
                 var master = await _catalog.GetTextAsync(playUrl, cancellationToken);
-                foreach (var v in HlsPlaylist.ParseVariants(master, playUrl)) Qualities.Add(new QualityOption(v.Label, v.Url));
+                foreach (var v in HlsPlaylist.ParseVariants(master, playUrl)) Qualities.Add(new QualityOption(_localizer.Quality(v.Height, v.Bandwidth), v.Url));
             }
             catch (CatalogException)
             {

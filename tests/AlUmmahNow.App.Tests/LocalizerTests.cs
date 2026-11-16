@@ -42,9 +42,9 @@ public class LocalizerTests
         Assert.Equal("⁨" + expected + "⁩", new Localizer("en").Duration(seconds));
 
     [Fact]
-    public void Eastern_numerals_only_apply_in_arabic()
+    public void Arabic_always_uses_eastern_arabic_numerals()
     {
-        var l = new Localizer("ar") { EasternNumerals = true };
+        var l = new Localizer("ar");
         Assert.Equal("١٢٣", l.Number(123));
         l.Language = "en";
         Assert.Equal("123", l.Number(123));
@@ -61,7 +61,7 @@ public class LocalizerTests
         Assert.Equal("1.2K", en.Compact(1200));
         Assert.Equal("2M", en.Compact(2_000_000));
         Assert.Equal("0.1", en.Decimal(0.05));
-        var ar = new Localizer("ar") { EasternNumerals = true };
+        var ar = new Localizer("ar");
         Assert.Equal("١٫٢ ألف", ar.Compact(1200));
     }
 
@@ -69,6 +69,6 @@ public class LocalizerTests
     public void Chart_dates_use_gregorian_month_names()
     {
         Assert.Equal("11 Nov", new Localizer("en").ShortDate(new DateTime(2026, 11, 11)));
-        Assert.Equal("١١ نوفمبر", new Localizer("ar") { EasternNumerals = true }.ShortDate(new DateTime(2026, 11, 11)));
+        Assert.Equal("١١ نوفمبر", new Localizer("ar").ShortDate(new DateTime(2026, 11, 11)));
     }
 }

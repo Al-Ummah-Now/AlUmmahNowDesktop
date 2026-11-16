@@ -364,7 +364,7 @@ public sealed class MainWindow
         controls.Append(seek);
         controls.Append(time);
 
-        controls.Append(BuildSelector("player.speed", WatchViewModel.Speeds.Select(s => s.ToString("0.##x", System.Globalization.CultureInfo.InvariantCulture)).ToArray(),
+        controls.Append(BuildSelector("player.speed", WatchViewModel.Speeds.Select(s => _localizer.Speed(s)).ToArray(),
             WatchViewModel.Speeds.ToList().IndexOf(vm.Speed), i => vm.SelectSpeed(WatchViewModel.Speeds[i])));
 
         var qualityLabels = vm.Qualities.Select((q, i) => i == 0 ? _localizer["player.quality.auto"] : q.Label).ToArray();

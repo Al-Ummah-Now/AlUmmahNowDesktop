@@ -209,7 +209,7 @@ public sealed class UploadPage
         var scheduleError = Ui.Label("");
         _scheduleStart.OnChanged += (_, _) =>
         {
-            var t = Formats.ParseLocal(_scheduleStart.GetText());
+            var t = Formats.ParseLocal(Localizer.NormalizeDigits(_scheduleStart.GetText()));
             scheduleError.SetText(t == null ? _l["studio.upload.scheduleInvalid"] : "");
             if (t == null) return;
             D.ScheduleStart = t;
@@ -301,8 +301,8 @@ public sealed class UploadPage
             title.SetHexpand(true);
             Ui.Named(title, _l.Format("studio.upload.titleFor", file));
             title.OnChanged += (_, _) => _vm.RenameStaged(plan.FilePath, title.GetText());
-            var meta = Ui.Label(Localizer.Isolate(file) + " · " + Formats.Bytes(plan.Size, CultureInfo.InvariantCulture)
-                + (plan.PublishAt is { } at ? " · " + _l.Format("studio.upload.publishesAt", Formats.ToLocalInput(at)) : ""), dim: true);
+            var meta = Ui.Label(Localizer.Isolate(file) + " · " + _l.Bytes(plan.Size)
+                + (plan.PublishAt is { } at ? " · " + _l.Format("studio.upload.publishesAt", _l.DateTime(at)) : ""), dim: true);
             meta.SetSizeRequest(320, -1);
             var remove = Gtk.Button.NewWithLabel(_l["studio.upload.remove"]);
             remove.AddCssClass("flat");
@@ -424,7 +424,7 @@ public sealed class UploadPage
             _title.SetText(item.Title);
             _bar.SetFraction(item.Fraction);
             var phase = l["studio.phase." + item.Phase.ToString().ToLowerInvariant()];
-            var amount = l.Format("studio.upload.progress", Formats.Bytes(item.SentBytes, CultureInfo.InvariantCulture), Formats.Bytes(item.TotalBytes, CultureInfo.InvariantCulture));
+            var amount = l.Format("studio.upload.progress", l.Bytes(item.SentBytes), l.Bytes(item.TotalBytes));
             _status.SetText(item.Phase == UploadPhase.Uploading ? phase + " · " + amount : phase);
             Ui.Named(_bar, item.Title + " · " + phase);
             if (_phase == item.Phase) return;

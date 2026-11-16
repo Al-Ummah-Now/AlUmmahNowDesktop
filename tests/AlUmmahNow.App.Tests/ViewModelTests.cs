@@ -129,7 +129,7 @@ public class WatchViewModelTests
         var (vm, p, s, _) = Make();
         await vm.LoadAsync("v");
         Assert.Equal(LoadState.Content, vm.State);
-        Assert.Equal(new[] { "تلقائي", "360p" }, vm.Qualities.Select(q => q.Label));
+        Assert.Equal(new[] { "تلقائي", "٣٦٠p" }, vm.Qualities.Select(q => q.Label));
         Assert.Equal((PlayUrl, 0d, true), Assert.Single(p.Opened));
         Assert.Equal("عنوان", s.Title);
     }

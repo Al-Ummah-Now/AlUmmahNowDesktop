@@ -11,7 +11,6 @@ namespace AlUmmahNow.App.Services
     {
         public string Language { get; set; } = "ar";
         public ThemePreference Theme { get; set; } = ThemePreference.Dark;
-        public bool EasternNumerals { get; set; }
         public string? WatchFolder { get; set; }
 
         /// <summary>Studio search history, newest first (local only).</summary>

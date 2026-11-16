@@ -179,8 +179,7 @@ internal sealed class StreamPlayer
         _seek.Maximum = Math.Max(1, session.NaturalDuration.TotalSeconds);
         _seek.Value = Math.Min(_seek.Maximum, session.Position.TotalSeconds);
         _seeking = false;
-        _time.Text = Clock(session.Position) + " / " + Clock(session.NaturalDuration);
+        _time.Text = _l.Duration(session.Position) + " / " + _l.Duration(session.NaturalDuration);
     }
 
-    internal static string Clock(TimeSpan t) => t.TotalHours >= 1 ? t.ToString(@"h\:mm\:ss") : t.ToString(@"m\:ss");
 }
