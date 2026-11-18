@@ -256,12 +256,9 @@ public sealed class UploadPage
 
             return GtkInputError; // The value is set above; GTK then re-shows it through OnOutput.
         };
-        // ٠–٩ are bidi-neutral: in an RTL window GTK's text resolves them RTL and scrolls them out of the narrow
-        // field, leaving it blank. A number reads the same either way, so the field's text is laid out LTR.
-        for (var child = _scheduleEvery.GetFirstChild(); child != null; child = child.GetNextSibling())
-        {
-            if (child is Gtk.Text text) text.SetDirection(Gtk.TextDirection.Ltr);
-        }
+        // NewWithRange turns on numeric mode, which drops every character but 0–9: the ٠–٩ text set by OnOutput
+        // was filtered away, leaving the field blank in Arabic. OnInput parses both kinds of digits instead.
+        _scheduleEvery.SetNumeric(false);
 
         _scheduleEvery.SetValue(D.ScheduleInterval.TotalHours);
         _scheduleEvery.OnValueChanged += (_, _) =>
