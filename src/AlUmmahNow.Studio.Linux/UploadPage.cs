@@ -133,6 +133,9 @@ public sealed class UploadPage
         if (scene == "scheduled") _visibility?.SetSelected(2);
     }
 
+    /// <summary>CI screenshots: what the hours stepper shows, so an empty field fails the log, not just the eye.</summary>
+    public string ScheduleEveryText => _scheduleEvery.GetText();
+
     private UploadDefaults D => _vm.Defaults;
 
     private Gtk.Widget BuildDefaults()
@@ -253,6 +256,13 @@ public sealed class UploadPage
 
             return GtkInputError; // The value is set above; GTK then re-shows it through OnOutput.
         };
+        // ٠–٩ are bidi-neutral: in an RTL window GTK's text resolves them RTL and scrolls them out of the narrow
+        // field, leaving it blank. A number reads the same either way, so the field's text is laid out LTR.
+        for (var child = _scheduleEvery.GetFirstChild(); child != null; child = child.GetNextSibling())
+        {
+            if (child is Gtk.Text text) text.SetDirection(Gtk.TextDirection.Ltr);
+        }
+
         _scheduleEvery.SetValue(D.ScheduleInterval.TotalHours);
         _scheduleEvery.OnValueChanged += (_, _) =>
         {
