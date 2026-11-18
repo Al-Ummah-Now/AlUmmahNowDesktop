@@ -231,10 +231,13 @@ public sealed class UploadPage
         // Prefilled in the UI's digits (٠–٩ in Arabic); typed digits of either kind read back.
         _scheduleStart.SetText(_l.InputDigits(Formats.ToLocalInput(D.ScheduleStart.Value)));
         var scheduleError = Ui.Label("");
+        scheduleError.AddCssClass("error");
+        scheduleError.SetVisible(false); // A blank label still takes the row spacing.
         _scheduleStart.OnChanged += (_, _) =>
         {
             var t = Formats.ParseLocal(Localizer.NormalizeDigits(_scheduleStart.GetText()));
             scheduleError.SetText(t == null ? _l["studio.upload.scheduleInvalid"] : "");
+            scheduleError.SetVisible(t == null);
             if (t == null) return;
             D.ScheduleStart = t;
             _vm.ApplyDefaults();
