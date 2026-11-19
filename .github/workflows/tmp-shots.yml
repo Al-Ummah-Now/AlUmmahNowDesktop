@@ -1,0 +1,39 @@
+name: TEMP review shots (throwaway branch, not for merge)
+on:
+  push:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Fetch AlUmmahNow.Core
+        shell: bash
+        run: ./scripts/fetch-core.sh
+      - name: Build Studio
+        run: dotnet build src/AlUmmahNow.Studio.Windows -c Release -p:Platform=x64
+      - name: Viewport frames, pointer parked off the window
+        shell: pwsh
+        run: |
+          ./scripts/set-resolution.ps1 1920 1080
+          Add-Type -AssemblyName System.Drawing, System.Windows.Forms
+          $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $out = (New-Item -ItemType Directory -Force shots).FullName
+          $exe = (Resolve-Path "src/AlUmmahNow.Studio.Windows/bin/x64/Release/net9.0-windows10.0.22621.0/win-x64/AlUmmahNowStudio.exe").Path
+          $env:AUN_DEMO = "1"; $env:AUN_AUTOMATION = "shell"; $env:AUN_SIMULATE_UPLOADS = "1"; $env:AUN_STAGE_DIR = ""; $env:AUN_WATCH_DIR = ""
+          foreach ($lang in "en","ar") { foreach ($theme in "light","dark") { foreach ($tab in "analytics","uploads") {
+            [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(($b.Right - 1), ($b.Bottom - 1))
+            $env:AUN_LANG = $lang; $env:AUN_THEME = $theme; $env:AUN_TAB = $tab
+            ./scripts/store-shot.ps1 $exe "studio-$tab-$lang-$theme" $out
+          } } }
+          exit 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shots-windows
+          path: shots
