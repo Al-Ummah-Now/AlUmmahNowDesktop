@@ -94,7 +94,8 @@ public sealed class DemoTransport : IApiTransport
             ["uploadStatus"] = i == 1 ? "processing" : "ready",
             ["category"] = i % 2 == 0 ? "quran_tafsir" : "islamic_history",
             ["language"] = i % 2 == 0 ? "ar" : "en",
-            ["tags"] = new[] { "demo" },
+            // Real-looking tags (never "demo": the frames show them in the edit dialog).
+            ["tags"] = i % 2 == 0 ? new[] { "تفسير", "القرآن" } : new[] { "history", "seerah" },
             ["views"] = 1200 - (i * 130),
             ["likesCount"] = 40 - (i * 4),
             ["commentsCount"] = 8 - i,
@@ -116,12 +117,22 @@ public sealed class DemoTransport : IApiTransport
         lock (_gate)
         {
             IReadOnlyList<Suggestion> found = _videos
-                .Where(v => ((string)v["title"]!).IndexOf(text.Trim(), StringComparison.OrdinalIgnoreCase) >= 0)
+                .Where(v => Matches(v, text.Trim()))
                 .Take(limit)
                 .Select(v => new Suggestion((string)v["title"]!, SuggestionKind.Video, (string)v["id"]!, null))
                 .ToList();
             return Task.FromResult(found);
         }
+    }
+
+    /// <summary>As the API's search: the title, the per-language titles and the tags.</summary>
+    private static bool Matches(Dictionary<string, object?> video, string text)
+    {
+        if (text.Length == 0) return true;
+        var fields = new List<string> { (string)video["title"]! };
+        if (video["titleLocalized"] is Dictionary<string, string> localized) fields.AddRange(localized.Values);
+        if (video["tags"] is IEnumerable<string> tags) fields.AddRange(tags);
+        return fields.Any(f => f.IndexOf(text, StringComparison.OrdinalIgnoreCase) >= 0);
     }
 
     /// <summary>Parses <c>AUN_DEMO_FEATURES_OFF</c> ("upload,analytics").</summary>
@@ -159,7 +170,7 @@ public sealed class DemoTransport : IApiTransport
                 var filter = r.Query.TryGetValue("filter", out var f) ? f : "all";
                 var channel = r.Query.TryGetValue("channelId", out var c) ? c : "";
                 var rows = _videos.Where(v => (string)v["channelId"]! == channel)
-                    .Where(v => q == null || ((string)v["title"]!).IndexOf(q, StringComparison.OrdinalIgnoreCase) >= 0)
+                    .Where(v => string.IsNullOrWhiteSpace(q) || Matches(v, q.Trim()))
                     .Where(v => filter == "all" || (filter == "public") == (bool)v["isPublic"]!)
                     .ToList();
                 return Json(new { data = rows });

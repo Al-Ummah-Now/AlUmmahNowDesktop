@@ -256,9 +256,13 @@ public sealed class VideosPage
         switch (scene)
         {
             case "search":
-                _search.SetText("تفسير");
-                _ = _vm.Search.TypedAsync("تفسير");
+            {
+                // A query that visibly narrows the list (the Seerah video only), in the page's language.
+                var q = _l.Language == "ar" ? "السيرة" : "Seerah";
+                _search.SetText(q);
+                _vm.Search.Submit(q);
                 break;
+            }
             case "edit" when _vm.Items.Count > 0:
                 _ = EditAsync(_vm.Items[0]);
                 break;
@@ -471,32 +475,31 @@ public sealed class VideosPage
     private async Task EditAsync(StudioVideo v)
     {
         var edit = new VideoEdit(v);
-        var form = Gtk.Box.New(Gtk.Orientation.Vertical, 8);
+        var form = Ui.Form();
         var title = Gtk.Entry.New();
         title.SetText(edit.Title);
-        form.Append(Ui.Labelled(_l["studio.upload.titlePattern"], title));
+        Ui.FormRow(form, _l["studio.upload.titlePattern"], title);
         var description = Gtk.TextView.New();
         description.SetWrapMode(Gtk.WrapMode.WordChar);
-        description.SetSizeRequest(420, 90);
+        description.SetSizeRequest(-1, 90);
         description.GetBuffer().SetText(edit.Description, -1);
-        form.Append(Ui.Label(_l["studio.upload.description"]));
         var frame = Gtk.Frame.New(null);
         frame.SetChild(description);
-        form.Append(frame);
+        Ui.FormRow(form, _l["studio.upload.description"], frame, top: true);
         var categories = new[] { (string?)null }.Concat(StudioCatalog.Categories).ToList();
         var category = Gtk.DropDown.NewFromStrings(categories.Select(c => c == null ? _l["studio.upload.none"] : _l["studio.category." + c]).ToArray());
         category.SetSelected((uint)Math.Max(0, categories.IndexOf(edit.Category)));
-        form.Append(Ui.Labelled(_l["studio.upload.category"], category));
+        Ui.FormRow(form, _l["studio.upload.category"], category);
         var languages = new[] { (string?)null }.Concat(StudioCatalog.Languages).ToList();
         var language = Gtk.DropDown.NewFromStrings(languages.Select(c => c == null ? _l["studio.upload.none"] : _l["studio.language." + c]).ToArray());
         language.SetSelected((uint)Math.Max(0, languages.IndexOf(edit.Language)));
-        form.Append(Ui.Labelled(_l["studio.upload.language"], language));
+        Ui.FormRow(form, _l["studio.upload.language"], language);
         var visibility = Gtk.DropDown.NewFromStrings(new[] { _l["studio.upload.visibility.private"], _l["studio.upload.visibility.public"] });
         visibility.SetSelected(edit.IsPublic ? 1u : 0u);
-        form.Append(Ui.Labelled(_l["studio.upload.visibility"], visibility));
+        Ui.FormRow(form, _l["studio.upload.visibility"], visibility);
         var tags = Gtk.Entry.New();
         tags.SetText(edit.Tags);
-        form.Append(Ui.Labelled(_l["studio.upload.tags"], tags));
+        Ui.FormRow(form, _l["studio.upload.tags"], tags);
 
         if (!await Ask(_l["studio.videos.editTitle"], form, _l["studio.videos.save"])) return;
         edit.Title = title.GetText();
@@ -519,19 +522,19 @@ public sealed class VideosPage
     private async Task BulkEditAsync()
     {
         var n = _vm.Selected.Count;
-        var form = Gtk.Box.New(Gtk.Orientation.Vertical, 8);
+        var form = Ui.Form();
         var visibility = Gtk.DropDown.NewFromStrings(new[] { _l["studio.videos.noChange"], _l["studio.upload.visibility.public"], _l["studio.upload.visibility.private"] });
-        form.Append(Ui.Labelled(_l["studio.upload.visibility"], visibility));
+        Ui.FormRow(form, _l["studio.upload.visibility"], visibility);
         var categories = new[] { (string?)null, "" }.Concat(StudioCatalog.Categories).ToList();
         var category = Gtk.DropDown.NewFromStrings(categories.Select(c => c == null ? _l["studio.videos.noChange"] : c.Length == 0 ? _l["studio.upload.none"] : _l["studio.category." + c]).ToArray());
-        form.Append(Ui.Labelled(_l["studio.upload.category"], category));
+        Ui.FormRow(form, _l["studio.upload.category"], category);
         var languages = new[] { (string?)null }.Concat(StudioCatalog.Languages).ToList();
         var language = Gtk.DropDown.NewFromStrings(languages.Select(c => c == null ? _l["studio.videos.noChange"] : _l["studio.language." + c]).ToArray());
-        form.Append(Ui.Labelled(_l["studio.upload.language"], language));
+        Ui.FormRow(form, _l["studio.upload.language"], language);
         var add = Gtk.Entry.New();
-        form.Append(Ui.Labelled(_l["studio.videos.addTags"], add));
+        Ui.FormRow(form, _l["studio.videos.addTags"], add);
         var remove = Gtk.Entry.New();
-        form.Append(Ui.Labelled(_l["studio.videos.removeTags"], remove));
+        Ui.FormRow(form, _l["studio.videos.removeTags"], remove);
         if (!await Ask(_l.Format("studio.videos.bulkEditTitle", n), form, _l["studio.videos.apply"])) return;
         await _vm.BulkEditAsync(new BulkVideoChanges
         {
