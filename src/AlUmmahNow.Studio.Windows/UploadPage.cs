@@ -404,7 +404,7 @@ internal sealed class UploadPage
             title.TextChanged += (_, _) => _vm.RenameStaged(plan.FilePath, title.Text);
             var meta = new TextBlock
             {
-                Text = _l.Join(Localizer.Isolate(file), _l.Bytes(plan.Size), plan.PublishAt is { } at ? _l.Format("studio.upload.publishesAt", _l.DateTime(at)) : null),
+                Text = _l.Join(Localizer.Isolate(file), _l.Bytes(plan.Size, 2), plan.PublishAt is { } at ? _l.Format("studio.upload.publishesAt", _l.DateTime(at)) : null),
                 Opacity = 0.8,
                 VerticalAlignment = VerticalAlignment.Center,
                 TextTrimming = TextTrimming.CharacterEllipsis,
@@ -512,7 +512,7 @@ internal sealed class UploadPage
             _title.Text = item.Title;
             _bar.Value = item.Fraction;
             var phase = l["studio.phase." + item.Phase.ToString().ToLowerInvariant()];
-            var amount = l.Format("studio.upload.progress", l.Bytes(item.SentBytes), l.Bytes(item.TotalBytes));
+            var amount = l.Format("studio.upload.progress", l.Bytes(item.SentBytes, 2), l.Bytes(item.TotalBytes, 2));
             _status.Text = item.Phase == UploadPhase.Uploading ? l.Join(phase, amount) : phase;
             AutomationProperties.SetName(_bar, l.Join(Localizer.Isolate(item.Title), phase));
             if (_phase == item.Phase) return;

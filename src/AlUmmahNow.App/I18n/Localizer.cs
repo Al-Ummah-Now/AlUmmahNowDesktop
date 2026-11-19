@@ -154,8 +154,13 @@ namespace AlUmmahNow.App.I18n
             ? Digits(height.ToString(CultureInfo.InvariantCulture)) + "p"
             : Format("unit.kbps", bandwidth / 1000);
 
-        /// <summary>A file size: "12.3 MB" / "١٢٫٣ م.ب".</summary>
-        public string Bytes(long bytes)
+        /// <summary>
+        /// A file size, as the website's <c>formatBytes</c> (shared-types locale-format): 1024 steps, the
+        /// Intl short unit ("1.5 MB" / «١٫٥ م.ب»), at most one decimal and none on whole bytes. With
+        /// <paramref name="decimals"/>, exactly that many on every unit, as the web upload page's file rows
+        /// ("1.43 MB" / «١٫٤٣ م.ب»). The same text on every platform, never the OS's own size format.
+        /// </summary>
+        public string Bytes(long bytes, int? decimals = null)
         {
             string[] units = { "unit.b", "unit.kb", "unit.mb", "unit.gb", "unit.tb" };
             double v = Math.Max(0, bytes);
@@ -166,7 +171,8 @@ namespace AlUmmahNow.App.I18n
                 u++;
             }
 
-            return Format(units[u], Digits(v.ToString(u == 0 ? "0" : "0.0", CultureInfo.InvariantCulture)));
+            var format = decimals is { } d && d > 0 ? "#,0." + new string('0', d) : decimals != null || u == 0 ? "#,0" : "#,0.#";
+            return Format(units[u], Digits(v.ToString(format, CultureInfo.InvariantCulture)));
         }
 
         /// <summary>

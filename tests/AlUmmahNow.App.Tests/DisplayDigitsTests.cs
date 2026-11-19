@@ -73,7 +73,7 @@ public class DisplayDigitsTests
         Assert.Equal("$12.69", en.Money(12.69m, "USD"));
         Assert.Equal("EUR 1,500.00", en.Money(1500m, "EUR"));
         Assert.Equal("12.3 MB", en.Bytes(12_900_000));
-        Assert.Equal("512 B", en.Bytes(512));
+        Assert.Equal("512 byte", en.Bytes(512));
         Assert.Equal("⁨1:02:05⁩", en.Duration(3725));
         Assert.Equal("1.5x", en.Speed(1.5));
         Assert.Equal("1080p", en.Quality(1080, 0));
