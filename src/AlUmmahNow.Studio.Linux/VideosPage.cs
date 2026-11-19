@@ -99,6 +99,8 @@ public sealed class VideosPage
         // Selection actions: a gold bar while videos are selected.
         _selectionBar.AddCssClass("selection-bar");
         _selectionLabel.AddCssClass("heading");
+        // One line ("8 selected" / «٨ محدد»): a wrapping label broke the count onto its own line.
+        _selectionLabel.SetWrap(false);
         _selectionBar.Append(_selectionLabel);
         _selectionBar.Append(Ui.Button(l["studio.videos.bulkEdit"], () => _ = BulkEditAsync()));
         var playlistButton = Gtk.MenuButton.New();
