@@ -362,6 +362,9 @@ public sealed class MainWindow
         // seek bar run left to right in every language. Only the row around them follows the page.
         var transport = Gtk.Box.New(Gtk.Orientation.Horizontal, 8);
         foreach (var w in new Gtk.Widget[] { transport, back10, play, forward10, seek }) w.SetDirection(Gtk.TextDirection.Ltr);
+        // The icon inside each button has its own direction (the app default, RTL in Arabic), which picks the
+        // mirrored -rtl icons: set it too.
+        foreach (var b in new[] { back10, play, forward10 }) b.GetChild()?.SetDirection(Gtk.TextDirection.Ltr);
         transport.Append(back10);
         transport.Append(play);
         transport.Append(forward10);
@@ -388,6 +391,7 @@ public sealed class MainWindow
             chapter.SetText(vm.CurrentChapter?.Title.For(_localizer.Language) ?? "");
             time.SetText(_localizer.Duration(vm.Position) + " / " + _localizer.Duration(vm.Duration));
             play.SetIconName(vm.IsPlaying ? "media-playback-pause-symbolic" : "media-playback-start-symbolic");
+            play.GetChild()?.SetDirection(Gtk.TextDirection.Ltr);
             syncing = true;
             if (vm.Duration > 0) seek.SetRange(0, vm.Duration);
             seek.SetValue(vm.Position);
