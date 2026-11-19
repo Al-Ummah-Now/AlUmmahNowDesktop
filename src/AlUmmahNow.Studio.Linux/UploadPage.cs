@@ -58,12 +58,14 @@ public sealed class UploadPage
         page.Append(left);
 
         // Add: the lantern, where the files go, and the ways to add them.
+        // Two rows, so the actions fit the card down to the 1024 window.
         var add = Gtk.Box.New(Gtk.Orientation.Horizontal, 8);
+        var addMore = Gtk.Box.New(Gtk.Orientation.Horizontal, 8);
         add.Append(Ui.Button(l["studio.upload.addFiles"], () => _ = PickFilesAsync(), "suggested-action"));
         add.Append(Ui.Button(l["studio.upload.addFolder"], () => _ = PickFolderAsync()));
         _recursive = Gtk.CheckButton.NewWithLabel(l["studio.upload.includeSubfolders"]);
-        add.Append(_recursive);
-        add.Append(Ui.Button(l["studio.upload.watch"], () => _ = PickWatchFolderAsync(rememberWatchFolder)));
+        addMore.Append(_recursive);
+        addMore.Append(Ui.Button(l["studio.upload.watch"], () => _ = PickWatchFolderAsync(rememberWatchFolder)));
         var drop = Gtk.Box.New(Gtk.Orientation.Horizontal, 20);
         drop.AddCssClass("drop-zone");
         var lantern = Gtk.Image.NewFromIconName("go-up-symbolic");
@@ -77,10 +79,13 @@ public sealed class UploadPage
         _dropText.AddCssClass("heading");
         dropText.Append(_dropText);
         dropText.Append(add);
+        dropText.Append(addMore);
         drop.Append(dropText);
         var addBody = Gtk.Box.New(Gtk.Orientation.Vertical, 12);
         addBody.Append(drop);
         var watchRow = _watchRow;
+        _watching.SetHexpand(true);
+        _watching.SetWrapMode(Pango.WrapMode.WordChar);
         watchRow.Append(_watching);
         _stopWatching = Ui.Button(l["studio.upload.stopWatching"], () =>
         {
@@ -122,7 +127,8 @@ public sealed class UploadPage
         forAll.Append(BuildDefaults());
         var right = Ui.Card(forAll);
         right.SetValign(Gtk.Align.Start);
-        right.SetSizeRequest(400, -1);
+        // 360: the page fits the 1024 minimum window (with the rail) without growing the window.
+        right.SetSizeRequest(360, -1);
         page.Append(right);
 
         _vm.PropertyChanged += (_, e) =>
@@ -296,10 +302,11 @@ public sealed class UploadPage
             D.ScheduleInterval = TimeSpan.FromHours(_scheduleEvery.GetValue());
             _vm.ApplyDefaults();
         };
-        _scheduleRow.Append(Ui.Labelled(_l["studio.upload.scheduleStart"], _scheduleStart));
+        // Labels above the fields, as the rest of the form: the card keeps its width.
+        _scheduleRow.Append(Ui.LabelledAbove(_l["studio.upload.scheduleStart"], _scheduleStart));
         _scheduleRow.Append(scheduleError);
         // "Every … hours" across a batch is bulk scheduling: hidden when bulkSchedule is off.
-        var every = Ui.Labelled(_l["studio.upload.scheduleEvery"], _scheduleEvery);
+        var every = Ui.LabelledAbove(_l["studio.upload.scheduleEvery"], _scheduleEvery);
         every.SetVisible(_vm.BulkScheduleOn);
         _vm.PropertyChanged += (_, e) =>
         {

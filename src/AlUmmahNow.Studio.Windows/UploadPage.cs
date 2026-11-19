@@ -31,7 +31,8 @@ internal sealed class UploadPage
     private readonly FrameworkElement _stagedCard;
     private readonly StackPanel _queue = new() { Spacing = 8 };
     // Rows with nothing to show collapse: an empty row or blank text still takes the page spacing.
-    private readonly StackPanel _watchRow = new() { Orientation = Orientation.Horizontal, Spacing = 8 };
+    // The watched folder (wraps: a long path never pushes the card wider) and Stop watching.
+    private readonly Grid _watchRow = new() { ColumnSpacing = 8 };
     private readonly StackPanel _stagedActions = new() { Orientation = Orientation.Horizontal, Spacing = 8 };
     private readonly TextBlock _queueEmpty;
     private readonly InfoBar _error = new() { Severity = InfoBarSeverity.Error, IsClosable = true };
@@ -60,15 +61,18 @@ internal sealed class UploadPage
         Root.Children.Add(left);
 
         // Add: the lantern, where the files go, and the ways to add them.
+        // Two rows, so the actions fit the card down to the 1024 window: Add videos and Add a folder, then
+        // Include subfolders and Watch folder.
         var add = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        var addMore = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         add.Children.Add(Button(l["studio.upload.addFiles"], async () => _vm.AddFiles(await pickFiles()), accent: true, id: "AddFiles", glyph: "\uE710"));
         add.Children.Add(Button(l["studio.upload.addFolder"], async () =>
         {
             if (await pickFolder() is { } f) _vm.AddFolder(f, _recursive!.IsChecked == true);
         }, id: "AddFolder", glyph: "\uE8B7"));
         _recursive = new CheckBox { Content = l["studio.upload.includeSubfolders"], Margin = new Thickness(4, 0, 0, 0) };
-        add.Children.Add(_recursive);
-        add.Children.Add(Button(l["studio.upload.watch"], async () =>
+        addMore.Children.Add(_recursive);
+        addMore.Children.Add(Button(l["studio.upload.watch"], async () =>
         {
             if (await pickFolder() is not { } f) return;
             _vm.Watch(f);
@@ -83,13 +87,15 @@ internal sealed class UploadPage
         _dropText.FontSize = 15.5;
         _dropText.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
         dropText.Children.Add(_dropText);
-        var addScroll = new ScrollViewer { Content = add, HorizontalScrollMode = ScrollMode.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled };
-        dropText.Children.Add(addScroll);
+        dropText.Children.Add(add);
+        dropText.Children.Add(addMore);
         Grid.SetColumn(dropText, 1);
         drop.Children.Add(dropText);
         var addBody = new StackPanel { Spacing = 12 };
         addBody.Children.Add(drop);
         var watchRow = _watchRow;
+        watchRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        watchRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         watchRow.Children.Add(_watching);
         _stopWatching = Button(l["studio.upload.stopWatching"], () =>
         {
@@ -97,6 +103,8 @@ internal sealed class UploadPage
             rememberWatchFolder(null);
             return Task.CompletedTask;
         });
+        Grid.SetColumn(_stopWatching, 1);
+        _stopWatching.VerticalAlignment = VerticalAlignment.Center;
         watchRow.Children.Add(_stopWatching);
         addBody.Children.Add(watchRow);
         addBody.Children.Add(_error);
