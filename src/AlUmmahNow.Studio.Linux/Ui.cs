@@ -146,7 +146,7 @@ public static class Ui
         var grid = Gtk.Grid.New();
         grid.SetColumnSpacing(12);
         grid.SetRowSpacing(8);
-        grid.SetSizeRequest(400, -1);
+        grid.SetSizeRequest(460, -1);
         return grid;
     }
 
@@ -159,6 +159,10 @@ public static class Ui
         var label = Gtk.Label.NewWithMnemonic(text);
         label.SetMnemonicWidget(control);
         label.SetHalign(Gtk.Align.Start);
+        label.SetXalign(0);
+        // A long label ("Tags (comma-separated)") wraps rather than widening the label column.
+        label.SetWrap(true);
+        label.SetMaxWidthChars(16);
         label.SetValign(top ? Gtk.Align.Start : Gtk.Align.Center);
         if (top) label.SetMarginTop(6);
         control.SetHexpand(true);

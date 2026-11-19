@@ -95,7 +95,7 @@ public sealed class DemoTransport : IApiTransport
             ["category"] = i % 2 == 0 ? "quran_tafsir" : "islamic_history",
             ["language"] = i % 2 == 0 ? "ar" : "en",
             // Real-looking tags (never "demo": the frames show them in the edit dialog).
-            ["tags"] = i % 2 == 0 ? new[] { "تفسير", "القرآن" } : new[] { "history", "seerah" },
+            ["tags"] = i % 2 == 0 ? new[] { "تفسير", "القرآن" } : new[] { "history" },
             ["views"] = 1200 - (i * 130),
             ["likesCount"] = 40 - (i * 4),
             ["commentsCount"] = 8 - i,
