@@ -62,6 +62,7 @@
   "studio.timeline.clips": "Clips",
   "studio.timeline.span": "{0} – {1}",
   "studio.encode.empty": "Nothing encoding.",
+  "studio.encode.remaining": "About {0} left",
   "auth.signIn": "Sign in",
   "auth.signOut": "Sign out",
   "auth.signingIn": "Continue in your browser…",

@@ -35,6 +35,15 @@ public sealed class EncodeJob
     public double Progress { get; internal set; }
     public EncoderChoice? UsedEncoder { get; internal set; }
     public string? Error { get; internal set; }
+
+    /// <summary>When the job started running.</summary>
+    public DateTimeOffset? StartedAt { get; internal set; }
+
+    /// <summary>
+    /// Time left while running, from the pace so far (elapsed × (1 − progress) / progress). Null before
+    /// there is enough progress to tell, and once the job ends.
+    /// </summary>
+    public TimeSpan? Remaining { get; internal set; }
 }
 
 /// <summary>Runs jobs one at a time. A failing hardware encoder falls back to the next choice.</summary>
@@ -47,7 +56,16 @@ public sealed class EncodeQueue
     private bool _pumping;
     private bool _paused;
 
-    public EncodeQueue(IEncodeBackend backend) => _backend = backend;
+    private readonly Func<DateTimeOffset> _now;
+
+    public EncodeQueue(IEncodeBackend backend, Func<DateTimeOffset>? now = null)
+    {
+        _backend = backend;
+        _now = now ?? (() => DateTimeOffset.UtcNow);
+    }
+
+    /// <summary>The estimate needs this much progress first (the first moments say little about the pace).</summary>
+    public const double EstimateFrom = 0.02;
 
     public event EventHandler? Changed;
 
@@ -125,10 +143,15 @@ public sealed class EncodeQueue
         using var cts = new CancellationTokenSource();
         _current = cts;
         job.Status = EncodeStatus.Running;
+        job.StartedAt = _now();
+        job.Remaining = null;
         Changed?.Invoke(this, EventArgs.Empty);
         var progress = new Progress(p =>
         {
             job.Progress = p;
+            job.Remaining = p >= EstimateFrom && p < 1 && job.StartedAt is { } started
+                ? TimeSpan.FromTicks((long)((_now() - started).Ticks * (1 - p) / p))
+                : null;
             Changed?.Invoke(this, EventArgs.Empty);
         });
 
@@ -163,6 +186,7 @@ public sealed class EncodeQueue
             job.Error = "No encoder available";
         }
 
+        job.Remaining = null;
         _current = null;
         Changed?.Invoke(this, EventArgs.Empty);
     }

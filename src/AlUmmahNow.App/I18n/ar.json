@@ -62,6 +62,7 @@
   "studio.timeline.clips": "المقاطع",
   "studio.timeline.span": "{0} – {1}",
   "studio.encode.empty": "لا يوجد ترميز حاليًا.",
+  "studio.encode.remaining": "يتبقى نحو {0}",
   "auth.signIn": "تسجيل الدخول",
   "auth.signOut": "تسجيل الخروج",
   "auth.signingIn": "تابع في المتصفح…",

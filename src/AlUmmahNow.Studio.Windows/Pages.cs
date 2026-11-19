@@ -82,7 +82,9 @@ internal sealed class EncodePage
             var bar = new ProgressBar { Minimum = 0, Maximum = 1, Value = job.Progress };
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(bar, name);
             text.Children.Add(bar);
-            text.Children.Add(new TextBlock { Text = _l.Join(status, encoder), FontSize = 12, Foreground = LanternGlass.Res("StudioMutedBrush") });
+            var pace = job.Status != EncodeStatus.Running ? null
+                : _l.Join(_l.Percent(job.Progress), job.Remaining is { } left ? _l.Format("studio.encode.remaining", _l.Duration(Math.Ceiling(left.TotalSeconds))) : null);
+            text.Children.Add(new TextBlock { Text = _l.Join(status, pace, encoder), FontSize = 12, Foreground = LanternGlass.Res("StudioMutedBrush") });
             Grid.SetColumn(text, 1);
             row.Children.Add(text);
             _rows.Children.Add(row);
