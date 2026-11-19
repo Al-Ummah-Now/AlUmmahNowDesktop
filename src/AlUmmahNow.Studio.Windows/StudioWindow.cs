@@ -522,6 +522,12 @@ internal sealed class StudioWindow
                 },
             },
         };
+        // The owner's lantern string hangs over the sign-in stage (the header itself has no art, as on the web).
+        var art = new Image { Stretch = Stretch.UniformToFill, VerticalAlignment = VerticalAlignment.Top, Height = 150, Opacity = 0.9, IsHitTestVisible = false };
+        var bitmap = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage();
+        _ = bitmap.SetSourceAsync(StudioTheme.LanternString().AsRandomAccessStream());
+        art.Source = bitmap;
+        stage.Children.Add(art);
         stage.Children.Add(card);
         return stage;
     }
