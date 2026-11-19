@@ -73,7 +73,7 @@ public sealed class TimelineProject
         JsonSerializer.Deserialize<TimelineProject>(json) ?? throw new JsonException("Empty project");
 }
 
-/// <summary>Maps timeline seconds to pixels, mirrored in RTL. Pure, shared by each platform's timeline.</summary>
+/// <summary>Maps timeline seconds to pixels (mirrored when IsRtl). Pure, shared by each platform's timeline; the Studio passes IsRtl false: time runs left to right in every language, as media players do.</summary>
 public sealed record TimelineViewport(double PixelsPerSecond, double ScrollSeconds, double Width, bool IsRtl)
 {
     public double ToX(double time)

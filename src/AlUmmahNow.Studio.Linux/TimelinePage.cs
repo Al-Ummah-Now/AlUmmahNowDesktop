@@ -18,13 +18,11 @@ public sealed class TimelinePage
     private readonly Gtk.DrawingArea _area = Gtk.DrawingArea.New();
     private readonly Gtk.Label _time = Ui.Label("");
     private readonly Gtk.Box _clips = Gtk.Box.New(Gtk.Orientation.Vertical, 4);
-    private readonly bool _rtl;
     private double _playhead = 20;
 
     public TimelinePage(Localizer l)
     {
         _l = l;
-        _rtl = l.IsRtl;
         var video = new Track { Kind = TrackKind.Video };
         video.Clips.Add(new Clip { Source = "intro.mp4", Start = 0, Duration = 12 });
         video.Clips.Add(new Clip { Source = "main.mp4", Start = 12, Duration = 40 });
@@ -125,7 +123,9 @@ public sealed class TimelinePage
         return s;
     }
 
-    private TimelineViewport Viewport(int width) => new(Math.Max(1, width / Math.Max(1, _project.Duration)), 0, width, _rtl);
+    // Time runs left to right in every language, as media players do (Apple HIG, Material; our web and
+    // mobile players): only the chrome around the lanes follows the page direction.
+    private TimelineViewport Viewport(int width) => new(Math.Max(1, width / Math.Max(1, _project.Duration)), 0, width, false);
 
     private void Move(double x)
     {
@@ -235,8 +235,7 @@ public sealed class TimelinePage
                     cr.Rectangle(x + 4, top, Math.Max(0, width - 8), TrackHeight);
                     // Clip first: Clip() clears the path and its current point, so the text position comes after.
                     cr.Clip();
-                    name.GetPixelSize(out var textWidth, out _);
-                    cr.MoveTo(_rtl ? x + width - 8 - Math.Min(width - 16, textWidth) : x + 8, top + 6);
+                    cr.MoveTo(x + 8, top + 6);
                     PangoCairo.Functions.ShowLayout(cr, name);
                     cr.Restore();
                 }

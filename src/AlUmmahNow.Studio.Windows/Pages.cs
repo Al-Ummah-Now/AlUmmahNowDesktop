@@ -127,7 +127,6 @@ internal sealed class TimelinePage
     private const double Gap = 10;
     private readonly Localizer _l;
     private readonly TimelineProject _project = new();
-    private readonly bool _rtl;
     private readonly Canvas _canvas;
     private readonly TextBlock _time = new() { FontWeight = Microsoft.UI.Text.FontWeights.Bold, VerticalAlignment = VerticalAlignment.Center };
     private readonly StackPanel _clips = new() { Spacing = 6 };
@@ -136,7 +135,6 @@ internal sealed class TimelinePage
     public TimelinePage(Localizer l)
     {
         _l = l;
-        _rtl = l.IsRtl;
         var video = new Track { Kind = TrackKind.Video };
         video.Clips.Add(new Clip { Source = "intro.mp4", Start = 0, Duration = 12 });
         video.Clips.Add(new Clip { Source = "main.mp4", Start = 12, Duration = 40 });
@@ -245,7 +243,9 @@ internal sealed class TimelinePage
     {
         _canvas.Children.Clear();
         var width = _canvas.ActualWidth > 0 ? _canvas.ActualWidth : 1000;
-        var viewport = new TimelineViewport(width / Math.Max(1, _project.Duration), 0, width, _rtl);
+        // Time runs left to right in every language, as media players do (Apple HIG, Material; our web and
+        // mobile players): only the chrome around the lanes follows the page direction.
+        var viewport = new TimelineViewport(width / Math.Max(1, _project.Duration), 0, width, false);
         var muted = LanternGlass.Res("StudioMutedBrush");
         var edge = global::Windows.UI.Color.FromArgb(0x73, 0xFF, 0xD9, 0x8A);
 
@@ -289,7 +289,7 @@ internal sealed class TimelinePage
                         },
                     },
                     Child = video
-                        ? new TextBlock { Text = clip.Source, Margin = new Thickness(8, 6, 8, 0), FontSize = 12, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = new SolidColorBrush(LanternGlass.OnNight), TextTrimming = TextTrimming.CharacterEllipsis, FlowDirection = _rtl ? FlowDirection.RightToLeft : FlowDirection.LeftToRight }
+                        ? new TextBlock { Text = clip.Source, Margin = new Thickness(8, 6, 8, 0), FontSize = 12, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = new SolidColorBrush(LanternGlass.OnNight), TextTrimming = TextTrimming.CharacterEllipsis, FlowDirection = FlowDirection.LeftToRight }
                         : Waveform(Math.Max(2, Math.Abs(b - a) - 2)),
                 };
                 Canvas.SetLeft(rect, Math.Min(a, b) + 1);
@@ -329,7 +329,7 @@ internal sealed class TimelinePage
 
     private void Scrub(Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
     {
-        var viewport = new TimelineViewport(_canvas.ActualWidth / Math.Max(1, _project.Duration), 0, _canvas.ActualWidth, _rtl);
+        var viewport = new TimelineViewport(_canvas.ActualWidth / Math.Max(1, _project.Duration), 0, _canvas.ActualWidth, false);
         _playhead = Math.Clamp(viewport.ToTime(e.GetCurrentPoint(_canvas).Position.X), 0, _project.Duration);
         Changed();
     }
