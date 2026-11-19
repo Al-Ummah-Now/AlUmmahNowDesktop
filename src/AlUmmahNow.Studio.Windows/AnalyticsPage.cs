@@ -14,8 +14,8 @@ internal sealed class AnalyticsPage
 {
     private readonly Localizer _l;
     private readonly AnalyticsViewModel _vm;
-    private readonly StackPanel _totals = new() { Orientation = Orientation.Horizontal, Spacing = 12 };
-    private readonly Canvas _chart = new() { Height = 222, FlowDirection = FlowDirection.LeftToRight };
+    private readonly Grid _totals = new() { ColumnSpacing = 14 };
+    private readonly Canvas _chart = new() { Height = 300, FlowDirection = FlowDirection.LeftToRight };
     private readonly TextBlock _summary = new() { Opacity = 0.8, TextWrapping = TextWrapping.Wrap };
     private readonly StackPanel _table = new();
     private readonly StackPanel _top = new() { Spacing = 4 };
@@ -25,26 +25,36 @@ internal sealed class AnalyticsPage
     {
         _l = l;
         _vm = vm;
-        Root = new StackPanel { Spacing = 14, Padding = new Thickness(20) };
-        var controls = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
-        var range = new ComboBox { Header = l["studio.analytics.range"], ItemsSource = AnalyticsViewModel.Ranges.Select(d => l.Format("studio.analytics.days", d)).ToList(), SelectedIndex = 1 };
+        // Lantern Glass: metric tiles (Views and Watch time pick the chart), the chart card beside Top videos.
+        Root = new StackPanel { Spacing = 18, Padding = new Thickness(16, 4, 16, 8) };
+        var range = new ComboBox { Header = l["studio.analytics.range"], ItemsSource = AnalyticsViewModel.Ranges.Select(d => l.Format("studio.analytics.days", d)).ToList(), SelectedIndex = 1, MinWidth = 180 };
         range.SelectionChanged += (_, _) => _vm.Days = AnalyticsViewModel.Ranges[Math.Max(0, range.SelectedIndex)];
-        var metrics = new[] { "views", "watch" };
-        var metric = new ComboBox { Header = l["studio.analytics.metric"], ItemsSource = new[] { l["studio.analytics.views"], l["studio.analytics.watchHours"] }, SelectedIndex = 0 };
-        metric.SelectionChanged += (_, _) => _vm.Metric = metrics[Math.Max(0, metric.SelectedIndex)];
-        controls.Children.Add(range);
-        controls.Children.Add(metric);
-        Root.Children.Add(controls);
+        Root.Children.Add(range);
         Root.Children.Add(_status);
         Root.Children.Add(_totals);
-        Root.Children.Add(Heading(l["studio.analytics.daily"]));
+
+        var columns = new Grid { ColumnSpacing = 20 };
+        columns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        columns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(380) });
+        columns.SizeChanged += (_, e) => columns.ColumnDefinitions[1].Width = new GridLength(e.NewSize.Width >= 1500 ? 440 : e.NewSize.Width < 900 ? 300 : 380);
+        var chartBody = new StackPanel { Spacing = 10 };
+        chartBody.Children.Add(Heading(l["studio.analytics.daily"]));
         AutomationProperties.SetAccessibilityView(_chart, AccessibilityView.Raw);
         _chart.SizeChanged += (_, _) => DrawChart();
-        Root.Children.Add(_chart);
-        Root.Children.Add(_summary);
-        Root.Children.Add(new Expander { Header = l["studio.analytics.table"], Content = _table, HorizontalAlignment = HorizontalAlignment.Stretch });
-        Root.Children.Add(Heading(l["studio.analytics.top"]));
-        Root.Children.Add(_top);
+        chartBody.Children.Add(_chart);
+        chartBody.Children.Add(_summary);
+        chartBody.Children.Add(new Expander { Header = l["studio.analytics.table"], Content = _table, HorizontalAlignment = HorizontalAlignment.Stretch, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) });
+        var chartCard = LanternGlass.Card(chartBody);
+        chartCard.VerticalAlignment = VerticalAlignment.Top;
+        columns.Children.Add(chartCard);
+        var topBody = new StackPanel { Spacing = 8 };
+        topBody.Children.Add(Heading(l["studio.analytics.top"]));
+        topBody.Children.Add(_top);
+        var topCard = LanternGlass.Card(topBody);
+        topCard.VerticalAlignment = VerticalAlignment.Top;
+        Grid.SetColumn(topCard, 1);
+        columns.Children.Add(topCard);
+        Root.Children.Add(columns);
         _vm.PropertyChanged += (_, _) => Render();
         Render();
     }
@@ -62,10 +72,11 @@ internal sealed class AnalyticsPage
     {
         _status.Text = _vm.IsLoading ? _l["studio.shell.loading"] : _vm.ErrorKey is { } k ? _l[k] : _vm.Data is { Daily.Count: 0 } ? _l["studio.analytics.empty"] : "";
         _totals.Children.Clear();
+        _totals.ColumnDefinitions.Clear();
         if (_vm.Data is { } d)
         {
-            Card(_l["studio.analytics.views"], _l.Stat(d.Totals.Views));
-            Card(_l["studio.analytics.watchHours"], _l.Stat(d.Totals.WatchTimeMinutes / 60, decimals: true));
+            Card(_l["studio.analytics.views"], _l.Stat(d.Totals.Views), "views");
+            Card(_l["studio.analytics.watchHours"], _l.Stat(d.Totals.WatchTimeMinutes / 60, decimals: true), "watch");
             Card(_l["studio.analytics.likes"], _l.Stat(d.Totals.Likes));
             Card(_l["studio.analytics.comments"], _l.Stat(d.Totals.Comments));
             Card(_l["studio.analytics.subscribers"], _l.Stat(d.Totals.Subscribers));
@@ -88,26 +99,59 @@ internal sealed class AnalyticsPage
 
         DrawChart();
         _top.Children.Clear();
+        var rank = 0;
         foreach (var v in _vm.Data?.TopVideos ?? Array.Empty<CoreBridge.Studio.TopVideo>())
         {
-            // The page's direction orders the line, never the title's script: an Arabic title on the English page
-            // must not turn the row right-to-left ("views 1,200").
-            _top.Children.Add(new TextBlock
+            var row = new Grid { ColumnSpacing = 12, Padding = new Thickness(0, 4, 0, 4) };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(20) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.Children.Add(new TextBlock { Text = _l.Number(++rank), FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = LanternGlass.Res("StudioMutedBrush"), VerticalAlignment = VerticalAlignment.Center });
+            var tile = new Border
             {
-                Text = _l.Join(Localizer.Isolate(_l.Format("studio.videos.views", _l.Number(v.Views))), Localizer.Isolate(v.TitleFor(_l.Language))),
-                TextTrimming = TextTrimming.CharacterEllipsis,
-                TextReadingOrder = TextReadingOrder.UseFlowDirection,
-            });
+                Width = 72,
+                Height = 40,
+                CornerRadius = new CornerRadius(6),
+                Background = new SolidColorBrush(global::Windows.UI.Color.FromArgb(0xFF, 0x18, 0x44, 0x56)),
+                Child = new FontIcon { Glyph = "\uE8B2", FontSize = 16, Foreground = new SolidColorBrush(LanternGlass.Gold) },
+            };
+            Grid.SetColumn(tile, 1);
+            row.Children.Add(tile);
+            var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+            // The page's direction orders and aligns each line, never the title's script: an Arabic title on the
+            // English page stays at the start, and the views line never turns around.
+            text.Children.Add(new TextBlock { Text = Localizer.Isolate(v.TitleFor(_l.Language)), FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis, TextReadingOrder = TextReadingOrder.UseFlowDirection });
+            text.Children.Add(new TextBlock { Text = _l.Format("studio.videos.views", _l.Number(v.Views)), FontSize = 12, Foreground = LanternGlass.Res("StudioMutedBrush"), TextReadingOrder = TextReadingOrder.UseFlowDirection });
+            Grid.SetColumn(text, 2);
+            row.Children.Add(text);
+            _top.Children.Add(row);
         }
     }
 
-    private void Card(string label, string value)
+    /// <summary>A metric tile; Views and Watch time are buttons that pick the chart's metric (the picked one glows gold).</summary>
+    private void Card(string label, string value, string? metric = null)
     {
-        var card = new StackPanel { Padding = new Thickness(14, 10, 14, 10), MinWidth = 140, Background = (Brush)Application.Current.Resources["CardBackgroundFillColorDefaultBrush"], CornerRadius = new CornerRadius(6) };
-        // Title size: the headline totals read first.
-        card.Children.Add(new TextBlock { Text = value, Style = (Style)Application.Current.Resources["TitleTextBlockStyle"] });
-        card.Children.Add(new TextBlock { Text = label, Opacity = 0.8 });
-        AutomationProperties.SetName(card, label + ": " + value);
+        var content = new StackPanel { Spacing = 2 };
+        content.Children.Add(new TextBlock { Text = label, FontSize = 12.5, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = LanternGlass.Res("StudioMutedBrush") });
+        content.Children.Add(new TextBlock { Text = value, FontSize = 28, FontWeight = Microsoft.UI.Text.FontWeights.Bold });
+        var on = metric != null && _vm.Metric == metric;
+        FrameworkElement inner;
+        if (metric != null)
+        {
+            var b = new Button { Content = content, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Left, Padding = new Thickness(16, 12, 16, 12), CornerRadius = new CornerRadius(14), Background = on ? LanternGlass.Res("StudioSelectedBrush") : LanternGlass.Res("StudioCardBrush"), BorderBrush = on ? new SolidColorBrush(LanternGlass.Gold) : LanternGlass.Res("StudioEdgeBrush"), BorderThickness = new Thickness(on ? 2 : 1) };
+            b.Click += (_, _) => _vm.Metric = metric;
+            AutomationProperties.SetName(b, _l.Format("studio.analytics.readout", _l["studio.analytics.metric"], label) + ", " + value);
+            inner = b;
+        }
+        else
+        {
+            inner = new Border { Child = content, Padding = new Thickness(16, 12, 16, 12), CornerRadius = new CornerRadius(14), Background = LanternGlass.Res("StudioCardBrush"), BorderBrush = LanternGlass.Res("StudioEdgeBrush"), BorderThickness = new Thickness(1) };
+            AutomationProperties.SetName(inner, label + ": " + value);
+        }
+
+        var card = LanternGlass.WithGlow(inner, 14, on ? 0.5f : 0.2f, on ? 30f : 20f);
+        _totals.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        Grid.SetColumn(card, _totals.Children.Count);
         _totals.Children.Add(card);
     }
 

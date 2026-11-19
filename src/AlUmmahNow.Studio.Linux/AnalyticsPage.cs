@@ -19,8 +19,12 @@ public sealed class AnalyticsPage
     {
         _l = l;
         _vm = vm;
+        // Lantern Glass: metric tiles (Views and Watch time pick the chart), the chart card beside Top videos.
         Root = Gtk.ScrolledWindow.New();
-        var page = Ui.Page(14);
+        Root.SetPolicy(Gtk.PolicyType.Never, Gtk.PolicyType.Automatic);
+        var page = Ui.Page(18);
+        page.SetMarginStart(24);
+        page.SetMarginEnd(24);
         Root.SetChild(page);
 
         var controls = Gtk.Box.New(Gtk.Orientation.Horizontal, 12);
@@ -31,39 +35,41 @@ public sealed class AnalyticsPage
             if (e.Pspec.GetName() == "selected") _vm.Days = AnalyticsViewModel.Ranges[(int)range.GetSelected()];
         };
         controls.Append(Ui.Labelled(l["studio.analytics.range"], range));
-        var metrics = new[] { "views", "watch" };
-        var metric = Gtk.DropDown.NewFromStrings(new[] { l["studio.analytics.views"], l["studio.analytics.watchHours"] });
-        metric.OnNotify += (_, e) =>
-        {
-            if (e.Pspec.GetName() == "selected") _vm.Metric = metrics[(int)metric.GetSelected()];
-        };
-        controls.Append(Ui.Labelled(l["studio.analytics.metric"], metric));
         page.Append(controls);
         page.Append(_status);
+        _totals.SetHomogeneous(true);
         page.Append(_totals);
 
-        var heading = Ui.Label(l["studio.analytics.daily"]);
-        heading.AddCssClass("heading");
-        page.Append(heading);
+        var columns = Gtk.Box.New(Gtk.Orientation.Horizontal, 20);
+        var chartBody = Gtk.Box.New(Gtk.Orientation.Vertical, 10);
+        chartBody.Append(Ui.CardTitle(l["studio.analytics.daily"]));
         _chart.SetHexpand(true);
-        _chart.SetContentHeight(222);
+        _chart.SetContentHeight(300);
         _chart.SetDrawFunc((_, cr, w, h) => DrawChart(cr, w, h));
         var motion = Gtk.EventControllerMotion.New();
         motion.OnMotion += (_, e) => OnHover(e.X);
         _chart.AddController(motion);
         _chart.SetHasTooltip(true);
-        page.Append(_chart);
-        page.Append(_summary);
+        chartBody.Append(_chart);
+        chartBody.Append(_summary);
         var tableExpander = Gtk.Expander.New(l["studio.analytics.table"]);
         _table.SetColumnSpacing(24);
         _table.SetRowSpacing(2);
         tableExpander.SetChild(_table);
-        page.Append(tableExpander);
+        chartBody.Append(tableExpander);
+        var chartCard = Ui.Card(chartBody);
+        chartCard.SetHexpand(true);
+        chartCard.SetValign(Gtk.Align.Start);
+        columns.Append(chartCard);
 
-        var topHeading = Ui.Label(l["studio.analytics.top"]);
-        topHeading.AddCssClass("heading");
-        page.Append(topHeading);
-        page.Append(_top);
+        var topBody = Gtk.Box.New(Gtk.Orientation.Vertical, 8);
+        topBody.Append(Ui.CardTitle(l["studio.analytics.top"]));
+        topBody.Append(_top);
+        var topCard = Ui.Card(topBody);
+        topCard.SetSizeRequest(380, -1);
+        topCard.SetValign(Gtk.Align.Start);
+        columns.Append(topCard);
+        page.Append(columns);
 
         _vm.PropertyChanged += (_, _) => Render();
         Render();
@@ -77,8 +83,8 @@ public sealed class AnalyticsPage
         Ui.Clear(_totals);
         if (_vm.Data is { } d)
         {
-            Card(_l["studio.analytics.views"], _l.Stat(d.Totals.Views));
-            Card(_l["studio.analytics.watchHours"], _l.Stat(d.Totals.WatchTimeMinutes / 60, decimals: true));
+            Card(_l["studio.analytics.views"], _l.Stat(d.Totals.Views), "views");
+            Card(_l["studio.analytics.watchHours"], _l.Stat(d.Totals.WatchTimeMinutes / 60, decimals: true), "watch");
             Card(_l["studio.analytics.likes"], _l.Stat(d.Totals.Likes));
             Card(_l["studio.analytics.comments"], _l.Stat(d.Totals.Comments));
             Card(_l["studio.analytics.subscribers"], _l.Stat(d.Totals.Subscribers));
@@ -95,14 +101,30 @@ public sealed class AnalyticsPage
         _summary.SetText(Summary(series));
         _chart.QueueDraw();
         Ui.Clear(_top);
+        var rank = 0;
         foreach (var v in _vm.Data?.TopVideos ?? Array.Empty<CoreBridge.Studio.TopVideo>())
         {
-            var row = Gtk.Box.New(Gtk.Orientation.Horizontal, 8);
-            var views = Ui.Label(_l.Format("studio.videos.views", _l.Number(v.Views)), dim: true);
-            row.Append(views);
+            var row = Gtk.Box.New(Gtk.Orientation.Horizontal, 12);
+            row.SetMarginTop(4);
+            row.SetMarginBottom(4);
+            var n = Ui.Label(_l.Number(++rank), dim: true);
+            n.AddCssClass("heading");
+            n.SetSizeRequest(18, -1);
+            n.SetValign(Gtk.Align.Center);
+            row.Append(n);
+            row.Append(Ui.FileTile(72, 40));
+            var text = Gtk.Box.New(Gtk.Orientation.Vertical, 2);
+            text.SetHexpand(true);
+            text.SetValign(Gtk.Align.Center);
             var t = Ui.Label(Localizer.Isolate(v.TitleFor(_l.Language)));
-            t.SetHexpand(true);
-            row.Append(t);
+            t.SetWrap(false);
+            t.SetEllipsize(Pango.EllipsizeMode.End);
+            t.AddCssClass("heading");
+            text.Append(t);
+            var views = Ui.Label(_l.Format("studio.videos.views", _l.Number(v.Views)), dim: true);
+            views.AddCssClass("caption");
+            text.Append(views);
+            row.Append(text);
             _top.Append(row);
         }
     }
@@ -119,21 +141,40 @@ public sealed class AnalyticsPage
             _l.ShortDate(max.Date));
     }
 
-    private void Card(string label, string value)
+    /// <summary>A metric tile; Views and Watch time are buttons that pick the chart's metric (the picked one glows).</summary>
+    private void Card(string label, string value, string? metric = null)
     {
-        var card = Gtk.Box.New(Gtk.Orientation.Vertical, 2);
-        card.AddCssClass("card");
-        card.SetSizeRequest(150, -1);
-        var v = Ui.Label(value);
-        v.AddCssClass("title-2");
-        v.SetMarginStart(12);
-        v.SetMarginTop(8);
+        var box = Gtk.Box.New(Gtk.Orientation.Vertical, 2);
         var name = Ui.Label(label, dim: true);
-        name.SetMarginStart(12);
-        name.SetMarginBottom(8);
-        card.Append(v);
-        card.Append(name);
-        _totals.Append(card);
+        name.AddCssClass("caption-heading");
+        var v = Ui.Label(value);
+        v.AddCssClass("title-1");
+        box.Append(name);
+        box.Append(v);
+        Gtk.Widget tile;
+        if (metric != null)
+        {
+            var button = Gtk.ToggleButton.New();
+            button.SetChild(box);
+            button.SetActive(_vm.Metric == metric);
+            button.OnToggled += (_, _) =>
+            {
+                if (button.GetActive() && _vm.Metric != metric) _vm.Metric = metric;
+                else if (!button.GetActive() && _vm.Metric == metric) button.SetActive(true);
+            };
+            Ui.Named(button, _l.Format("studio.analytics.readout", _l["studio.analytics.metric"], label));
+            tile = button;
+        }
+        else
+        {
+            tile = box;
+        }
+
+        tile.AddCssClass("card");
+        tile.AddCssClass("kpi");
+        box.SetMarginStart(4);
+        box.SetMarginEnd(4);
+        _totals.Append(tile);
     }
 
     private ChartLayout? _layout;
@@ -170,9 +211,19 @@ public sealed class AnalyticsPage
         }
 
         cr.SetDash(System.Array.Empty<double>(), 0);
-        cr.SetSourceRgb(1, 0.627, 0.216);
-        foreach (var bar in layout.Bars.Where(b => b.Height > 0)) cr.Rectangle(bar.X, bar.Y, bar.Width, bar.Height);
-        cr.Fill();
+        // Lantern gold bars: a soft glow behind, then a gold gradient (glow #fbc661 to pressed #e0962a).
+        foreach (var bar in layout.Bars.Where(b => b.Height > 0))
+        {
+            cr.SetSourceRgba(0.957, 0.682, 0.227, 0.22);
+            cr.Rectangle(bar.X - 2, bar.Y - 2, bar.Width + 4, bar.Height + 2);
+            cr.Fill();
+            using var gold = new Cairo.LinearGradient(0, bar.Y, 0, bar.Y + bar.Height);
+            gold.AddColorStopRgb(0, 0.984, 0.776, 0.380);
+            gold.AddColorStopRgb(1, 0.878, 0.588, 0.165);
+            cr.SetSource(gold);
+            cr.Rectangle(bar.X, bar.Y, bar.Width, bar.Height);
+            cr.Fill();
+        }
 
         foreach (var (index, x) in layout.Dates)
         {
