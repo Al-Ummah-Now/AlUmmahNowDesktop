@@ -253,7 +253,17 @@ internal static class LanternGlass
     /// <summary>Puts a gold glow behind <paramref name="element"/>.</summary>
     public static FrameworkElement WithGlow(FrameworkElement element, double radius = 14, float opacity = 0.32f, float blur = 26f)
     {
-        var host = new Grid();
+        // The host takes the element's place (alignment, margin), so the glow sits exactly behind it
+        // (a centred element in a stretched host left the glow at the host's top-left corner).
+        var host = new Grid
+        {
+            HorizontalAlignment = element.HorizontalAlignment,
+            VerticalAlignment = element.VerticalAlignment,
+            Margin = element.Margin,
+        };
+        element.HorizontalAlignment = HorizontalAlignment.Stretch;
+        element.VerticalAlignment = VerticalAlignment.Stretch;
+        element.Margin = new Thickness(0);
         var shadowHost = new Canvas { IsHitTestVisible = false };
         host.Children.Add(shadowHost);
         host.Children.Add(element);
