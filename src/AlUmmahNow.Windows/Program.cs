@@ -62,6 +62,8 @@ public sealed partial class App : Application
         ICatalogClient catalog = Environment.GetEnvironmentVariable("AUN_DEMO") == "1"
             ? new DemoCatalogClient(Environment.GetEnvironmentVariable("AUN_DEMO_THUMBS"))
             : new HttpCatalogClient(http, environment.VideosApi);
+        // CI's watch scenario plays a local fixture (AUN_FIXTURE_MEDIA), never a remote stream.
+        if (Environment.GetEnvironmentVariable("AUN_FIXTURE_MEDIA") is { Length: > 0 } fixtureMedia) catalog = new FixtureMediaCatalog(catalog, fixtureMedia);
         var localizer = new Localizer(settings.Language);
         var navigator = new Navigator();
         var secureStore = new DpapiSecureStore(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AlUmmahNow", "secure"));

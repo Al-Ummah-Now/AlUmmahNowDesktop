@@ -35,7 +35,9 @@ var exitAfter = int.TryParse(Environment.GetEnvironmentVariable("AUN_EXIT_AFTER"
 
 var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
 http.DefaultRequestHeaders.UserAgent.ParseAdd("AlUmmahNowLinux/0.1");
-var catalog = new HttpCatalogClient(http, environment.VideosApi);
+AlUmmahNow.CoreBridge.ICatalogClient catalog = new HttpCatalogClient(http, environment.VideosApi);
+// CI's watch scenario plays a local fixture (AUN_FIXTURE_MEDIA), never a remote stream.
+if (Environment.GetEnvironmentVariable("AUN_FIXTURE_MEDIA") is { Length: > 0 } fixtureMedia) catalog = new AlUmmahNow.App.Demo.FixtureMediaCatalog(catalog, fixtureMedia);
 var localizer = new Localizer(settings.Language);
 var navigator = new Navigator();
 var authSession = new PkceAuthSession(http, environment.AuthIssuer, environment.ViewerClientId, new LibSecretStore("alummahnow"), new ShellBrowserLauncher(), localizer["auth.browser.done"]);

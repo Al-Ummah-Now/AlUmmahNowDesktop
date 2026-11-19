@@ -30,9 +30,11 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force artifacts/windows | Out-Null
           $exe = Resolve-Path "src/AlUmmahNow.Windows/bin/x64/Release/net9.0-windows10.0.22621.0/win-x64/AlUmmahNow.exe"
-          # QA's test library is purged regularly: pick a current video instead of pinning one.
-          $video, $captions = (python scripts/pick-qa-video.py).Split(" ")
-          $env:AUN_EXPECT_CAPTION = $captions
+          # The watch scenarios play a committed fixture (video + captions), never a remote stream: opening
+          # QA's HLS stream failed now and then on the runner and turned the gate red without a bug.
+          $env:AUN_FIXTURE_MEDIA = (Resolve-Path tests/fixtures/watch).Path
+          $video = "fixture"
+          $env:AUN_EXPECT_CAPTION = "1"
           $out = (Resolve-Path artifacts/windows).Path
           ./scripts/windows-scenario.ps1 $exe ar dark home home-ar-dark $out
           ./scripts/windows-scenario.ps1 $exe en light home home-en-light $out
