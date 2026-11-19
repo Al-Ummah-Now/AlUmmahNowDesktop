@@ -223,9 +223,13 @@ internal sealed class VideosPage
         switch (scene)
         {
             case "search":
-                _search.Text = "تفسير";
-                _ = _vm.Search.TypedAsync("تفسير");
+            {
+                // A query that visibly narrows the list (the Seerah video only), in the page's language.
+                var q = _l.Language == "ar" ? "السيرة" : "Seerah";
+                _search.Text = q;
+                _vm.Search.Submit(q);
                 break;
+            }
             case "edit" when _vm.Items.Count > 0:
                 _ = EditAsync(_vm.Items[0]);
                 break;
@@ -311,6 +315,9 @@ internal sealed class VideosPage
             Text = _l.Join(_l.Format("studio.videos.views", _l.Number(v.Views)), v.CreatedAt is { } at ? _l.Date(at) : null, v.Category is { } c ? _l["studio.category." + c] : null),
             Foreground = LanternGlass.Res("StudioMutedBrush"),
             FontSize = 12.5,
+            // Wraps to a second line rather than cutting the category ("Islamic hist…").
+            TextWrapping = TextWrapping.WrapWholeWords,
+            MaxLines = 2,
             TextTrimming = TextTrimming.CharacterEllipsis,
             Margin = new Thickness(28, 0, 0, 0),
         };

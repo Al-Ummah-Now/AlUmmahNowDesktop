@@ -137,6 +137,36 @@ public static class Ui
     }
 
     /// <summary>Labels a control for screen readers through a visible label (AT-SPI labelled-by).</summary>
+    /// <summary>
+    /// A dialog form: one label column and one control column, so every field starts at the same
+    /// offset and fills the same width (as the Windows dialogs). Add rows with <see cref="FormRow"/>.
+    /// </summary>
+    public static Gtk.Grid Form()
+    {
+        var grid = Gtk.Grid.New();
+        grid.SetColumnSpacing(12);
+        grid.SetRowSpacing(8);
+        grid.SetSizeRequest(400, -1);
+        return grid;
+    }
+
+    /// <summary>A labelled row of a <see cref="Form"/>: the label at the start, the control filling the rest.</summary>
+    public static void FormRow(Gtk.Grid form, string text, Gtk.Widget control, bool top = false)
+    {
+        var row = 0;
+        for (var child = form.GetFirstChild(); child != null; child = child.GetNextSibling()) row++;
+        row /= 2;
+        var label = Gtk.Label.NewWithMnemonic(text);
+        label.SetMnemonicWidget(control);
+        label.SetHalign(Gtk.Align.Start);
+        label.SetValign(top ? Gtk.Align.Start : Gtk.Align.Center);
+        if (top) label.SetMarginTop(6);
+        control.SetHexpand(true);
+        control.SetHalign(Gtk.Align.Fill);
+        form.Attach(label, 0, row, 1, 1);
+        form.Attach(control, 1, row, 1, 1);
+    }
+
     public static Gtk.Box Labelled(string text, Gtk.Widget control)
     {
         var row = Gtk.Box.New(Gtk.Orientation.Horizontal, 8);
