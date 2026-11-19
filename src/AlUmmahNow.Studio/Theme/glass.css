@@ -137,3 +137,8 @@ button.kpi:checked {
   border-color: #f4ae3a;
   box-shadow: 0 0 0 1px #f4ae3a, 0 0 28px -6px alpha(#f4ae3a, 0.7);
 }
+
+/* Timeline. */
+.timecode { font-feature-settings: "tnum"; font-weight: 700; color: @fanous_link; }
+.clip-row { padding: 6px 8px; border-radius: 10px; }
+.clip-row.current { background-image: linear-gradient(to right, alpha(@fanous_primary, 0.22), alpha(@fanous_primary, 0.05)); box-shadow: inset 0 0 0 1px alpha(@fanous_primary_edge, 0.3); }
