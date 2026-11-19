@@ -337,10 +337,9 @@ public sealed class StudioWindow
     private Gtk.Widget Hero(string title, Gtk.Label body, Gtk.Widget? actions, Gtk.Widget? extra = null)
     {
         var content = Gtk.Box.New(Gtk.Orientation.Vertical, 12);
-        var icon = Gtk.Picture.NewForPaintable(Gdk.Texture.NewFromBytes(GLib.Bytes.New(ReadAll(StudioTheme.AppIcon()))));
-        icon.SetSizeRequest(112, 112);
-        icon.SetCanShrink(true);
-        icon.SetContentFit(Gtk.ContentFit.Cover);
+        // A fixed 112 px image: a Gtk.Picture grows with the card and filled the whole sign-in card.
+        var icon = Gtk.Image.NewFromPaintable(Gdk.Texture.NewFromBytes(GLib.Bytes.New(ReadAll(StudioTheme.AppIcon()))));
+        icon.SetPixelSize(112);
         icon.SetHalign(Gtk.Align.Center);
         icon.AddCssClass("hero-icon");
         icon.SetOverflow(Gtk.Overflow.Hidden);
@@ -364,7 +363,9 @@ public sealed class StudioWindow
         stage.AddCssClass("hero-stage");
         stage.SetVexpand(true);
         stage.Append(card);
+        // Centred in the stage at its own height.
         card.SetVexpand(true);
+        card.SetValign(Gtk.Align.Center);
         return stage;
     }
 
