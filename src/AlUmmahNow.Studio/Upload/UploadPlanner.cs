@@ -110,9 +110,14 @@ public static class UploadPlanner
             .ToList();
     }
 
-    /// <summary>Applies the defaults to each file in order. Scheduled times step by the interval.</summary>
-    public static IReadOnlyList<PlannedUpload> Plan(IReadOnlyList<string> files, UploadDefaults d, DateTimeOffset now)
+    /// <summary>
+    /// Applies the defaults to each file in order. Scheduled times step by the interval when
+    /// <paramref name="stepSchedule"/> (bulk scheduling, GET /api/me/features <c>bulkSchedule</c>); otherwise every
+    /// scheduled file publishes at the chosen time.
+    /// </summary>
+    public static IReadOnlyList<PlannedUpload> Plan(IReadOnlyList<string> files, UploadDefaults d, DateTimeOffset now, bool stepSchedule = true)
     {
+        var step = stepSchedule ? d.ScheduleInterval : TimeSpan.Zero;
         var plans = new List<PlannedUpload>(files.Count);
         var start = d.ScheduleStart ?? now.AddHours(1);
         if (start < now) start = now.AddMinutes(5);
@@ -140,7 +145,7 @@ public static class UploadPlanner
                 IsPublic = d.Visibility == UploadVisibility.Public,
                 Tags = d.Tags.Select(t => t.Trim()).Where(t => t.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).Take(30).ToList(),
                 PlaylistIds = d.PlaylistIds.Distinct().ToList(),
-                PublishAt = scheduled ? start + TimeSpan.FromTicks(d.ScheduleInterval.Ticks * i) : null,
+                PublishAt = scheduled ? start + TimeSpan.FromTicks(step.Ticks * i) : null,
                 TimeZone = d.TimeZone,
             });
         }

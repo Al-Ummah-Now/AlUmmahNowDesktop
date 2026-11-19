@@ -54,7 +54,7 @@ Func<string, IUploadService> uploadServiceFor;
 if (demo)
 {
     accounts = new DemoAccounts();
-    transport = new DemoTransport();
+    transport = new DemoTransport(DemoTransport.FeaturesOff(Environment.GetEnvironmentVariable("AUN_DEMO_FEATURES_OFF")));
     uploadServiceFor = account => new SimulatedUploadService(account, TimeSpan.FromMilliseconds(250));
 }
 else
@@ -74,10 +74,22 @@ var exitCode = 0;
 app.OnActivate += (_, _) =>
 {
     Gtk.Widget.SetDefaultDirection(localizer.IsRtl ? Gtk.TextDirection.Rtl : Gtk.TextDirection.Ltr);
+    // CI and screenshots: AUN_THEME=dark|light; otherwise Studio follows the desktop.
+    var theme = Environment.GetEnvironmentVariable("AUN_THEME");
+    if (theme is "dark" or "light") Adw.StyleManager.GetDefault().SetColorScheme(theme == "dark" ? Adw.ColorScheme.ForceDark : Adw.ColorScheme.ForceLight);
     // The view-model posts its updates to the GTK main loop's synchronization context.
-    var shell = new StudioShellViewModel(accounts, api);
+    var shell = new StudioShellViewModel(accounts, api, new FeaturesClient(transport),
+            profiles: new ProfileClient(transport), language: localizer.Language,
+            knownNames: settings.AccountNames, saveNames: names =>
+            {
+                settings.AccountNames = names.ToDictionary(kv => kv.Key, kv => kv.Value);
+                settingsStore.Save(settings);
+            });
     var uploadsVm = new UploadsViewModel(shell, api, uploadServiceFor, Path.Combine(stateDir, demo ? "demo" : "studio"));
     var banner = demo ? localizer["studio.shell.demo"] : environment.Name != "prod" ? localizer.Format("studio.shell.environment", environment.Name.ToUpperInvariant()) : null;
+    // Review and store screenshots (AUN_STORE_SHOT=1, as on Windows) show the demo data without the notice:
+    // real users never see it.
+    if (demo && Environment.GetEnvironmentVariable("AUN_STORE_SHOT") == "1") banner = null;
     var window = new StudioWindow(app, localizer, shell, banner);
 
     uploadsVm.Watch(Environment.GetEnvironmentVariable("AUN_WATCH_DIR") is { Length: > 0 } dir ? dir : settings.WatchFolder);
@@ -96,15 +108,22 @@ app.OnActivate += (_, _) =>
     var analyticsVm = new AnalyticsViewModel(shell, api);
     var videos = new VideosPage(localizer, videosVm, uploadsVm, window.Window);
     var analytics = new AnalyticsPage(localizer, analyticsVm);
+    // Upload (creator tier) and Analytics (feature_off) are left out of the navigation when off.
+    var pages = new StudioPages(shell, analyticsVm, tabName);
     var encodePage = new EncodePage(localizer, encode);
     var timeline = new TimelinePage(localizer);
-    window.AddPage("uploads", localizer["studio.tab.upload"], "document-send-symbolic", uploads.Root);
-    window.AddPage("videos", localizer["studio.tab.videos"], "view-list-symbolic", videos.Root);
-    window.AddPage("analytics", localizer["studio.tab.analytics"], "power-profile-performance-symbolic", analytics.Root);
-    window.AddPage("encode", localizer["studio.tab.encode"], "media-record-symbolic", encodePage.Root);
-    window.AddPage("timeline", localizer["studio.tab.timeline"], "video-x-generic-symbolic", timeline.Root);
-    window.ShowPage(tabName);
+    window.AddPage(StudioPages.Uploads, localizer["studio.tab.upload"], "document-send-symbolic", uploads.Root);
+    window.AddPage(StudioPages.Videos, localizer["studio.tab.videos"], "view-list-symbolic", videos.Root);
+    window.AddPage(StudioPages.Analytics, localizer["studio.tab.analytics"], "power-profile-performance-symbolic", analytics.Root);
+    window.AddPage(StudioPages.Encode, localizer["studio.tab.encode"], "media-record-symbolic", encodePage.Root);
+    window.AddPage(StudioPages.Timeline, localizer["studio.tab.timeline"], "video-x-generic-symbolic", timeline.Root);
+    window.UsePages(pages);
     window.Window.Present();
+    // Features are re-read when Studio comes back to the foreground (at most once a minute).
+    window.Window.OnNotify += (sender, e) =>
+    {
+        if (e.Pspec.GetName() == "is-active" && window.Window.IsActive) _ = shell.RefreshFeaturesAsync();
+    };
 
     GLib.Functions.TimeoutAdd(0, 300, () =>
     {
@@ -131,6 +150,9 @@ app.OnActivate += (_, _) =>
         {
             if (scene == "accounts") window.OpenAccountMenu();
             else if (scene == "signout") window.AskSignOut();
+            else if (scene == "scheduled") uploads.RunScene(scene);
+            // The demo's second channel has no videos: the Videos empty state.
+            else if (scene == "emptychannel") shell.SelectChannel(shell.Channels.ElementAtOrDefault(1));
             else videos.RunScene(scene);
             return false;
         });
@@ -146,7 +168,7 @@ app.OnActivate += (_, _) =>
             var pass = automation.StartsWith("encode:", StringComparison.Ordinal) ? encoded
                 : automation == "shell" ? shell.State == ShellState.Ready && shell.ActiveChannel != null
                 : uploadsDone || tabName != "uploads";
-            Log.For("automation").Info($"AUTOMATION {tabName} scene={scene} shell={shell.State} channel={shell.ActiveChannel?.Id} accounts={shell.AccountList.Count} uploads={items.Count} uploadsDone={uploadsDone} encode={automationJob?.Status} encoder={automationJob?.UsedEncoder?.Name} error={automationJob?.Error} RESULT {(pass ? "PASS" : "FAIL")}");
+            Log.For("automation").Info($"AUTOMATION {tabName} page={pages.Current} upload={pages.IsVisible(StudioPages.Uploads)} analytics={pages.IsVisible(StudioPages.Analytics)} bulkSchedule={uploadsVm.BulkScheduleOn} scene={scene} shell={shell.State} channel={shell.ActiveChannel?.Id} accounts={shell.AccountList.Count} uploads={items.Count} uploadsDone={uploadsDone} encode={automationJob?.Status} encoder={automationJob?.UsedEncoder?.Name} error={automationJob?.Error} everyText={uploads.ScheduleEveryText} RESULT {(pass ? "PASS" : "FAIL")}");
             exitCode = pass ? 0 : 3;
             app.Quit();
             return false;

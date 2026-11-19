@@ -84,9 +84,11 @@ public sealed class CoreApiTransport : IApiTransport
     {
         AunException.Unauthorized u => new AuthRequiredException(what + ": " + u.@detail),
         AunException.RateLimited r => new RateLimitedException(TimeSpan.FromMilliseconds(r.@retryAfterMs ?? 5000)),
-        AunException.Http h => new StudioApiException(what + " failed: HTTP " + h.@status + " " + h.@detail, h.@status, ex),
-        AunException.Forbidden f => new StudioApiException(what + " is not allowed: " + f.@detail, 403, ex),
-        AunException.NotFound n => new StudioApiException(what + " not found: " + n.@detail, 404, ex),
+        // 402 upgrade_required and 404 feature_off carry their code: the UI hides the entry point for them.
+        AunException.Http h => StudioApiException.FromServer(what + " failed: HTTP " + h.@status + " " + h.@detail, h.@status, h.@code ?? StudioApiException.CodeFromBody(h.@detail), inner: ex),
+        AunException.Forbidden f => StudioApiException.FromServer(what + " is not allowed: " + f.@detail, 403, StudioApiException.CodeFromBody(f.@detail), inner: ex),
+        // The core keeps a short body without a message as the detail: {"success":false,"code":"feature_off"}.
+        AunException.NotFound n => StudioApiException.FromServer(what + " not found: " + n.@detail, 404, StudioApiException.CodeFromBody(n.@detail), inner: ex),
         AunException.Conflict c => new StudioApiException(what + " conflict: " + c.@detail, 409, ex),
         AunException.InvalidInput i => new StudioApiException(what + " rejected: " + i.@detail, 400, ex),
         AunException.Network or AunException.Offline => new StudioApiException(what + ": network unavailable", null, ex),

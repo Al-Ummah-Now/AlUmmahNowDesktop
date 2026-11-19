@@ -80,6 +80,18 @@ public sealed partial class VideosViewModel : ObservableObject
 
     partial void OnVisibilityChanged(StudioVisibilityFilter value) => _ = LoadAsync();
 
+    /// <summary>
+    /// "No videos here yet" (or "no results"): the load ended with nothing and no error. Raised whenever any of
+    /// its inputs change, so the page never sits blank after a load that found no videos.
+    /// </summary>
+    public bool ShowEmpty => Items.Count == 0 && !IsLoading && ErrorKey == null && _shell.ActiveChannel != null;
+
+    partial void OnItemsChanged(IReadOnlyList<StudioVideo> value) => OnPropertyChanged(nameof(ShowEmpty));
+
+    partial void OnIsLoadingChanged(bool value) => OnPropertyChanged(nameof(ShowEmpty));
+
+    partial void OnErrorKeyChanged(string? value) => OnPropertyChanged(nameof(ShowEmpty));
+
     public async Task LoadAsync()
     {
         var gen = Interlocked.Increment(ref _generation);
@@ -239,7 +251,13 @@ public sealed partial class VideosViewModel : ObservableObject
 
     private async Task FetchAsync(int gen, string? cursor)
     {
-        if (_shell.ActiveChannel is not { } channel) return;
+        if (_shell.ActiveChannel is not { } channel)
+        {
+            // No channel (signed out, switching): an older load must not leave the spinner on.
+            if (gen == _generation) IsLoading = false;
+            return;
+        }
+
         IsLoading = true;
         ErrorKey = null;
         try
@@ -281,12 +299,21 @@ public sealed partial class VideosViewModel : ObservableObject
             case AuthRequiredException:
                 _shell.ReportAuthRequired();
                 return true;
+            case StudioApiException { HidesFeature: true } off:
+                // 404 feature_off / 402: the feature isn't this person's. No text; the features re-read hides its entry point.
+                Logger.Info(key + ": feature off: " + off.Message);
+                ErrorKey = null;
+                _ = _shell.RefreshFeaturesAsync(force: true);
+                return true;
             case StudioApiException api:
                 Logger.Warn(key, api);
                 ErrorKey = api.Status == 403 ? "studio.videos.notAllowed" : api.Status == null ? "studio.error.offline" : key;
                 return true;
             case RateLimitedException:
                 ErrorKey = "studio.error.server";
+                return true;
+            case OperationCanceledException:
+                // Nothing to report; the caller's finally block stops the spinner.
                 return true;
             default:
                 return false;

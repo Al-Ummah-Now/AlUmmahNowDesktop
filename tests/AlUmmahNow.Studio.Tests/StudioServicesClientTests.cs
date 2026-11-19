@@ -270,4 +270,15 @@ public sealed class StudioServicesClientTests : IDisposable
         Assert.True(ex.IsNetwork);
         Assert.True(ex.IsTransient);
     }
+
+    [Fact]
+    public async Task FeatureOffBodyIsReadFromCode()
+    {
+        // Gated routes answer { success: false, code: "feature_off" } (owner rule 2026-11-16): hide, no text.
+        _server.On("GET /v1/api/videos/v1/captions/jobs", 404, """{"success":false,"code":"feature_off"}""");
+        var ex = await Assert.ThrowsAsync<StudioApiException>(() => _api.JobsAsync("v1", "c1"));
+        Assert.Equal("feature_off", ex.Code);
+        Assert.True(ex.IsFeatureOff);
+        Assert.True(ex.HidesFeature);
+    }
 }
