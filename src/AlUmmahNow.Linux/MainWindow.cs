@@ -352,15 +352,20 @@ public sealed class MainWindow
         var play = Gtk.Button.NewFromIconName(vm.IsPlaying ? "media-playback-pause-symbolic" : "media-playback-start-symbolic");
         play.SetTooltipText(_localizer[vm.IsPlaying ? "player.pause" : "player.play"]);
         play.OnClicked += (_, _) => vm.TogglePlay();
-        var back10 = Gtk.Button.NewFromIconName(_localizer.IsRtl ? "media-seek-forward-symbolic" : "media-seek-backward-symbolic");
+        var back10 = Gtk.Button.NewFromIconName("media-seek-backward-symbolic");
         back10.SetTooltipText(_localizer["player.seekBack"]);
         back10.OnClicked += (_, _) => vm.SkipBack();
-        var forward10 = Gtk.Button.NewFromIconName(_localizer.IsRtl ? "media-seek-backward-symbolic" : "media-seek-forward-symbolic");
+        var forward10 = Gtk.Button.NewFromIconName("media-seek-forward-symbolic");
         forward10.SetTooltipText(_localizer["player.seekForward"]);
         forward10.OnClicked += (_, _) => vm.SkipForward();
-        controls.Append(back10);
-        controls.Append(play);
-        controls.Append(forward10);
+        // Media time never mirrors (Apple HIG, Material; our web and mobile players): the transport and the
+        // seek bar run left to right in every language. Only the row around them follows the page.
+        var transport = Gtk.Box.New(Gtk.Orientation.Horizontal, 8);
+        foreach (var w in new Gtk.Widget[] { transport, back10, play, forward10, seek }) w.SetDirection(Gtk.TextDirection.Ltr);
+        transport.Append(back10);
+        transport.Append(play);
+        transport.Append(forward10);
+        controls.Append(transport);
         controls.Append(seek);
         controls.Append(time);
 
