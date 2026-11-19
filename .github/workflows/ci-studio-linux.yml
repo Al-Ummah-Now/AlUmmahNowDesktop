@@ -115,11 +115,17 @@ jobs:
             AUN_WINDOW_SIZE=$5 AUN_THEME=$4 dbus-run-session -- xvfb-run -a -s "-screen 0 ${5}x24" \
               scripts/studio-scenario.sh $3 $1 shell "$name" artifacts/review "" "$2" > "artifacts/review/$name.log" 2>&1 || true
           }
+          # Upload with three staged files and two watched ones uploading (simulated), so every card shows.
+          mkdir -p staged watched
+          truncate -s 1500K "staged/درس 1.mp4" "staged/درس 2.mp4" "staged/lesson 10.mp4"
+          truncate -s 2M watched/friday-khutbah.mp4 watched/seerah-part-4.mov
+          export AUN_STAGE_DIR=$PWD/staged AUN_WATCH_DIR=$PWD/watched
           n=0
           for lang in en ar; do for theme in dark light; do
             shot uploads "" $lang $theme 1440x900; shot uploads channels $lang $theme 1440x900
             shot uploads "" $lang $theme 1920x1080; shot uploads "" $lang $theme 1024x700
-            n=$((n+4))
+            shot uploads scheduled $lang $theme 1440x900
+            n=$((n+5))
           done; done
           grep -h AUTOMATION artifacts/review/*.log
           test "$(cat artifacts/review/*.log | grep -c 'RESULT PASS')" = $n

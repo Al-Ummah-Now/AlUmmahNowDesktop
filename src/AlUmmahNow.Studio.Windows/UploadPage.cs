@@ -27,6 +27,8 @@ internal sealed class UploadPage
     private readonly TextBlock _stagedTitle = new() { Style = (Style)Application.Current.Resources["SubtitleTextBlockStyle"] };
     private readonly Button _start = new() { Style = (Style)Application.Current.Resources["AccentButtonStyle"] };
     private readonly Button _clear;
+    private readonly TextBlock _dropText = new();
+    private readonly FrameworkElement _stagedCard;
     private readonly StackPanel _queue = new() { Spacing = 8 };
     // Rows with nothing to show collapse: an empty row or blank text still takes the page spacing.
     private readonly StackPanel _watchRow = new() { Orientation = Orientation.Horizontal, Spacing = 8 };
@@ -48,23 +50,45 @@ internal sealed class UploadPage
         _shell = shell;
         _root = root;
         _direction = l.IsRtl ? FlowDirection.RightToLeft : FlowDirection.LeftToRight;
-        Root = new StackPanel { Spacing = 14, Padding = new Thickness(20) };
+        // Lantern Glass: files and the queue on the left, "Set for all" on the right; card actions in each footer.
+        Root = new Grid { ColumnSpacing = 20, Padding = new Thickness(16, 4, 16, 8) };
+        Root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        Root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(400) });
+        // Wider windows give the form more room; the 1024 minimum gives the files more.
+        Root.SizeChanged += (_, e) => Root.ColumnDefinitions[1].Width = new GridLength(e.NewSize.Width >= 1500 ? 460 : e.NewSize.Width < 900 ? 340 : 400);
+        var left = new StackPanel { Spacing = 18 };
+        Root.Children.Add(left);
 
+        // Add: the lantern, where the files go, and the ways to add them.
         var add = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        add.Children.Add(Button(l["studio.upload.addFiles"], async () => _vm.AddFiles(await pickFiles()), accent: true, id: "AddFiles"));
+        add.Children.Add(Button(l["studio.upload.addFiles"], async () => _vm.AddFiles(await pickFiles()), accent: true, id: "AddFiles", glyph: "\uE710"));
         add.Children.Add(Button(l["studio.upload.addFolder"], async () =>
         {
             if (await pickFolder() is { } f) _vm.AddFolder(f, _recursive!.IsChecked == true);
-        }, id: "AddFolder"));
-        _recursive = new CheckBox { Content = l["studio.upload.includeSubfolders"] };
+        }, id: "AddFolder", glyph: "\uE8B7"));
+        _recursive = new CheckBox { Content = l["studio.upload.includeSubfolders"], Margin = new Thickness(4, 0, 0, 0) };
         add.Children.Add(_recursive);
         add.Children.Add(Button(l["studio.upload.watch"], async () =>
         {
             if (await pickFolder() is not { } f) return;
             _vm.Watch(f);
             rememberWatchFolder(f);
-        }));
-        Root.Children.Add(add);
+        }, glyph: "\uE7B3"));
+        var drop = new Grid { ColumnSpacing = 20, Padding = new Thickness(6), BorderBrush = LanternGlass.Res("StudioEdgeStrongBrush"), BorderThickness = new Thickness(1.5), CornerRadius = new CornerRadius(12) };
+        drop.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        drop.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        drop.Children.Add(Lantern());
+        var dropText = new StackPanel { Spacing = 12, VerticalAlignment = VerticalAlignment.Center, Padding = new Thickness(0, 14, 0, 14) };
+        _dropText.TextWrapping = TextWrapping.Wrap;
+        _dropText.FontSize = 15.5;
+        _dropText.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
+        dropText.Children.Add(_dropText);
+        var addScroll = new ScrollViewer { Content = add, HorizontalScrollMode = ScrollMode.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled };
+        dropText.Children.Add(addScroll);
+        Grid.SetColumn(dropText, 1);
+        drop.Children.Add(dropText);
+        var addBody = new StackPanel { Spacing = 12 };
+        addBody.Children.Add(drop);
         var watchRow = _watchRow;
         watchRow.Children.Add(_watching);
         _stopWatching = Button(l["studio.upload.stopWatching"], () =>
@@ -74,40 +98,54 @@ internal sealed class UploadPage
             return Task.CompletedTask;
         });
         watchRow.Children.Add(_stopWatching);
-        Root.Children.Add(watchRow);
-        Root.Children.Add(_error);
+        addBody.Children.Add(watchRow);
+        addBody.Children.Add(_error);
+        left.Children.Add(LanternGlass.Card(addBody));
 
-        var expander = new Expander { Header = l["studio.upload.forAll"], IsExpanded = true, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch, Content = BuildDefaults() };
-        Root.Children.Add(expander);
-
+        // Ready to upload: the staged files with their titles; Clear list and Upload in the footer.
         AutomationProperties.SetHeadingLevel(_stagedTitle, AutomationHeadingLevel.Level2);
-        Root.Children.Add(_stagedTitle);
-        Root.Children.Add(_staged);
+        var stagedBody = new StackPanel { Spacing = 10 };
+        stagedBody.Children.Add(_stagedTitle);
+        stagedBody.Children.Add(_staged);
         var actions = _stagedActions;
-        AutomationProperties.SetAutomationId(_start, "StartUpload");
-        _start.Click += (_, _) => _vm.Start();
-        actions.Children.Add(_start);
         _clear = Button(l["studio.upload.clear"], () =>
         {
             _vm.ClearStaged();
             return Task.CompletedTask;
         });
         actions.Children.Add(_clear);
-        Root.Children.Add(actions);
+        AutomationProperties.SetAutomationId(_start, "StartUpload");
+        _start.Click += (_, _) => _vm.Start();
+        actions.Children.Add(_start);
+        _stagedCard = LanternGlass.Card(stagedBody, actions);
+        left.Children.Add(_stagedCard);
 
+        // Uploads: the queue; Clear finished in the footer.
         var queueTitle = new TextBlock { Text = l["studio.upload.queue"], Style = (Style)Application.Current.Resources["SubtitleTextBlockStyle"] };
         AutomationProperties.SetHeadingLevel(queueTitle, AutomationHeadingLevel.Level2);
-        var queueHeader = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
-        queueHeader.Children.Add(queueTitle);
-        queueHeader.Children.Add(Button(l["studio.upload.clearFinished"], () =>
+        var queueBody = new StackPanel { Spacing = 10 };
+        queueBody.Children.Add(queueTitle);
+        _queueEmpty = new TextBlock { Text = l["studio.upload.queueEmpty"], Opacity = 0.8, TextWrapping = TextWrapping.Wrap };
+        queueBody.Children.Add(_queueEmpty);
+        queueBody.Children.Add(_queue);
+        var queueFooter = new StackPanel { Orientation = Orientation.Horizontal };
+        queueFooter.Children.Add(Button(l["studio.upload.clearFinished"], () =>
         {
             _vm.ClearFinished();
             return Task.CompletedTask;
         }));
-        Root.Children.Add(queueHeader);
-        _queueEmpty = new TextBlock { Text = l["studio.upload.queueEmpty"], Opacity = 0.8, TextWrapping = TextWrapping.Wrap };
-        Root.Children.Add(_queueEmpty);
-        Root.Children.Add(_queue);
+        left.Children.Add(LanternGlass.Card(queueBody, queueFooter));
+
+        // Set for all.
+        var forAllTitle = new TextBlock { Text = l["studio.upload.forAll"], Style = (Style)Application.Current.Resources["SubtitleTextBlockStyle"] };
+        AutomationProperties.SetHeadingLevel(forAllTitle, AutomationHeadingLevel.Level2);
+        var forAll = new StackPanel { Spacing = 12 };
+        forAll.Children.Add(forAllTitle);
+        forAll.Children.Add(BuildDefaults());
+        var right = LanternGlass.Card(forAll);
+        right.VerticalAlignment = VerticalAlignment.Top;
+        Grid.SetColumn(right, 1);
+        Root.Children.Add(right);
 
         _vm.PropertyChanged += (_, e) =>
         {
@@ -128,7 +166,7 @@ internal sealed class UploadPage
         RenderError();
     }
 
-    public StackPanel Root { get; }
+    public Grid Root { get; }
 
     private ComboBox? _visibility;
 
@@ -140,12 +178,39 @@ internal sealed class UploadPage
 
     private UploadDefaults D => _vm.Defaults;
 
+    /// <summary>The upload lantern: a gold arrow in a glowing gold ring.</summary>
+    private static FrameworkElement Lantern()
+    {
+        var ring = new Border
+        {
+            Width = 72,
+            Height = 72,
+            CornerRadius = new CornerRadius(36),
+            BorderThickness = new Thickness(2),
+            BorderBrush = new Microsoft.UI.Xaml.Media.SolidColorBrush(LanternGlass.GoldEdge),
+            Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(global::Windows.UI.Color.FromArgb(0x33, 0xF4, 0xAE, 0x3A)),
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(14, 0, 0, 0),
+            Child = new FontIcon { Glyph = "\uE898", FontSize = 30, Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(LanternGlass.Gold) },
+        };
+        return LanternGlass.WithGlow(ring, 36, 0.55f, 30f);
+    }
+
     /// <summary>The title-pattern hint; its {n} examples use the UI digits (the token itself writes 0–9).</summary>
     private static string TitlePatternHint(Localizer l) => l.Format("studio.upload.titlePatternHint", 1, 2, 3);
 
-    private static Button Button(string text, Func<Task> click, bool accent = false, string? id = null)
+    private static Button Button(string text, Func<Task> click, bool accent = false, string? id = null, string? glyph = null)
     {
         var b = new Button { Content = text };
+        if (glyph != null)
+        {
+            var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+            row.Children.Add(new FontIcon { Glyph = glyph, FontSize = 14 });
+            row.Children.Add(new TextBlock { Text = text });
+            b.Content = row;
+            AutomationProperties.SetName(b, text);
+        }
+
         if (accent) b.Style = (Style)Application.Current.Resources["AccentButtonStyle"];
         if (id != null) AutomationProperties.SetAutomationId(b, id);
         b.Click += async (_, _) => await click();
@@ -154,7 +219,7 @@ internal sealed class UploadPage
 
     private FrameworkElement BuildDefaults()
     {
-        var panel = new StackPanel { Spacing = 10, MaxWidth = 760, HorizontalAlignment = HorizontalAlignment.Left };
+        var panel = new StackPanel { Spacing = 12 };
 
         var title = new TextBox { Header = _l["studio.upload.titlePattern"], Text = D.TitlePattern, Description = TitlePatternHint(_l) };
         title.TextChanged += (_, _) =>
@@ -172,7 +237,11 @@ internal sealed class UploadPage
         };
         panel.Children.Add(description);
 
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
+        var row = new Grid { ColumnSpacing = 10, RowSpacing = 12 };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        row.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         var categories = new[] { (string?)null }.Concat(StudioCatalog.Categories).ToList();
         var category = new ComboBox { Header = _l["studio.upload.category"], ItemsSource = categories.Select(c => c == null ? _l["studio.upload.none"] : _l["studio.category." + c]).ToList(), SelectedIndex = 0, MinWidth = 200 };
         category.SelectionChanged += (_, _) =>
@@ -195,6 +264,11 @@ internal sealed class UploadPage
             _scheduleRow.Visibility = D.Visibility == UploadVisibility.Scheduled ? Visibility.Visible : Visibility.Collapsed;
             _vm.ApplyDefaults();
         };
+        category.HorizontalAlignment = language.HorizontalAlignment = visibility.HorizontalAlignment = HorizontalAlignment.Stretch;
+        category.MinWidth = language.MinWidth = visibility.MinWidth = 0;
+        Grid.SetColumn(language, 1);
+        Grid.SetRow(visibility, 1);
+        Grid.SetColumnSpan(visibility, 2);
         row.Children.Add(category);
         row.Children.Add(language);
         row.Children.Add(visibility);
@@ -226,7 +300,9 @@ internal sealed class UploadPage
         {
             if (e.PropertyName == nameof(UploadsViewModel.BulkScheduleOn)) every.Visibility = _vm.BulkScheduleOn ? Visibility.Visible : Visibility.Collapsed;
         };
-        var scheduleFields = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
+        var scheduleFields = new StackPanel { Spacing = 12 };
+        start.MinWidth = 0;
+        start.HorizontalAlignment = every.HorizontalAlignment = HorizontalAlignment.Stretch;
         scheduleFields.Children.Add(start);
         scheduleFields.Children.Add(every);
         _scheduleRow.Children.Add(scheduleFields);
@@ -235,7 +311,7 @@ internal sealed class UploadPage
         var playlistsHeader = new TextBlock { Text = _l["studio.upload.playlists"] };
         panel.Children.Add(playlistsHeader);
         panel.Children.Add(_playlists);
-        var newPlaylist = new TextBox { PlaceholderText = _l["studio.upload.newPlaylist"], MinWidth = 240 };
+        var newPlaylist = new TextBox { PlaceholderText = _l["studio.upload.newPlaylist"] };
         AutomationProperties.SetName(newPlaylist, _l["studio.upload.newPlaylist"]);
         var create = Button(_l["studio.upload.createPlaylist"], async () =>
         {
@@ -246,7 +322,10 @@ internal sealed class UploadPage
             _vm.ApplyDefaults();
             RenderPlaylists();
         });
-        var createRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        var createRow = new Grid { ColumnSpacing = 8 };
+        createRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        createRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        Grid.SetColumn(create, 1);
         createRow.Children.Add(newPlaylist);
         createRow.Children.Add(create);
         panel.Children.Add(createRow);
@@ -299,19 +378,18 @@ internal sealed class UploadPage
         var staged = _vm.Staged;
         _start.Content = staged.Count == 1 ? _l["studio.upload.startOne"] : _l.Format("studio.upload.start", staged.Count);
         _start.IsEnabled = _vm.CanStart;
-        _start.Visibility = _clear.Visibility = _stagedActions.Visibility = _staged.Visibility = staged.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-        _stagedTitle.Text = staged.Count > 0
-            ? _l.Format("studio.upload.stagedTitle", staged.Count)
-            : _l.Format("studio.upload.stagedEmpty", Localizer.Isolate(_shell.ActiveChannel?.Name ?? ""));
+        _stagedCard.Visibility = staged.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        _stagedTitle.Text = _l.Format("studio.upload.stagedTitle", staged.Count);
+        _dropText.Text = _l.Format("studio.upload.stagedEmpty", Localizer.Isolate(_shell.ActiveChannel?.Name ?? ""));
         if (ReferenceEquals(staged, _renderedStaged)) return;
         _renderedStaged = staged;
         _staged.Children.Clear();
         foreach (var plan in staged)
         {
             var file = Path.GetFileName(plan.FilePath);
-            var grid = new Grid { ColumnSpacing = 8 };
+            var grid = new Grid { ColumnSpacing = 12, Padding = new Thickness(0, 6, 0, 6) };
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(340) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             var title = new TextBox { Text = plan.Title };
             AutomationProperties.SetName(title, _l.Format("studio.upload.titleFor", file));
@@ -323,18 +401,43 @@ internal sealed class UploadPage
                 VerticalAlignment = VerticalAlignment.Center,
                 TextTrimming = TextTrimming.CharacterEllipsis,
             };
-            Grid.SetColumn(meta, 1);
-            var remove = new Button { Content = new SymbolIcon(Symbol.Remove) };
+            var text = new StackPanel { Spacing = 4 };
+            text.Children.Add(title);
+            text.Children.Add(meta);
+            Grid.SetColumn(text, 1);
+            var remove = new Button { Content = new SymbolIcon(Symbol.Cancel), Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0), VerticalAlignment = VerticalAlignment.Center };
             AutomationProperties.SetName(remove, _l.Format("studio.upload.removeStaged", file));
             ToolTipService.SetToolTip(remove, _l.Format("studio.upload.removeStaged", file));
             remove.Click += (_, _) => _vm.RemoveStaged(plan.FilePath);
             Grid.SetColumn(remove, 2);
-            grid.Children.Add(title);
-            grid.Children.Add(meta);
+            grid.Children.Add(FileTile(96, 54));
+            grid.Children.Add(text);
             grid.Children.Add(remove);
             _staged.Children.Add(grid);
         }
     }
+
+    /// <summary>A video file's tile: night blue with a gold film glyph (the server makes the real thumbnail).</summary>
+    private static Border FileTile(double width, double height) => new()
+    {
+        Width = width,
+        Height = height,
+        CornerRadius = new CornerRadius(8),
+        VerticalAlignment = VerticalAlignment.Center,
+        BorderThickness = new Thickness(1),
+        BorderBrush = LanternGlass.Res("StudioEdgeBrush"),
+        Background = new Microsoft.UI.Xaml.Media.LinearGradientBrush
+        {
+            StartPoint = new global::Windows.Foundation.Point(0, 0),
+            EndPoint = new global::Windows.Foundation.Point(1, 1),
+            GradientStops =
+            {
+                new Microsoft.UI.Xaml.Media.GradientStop { Color = global::Windows.UI.Color.FromArgb(0xFF, 0x18, 0x44, 0x56), Offset = 0 },
+                new Microsoft.UI.Xaml.Media.GradientStop { Color = LanternGlass.Night, Offset = 1 },
+            },
+        },
+        Child = new FontIcon { Glyph = "\uE8B2", FontSize = height * 0.4, Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(LanternGlass.Gold) },
+    };
 
     private void RenderQueue()
     {
@@ -376,17 +479,20 @@ internal sealed class UploadPage
         {
             _page = page;
             _id = id;
-            Root = new Grid { ColumnSpacing = 12 };
-            Root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(360) });
+            Root = new Grid { ColumnSpacing = 12, Padding = new Thickness(0, 6, 0, 6) };
+            Root.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             Root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             Root.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            var text = new StackPanel();
+            _title.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
+            var text = new StackPanel { Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
             text.Children.Add(_title);
+            text.Children.Add(_bar);
             text.Children.Add(_status);
-            Grid.SetColumn(_bar, 1);
+            Grid.SetColumn(text, 1);
+            _buttons.VerticalAlignment = VerticalAlignment.Center;
             Grid.SetColumn(_buttons, 2);
+            Root.Children.Add(FileTile(80, 45));
             Root.Children.Add(text);
-            Root.Children.Add(_bar);
             Root.Children.Add(_buttons);
         }
 
