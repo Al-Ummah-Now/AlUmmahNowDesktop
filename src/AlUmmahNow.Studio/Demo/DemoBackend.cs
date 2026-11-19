@@ -63,14 +63,22 @@ public sealed class DemoTransport : IApiTransport
     private readonly List<Dictionary<string, object?>> _videos;
     private readonly List<(Dictionary<string, object?> Video, DateTimeOffset At, string Status)> _deleted = new();
 
+    /// <summary>The demo channel's videos, shared with the demo captions and reports.</summary>
+    public static readonly IReadOnlyList<string> VideoTitles = new[]
+    {
+        "تأملات في سورة الكهف — الجزء الأول", "Seerah: the early years in Makkah", "أحكام الصيام للمبتدئين", "Old Damascus: a walk through the souq",
+        "خطبة الجمعة: الصبر", "Hadith of the week: intentions", "قصص الأنبياء: يونس عليه السلام", "Q&A: prayer while travelling",
+    };
+
+    // One fitting category per demo title above.
+    private static readonly string[] Categories =
+    {
+        "quran_tafsir", "islamic_history", "ramadan", "islamic_lifestyle", "khutbah", "hadith_studies", "islamic_history", "fiqh",
+    };
+
     public DemoTransport()
     {
-        string[] titles =
-        {
-            "تأملات في سورة الكهف — الجزء الأول", "Seerah: the early years in Makkah", "أحكام الصيام للمبتدئين", "Arabic grammar, part 3",
-            "خطبة الجمعة: الصبر", "Hadith of the week: intentions", "قصص الأنبياء: يونس عليه السلام", "Q&A: prayer while travelling",
-        };
-        _videos = titles.Select((t, i) => new Dictionary<string, object?>
+        _videos = VideoTitles.Select((t, i) => new Dictionary<string, object?>
         {
             ["id"] = "demo-v" + (i + 1),
             ["title"] = t,
@@ -78,7 +86,7 @@ public sealed class DemoTransport : IApiTransport
             ["channelId"] = "demo-c1",
             ["isPublic"] = i % 3 != 2,
             ["uploadStatus"] = i == 1 ? "processing" : "ready",
-            ["category"] = i % 2 == 0 ? "quran_tafsir" : "islamic_history",
+            ["category"] = Categories[i],
             ["language"] = i % 2 == 0 ? "ar" : "en",
             ["tags"] = new[] { "demo" },
             ["views"] = 1200 - (i * 130),

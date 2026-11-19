@@ -11,8 +11,8 @@ using Microsoft.UI.Xaml.Controls;
 namespace AlUmmahNow.Studio.WindowsApp;
 
 /// <summary>
-/// The Studio window: top navigation for the pages, channel picker and account menu, and a body
-/// that shows sign-in, loading and error states or the selected page.
+/// The Studio window: a bar with the channel picker and account menu, a side rail for the pages (every
+/// label in full, as on Linux), and a body that shows sign-in, loading and error states or the selected page.
 /// </summary>
 internal sealed class StudioWindow
 {
@@ -23,6 +23,7 @@ internal sealed class StudioWindow
     private readonly FlowDirection _direction;
     private readonly Grid _body = new();
     private readonly NavigationView _nav;
+    private readonly Grid _studio = new();
     private readonly Dictionary<string, FrameworkElement> _pages = new();
     private readonly ComboBox _channelPicker;
     private readonly DropDownButton _accountButton;
@@ -48,17 +49,26 @@ internal sealed class StudioWindow
         _accountButton = new DropDownButton { Flyout = _accountMenu, VerticalAlignment = VerticalAlignment.Center };
         AutomationProperties.SetAutomationId(_accountButton, "AccountMenu");
 
-        var bar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new Thickness(0, 0, 12, 0) };
+        // HorizontalAlignment.Right is the end side: it mirrors to the left in Arabic.
+        var bar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new Thickness(12, 8, 12, 8), HorizontalAlignment = HorizontalAlignment.Right };
         bar.Children.Add(_channelPicker);
         bar.Children.Add(_accountButton);
 
         _nav = new NavigationView
         {
-            PaneDisplayMode = NavigationViewPaneDisplayMode.Top,
+            PaneDisplayMode = NavigationViewPaneDisplayMode.Left,
+            IsPaneOpen = true,
+            OpenPaneLength = 220,
+            IsPaneToggleButtonVisible = false,
             IsSettingsVisible = false,
             IsBackButtonVisible = NavigationViewBackButtonVisible.Collapsed,
-            PaneFooter = bar,
         };
+        AutomationProperties.SetName(_nav, l["studio.shell.pages"]);
+        _studio.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        _studio.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        _studio.Children.Add(bar);
+        Grid.SetRow(_nav, 1);
+        _studio.Children.Add(_nav);
         _nav.SelectionChanged += (_, e) =>
         {
             if (e.SelectedItem is NavigationViewItem item && item.Tag is string name && _pages.TryGetValue(name, out var page)) _nav.Content = new ScrollViewer { Content = page };
@@ -112,7 +122,7 @@ internal sealed class StudioWindow
             ShellState.NoChannel => Status(_l["studio.shell.noChannelTitle"], _l["studio.shell.noChannelBody"], Action(_l["studio.shell.retry"], () => _ = _shell.RetryAsync())),
             ShellState.Error => Status(_l["studio.shell.errorTitle"], _shell.ErrorKey is { } e ? _l[e] : null, Action(_l["studio.shell.retry"], () => _ = _shell.RetryAsync())),
             ShellState.NeedsReauth => Status(_l["studio.shell.reauthTitle"], _l.Format("studio.shell.reauthBody", Localizer.Isolate(_shell.ActiveAccount?.Label ?? "")), SignInActions()),
-            _ => _nav,
+            _ => _studio,
         });
         RenderChannels();
         RenderAccounts();

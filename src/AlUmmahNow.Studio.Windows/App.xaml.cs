@@ -14,6 +14,8 @@ using AlUmmahNow.Studio.Shell;
 using AlUmmahNow.Studio.Upload;
 using AlUmmahNow.Studio.Videos;
 using AlUmmahNow.Studio.Analytics;
+using AlUmmahNow.Studio.Captions;
+using AlUmmahNow.Studio.Institution;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -32,6 +34,10 @@ public sealed partial class App : Application
     public App()
     {
         InitializeComponent();
+        // AUN_THEME=dark|light forces a theme (CI screenshots); otherwise Windows' app mode applies. Only settable here.
+        var theme = Environment.GetEnvironmentVariable("AUN_THEME");
+        if (theme == "dark") RequestedTheme = ApplicationTheme.Dark;
+        else if (theme == "light") RequestedTheme = ApplicationTheme.Light;
         UnhandledException += (_, e) =>
         {
             Log.For("app").Error("unhandled exception", e.Exception);
@@ -72,11 +78,24 @@ public sealed partial class App : Application
         IStudioAccounts accounts;
         IApiTransport transport;
         Func<string, IUploadService> uploadServiceFor;
+        ICaptionsApi captionsApi;
+        IInstitutionApi institutionApi;
+        IInsightsApi insightsApi;
+        // On-device transcription and pre-encoding need Core's whisper and HLS packaging (v0.4); until then they stay hidden.
+        IOnDeviceTranscriber? transcriber = null;
+        PreEncodeCoordinator? preEncoder = null;
         if (demo)
         {
             accounts = new DemoAccounts();
             transport = new DemoTransport();
             uploadServiceFor = account => new SimulatedUploadService(account, TimeSpan.FromMilliseconds(250));
+            var demoServices = new DemoStudioServices();
+            captionsApi = demoServices;
+            institutionApi = demoServices;
+            insightsApi = demoServices;
+            transcriber = new DemoTranscriber();
+            var demoMedia = new DemoRenditionPackaging();
+            preEncoder = new PreEncodeCoordinator(() => new LocalRenditionJob(demoMedia, demoMedia, demoMedia, demoServices), Path.Combine(dataRoot, "demo-renditions"));
         }
         else
         {
@@ -85,11 +104,16 @@ public sealed partial class App : Application
             accounts = core;
             transport = new CoreApiTransport(core, environment.VideosApi, userAgent, localizer.Language);
             uploadServiceFor = account => new CoreUploadService(core, environment.VideosApi, userAgent, Path.Combine(dataRoot, "uploads"), account);
+            var session = new AccountsAuthSession(core);
+            var services = new StudioServicesClient(new StudioHttpClient(environment.VideosApi, session.GetAccessTokenAsync, userAgent, localizer.Language));
+            captionsApi = services;
+            institutionApi = services;
+            insightsApi = services;
         }
 
         var api = new StudioApiClient(transport);
         var shell = new StudioShellViewModel(accounts, api);
-        _uploads = new UploadsViewModel(shell, api, uploadServiceFor, Path.Combine(dataRoot, demo ? "demo" : "studio"));
+        _uploads = new UploadsViewModel(shell, api, uploadServiceFor, Path.Combine(dataRoot, demo ? "demo" : "studio")) { PreEncoder = preEncoder };
         var uploadsVm = _uploads;
         var encode = new EncodeQueue(new MediaFoundationEncodeBackend());
 
@@ -121,6 +145,24 @@ public sealed partial class App : Application
             return files.Select(f => f.Path).ToList();
         }
 
+        async Task<string?> PickFileAsync(IEnumerable<string> extensions)
+        {
+            var picker = new global::Windows.Storage.Pickers.FileOpenPicker();
+            foreach (var ext in extensions) picker.FileTypeFilter.Add(ext);
+            WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(window.Window));
+            var file = await picker.PickSingleFileAsync();
+            return file?.Path;
+        }
+
+        async Task<string?> PickSaveAsync(string suggestedName)
+        {
+            var picker = new global::Windows.Storage.Pickers.FileSavePicker { SuggestedFileName = Path.GetFileNameWithoutExtension(suggestedName) };
+            picker.FileTypeChoices.Add("CSV", new List<string> { ".csv" });
+            WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(window.Window));
+            var file = await picker.PickSaveFileAsync();
+            return file?.Path;
+        }
+
         var uploads = new UploadPage(localizer, uploadsVm, shell, () => window.Window.Content?.XamlRoot, PickFilesAsync, PickFolderAsync, path =>
         {
             settings.WatchFolder = path;
@@ -133,18 +175,35 @@ public sealed partial class App : Application
                 settings.RecentSearches = recents.ToList();
                 settingsStore.Save(settings);
             });
-        var analyticsVm = new AnalyticsViewModel(shell, api);
         var videos = new VideosPage(localizer, videosVm, uploadsVm, () => window.Window.Content?.XamlRoot);
-        var analytics = new AnalyticsPage(localizer, analyticsVm);
         var encodePage = new EncodePage(localizer, encode);
         var timeline = new TimelinePage(localizer);
+        var captionsVm = new CaptionsViewModel(shell, api, captionsApi, transcriber);
+        var captions = new CaptionsPage(localizer, captionsVm, () => window.Window.Content?.XamlRoot, () => PickFileAsync(UploadPlanner.VideoExtensions));
+        var insightsVm = new InsightsViewModel(shell, api, insightsApi);
+        var insights = new InsightsPage(localizer, insightsVm, PickSaveAsync);
+        var institutionVm = new InstitutionViewModel(shell, institutionApi);
+        var brand = new BrandPage(localizer, institutionVm, () => window.Window.Content?.XamlRoot,
+            () => PickFileAsync(new[] { ".png", ".jpg", ".jpeg", ".webp", ".mp4", ".mov", ".mp3", ".m4a", ".wav" }));
         window.AddPage("uploads", localizer["studio.tab.upload"], Symbol.Upload, uploads.Root);
         window.AddPage("videos", localizer["studio.tab.videos"], Symbol.List, videos.Root);
-        window.AddPage("analytics", localizer["studio.tab.analytics"], Symbol.Calculator, analytics.Root);
+        window.AddPage("captions", localizer["studio.tab.captions"], Symbol.ClosedCaption, captions.Root);
+        window.AddPage("analytics", localizer["studio.tab.analytics"], Symbol.ViewAll, insights.Root);
+        window.AddPage("brand", localizer["studio.tab.brand"], Symbol.People, brand.Root);
         window.AddPage("encode", localizer["studio.tab.encode"], Symbol.Video, encodePage.Root);
         window.AddPage("timeline", localizer["studio.tab.timeline"], Symbol.Edit, timeline.Root);
         window.ShowPage(tabName);
+
+        // Studio screens (E19): the scene's data actually rendered, not only the shell.
+        bool SceneOk() => tabName switch
+        {
+            "captions" => scene == "captions-editor" ? captionsVm.Editor != null : captionsVm.Drafts != null,
+            "analytics" => scene == "analytics-video" ? insightsVm.Retention != null : insightsVm.Summary != null,
+            "brand" => scene == "brand-team" ? institutionVm.State != null && !institutionVm.CanEdit : institutionVm.State is { CanEdit: true },
+            _ => scene != "preencode" || uploadsVm.Items.Any(i => preEncoder?.StatusOf(i.Id) != null),
+        };
         window.Window.Activate();
+        if (demo) SizeForScreenshots(window.Window.AppWindow);
         window.Window.Closed += (_, _) => uploadsVm.Dispose();
 
         _refresh = ui.CreateTimer();
@@ -177,6 +236,14 @@ public sealed partial class App : Application
                 if (scene == "accounts") window.OpenAccountMenu();
                 else if (scene == "signout") window.AskSignOut();
                 else if (scene == "addpasskey") _ = window.AddPasskeyAsync();
+                else if (scene.StartsWith("captions", StringComparison.Ordinal)) captions.RunScene(scene);
+                else if (scene == "analytics-video" && insightsVm.VideoStats.FirstOrDefault() is { } top) insightsVm.VideoId = top.VideoId;
+                else if (scene == "brand-team" && shell.Channels.FirstOrDefault(c => c.Role != ChannelRole.Owner) is { } managed) institutionVm.Switch(managed);
+                else if (scene == "preencode")
+                {
+                    uploadsVm.Start();
+                    uploads.ShowQueue();
+                }
                 else videos.RunScene(scene);
             };
             _sceneTimer.Start();
@@ -194,10 +261,29 @@ public sealed partial class App : Application
                 var pass = job != null ? job.Status == EncodeStatus.Completed
                     : automation == "shell" ? shell.State == ShellState.Ready && shell.ActiveChannel != null
                     : uploadsDone || tabName != "uploads";
-                File.WriteAllText(ResultPath, $"AUTOMATION {tabName} scene={scene} shell={shell.State} channel={shell.ActiveChannel?.Id} accounts={shell.AccountList.Count} uploads={snapshot.Count} uploadsDone={uploadsDone} encode={job?.Status} encoder={job?.UsedEncoder?.Name} error={job?.Error} RESULT {(pass ? "PASS" : "FAIL")}");
+                var sceneOk = SceneOk();
+                pass = pass && sceneOk;
+                File.WriteAllText(ResultPath, $"AUTOMATION {tabName} scene={scene} sceneOk={sceneOk} shell={shell.State} channel={shell.ActiveChannel?.Id} accounts={shell.AccountList.Count} uploads={snapshot.Count} uploadsDone={uploadsDone} encode={job?.Status} encoder={job?.UsedEncoder?.Name} error={job?.Error} RESULT {(pass ? "PASS" : "FAIL")}");
                 Exit();
             };
             _endTimer.Start();
+        }
+    }
+
+    /// <summary>
+    /// Demo screenshots: 1280x800 like the Linux captures when the desktop has room, otherwise maximised,
+    /// so the CI capture of the window shows each page's content.
+    /// </summary>
+    private static void SizeForScreenshots(Microsoft.UI.Windowing.AppWindow appWindow)
+    {
+        var area = Microsoft.UI.Windowing.DisplayArea.GetFromWindowId(appWindow.Id, Microsoft.UI.Windowing.DisplayAreaFallback.Primary).WorkArea;
+        if (area.Width >= 1280 && area.Height >= 800)
+        {
+            appWindow.MoveAndResize(new global::Windows.Graphics.RectInt32(area.X, area.Y, 1280, 800));
+        }
+        else if (appWindow.Presenter is Microsoft.UI.Windowing.OverlappedPresenter presenter)
+        {
+            presenter.Maximize();
         }
     }
 }

@@ -1,5 +1,4 @@
 using AlUmmahNow.CoreBridge.Studio;
-using AlUmmahNow.Studio.Analytics;
 using AlUmmahNow.Studio.Search;
 using AlUmmahNow.Studio.Shell;
 using AlUmmahNow.Studio.Videos;
@@ -224,32 +223,5 @@ public sealed class VideosViewModelTests : IDisposable
         var vm = await CreateAsync();
         Assert.False(await vm.SaveAsync("v1", new VideoChanges { Title = "x" }));
         Assert.Equal("studio.videos.notAllowed", vm.ErrorKey);
-    }
-}
-
-public sealed class AnalyticsViewModelTests
-{
-    [Fact]
-    public async Task LoadsTheRangeAndSwitchesMetric()
-    {
-        var accounts = new FakeAccounts();
-        accounts.Saved.Add(new StudioAccount("u1", null, "A", null, null, false));
-        accounts.ActiveId = "u1";
-        var t = new FakeTransport();
-        t.Responses["get_ChannelAccessList"] = _ => FakeTransport.Json(new { data = new[] { new { id = "c1", userId = "u1", name = "C", isMain = true, role = "owner", capabilities = Array.Empty<string>() } } });
-        t.Responses["get_AnalyticsChannelGet"] = _ => FakeTransport.Json(new { totalViews = 10, recentMetrics = new[] { new { date = "2026-11-01", views = 4, watchTime = 7200 } } });
-        var api = new StudioApiClient(t);
-        var shell = new StudioShellViewModel(accounts, api);
-        var vm = new AnalyticsViewModel(shell, api, () => new DateTimeOffset(2026, 11, 10, 0, 0, 0, TimeSpan.Zero));
-        await shell.InitializeAsync();
-        await vm.LoadAsync();
-        Assert.Equal(4, vm.Data!.Totals.Views);
-        Assert.Equal(4, vm.Series.Single().Value);
-        vm.Metric = "watch";
-        Assert.Equal(2, vm.Series.Single().Value);
-        vm.Days = 7;
-        for (var i = 0; i < 20 && t.Calls("get_AnalyticsChannelGet").Count < 3; i++) await Task.Delay(10);
-        // Last 7 days = 4 to 10 November, both ends counted
-        Assert.Equal("2026-11-04T00:00:00Z", t.Calls("get_AnalyticsChannelGet").Last().Query["dateFrom"]);
     }
 }

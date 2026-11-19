@@ -123,12 +123,10 @@ internal sealed class VideosPage
                 case nameof(VideosViewModel.IsLoading): _loading.IsActive = _vm.IsLoading; break;
                 case nameof(VideosViewModel.Deleted): RenderDeleted(); break;
                 case nameof(VideosViewModel.ErrorKey):
-                    _error.Message = _vm.ErrorKey is { } k ? _l[k] : "";
-                    _error.IsOpen = _vm.ErrorKey != null;
+                    Ui.Show(_error, _vm.ErrorKey is { } k ? _l[k] : null);
                     break;
                 case nameof(VideosViewModel.NoticeKey):
-                    _notice.Message = _vm.NoticeKey is { } n ? _l[n] : "";
-                    _notice.IsOpen = _vm.NoticeKey != null;
+                    Ui.Show(_notice, _vm.NoticeKey is { } n ? _l[n] : null);
                     break;
             }
         };
@@ -267,7 +265,7 @@ internal sealed class VideosPage
         var parts = new List<string> { _l["studio.upload.visibility." + (v.IsPublic ? "public" : "private")] };
         if (v.Status is StudioVideoStatus.Processing or StudioVideoStatus.Failed or StudioVideoStatus.Uploading) parts.Add(_l["studio.videos.status." + v.Status.ToString().ToLowerInvariant()]);
         parts.Add(_l.Format("studio.videos.views", _l.Number(v.Views)));
-        if (v.CreatedAt is { } at) parts.Add(at.ToLocalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+        if (v.CreatedAt is { } at) parts.Add(Localizer.IsolateLtr(at.ToLocalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)));
         if (v.Category is { } c) parts.Add(_l["studio.category." + c]);
         return string.Join(" · ", parts);
     }
@@ -288,7 +286,7 @@ internal sealed class VideosPage
             text.Children.Add(new TextBlock
             {
                 Text = d.CanRestore
-                    ? _l.Format("studio.videos.deletedOn", d.DeletedAt.ToLocalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), (d.PurgeAfter ?? d.DeletedAt.AddDays(30)).ToLocalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))
+                    ? _l.Format("studio.videos.deletedOn", Localizer.IsolateLtr(d.DeletedAt.ToLocalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)), Localizer.IsolateLtr((d.PurgeAfter ?? d.DeletedAt.AddDays(30)).ToLocalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)))
                     : _l["studio.videos.queuedForDeletion"],
                 Opacity = 0.75,
                 FontSize = 12,
@@ -364,8 +362,7 @@ internal sealed class VideosPage
         edit.Tags = tags.Text;
         if (edit.Problem is { } p)
         {
-            _error.Message = _l[p];
-            _error.IsOpen = true;
+            Ui.Show(_error, _l[p]);
             return;
         }
 

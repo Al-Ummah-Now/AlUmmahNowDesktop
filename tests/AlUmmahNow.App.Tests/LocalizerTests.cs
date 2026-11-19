@@ -14,6 +14,19 @@ public class LocalizerTests
     }
 
     [Fact]
+    public void Sizes_are_isolated_left_to_right()
+    {
+        Assert.Equal("\u2066\u200E1.5 MB\u200E\u2069", Localizer.IsolateLtr("1.5 MB"));
+    }
+
+    [Fact]
+    public void Lines_start_with_the_interface_direction()
+    {
+        Assert.Equal("\u200F", new Localizer("ar").LineStart);
+        Assert.Equal("\u200E", new Localizer("en").LineStart);
+    }
+
+    [Fact]
     public void Arabic_is_default_and_rtl()
     {
         var l = new Localizer();

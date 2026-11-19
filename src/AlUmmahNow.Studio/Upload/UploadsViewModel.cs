@@ -48,6 +48,9 @@ public sealed partial class UploadsViewModel : ObservableObject, IDisposable
     [ObservableProperty] private string? _errorKey;
     [ObservableProperty] private string? _watchFolder;
 
+    /// <summary>"Pre-encode renditions on this computer" for the next uploads. Off by default.</summary>
+    [ObservableProperty] private bool _preEncode;
+
     public UploadsViewModel(StudioShellViewModel shell, IStudioApi api, Func<string, IUploadService> serviceFor, string stateDir, Func<DateTimeOffset>? now = null)
     {
         _shell = shell;
@@ -62,6 +65,21 @@ public sealed partial class UploadsViewModel : ObservableObject, IDisposable
         _shell.ChannelChanged += (_, _) => _ = LoadPlaylistsAsync();
         SwitchAccount();
     }
+
+    /// <summary>Set when this build can pre-encode (Core packaging present); the option is hidden otherwise.</summary>
+    public PreEncodeCoordinator? PreEncoder
+    {
+        get => _preEncoder;
+        set
+        {
+            _preEncoder = value;
+            if (value != null) value.Changed += (_, _) => Interlocked.Exchange(ref _dirty, 1);
+        }
+    }
+
+    private PreEncodeCoordinator? _preEncoder;
+
+    public bool PreEncodeAvailable => PreEncoder != null;
 
     public bool CanStart => Staged.Count > 0 && _service != null && _shell.ActiveChannel != null;
 
@@ -116,6 +134,7 @@ public sealed partial class UploadsViewModel : ObservableObject, IDisposable
                     Category = plan.Category,
                     Priority = 0,
                 });
+                if (PreEncode && PreEncoder != null) PreEncoder.Want(id, plan.FilePath, channel.Id);
                 if (plan.Language != null || plan.PlaylistIds.Count > 0 || plan.PublishAt != null)
                 {
                     _steps[id] = new FinishStep { ChannelId = channel.Id, Language = plan.Language, PlaylistIds = plan.PlaylistIds.ToList(), PublishAt = plan.PublishAt, TimeZone = plan.TimeZone };
@@ -231,6 +250,7 @@ public sealed partial class UploadsViewModel : ObservableObject, IDisposable
 
         Items = list;
         OnPropertyChanged(nameof(ActiveCount));
+        PreEncoder?.Observe(list);
         foreach (var done in list.Where(i => i.Phase == UploadPhase.Done && i.VideoId != null && _steps.ContainsKey(i.Id)))
         {
             bool start;

@@ -39,3 +39,14 @@ public static class Confirm
         await dialog.ShowAsync();
     }
 }
+
+/// <summary>Confirmations asked by view models by i18n key: "&lt;key&gt;.heading", "&lt;key&gt;" (body) and "&lt;key&gt;.ok".</summary>
+public static class ConfirmKeys
+{
+    public static Func<string, object[], Task<bool>> For(Func<XamlRoot?> root, AlUmmahNow.App.I18n.Localizer l) => async (key, args) =>
+    {
+        if (root() is not { } r) return false;
+        var shown = args.Select(a => a is string s && s.StartsWith("studio.", StringComparison.Ordinal) ? (object)l[s] : a).ToArray();
+        return await Confirm.AskAsync(r, l.IsRtl ? FlowDirection.RightToLeft : FlowDirection.LeftToRight, l[key + ".heading"], l.Format(key, shown), l[key + ".ok"], l["common.cancel"]);
+    };
+}

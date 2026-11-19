@@ -53,4 +53,29 @@ public static class Ui
         row.Append(control);
         return row;
     }
+
+    public static Gtk.Label Heading(string text)
+    {
+        var h = Label(text);
+        // Headings stay on one line; next to a button they would otherwise wrap word by word.
+        h.SetWrap(false);
+        h.AddCssClass("heading");
+        return h;
+    }
+
+    /// <summary>Sets a status line and hides it when empty, so empty lines leave no gap.</summary>
+    public static void Status(Gtk.Label label, string? text)
+    {
+        label.SetText(text ?? "");
+        label.SetVisible(!string.IsNullOrEmpty(text));
+    }
+
+    /// <summary>A padded card (Adwaita "card" plus the app's padding class).</summary>
+    public static Gtk.Box Card(int spacing = 8)
+    {
+        var b = Gtk.Box.New(Gtk.Orientation.Vertical, spacing);
+        b.AddCssClass("card");
+        b.AddCssClass("aun-pad");
+        return b;
+    }
 }

@@ -72,12 +72,10 @@ public sealed class SimulatedUploadService : IUploadService
             foreach (var i in _items.Where(i => i.Phase is UploadPhase.Queued or UploadPhase.Uploading).Take(3))
             {
                 i.Phase = UploadPhase.Uploading;
+                // Like the real service, the server creates the video when the upload starts.
+                i.VideoId ??= "sim-" + i.Id[..8];
                 i.Sent = Math.Min(i.Total, i.Sent + _step);
-                if (i.Sent >= i.Total)
-                {
-                    i.Phase = UploadPhase.Done;
-                    i.VideoId = "sim-" + i.Id[..8];
-                }
+                if (i.Sent >= i.Total) i.Phase = UploadPhase.Done;
 
                 changed.Add(i.Id);
             }

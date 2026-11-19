@@ -25,6 +25,7 @@ public sealed class UploadPage
     private readonly Gtk.Label _error = Ui.Label("");
     private readonly Gtk.Label _watching = Ui.Label("", dim: true);
     private readonly Gtk.Button _stopWatching;
+    private readonly Gtk.Box _watchRow = Gtk.Box.New(Gtk.Orientation.Horizontal, 8);
     private readonly Gtk.Box _playlists = Gtk.Box.New(Gtk.Orientation.Vertical, 4);
     private readonly Gtk.Entry _scheduleStart = Gtk.Entry.New();
     private readonly Gtk.SpinButton _scheduleEvery = Gtk.SpinButton.NewWithRange(0, 24 * 30, 1);
@@ -51,7 +52,7 @@ public sealed class UploadPage
         add.Append(_recursive);
         add.Append(Ui.Button(l["studio.upload.watch"], () => _ = PickWatchFolderAsync(rememberWatchFolder)));
         page.Append(add);
-        var watchRow = Gtk.Box.New(Gtk.Orientation.Horizontal, 8);
+        var watchRow = _watchRow;
         watchRow.Append(_watching);
         _stopWatching = Ui.Button(l["studio.upload.stopWatching"], () =>
         {
@@ -61,13 +62,14 @@ public sealed class UploadPage
         watchRow.Append(_stopWatching);
         page.Append(watchRow);
         _error.AddCssClass("error");
+        _error.SetVisible(false);
         page.Append(_error);
 
         // Set for all
-        var expander = Gtk.Expander.New(l["studio.upload.forAll"]);
-        expander.SetExpanded(true);
-        expander.SetChild(BuildDefaults());
-        page.Append(expander);
+        _forAll = Gtk.Expander.New(l["studio.upload.forAll"]);
+        _forAll.SetExpanded(true);
+        _forAll.SetChild(BuildDefaults());
+        page.Append(_forAll);
 
         // Staged
         _stagedTitle.AddCssClass("heading");
@@ -79,12 +81,26 @@ public sealed class UploadPage
         actions.Append(_start);
         _clear = Ui.Button(l["studio.upload.clear"], () => _vm.ClearStaged(), "flat");
         actions.Append(_clear);
+        if (_vm.PreEncodeAvailable)
+        {
+            // D11: opt-in, off by default. The server checks the files and encodes itself when they don't arrive in time.
+            var preEncode = Gtk.CheckButton.NewWithLabel(l["studio.upload.preEncode"]);
+            preEncode.SetActive(_vm.PreEncode);
+            preEncode.OnToggled += (_, _) => _vm.PreEncode = preEncode.GetActive();
+            var pre = Gtk.Box.New(Gtk.Orientation.Vertical, 2);
+            pre.Append(preEncode);
+            var hint = Ui.Label(l["studio.upload.preEncodeHint"], dim: true);
+            hint.SetMarginStart(28);
+            pre.Append(hint);
+            page.Append(pre);
+            if (Environment.GetEnvironmentVariable("AUN_SCENE") == "preencode") preEncode.SetActive(true);
+        }
+
         page.Append(actions);
 
         // Queue
         var queueHeader = Gtk.Box.New(Gtk.Orientation.Horizontal, 8);
-        var queueTitle = Ui.Label(l["studio.upload.queue"]);
-        queueTitle.AddCssClass("heading");
+        var queueTitle = Ui.Heading(l["studio.upload.queue"]);
         queueTitle.SetHexpand(true);
         queueHeader.Append(queueTitle);
         queueHeader.Append(Ui.Button(l["studio.upload.clearFinished"], () => _vm.ClearFinished(), "flat"));
@@ -100,7 +116,7 @@ public sealed class UploadPage
                 case nameof(UploadsViewModel.Staged): RenderStaged(); break;
                 case nameof(UploadsViewModel.Items): RenderQueue(); break;
                 case nameof(UploadsViewModel.Playlists): RenderPlaylists(); break;
-                case nameof(UploadsViewModel.ErrorKey): _error.SetText(_vm.ErrorKey is { } k ? _l[k] : ""); break;
+                case nameof(UploadsViewModel.ErrorKey): Ui.Status(_error, _vm.ErrorKey is { } k ? _l[k] : null); break;
                 case nameof(UploadsViewModel.WatchFolder): RenderWatching(); break;
             }
         };
@@ -112,6 +128,11 @@ public sealed class UploadPage
     }
 
     public Gtk.ScrolledWindow Root { get; }
+
+    private readonly Gtk.Expander _forAll;
+
+    /// <summary>CI screenshots: fold "Set for all" so the queue is in view.</summary>
+    public void ShowQueue() => _forAll.SetExpanded(false);
 
     private UploadDefaults D => _vm.Defaults;
 
@@ -275,6 +296,8 @@ public sealed class UploadPage
 
     private void RenderWatching()
     {
+        // Hidden when no folder is watched, so it leaves no gap.
+        _watchRow.SetVisible(_vm.WatchFolder != null);
         _watching.SetText(_vm.WatchFolder is { } f ? _l.Format("studio.upload.watchingFolder", Localizer.Isolate(f)) : "");
         _stopWatching.SetVisible(_vm.WatchFolder != null);
     }
@@ -301,8 +324,8 @@ public sealed class UploadPage
             title.SetHexpand(true);
             Ui.Named(title, _l.Format("studio.upload.titleFor", file));
             title.OnChanged += (_, _) => _vm.RenameStaged(plan.FilePath, title.GetText());
-            var meta = Ui.Label(Localizer.Isolate(file) + " · " + Formats.Bytes(plan.Size, CultureInfo.InvariantCulture)
-                + (plan.PublishAt is { } at ? " · " + _l.Format("studio.upload.publishesAt", Formats.ToLocalInput(at)) : ""), dim: true);
+            var meta = Ui.Label(_l.LineStart + Localizer.Isolate(file) + " · " + Localizer.IsolateLtr(Formats.Bytes(plan.Size, CultureInfo.InvariantCulture))
+                + (plan.PublishAt is { } at ? " · " + _l.Format("studio.upload.publishesAt", Localizer.IsolateLtr(Formats.ToLocalInput(at))) : ""), dim: true);
             meta.SetSizeRequest(320, -1);
             var remove = Gtk.Button.NewWithLabel(_l["studio.upload.remove"]);
             remove.AddCssClass("flat");
@@ -398,6 +421,7 @@ public sealed class UploadPage
         private readonly Gtk.Label _status = Ui.Label("", dim: true);
         private readonly Gtk.Box _buttons = Gtk.Box.New(Gtk.Orientation.Horizontal, 4);
         private UploadPhase? _phase;
+        private bool _preRunning;
 
         public QueueRow(UploadPage page, string id)
         {
@@ -425,10 +449,14 @@ public sealed class UploadPage
             _bar.SetFraction(item.Fraction);
             var phase = l["studio.phase." + item.Phase.ToString().ToLowerInvariant()];
             var amount = l.Format("studio.upload.progress", Formats.Bytes(item.SentBytes, CultureInfo.InvariantCulture), Formats.Bytes(item.TotalBytes, CultureInfo.InvariantCulture));
-            _status.SetText(item.Phase == UploadPhase.Uploading ? phase + " · " + amount : phase);
+            var pre = _page._vm.PreEncoder?.StatusOf(_id);
+            var preText = pre == null ? null : PreEncodeText(l, pre);
+            _status.SetText((item.Phase == UploadPhase.Uploading ? phase + " · " + amount : phase) + (preText == null ? "" : " · " + preText));
             Ui.Named(_bar, item.Title + " · " + phase);
-            if (_phase == item.Phase) return;
+            var preRunning = pre is { IsRunning: true };
+            if (_phase == item.Phase && _preRunning == preRunning) return;
             _phase = item.Phase;
+            _preRunning = preRunning;
             Ui.Clear(_buttons);
             var vm = _page._vm;
             switch (item.Phase)
@@ -450,7 +478,13 @@ public sealed class UploadPage
                     _buttons.Append(Cancel(item));
                     break;
             }
+
+            if (preRunning) _buttons.Append(Ui.Named(Ui.Button(l["studio.upload.preEncodeStop"], () => vm.PreEncoder?.Cancel(_id), "flat"), l.Format("studio.upload.preEncodeStopFor", item.Title)));
+            // The buttons change width: redraw the whole row so no part of the old ones is left on screen.
+            Root.QueueDraw();
         }
+
+        internal static string PreEncodeText(Localizer l, PreEncodeStatus s) => l.Format(s.LabelKey, l.Number(s.Percent));
 
         private Gtk.Button Cancel(UploadSnapshot item) => Ui.Button(_page._l["studio.upload.cancel"], async () =>
         {
