@@ -97,7 +97,12 @@ public sealed class TimelinePage
         var clipsBody = Gtk.Box.New(Gtk.Orientation.Vertical, 8);
         clipsBody.Append(Ui.CardTitle(l["studio.timeline.clips"]));
         clipsBody.Append(_clips);
-        Root.Append(Ui.Card(clipsBody));
+        // The list keeps its rows' own height: the card never spreads them over the page.
+        _clips.SetValign(Gtk.Align.Start);
+        var clipsCard = Ui.Card(clipsBody);
+        clipsCard.SetValign(Gtk.Align.Start);
+        clipsCard.SetVexpand(false);
+        Root.Append(clipsCard);
 
         var drag = Gtk.GestureDrag.New();
         double start = 0;
@@ -226,10 +231,12 @@ public sealed class TimelinePage
                 {
                     var name = _area.CreatePangoLayout(clip.Source);
                     cr.SetSourceRgb(0.969, 0.945, 0.910);
-                    cr.MoveTo(_rtl ? x + width - 8 - Math.Min(width - 16, 120) : x + 8, top + 6);
                     cr.Save();
                     cr.Rectangle(x + 4, top, Math.Max(0, width - 8), TrackHeight);
+                    // Clip first: Clip() clears the path and its current point, so the text position comes after.
                     cr.Clip();
+                    name.GetPixelSize(out var textWidth, out _);
+                    cr.MoveTo(_rtl ? x + width - 8 - Math.Min(width - 16, textWidth) : x + 8, top + 6);
                     PangoCairo.Functions.ShowLayout(cr, name);
                     cr.Restore();
                 }
