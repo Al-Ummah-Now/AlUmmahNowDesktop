@@ -129,7 +129,8 @@ jobs:
             shot uploads scheduled $lang $theme 1440x900
             shot videos "" $lang $theme 1440x900; shot videos bulk $lang $theme 1440x900
             shot videos "" $lang $theme 1920x1080; shot videos "" $lang $theme 1024x700
-            n=$((n+9))
+            shot analytics "" $lang $theme 1440x900; shot analytics "" $lang $theme 1920x1080; shot analytics "" $lang $theme 1024x700
+            n=$((n+12))
           done; done
           for lang in en ar; do shot videos search $lang dark 1440x900; shot videos edit $lang dark 1440x900; shot videos delete $lang dark 1440x900; n=$((n+3)); done
           grep -h AUTOMATION artifacts/review/*.log

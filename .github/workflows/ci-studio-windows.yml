@@ -125,7 +125,7 @@ jobs:
           $env:AUN_STAGE_DIR = $stage; $env:AUN_WATCH_DIR = $watch
           $failed = @()
           foreach ($lang in "en","ar") { foreach ($theme in "dark","light") {
-            foreach ($shot in @(@("uploads","","1440x900"), @("uploads","channels","1440x900"), @("uploads","","1920x1032"), @("uploads","","1024x700"), @("uploads","scheduled","1440x900"), @("videos","","1440x900"), @("videos","bulk","1440x900"), @("videos","","1920x1032"), @("videos","","1024x700"))) {
+            foreach ($shot in @(@("uploads","","1440x900"), @("uploads","channels","1440x900"), @("uploads","","1920x1032"), @("uploads","","1024x700"), @("uploads","scheduled","1440x900"), @("videos","","1440x900"), @("videos","bulk","1440x900"), @("videos","","1920x1032"), @("videos","","1024x700"), @("analytics","","1440x900"), @("analytics","","1920x1032"), @("analytics","","1024x700"))) {
               $state = if ($shot[1]) { $shot[1] } else { "closed" }
               $name = "windows-$($shot[0])-$state-$lang-$theme-$($shot[2])"
               ./scripts/windows-studio-shot.ps1 $exe $lang $theme $shot[2] $shot[1] $name $out $shot[0]
