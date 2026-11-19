@@ -135,6 +135,8 @@ internal static class LanternGlass
         t["StudioSelectedTextBrush"] = B(dark ? Color.FromArgb(0xFF, 0xFF, 0xC4, 0x6B) : Color.FromArgb(0xFF, 0x6B, 0x3B, 0x00));
         t["StudioMutedBrush"] = B(muted);
         t["StudioDangerBrush"] = B(C("ErrorText"));
+        t["StudioDangerFillBrush"] = B(C("ErrorFill"));
+        t["StudioOnDangerFillBrush"] = B(C("OnErrorFill"));
 
         // NavigationView: Acrylic pane, transparent content (the Studio page brush sits over Mica), gold selection.
         t["NavigationViewExpandedPaneBackground"] = t["StudioSidebarBrush"];
@@ -171,6 +173,34 @@ internal static class LanternGlass
         EndPoint = new Windows.Foundation.Point(0, 1),
         GradientStops = { new GradientStop { Color = top, Offset = 0 }, new GradientStop { Color = bottom, Offset = 1 } },
     };
+
+    /// <summary>
+    /// A dialog in Lantern Glass: the frosted menu surface with a gold edge and rounded corners. A
+    /// destructive action (Delete, Sign out, Cancel upload) is red and Cancel stays the default; any
+    /// other action is the gold default button.
+    /// </summary>
+    public static ContentDialog Dialog(ContentDialog dialog, bool destructive)
+    {
+        dialog.Background = Res("StudioMenuBrush");
+        dialog.BorderBrush = Res("StudioEdgeStrongBrush");
+        dialog.BorderThickness = new Thickness(1);
+        dialog.CornerRadius = new CornerRadius(14);
+        if (destructive && !string.IsNullOrEmpty(dialog.PrimaryButtonText))
+        {
+            var danger = new Style(typeof(Button)) { BasedOn = (Style)Application.Current.Resources["DefaultButtonStyle"] };
+            danger.Setters.Add(new Setter(Control.BackgroundProperty, Res("StudioDangerFillBrush")));
+            danger.Setters.Add(new Setter(Control.ForegroundProperty, Res("StudioOnDangerFillBrush")));
+            danger.Setters.Add(new Setter(Control.BorderBrushProperty, Res("StudioDangerFillBrush")));
+            dialog.PrimaryButtonStyle = danger;
+            dialog.DefaultButton = ContentDialogButton.Close;
+        }
+        else if (!string.IsNullOrEmpty(dialog.PrimaryButtonText))
+        {
+            dialog.DefaultButton = ContentDialogButton.Primary;
+        }
+
+        return dialog;
+    }
 
     /// <summary>A Studio brush for the app's theme; transparent if the theme failed to load (never a crash).</summary>
     public static Brush Res(string key)

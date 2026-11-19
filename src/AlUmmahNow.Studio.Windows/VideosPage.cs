@@ -449,7 +449,8 @@ internal sealed class VideosPage
             CloseButtonText = _l["common.cancel"],
             DefaultButton = ContentDialogButton.Close,
         };
-        return await dialog.ShowAsync() == ContentDialogResult.Primary;
+        // Edit and bulk edit: Apply/Save is the gold default.
+        return await LanternGlass.Dialog(dialog, destructive: false).ShowAsync() == ContentDialogResult.Primary;
     }
 
     private async Task EditAsync(StudioVideo v)

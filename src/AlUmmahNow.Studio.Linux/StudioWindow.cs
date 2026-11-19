@@ -119,6 +119,9 @@ public sealed class StudioWindow
         }
 
         BuildStates();
+        // Each page has its own width: a GTK Stack is otherwise as wide as its widest page, hidden or not.
+        _pages.SetHhomogeneous(false);
+        _body.SetHhomogeneous(false);
         _body.SetVexpand(true);
         _body.SetHexpand(true);
         _body.AddCssClass("studio-content");
