@@ -175,10 +175,17 @@ public sealed class StudioWindow
     /// <summary>CI: whether the header search has keyboard focus (it must not when the window opens).</summary>
     public bool SearchHasFocus => Window.GetFocus() is { } f && (f == _searchText || f.IsAncestor(_searchBox));
 
+    /// <summary>CI: whether any text field has keyboard focus (none may when the window opens).</summary>
+    public bool FieldHasFocus => Window.GetFocus() is Gtk.Text or Gtk.Entry or Gtk.TextView or Gtk.SpinButton;
+
     /// <summary>Moves focus off the header search to the current page in the sidebar (already a tab stop).</summary>
+    /// <summary>
+    /// The window opens at rest, as the web does: GTK focuses the first field it finds (the header search,
+    /// or a page's own search). Focus moves to the current page in the sidebar, which is already a tab stop.
+    /// </summary>
     private void Settle()
     {
-        if (!SearchHasFocus) return;
+        if (!SearchHasFocus && !FieldHasFocus) return;
         if (_nav.GetSelectedRow() is { } row) row.GrabFocus();
         else Window.SetFocus(null);
     }

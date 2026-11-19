@@ -72,6 +72,8 @@ jobs:
           # Studio opens at rest, as the web: the header search never takes focus on its own.
           grep -q "searchFocused=False" artifacts/studio/shell-en.log
           grep -q "searchFocused=False" artifacts/studio/shell-ar.log
+          # No text field at all on open, on any page (the Videos page has its own search field).
+          for n in shell-en shell-ar videos-en videos-ar; do grep -q "fieldFocused=False" artifacts/studio/$n.log; done
           grep -P "^check box\tSeerah" artifacts/studio/videos-en.atspi.txt
           grep -P "^button\tUpload 3 videos$" artifacts/studio/upload-staged-en.atspi.txt
           gst-discoverer-1.0 source.mp4.out.mp4 | tee artifacts/studio/discover.txt

@@ -234,7 +234,7 @@ public sealed partial class App : Application
                 var pass = job != null ? job.Status == EncodeStatus.Completed
                     : automation == "shell" ? shell.State == ShellState.Ready && shell.ActiveChannel != null
                     : uploadsDone || tabName != "uploads";
-                File.WriteAllText(ResultPath, $"AUTOMATION {tabName} page={pages.Current} upload={pages.IsVisible(StudioPages.Uploads)} analytics={pages.IsVisible(StudioPages.Analytics)} bulkSchedule={uploadsVm.BulkScheduleOn} scene={scene} shell={shell.State} channel={shell.ActiveChannel?.Id} accounts={shell.AccountList.Count} uploads={snapshot.Count} uploadsDone={uploadsDone} encode={job?.Status} encoder={job?.UsedEncoder?.Name} error={job?.Error} searchFocused={window.SearchHasFocus} RESULT {(pass ? "PASS" : "FAIL")}");
+                File.WriteAllText(ResultPath, $"AUTOMATION {tabName} page={pages.Current} upload={pages.IsVisible(StudioPages.Uploads)} analytics={pages.IsVisible(StudioPages.Analytics)} bulkSchedule={uploadsVm.BulkScheduleOn} scene={scene} shell={shell.State} channel={shell.ActiveChannel?.Id} accounts={shell.AccountList.Count} uploads={snapshot.Count} uploadsDone={uploadsDone} encode={job?.Status} encoder={job?.UsedEncoder?.Name} error={job?.Error} searchFocused={window.SearchHasFocus} fieldFocused={window.FieldHasFocus} RESULT {(pass ? "PASS" : "FAIL")}");
                 Exit();
             };
             _endTimer.Start();

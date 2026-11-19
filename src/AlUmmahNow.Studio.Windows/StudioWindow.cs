@@ -185,9 +185,13 @@ internal sealed class StudioWindow
     public bool SearchHasFocus => _searchText?.XamlRoot is { } r && ReferenceEquals(Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(r), _searchText);
 
     /// <summary>Moves focus off the header search when the window (or the signed-in Studio) first appears.</summary>
+    /// <summary>CI: whether any text field has keyboard focus (none may when the window opens).</summary>
+    public bool FieldHasFocus => Typing();
+
     private void Settle()
     {
-        if (!SearchHasFocus) return;
+        // The header search, or a page's own field (WinUI focuses the first one it finds).
+        if (!SearchHasFocus && !Typing()) return;
         if (_nav.SelectedItem is ListViewItem selected) selected.Focus(FocusState.Programmatic);
         else _nav.Focus(FocusState.Programmatic);
     }
