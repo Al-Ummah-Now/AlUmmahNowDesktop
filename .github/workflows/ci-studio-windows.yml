@@ -97,6 +97,8 @@ jobs:
           if (-not (Select-String -Quiet "`tIdentityMenu`tActing as" artifacts/studio/shell-en.uia.txt)) { throw "the identity menu has no accessible name" }
           # Studio opens at rest, as the web: the header search never takes focus on its own.
           foreach ($n in "shell-en","shell-ar") { if (-not (Select-String -Quiet -SimpleMatch "searchFocused=False" "artifacts/studio/$n.txt")) { throw "$n opened with focus in the header search" } }
+          # No text field at all on open, on any page (the Videos page has its own search field).
+          foreach ($n in "shell-en","shell-ar","videos-en","videos-ar") { if (-not (Select-String -Quiet -SimpleMatch "fieldFocused=False" "artifacts/studio/$n.txt")) { throw "$n opened with focus in a text field" } }
           if (-not (Select-String -Quiet -SimpleMatch "Masjid Media Team · Channel · Editor" artifacts/studio/channels-en.uia.txt)) { throw "channel options are not tagged 'Channel'" }
           if (-not (Select-String -Quiet -SimpleMatch "Masjid Media Team • قناة • محرّر" artifacts/studio/channels-ar.uia.txt)) { throw "Arabic channel options are not tagged «قناة»" }
           if (-not (Select-String -Quiet -SimpleMatch "Switch to Amina Studio" artifacts/studio/accounts-en.uia.txt)) { throw "people are not in the identity menu" }
