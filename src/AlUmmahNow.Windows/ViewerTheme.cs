@@ -13,7 +13,8 @@ internal static class ViewerTheme
 {
     public static void Apply(Application app)
     {
-        var themes = Fanous.ReadXamlColors(Fanous.File("Fanous.Colors.xaml"));
+        // Fully qualified: inside AlUmmahNow.*, "Fanous" alone names the registry namespace AlUmmahNow.Fanous.
+        var themes = AlUmmahNow.App.Theme.Fanous.ReadXamlColors(AlUmmahNow.App.Theme.Fanous.File("Fanous.Colors.xaml"));
         Fill(Theme(app, "Dark"), themes["Default"]);
         Fill(Theme(app, "Light"), themes["Light"]);
     }
