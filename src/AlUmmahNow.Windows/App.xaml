@@ -6,7 +6,7 @@
     <ResourceDictionary>
       <ResourceDictionary.MergedDictionaries>
         <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
-        <!-- Generated Fanous dictionaries (Epic 10) merge here. -->
+        <!-- The Fawanees accent is added at start-up from the registry's colours (ViewerTheme.cs). -->
       </ResourceDictionary.MergedDictionaries>
     </ResourceDictionary>
   </Application.Resources>

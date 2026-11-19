@@ -80,9 +80,9 @@ public sealed class MainWindow
     {
         Adw.StyleManager.GetDefault().SetColorScheme(_settings.Theme switch
         {
-            ThemePreference.Dark => Adw.ColorScheme.ForceDark,
+            // Light or Dark only (owner rule): an old "System" setting reads as Dark.
             ThemePreference.Light => Adw.ColorScheme.ForceLight,
-            _ => Adw.ColorScheme.Default,
+            _ => Adw.ColorScheme.ForceDark,
         });
     }
 

@@ -7,15 +7,12 @@
     <!-- Lantern Glass: the owner's lantern-string art and the Fawanees tokens (scripts/sync-fanous.sh). -->
     <EmbeddedResource Include="Assets\lantern-string.png" LogicalName="studio/lantern-string.png" />
     <EmbeddedResource Include="Assets\app-icon.png" LogicalName="studio/app-icon.png" />
-    <EmbeddedResource Include="Theme\fanous\winui\*.xaml" LogicalName="studio/fanous/%(Filename)%(Extension)" />
-    <EmbeddedResource Include="Theme\fanous\gtk\*.css" LogicalName="studio/fanous/%(Filename)%(Extension)" />
-    <!-- The native registry's GTK materials (FanousThemes.cs, also from the registry, compiles in). -->
-    <EmbeddedResource Include="Theme\fanous\native\*.css" LogicalName="studio/fanous/native-%(Filename)%(Extension)" />
     <EmbeddedResource Include="Theme\*.xaml" LogicalName="studio/theme/%(Filename)%(Extension)" />
     <EmbeddedResource Include="Theme\*.css" LogicalName="studio/theme/%(Filename)%(Extension)" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="CommunityToolkit.Mvvm" />
     <ProjectReference Include="..\AlUmmahNow.CoreBridge\AlUmmahNow.CoreBridge.csproj" />
+    <ProjectReference Include="..\AlUmmahNow.App\AlUmmahNow.App.csproj" />
   </ItemGroup>
 </Project>

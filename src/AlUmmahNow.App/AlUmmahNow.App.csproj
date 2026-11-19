@@ -7,6 +7,11 @@
     <ProjectReference Include="..\AlUmmahNow.CoreBridge\AlUmmahNow.CoreBridge.csproj" />
     <EmbeddedResource Include="I18n\en.json" LogicalName="i18n.en.json" />
     <EmbeddedResource Include="I18n\ar.json" LogicalName="i18n.ar.json" />
+    <!-- Fawanees tokens from the shared native theme registry (scripts/sync-fanous.sh), for Studio and the viewer. -->
+    <EmbeddedResource Include="Theme\fanous\winui\*.xaml" LogicalName="fanous/%(Filename)%(Extension)" />
+    <EmbeddedResource Include="Theme\fanous\gtk\*.css" LogicalName="fanous/%(Filename)%(Extension)" />
+    <!-- The native registry: its GTK stylesheets (FanousThemes.cs, also from the registry, compiles in). -->
+    <EmbeddedResource Include="Theme\fanous\native\*.css" LogicalName="fanous/native-%(Filename)%(Extension)" />
   </ItemGroup>
   <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
     <PackageReference Include="System.Text.Json" />

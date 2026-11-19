@@ -5,6 +5,10 @@ using System.Text.Json;
 
 namespace AlUmmahNow.App.Services
 {
+    /// <summary>
+    /// Light or Dark (owner rule: no "System" choice). <see cref="System"/> only remains so settings saved
+    /// by older versions still load; every app reads it as Dark.
+    /// </summary>
     public enum ThemePreference { System, Dark, Light }
 
     public sealed class AppSettings

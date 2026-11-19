@@ -24,6 +24,15 @@ public sealed partial class App : Application
     {
         InitializeComponent();
         UnhandledException += (_, e) => ReportCrash("unhandled: " + e.Message + "\n" + e.Exception);
+        try
+        {
+            ViewerTheme.Apply(this);
+        }
+        catch (Exception ex)
+        {
+            // Never a dead viewer over styling: report it, keep the stock accent.
+            ReportCrash("theme: " + ex);
+        }
     }
 
     private static void ReportCrash(string text)
