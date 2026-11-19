@@ -119,8 +119,9 @@ internal sealed class AnalyticsPage
             row.Children.Add(tile);
             var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
             // The page's direction orders and aligns each line, never the title's script: an Arabic title on the
-            // English page stays at the start, and the views line never turns around.
-            text.Children.Add(new TextBlock { Text = Localizer.Isolate(v.TitleFor(_l.Language)), FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis, TextReadingOrder = TextReadingOrder.UseFlowDirection });
+            // English page stays at the start, and the views line never turns around. Titles wrap to two lines
+            // (the card is narrow at the 1024 window).
+            text.Children.Add(new TextBlock { Text = Localizer.Isolate(v.TitleFor(_l.Language)), FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextWrapping = TextWrapping.WrapWholeWords, MaxLines = 2, TextTrimming = TextTrimming.CharacterEllipsis, TextReadingOrder = TextReadingOrder.UseFlowDirection });
             text.Children.Add(new TextBlock { Text = _l.Format("studio.videos.views", _l.Number(v.Views)), FontSize = 12, Foreground = LanternGlass.Res("StudioMutedBrush"), TextReadingOrder = TextReadingOrder.UseFlowDirection });
             Grid.SetColumn(text, 2);
             row.Children.Add(text);
