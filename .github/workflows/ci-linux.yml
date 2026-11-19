@@ -34,9 +34,11 @@ jobs:
           LIBGL_ALWAYS_SOFTWARE: "1"
         run: |
           mkdir -p artifacts/linux
-          # QA's test library is purged regularly: pick a current video instead of pinning one.
-          read video captions < <(python3 scripts/pick-qa-video.py)
-          export AUN_EXPECT_CAPTION=$captions
+          # The watch scenarios play a committed fixture (video + captions), never a remote stream: opening
+          # QA's HLS stream failed now and then on the runner and turned the gate red without a bug.
+          export AUN_FIXTURE_MEDIA=$PWD/tests/fixtures/watch
+          video=fixture
+          export AUN_EXPECT_CAPTION=1
           run() {
             dbus-run-session -- xvfb-run -a -s "-screen 0 1280x800x24" scripts/linux-scenario.sh "$1" "$2" "$3" "$4" artifacts/linux 2>&1 | tee artifacts/linux/$4.log || true
           }
