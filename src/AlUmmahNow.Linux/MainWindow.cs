@@ -287,10 +287,13 @@ public sealed class MainWindow
         if (string.IsNullOrEmpty(url)) return;
         try
         {
-            var data = await _http.GetByteArrayAsync(url);
+            // A local file (the demo catalog's title cards) is read from disk: HttpClient has no file:// scheme.
+            var data = Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.IsFile
+                ? await File.ReadAllBytesAsync(uri.LocalPath)
+                : await _http.GetByteArrayAsync(url);
             picture.SetPaintable(Gdk.Texture.NewFromBytes(GLib.Bytes.New(data)));
         }
-        catch (Exception ex) when (ex is HttpRequestException || ex is TaskCanceledException || ex is GLib.GException)
+        catch (Exception ex) when (ex is HttpRequestException || ex is TaskCanceledException || ex is GLib.GException || ex is IOException)
         {
             // A missing thumbnail leaves the placeholder area empty.
         }
