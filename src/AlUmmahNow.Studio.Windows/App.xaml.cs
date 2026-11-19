@@ -32,20 +32,39 @@ public sealed partial class App : Application
     public App()
     {
         InitializeComponent();
-        // CI and screenshots: AUN_THEME=dark|light; otherwise Studio follows Windows. Only settable here, before any window.
+        // Light or Dark (no "System"): the saved choice, Dark by default; CI and screenshots force one with
+        // AUN_THEME=dark|light. Only settable here, before any window.
         var theme = Environment.GetEnvironmentVariable("AUN_THEME");
-        if (theme is "dark" or "light") RequestedTheme = theme == "dark" ? ApplicationTheme.Dark : ApplicationTheme.Light;
+        if (theme is not ("dark" or "light"))
+        {
+            var saved = new SettingsStore(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AlUmmahNowStudio", "settings.json")).Load();
+            theme = saved.Theme == ThemePreference.Light ? "light" : "dark";
+        }
+
+        RequestedTheme = theme == "dark" ? ApplicationTheme.Dark : ApplicationTheme.Light;
         UnhandledException += (_, e) =>
         {
             Log.For("app").Error("unhandled exception", e.Exception);
             File.AppendAllText(ResultPath + ".crash.txt", LogScrubber.Scrub(e.Exception.ToString()) + "\n");
         };
+
     }
 
     private static string ResultPath => Environment.GetEnvironmentVariable("AUN_RESULT") ?? "aun-studio-result.txt";
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
+        // Application.Resources only exists from here on (not in App()).
+        try
+        {
+            LanternGlass.Apply(this);
+        }
+        catch (Exception ex)
+        {
+            // Never a dead Studio over styling: report it, keep the stock look.
+            File.AppendAllText(ResultPath + ".crash.txt", "theme: " + LogScrubber.Scrub(ex.ToString()) + "\n");
+        }
+
         var localizer = new Localizer(Environment.GetEnvironmentVariable("AUN_LANG") is { Length: > 0 } l ? l : "ar");
         var automation = Environment.GetEnvironmentVariable("AUN_AUTOMATION") ?? "";
         var tabName = Environment.GetEnvironmentVariable("AUN_TAB") ?? "uploads";
@@ -155,6 +174,7 @@ public sealed partial class App : Application
         window.AddPage(StudioPages.Encode, localizer["studio.tab.encode"], Symbol.Video, encodePage.Root);
         window.AddPage(StudioPages.Timeline, localizer["studio.tab.timeline"], Symbol.Edit, timeline.Root);
         window.UsePages(pages);
+        window.SearchRequested += (_, q) => videos.SearchFor(q);
         window.Window.Activate();
         // Features are re-read when Studio comes back to the foreground (at most once a minute).
         window.Window.Activated += (sender, e) =>
@@ -214,7 +234,7 @@ public sealed partial class App : Application
                 var pass = job != null ? job.Status == EncodeStatus.Completed
                     : automation == "shell" ? shell.State == ShellState.Ready && shell.ActiveChannel != null
                     : uploadsDone || tabName != "uploads";
-                File.WriteAllText(ResultPath, $"AUTOMATION {tabName} page={pages.Current} upload={pages.IsVisible(StudioPages.Uploads)} analytics={pages.IsVisible(StudioPages.Analytics)} bulkSchedule={uploadsVm.BulkScheduleOn} scene={scene} shell={shell.State} channel={shell.ActiveChannel?.Id} accounts={shell.AccountList.Count} uploads={snapshot.Count} uploadsDone={uploadsDone} encode={job?.Status} encoder={job?.UsedEncoder?.Name} error={job?.Error} RESULT {(pass ? "PASS" : "FAIL")}");
+                File.WriteAllText(ResultPath, $"AUTOMATION {tabName} page={pages.Current} upload={pages.IsVisible(StudioPages.Uploads)} analytics={pages.IsVisible(StudioPages.Analytics)} bulkSchedule={uploadsVm.BulkScheduleOn} scene={scene} shell={shell.State} channel={shell.ActiveChannel?.Id} accounts={shell.AccountList.Count} uploads={snapshot.Count} uploadsDone={uploadsDone} encode={job?.Status} encoder={job?.UsedEncoder?.Name} error={job?.Error} searchFocused={window.SearchHasFocus} RESULT {(pass ? "PASS" : "FAIL")}");
                 Exit();
             };
             _endTimer.Start();

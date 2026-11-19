@@ -1,36 +1,56 @@
+using System.Runtime.InteropServices;
 using AlUmmahNow.App.I18n;
 using AlUmmahNow.CoreBridge.Logging;
 using AlUmmahNow.CoreBridge.Passkeys;
 using AlUmmahNow.CoreBridge.Studio;
 using AlUmmahNow.Studio.Shell;
+using Microsoft.UI;
+using Microsoft.UI.Input;
+using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
+using Microsoft.UI.Xaml.Media;
+using Windows.UI;
 
 namespace AlUmmahNow.Studio.WindowsApp;
 
 /// <summary>
-/// The Studio window: top navigation for the pages, channel picker and account menu, and a body
-/// that shows sign-in, loading and error states or the selected page.
+/// The Studio window (Lantern Glass): Mica window; a night title bar with the lantern string, the app
+/// name, video search and the caption buttons; an Acrylic sidebar headed by the one identity menu
+/// (channels and people) with the pages under it, an icon rail in narrow windows; the page with its
+/// title. Sign-in, loading and error states replace the sidebar and page.
 /// </summary>
 internal sealed class StudioWindow
 {
     private static readonly Logger Logger = Log.For("ui");
+    private const double SidebarWidth = 264;
+    private const double RailWidth = 72;
 
     private readonly Localizer _l;
     private readonly StudioShellViewModel _shell;
     private readonly FlowDirection _direction;
     private readonly Grid _body = new();
-    private readonly NavigationView _nav;
-    private readonly Dictionary<string, FrameworkElement> _pages = new();
-    private readonly ComboBox _channelPicker;
-    private readonly TextBlock _channelHeading;
-    private readonly DropDownButton _accountButton;
-    private readonly MenuFlyout _accountMenu = new() { Placement = Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.BottomEdgeAlignedRight };
-    private bool _syncingPicker;
+    private readonly Grid _studio = new();
+    private readonly Border _sidebar;
+    private readonly ListView _nav = new() { SelectionMode = ListViewSelectionMode.Single, IsItemClickEnabled = false };
+    private readonly ContentControl _page = new() { HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch };
+    private readonly TextBlock _pageTitle = new() { FontSize = 26, FontWeight = Microsoft.UI.Text.FontWeights.Bold, TextTrimming = TextTrimming.CharacterEllipsis };
+    private readonly Dictionary<string, (FrameworkElement Page, string Title, ListViewItem Item, TextBlock Label)> _pages = new();
+    private readonly Button _identityButton = new() { HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch };
+    private readonly Flyout _identityFlyout = new() { Placement = FlyoutPlacementMode.BottomEdgeAlignedLeft };
+    private readonly Border _search;
+    private TextBox? _searchText;
+    private bool _readySettled;
+    private readonly Grid _titleBar = new() { Height = 48 };
+    private readonly List<ListViewItem> _order = new();
     private StudioPages? _studioPages;
     private bool _syncingPages;
+    private bool _rail;
+    // The web Fawanees header's colours for the app's theme (Light or Dark), from the registry's web tokens.
+    private readonly FawaneesHeader _header = FawaneesHeader.For(Application.Current.RequestedTheme == ApplicationTheme.Dark);
 
     public StudioWindow(Localizer l, StudioShellViewModel shell, string? banner)
     {
@@ -38,86 +58,320 @@ internal sealed class StudioWindow
         _shell = shell;
         _direction = l.IsRtl ? FlowDirection.RightToLeft : FlowDirection.LeftToRight;
 
-        // "Acting as" picker: each channel shows its logo, name and a small "Channel" tag.
-        _channelPicker = new ComboBox { MinWidth = 240, VerticalAlignment = VerticalAlignment.Center, PlaceholderText = l[ActingAs.HeadingKey] };
-        AutomationProperties.SetName(_channelPicker, l[ActingAs.HeadingKey]);
-        AutomationProperties.SetAutomationId(_channelPicker, "ChannelPicker");
-        _channelPicker.SelectionChanged += (_, _) =>
-        {
-            if (_syncingPicker) return;
-            var i = _channelPicker.SelectedIndex;
-            if (i >= 0 && i < _shell.Channels.Count) _shell.SelectChannel(_shell.Channels[i]);
-        };
+        Window = new Window { Title = l["studio.name"], SystemBackdrop = new MicaBackdrop() };
+        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(Window);
+        // Arabic: a right-to-left window, so Windows puts the caption buttons on the left.
+        if (l.IsRtl) SetWindowLongPtr(hwnd, GwlExStyle, GetWindowLongPtr(hwnd, GwlExStyle) | WsExLayoutRtl);
 
-        _accountButton = new DropDownButton { Flyout = _accountMenu, VerticalAlignment = VerticalAlignment.Center };
-        AutomationProperties.SetAutomationId(_accountButton, "AccountMenu");
-
-        var bar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new Thickness(0, 0, 12, 0) };
-        _channelHeading = new TextBlock { Text = l[ActingAs.HeadingKey], VerticalAlignment = VerticalAlignment.Center, Opacity = 0.8 };
-        bar.Children.Add(_channelHeading);
-        bar.Children.Add(_channelPicker);
-        bar.Children.Add(_accountButton);
-
-        _nav = new NavigationView
+        _search = SearchPill(l["studio.videos.search"], text =>
         {
-            PaneDisplayMode = NavigationViewPaneDisplayMode.Top,
-            IsSettingsVisible = false,
-            IsBackButtonVisible = NavigationViewBackButtonVisible.Collapsed,
-            PaneFooter = bar,
-        };
-        _nav.SelectionChanged += (_, e) =>
+            ShowPage(StudioPages.Videos);
+            SearchRequested?.Invoke(this, text);
+        });
+
+        BuildTitleBar();
+        _identityButton.Flyout = _identityFlyout;
+        _identityButton.Style = IdentityButtonStyle();
+        AutomationProperties.SetAutomationId(_identityButton, "IdentityMenu");
+        _identityFlyout.FlyoutPresenterStyle = MenuStyle();
+
+        _nav.SelectionChanged += (_, _) =>
         {
-            if (e.SelectedItem is NavigationViewItem item && item.Tag is string name && _pages.TryGetValue(name, out var page))
+            if (_nav.SelectedItem is ListViewItem { Tag: string name } && _pages.TryGetValue(name, out var p))
             {
-                _nav.Content = new ScrollViewer { Content = page };
+                _page.Content = new ScrollViewer { Content = p.Page, HorizontalScrollMode = ScrollMode.Disabled, Padding = new Thickness(12, 0, 12, 24) };
+                _pageTitle.Text = p.Title;
                 if (!_syncingPages) _studioPages?.Select(name);
             }
         };
 
-        var root = new Grid { FlowDirection = _direction };
+        var side = new Grid { Padding = new Thickness(10, 12, 10, 12) };
+        side.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        side.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        side.Children.Add(LanternGlass.WithGlow(_identityButton, 12, 0.28f, 22f));
+        Grid.SetRow(_nav, 1);
+        _nav.Margin = new Thickness(0, 14, 0, 0);
+        side.Children.Add(_nav);
+        _sidebar = new Border
+        {
+            Background = LanternGlass.Res("StudioSidebarBrush"),
+            BorderBrush = LanternGlass.Res("StudioEdgeBrush"),
+            BorderThickness = new Thickness(0, 0, 1, 0),
+            Child = side,
+            Width = SidebarWidth,
+        };
+
+        var main = new Grid();
+        main.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        main.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        var heading = new Border { Padding = new Thickness(28, 20, 28, 10), Child = _pageTitle };
+        AutomationProperties.SetHeadingLevel(_pageTitle, AutomationHeadingLevel.Level1);
+        main.Children.Add(heading);
+        Grid.SetRow(_page, 1);
+        main.Children.Add(_page);
+
+        _studio.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        _studio.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        _studio.Children.Add(_sidebar);
+        Grid.SetColumn(main, 1);
+        _studio.Children.Add(main);
+
+        var root = new Grid { FlowDirection = _direction, Background = LanternGlass.Res("StudioPageBrush") };
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        if (!string.IsNullOrEmpty(banner)) root.Children.Add(new InfoBar { IsOpen = true, IsClosable = false, Severity = InfoBarSeverity.Informational, Message = banner });
-        Grid.SetRow(_body, 1);
-        root.Children.Add(_body);
+        root.Children.Add(_titleBar);
+        if (!string.IsNullOrEmpty(banner))
+        {
+            var info = new InfoBar { IsOpen = true, IsClosable = false, Severity = InfoBarSeverity.Informational, Message = banner };
+            Grid.SetRow(info, 1);
+            root.Children.Add(info);
+        }
 
-        Window = new Window { Title = l["studio.name"], Content = root };
+        Grid.SetRow(_body, 2);
+        root.Children.Add(_body);
+        Window.Content = root;
+
+        // The window opens at rest, as the web does: WinUI focuses the first field (the search), so focus
+        // moves to the page list once, which is already a tab stop (Tab order unchanged).
+        root.Loaded += (_, _) => Window.DispatcherQueue.TryEnqueue(Settle);
+        // Ctrl+K or "/" jump into the search; "/" only when you're not typing in a field.
+        root.KeyboardAcceleratorPlacementMode = Microsoft.UI.Xaml.Input.KeyboardAcceleratorPlacementMode.Hidden;
+        var ctrlK = new Microsoft.UI.Xaml.Input.KeyboardAccelerator { Key = global::Windows.System.VirtualKey.K, Modifiers = global::Windows.System.VirtualKeyModifiers.Control };
+        ctrlK.Invoked += (_, e) => e.Handled = FocusSearch();
+        root.KeyboardAccelerators.Add(ctrlK);
+        foreach (var key in new[] { (global::Windows.System.VirtualKey)191, global::Windows.System.VirtualKey.Divide })
+        {
+            var slash = new Microsoft.UI.Xaml.Input.KeyboardAccelerator { Key = key };
+            slash.Invoked += (_, e) => e.Handled = !Typing() && FocusSearch();
+            root.KeyboardAccelerators.Add(slash);
+        }
+
+        Window.ExtendsContentIntoTitleBar = true;
+        Window.SetTitleBar(_titleBar);
+        var titleBar = Window.AppWindow.TitleBar;
+        titleBar.PreferredHeightOption = TitleBarHeightOption.Tall;
+        // The header band is night blue in Light and Dark, so the caption glyphs are always light.
+        titleBar.ButtonBackgroundColor = Colors.Transparent;
+        titleBar.ButtonInactiveBackgroundColor = Colors.Transparent;
+        // The web header's icon, hover and pressed colours (nav-icon, nav-hover, nav-active-*).
+        titleBar.ButtonForegroundColor = LanternGlass.C(_header.Icon);
+        titleBar.ButtonInactiveForegroundColor = LanternGlass.C(_header.Icon);
+        titleBar.ButtonHoverBackgroundColor = LanternGlass.C(_header.Hover);
+        titleBar.ButtonHoverForegroundColor = LanternGlass.C(_header.Text);
+        titleBar.ButtonPressedBackgroundColor = LanternGlass.C(_header.ActiveBackground);
+        titleBar.ButtonPressedForegroundColor = LanternGlass.C(_header.ActiveText);
+
         // A minimum size instead of a phone layout: nothing clips or truncates at any size it can take.
-        var scale = GetDpiForWindow(WinRT.Interop.WindowNative.GetWindowHandle(Window)) / 96.0;
-        if (Window.AppWindow.Presenter is Microsoft.UI.Windowing.OverlappedPresenter presenter)
+        var scale = GetDpiForWindow(hwnd) / 96.0;
+        if (Window.AppWindow.Presenter is OverlappedPresenter presenter)
         {
             presenter.PreferredMinimumWidth = (int)Math.Ceiling(StudioWindowSize.MinWidth * scale);
             presenter.PreferredMinimumHeight = (int)Math.Ceiling(StudioWindowSize.MinHeight * scale);
         }
+
         var (width, height) = StudioWindowSize.Initial(Environment.GetEnvironmentVariable("AUN_WINDOW_SIZE"));
         Window.AppWindow.Resize(new global::Windows.Graphics.SizeInt32((int)Math.Ceiling(width * scale), (int)Math.Ceiling(height * scale)));
-        // The caption bar follows the app theme (Light/Dark), not only the Windows setting.
-        Window.AppWindow.TitleBar.PreferredTheme = Microsoft.UI.Windowing.TitleBarTheme.UseDefaultAppMode;
+        Window.SizeChanged += (_, e) => SetRail(StudioWindowSize.IsRail(e.Size.Width));
+        SetRail(StudioWindowSize.IsRail(width));
+
         _shell.PropertyChanged += (_, _) => Render();
         Render();
     }
 
     public Window Window { get; }
 
-    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    /// <summary>CI: whether the header search has keyboard focus (it must not when the window opens).</summary>
+    public bool SearchHasFocus => _searchText?.XamlRoot is { } r && ReferenceEquals(Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(r), _searchText);
+
+    /// <summary>Moves focus off the header search when the window (or the signed-in Studio) first appears.</summary>
+    private void Settle()
+    {
+        if (!SearchHasFocus) return;
+        if (_nav.SelectedItem is ListViewItem selected) selected.Focus(FocusState.Programmatic);
+        else _nav.Focus(FocusState.Programmatic);
+    }
+
+    private bool Typing() => Window.Content?.XamlRoot is { } r && Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(r) is TextBox or PasswordBox or RichEditBox or AutoSuggestBox;
+
+    private bool FocusSearch() => _search.Visibility == Visibility.Visible && _searchText != null && _searchText.Focus(FocusState.Keyboard);
+
+    /// <summary>The title-bar search was submitted: the Videos page searches for the text.</summary>
+    public event EventHandler<string>? SearchRequested;
+
+    private const int GwlExStyle = -20;
+    private const long WsExLayoutRtl = 0x00400000;
+
+    [DllImport("user32.dll")]
     private static extern uint GetDpiForWindow(IntPtr hwnd);
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
+    private static extern long GetWindowLongPtr(IntPtr hwnd, int index);
+
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")]
+    private static extern long SetWindowLongPtr(IntPtr hwnd, int index, long value);
+
+    private void BuildTitleBar()
+    {
+        _titleBar.Children.Add(LanternGlass.NightBand(_header));
+        var row = new Grid { Padding = new Thickness(14, 0, 0, 0) };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        // Room for the caption buttons (138 px at 100 %), on whichever side Windows draws them.
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(146) });
+        var app = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, VerticalAlignment = VerticalAlignment.Center };
+        // The videos app's icon (the owner's art, as is).
+        var icon = new Image { Width = 22, Height = 22 };
+        var bitmap = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage { DecodePixelWidth = 44 };
+        _ = bitmap.SetSourceAsync(StudioTheme.AppIcon().AsRandomAccessStream());
+        icon.Source = bitmap;
+        app.Children.Add(icon);
+        app.Children.Add(new TextBlock { Text = _l["studio.name"], Foreground = new SolidColorBrush(LanternGlass.C(_header.Text)), FontSize = 12.5, VerticalAlignment = VerticalAlignment.Center });
+        row.Children.Add(app);
+        Grid.SetColumn(_search, 1);
+        row.Children.Add(_search);
+        _titleBar.Children.Add(row);
+        // The search box takes clicks; the rest of the band drags the window.
+        _search.SizeChanged += (_, _) => UpdatePassthrough();
+        _titleBar.SizeChanged += (_, _) => UpdatePassthrough();
+    }
+
+    /// <summary>
+    /// The web header's search field (<c>.ah-search</c>), shape and colour: a 40 px pill with a 1 px
+    /// nav-search-border (2 px upload-focus ring while typing), the text 15 px with 16 px at its start,
+    /// and a 52 px search button at its end behind a 1 px divider, nav-icon with nav-hover on hover.
+    /// </summary>
+    private Border SearchPill(string label, Action<string> submit)
+    {
+        var h = _header;
+        var border = new SolidColorBrush(LanternGlass.C(h.SearchBorder));
+        var text = new TextBox
+        {
+            PlaceholderText = label,
+            FontSize = FawaneesHeader.SearchFontSize,
+            VerticalAlignment = VerticalAlignment.Center,
+            Padding = new Thickness(FawaneesHeader.SearchTextInset, 0, 8, 0),
+            BorderThickness = new Thickness(0),
+            MinHeight = 0,
+        };
+        // Lightweight styling: no box of its own; the pill draws the field.
+        var clear = new SolidColorBrush(Colors.Transparent);
+        foreach (var state in new[] { "", "PointerOver", "Focused" })
+        {
+            text.Resources["TextControlBackground" + state] = clear;
+            text.Resources["TextControlBorderBrush" + state] = clear;
+            text.Resources["TextControlForeground" + state] = new SolidColorBrush(LanternGlass.C(h.SearchText));
+            text.Resources["TextControlPlaceholderForeground" + state] = new SolidColorBrush(LanternGlass.C(h.SearchPlaceholder));
+        }
+
+        text.Resources["TextControlBorderThemeThicknessFocused"] = new Thickness(0);
+        AutomationProperties.SetName(text, label);
+        AutomationProperties.SetAutomationId(text, "TitleSearch");
+        AutomationProperties.SetAcceleratorKey(text, "Control+K");
+        _searchText = text;
+        text.KeyDown += (_, e) =>
+        {
+            if (e.Key != global::Windows.System.VirtualKey.Enter) return;
+            e.Handled = true;
+            submit(text.Text);
+        };
+
+        var go = new Button
+        {
+            Width = FawaneesHeader.SearchButtonWidth,
+            VerticalAlignment = VerticalAlignment.Stretch,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            Padding = new Thickness(0),
+            CornerRadius = new CornerRadius(0),
+            Background = clear,
+            BorderThickness = new Thickness(1, 0, 0, 0),
+            BorderBrush = border,
+            Foreground = new SolidColorBrush(LanternGlass.C(h.Icon)),
+            Content = new FontIcon { Glyph = "\uE721", FontSize = 18 },
+        };
+        go.Resources["ButtonBackgroundPointerOver"] = new SolidColorBrush(LanternGlass.C(h.Hover));
+        go.Resources["ButtonBackgroundPressed"] = new SolidColorBrush(LanternGlass.C(h.Hover));
+        go.Resources["ButtonForegroundPointerOver"] = new SolidColorBrush(LanternGlass.C(h.Icon));
+        go.Resources["ButtonForegroundPressed"] = new SolidColorBrush(LanternGlass.C(h.Icon));
+        go.Resources["ButtonBorderBrushPointerOver"] = border;
+        go.Resources["ButtonBorderBrushPressed"] = border;
+        AutomationProperties.SetName(go, label);
+        go.Click += (_, _) => submit(text.Text);
+
+        var row = new Grid();
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.Children.Add(text);
+        Grid.SetColumn(go, 1);
+        row.Children.Add(go);
+        var pill = new Border
+        {
+            Height = FawaneesHeader.SearchHeight,
+            Width = FawaneesHeader.SearchMaxWidth,
+            VerticalAlignment = VerticalAlignment.Center,
+            // --r-pill (999px) on a 40 px field: half the height rounds the ends fully.
+            CornerRadius = new CornerRadius(Math.Min(h.SearchRadius, FawaneesHeader.SearchHeight / 2)),
+            Background = new SolidColorBrush(LanternGlass.C(h.SearchBackground)),
+            BorderBrush = border,
+            BorderThickness = new Thickness(1),
+            Child = row,
+        };
+        text.GotFocus += (_, _) =>
+        {
+            pill.BorderBrush = new SolidColorBrush(LanternGlass.C(h.SearchFocus));
+            pill.BorderThickness = new Thickness(2);
+        };
+        text.LostFocus += (_, _) =>
+        {
+            pill.BorderBrush = border;
+            pill.BorderThickness = new Thickness(1);
+        };
+        return pill;
+    }
+
+    private void UpdatePassthrough()
+    {
+        if (_search.XamlRoot is not { } root || _search.ActualWidth <= 0) return;
+        var bounds = _search.TransformToVisual(null).TransformBounds(new global::Windows.Foundation.Rect(0, 0, _search.ActualWidth, _search.ActualHeight));
+        var s = root.RasterizationScale;
+        var rect = new global::Windows.Graphics.RectInt32((int)Math.Round(bounds.X * s), (int)Math.Round(bounds.Y * s), (int)Math.Round(bounds.Width * s), (int)Math.Round(bounds.Height * s));
+        InputNonClientPointerSource.GetForWindowId(Window.AppWindow.Id).SetRegionRects(NonClientRegionKind.Passthrough, new[] { rect });
+    }
+
+    private void SetRail(bool rail)
+    {
+        _rail = rail;
+        _sidebar.Width = rail ? RailWidth : SidebarWidth;
+        foreach (var p in _pages.Values) p.Label.Visibility = rail ? Visibility.Collapsed : Visibility.Visible;
+        _search.Width = rail ? FawaneesHeader.SearchNarrowWidth : FawaneesHeader.SearchMaxWidth;
+        RenderIdentity();
+    }
 
     public void AddPage(string name, string title, Symbol icon, FrameworkElement page)
     {
-        _pages[name] = page;
-        var item = new NavigationViewItem { Content = title, Tag = name, Icon = new SymbolIcon(icon) };
+        var label = new TextBlock { Text = title, VerticalAlignment = VerticalAlignment.Center, FontSize = 14 };
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 14, Padding = new Thickness(4, 0, 4, 0) };
+        row.Children.Add(new SymbolIcon(icon));
+        row.Children.Add(label);
+        var item = new ListViewItem { Content = row, Tag = name, MinHeight = 42, Padding = new Thickness(10, 0, 10, 0), CornerRadius = new CornerRadius(8) };
         AutomationProperties.SetAutomationId(item, "Page_" + name);
-        _nav.MenuItems.Add(item);
+        AutomationProperties.SetName(item, title);
+        ToolTipService.SetToolTip(item, title);
+        label.Visibility = _rail ? Visibility.Collapsed : Visibility.Visible;
+        _pages[name] = (page, title, item, label);
+        _order.Add(item);
+        _nav.Items.Add(item);
     }
 
     public void ShowPage(string name)
     {
-        var item = _nav.MenuItems.OfType<NavigationViewItem>().FirstOrDefault(i => (string)i.Tag == name && i.Visibility == Visibility.Visible)
-            ?? _nav.MenuItems.OfType<NavigationViewItem>().FirstOrDefault(i => i.Visibility == Visibility.Visible);
+        var item = _nav.Items.OfType<ListViewItem>().FirstOrDefault(i => (string)i.Tag == name && i.Visibility == Visibility.Visible)
+            ?? _nav.Items.OfType<ListViewItem>().FirstOrDefault(i => i.Visibility == Visibility.Visible);
         _nav.SelectedItem = item;
     }
 
-    /// <summary>Hidden-when-off pages: a tab whose feature is off is collapsed, and the window shows <see cref="StudioPages.Current"/>.</summary>
+    /// <summary>Hidden-when-off pages: a page whose feature is off leaves the sidebar, and the window shows <see cref="StudioPages.Current"/>.</summary>
     public void UsePages(StudioPages pages)
     {
         _studioPages = pages;
@@ -131,12 +385,15 @@ internal sealed class StudioWindow
         _syncingPages = true;
         try
         {
-            foreach (var item in _nav.MenuItems.OfType<NavigationViewItem>())
+            // A page whose feature is off leaves the list entirely (a collapsed item would still reach UI Automation).
+            var visible = _order.Where(i => i.Tag is not string name || pages.IsVisible(name)).ToList();
+            if (!visible.SequenceEqual(_nav.Items.OfType<ListViewItem>()))
             {
-                item.Visibility = item.Tag is string name && !pages.IsVisible(name) ? Visibility.Collapsed : Visibility.Visible;
+                _nav.Items.Clear();
+                foreach (var item in visible) _nav.Items.Add(item);
             }
 
-            if ((_nav.SelectedItem as NavigationViewItem)?.Tag as string != pages.Current) ShowPage(pages.Current);
+            if ((_nav.SelectedItem as ListViewItem)?.Tag as string != pages.Current) ShowPage(pages.Current);
         }
         finally
         {
@@ -144,8 +401,11 @@ internal sealed class StudioWindow
         }
     }
 
-    /// <summary>For CI screenshots: open the account menu.</summary>
-    public void OpenAccountMenu() => _accountMenu.ShowAt(_accountButton);
+    /// <summary>For CI screenshots: open the identity menu (formerly the account menu).</summary>
+    public void OpenAccountMenu() => _identityFlyout.ShowAt(_identityButton);
+
+    /// <summary>For CI screenshots: open the identity menu (formerly the "Acting as" picker).</summary>
+    public void OpenChannelPicker() => _identityFlyout.ShowAt(_identityButton);
 
     /// <summary>For CI screenshots: show the sign-out confirmation for the active account.</summary>
     public void AskSignOut()
@@ -164,10 +424,16 @@ internal sealed class StudioWindow
             ShellState.NoChannel => Status(_l["studio.shell.noChannelTitle"], _l["studio.shell.noChannelBody"], Action(_l["studio.shell.retry"], () => _ = _shell.RetryAsync())),
             ShellState.Error => Status(_l["studio.shell.errorTitle"], _shell.ErrorKey is { } e ? _l[e] : null, Action(_l["studio.shell.retry"], () => _ = _shell.RetryAsync())),
             ShellState.NeedsReauth => Status(_l["studio.shell.reauthTitle"], _l.Format("studio.shell.reauthBody", Localizer.Isolate(_shell.ActiveAccountName ?? "")), SignInActions()),
-            _ => _nav,
+            _ => _studio,
         });
-        RenderChannels();
-        RenderAccounts();
+        _search.Visibility = _shell.State == ShellState.Ready ? Visibility.Visible : Visibility.Collapsed;
+        if (_shell.State == ShellState.Ready && !_readySettled)
+        {
+            // The signed-in Studio replaces the sign-in state: settle once its controls exist.
+            _readySettled = true;
+            Window.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, Settle);
+        }
+        RenderIdentity();
     }
 
     private static FrameworkElement Status(string title, string? body, FrameworkElement action, string? note = null)
@@ -216,7 +482,7 @@ internal sealed class StudioWindow
         await ShowPasskeyOutcomeAsync(outcome);
     }
 
-    /// <summary>"Add a passkey" from the account menu; asks in-app before a step-up browser sign-in.</summary>
+    /// <summary>"Add a passkey" from the identity menu; asks in-app before a step-up browser sign-in.</summary>
     public async Task AddPasskeyAsync()
     {
         var outcome = await _shell.AddPasskeyAsync(_ => OnUiAsync(() => Window.Content?.XamlRoot is { } root
@@ -267,85 +533,186 @@ internal sealed class StudioWindow
         return b;
     }
 
-    private void RenderChannels()
+    /// <summary>The sidebar button (the acting identity) and the one identity menu it opens.</summary>
+    private void RenderIdentity()
     {
-        _syncingPicker = true;
-        try
+        string T(string k) => _l[k];
+        var channels = IdentityMenu.Channels(_shell.Channels, _shell.ActiveChannel, T, _l.Separator);
+        var people = IdentityMenu.Accounts(_shell.AccountList, _shell.ActiveAccount, a => _shell.NameOf(a), T, _l.Separator);
+        var current = IdentityMenu.Current(channels, people);
+        _identityButton.Visibility = current == null ? Visibility.Collapsed : Visibility.Visible;
+        if (current == null) return;
+
+        AutomationProperties.SetName(_identityButton, _l.Format(ActingAs.ButtonNameKey, current.Name));
+        ToolTipService.SetToolTip(_identityButton, current.AccessibleName);
+        var face = LanternGlass.Avatar(current.Initials, current.AvatarUrl, 36, current.Kind == IdentityKind.Account);
+        if (_rail)
         {
-            var visibility = _shell.Channels.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-            _channelPicker.Visibility = visibility;
-            _channelHeading.Visibility = visibility;
-            _channelPicker.Items.Clear();
-            foreach (var channel in _shell.Channels) _channelPicker.Items.Add(ChannelItem(channel));
-            _channelPicker.SelectedIndex = _shell.ActiveChannel is { } a ? _shell.Channels.ToList().IndexOf(a) : -1;
+            _identityButton.Padding = new Thickness(6);
+            _identityButton.Content = face;
         }
-        finally
+        else
         {
-            _syncingPicker = false;
+            var row = new Grid { ColumnSpacing = 10 };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row.Children.Add(face);
+            var text = NameAndTag(current, 14);
+            Grid.SetColumn(text, 1);
+            row.Children.Add(text);
+            var chevron = new FontIcon { Glyph = "", FontSize = 12, Foreground = LanternGlass.Res("StudioMutedBrush"), VerticalAlignment = VerticalAlignment.Center };
+            Grid.SetColumn(chevron, 2);
+            row.Children.Add(chevron);
+            _identityButton.Padding = new Thickness(10);
+            _identityButton.Content = row;
         }
-    }
 
-    /// <summary>Logo (initials until the picture loads), name and the small "Channel" tag.</summary>
-    private ComboBoxItem ChannelItem(StudioChannel channel)
-    {
-        // Our own initials: PersonPicture's own shows a generic icon for Arabic names.
-        var logo = new PersonPicture { Width = 28, Height = 28 };
-        if (Initials.For(channel.Name) is { } initials) logo.Initials = initials;
-        if (Uri.TryCreate(channel.AvatarUrl, UriKind.Absolute, out var url)) logo.ProfilePicture = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(url) { DecodePixelWidth = 56 };
-        var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-        text.Children.Add(new TextBlock { Text = channel.Name, TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 220 });
-        text.Children.Add(new TextBlock { Text = ActingAs.ChannelTag(channel, k => _l[k]), Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"], Opacity = 0.7 });
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        row.Children.Add(logo);
-        row.Children.Add(text);
-        var item = new ComboBoxItem { Content = row, Tag = channel.Id };
-        AutomationProperties.SetName(item, ActingAs.OptionText(channel, k => _l[k]));
-        return item;
-    }
-
-    /// <summary>For CI screenshots: open the "Acting as" picker.</summary>
-    public void OpenChannelPicker() => _channelPicker.IsDropDownOpen = true;
-
-    private void RenderAccounts()
-    {
-        var active = _shell.ActiveAccount;
-        _accountButton.Visibility = _shell.AccountList.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-        _accountButton.Content = (active == null ? null : _shell.NameOf(active)) ?? _l["studio.shell.account"];
-        AutomationProperties.SetName(_accountButton, active == null ? _l["studio.shell.account"] : _l.Format("studio.shell.accountMenu", _shell.NameOf(active)));
-        _accountMenu.Items.Clear();
-        foreach (var account in _shell.AccountList)
+        var menu = new StackPanel { Spacing = 2, MinWidth = 300, MaxWidth = 360 };
+        if (channels.Count > 0)
         {
-            var isActive = account.UserId == active?.UserId;
-            var item = new ToggleMenuFlyoutItem
+            menu.Children.Add(MenuHeading(_l[IdentityMenu.ChannelsHeadingKey]));
+            foreach (var r in channels)
             {
-                Text = _l.Join(_shell.NameOf(account), account.NeedsReauth ? _l["studio.shell.needsReauth"] : null),
-                IsChecked = isActive,
-            };
-            AutomationProperties.SetName(item, _l.Format("studio.shell.switchTo", _shell.NameOf(account)));
-            item.Click += (_, _) => _ = _shell.SwitchAccountAsync(account.UserId);
-            _accountMenu.Items.Add(item);
+                var channel = _shell.Channels.First(c => c.Id == r.Id);
+                menu.Children.Add(MenuRow(r, () => _shell.SelectChannel(channel)));
+            }
         }
 
-        _accountMenu.Items.Add(new MenuFlyoutSeparator());
-        var add = new MenuFlyoutItem { Text = _l["studio.shell.addAccount"], Icon = new SymbolIcon(Symbol.AddFriend) };
-        add.Click += (_, _) => _ = _shell.SignInAsync(SignInMode.AddAccount);
-        _accountMenu.Items.Add(add);
+        if (people.Count > 0)
+        {
+            menu.Children.Add(Separator());
+            menu.Children.Add(MenuHeading(_l[IdentityMenu.AccountsHeadingKey]));
+            foreach (var r in people)
+            {
+                var row = MenuRow(r, () => _ = _shell.SwitchAccountAsync(r.Id));
+                AutomationProperties.SetName(row, _l.Join(_l.Format("studio.shell.switchTo", r.Name), r.Tag));
+                menu.Children.Add(row);
+            }
+        }
+
+        menu.Children.Add(Separator());
+        menu.Children.Add(MenuAction(_l["studio.shell.addAccount"], "", null, () => _ = _shell.SignInAsync(SignInMode.AddAccount)));
+        var active = _shell.ActiveAccount;
         if (_shell.PasskeysAvailable && active != null && !active.NeedsReauth)
         {
-            var passkey = new MenuFlyoutItem { Text = _l["passkey.add"], Icon = new FontIcon { Glyph = "\uE8D7" }, IsEnabled = !_shell.PasskeyBusy };
-            AutomationProperties.SetAutomationId(passkey, "AddPasskey");
-            AutomationProperties.SetName(passkey, _l["passkey.add"]);
-            passkey.Click += (_, _) => _ = AddPasskeyAsync();
-            _accountMenu.Items.Add(passkey);
+            var passkey = MenuAction(_l["passkey.add"], "", "AddPasskey", () => _ = AddPasskeyAsync());
+            passkey.IsEnabled = !_shell.PasskeyBusy;
+            menu.Children.Add(passkey);
         }
 
-        _accountMenu.Items.Add(new MenuFlyoutSeparator());
-        foreach (var account in _shell.AccountList)
+        if (active != null)
         {
-            var signOut = new MenuFlyoutItem { Text = _l.Format("studio.shell.signOutOf", _shell.NameOf(account)) };
-            signOut.Click += (_, _) => _ = SignOutAsync(account);
-            _accountMenu.Items.Add(signOut);
+            var signOut = MenuAction(_l.Format("studio.shell.signOutOf", _shell.NameOf(active)), "", "SignOut", () => _ = SignOutAsync(active));
+            signOut.Foreground = LanternGlass.Res("StudioDangerBrush");
+            menu.Children.Add(signOut);
         }
+
+        _identityFlyout.Content = menu;
+    }
+
+    private static StackPanel NameAndTag(IdentityRow r, double size)
+    {
+        var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+        text.Children.Add(new TextBlock { Text = r.Name, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, FontSize = size, TextTrimming = TextTrimming.CharacterEllipsis });
+        text.Children.Add(new TextBlock { Text = r.Tag, FontSize = 12, Foreground = LanternGlass.Res("StudioMutedBrush"), TextTrimming = TextTrimming.CharacterEllipsis });
+        return text;
+    }
+
+    private Button MenuRow(IdentityRow r, Action pick)
+    {
+        var row = new Grid { ColumnSpacing = 10 };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.Children.Add(LanternGlass.Avatar(r.Initials, r.AvatarUrl, 32, r.Kind == IdentityKind.Account));
+        var text = NameAndTag(r, 13.5);
+        Grid.SetColumn(text, 1);
+        row.Children.Add(text);
+        if (r.IsActive)
+        {
+            var check = new FontIcon { Glyph = "", FontSize = 14, Foreground = new SolidColorBrush(LanternGlass.Gold), VerticalAlignment = VerticalAlignment.Center };
+            Grid.SetColumn(check, 2);
+            row.Children.Add(check);
+        }
+
+        var b = new Button
+        {
+            Content = row,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            Padding = new Thickness(8, 6, 8, 6),
+            CornerRadius = new CornerRadius(9),
+            BorderThickness = new Thickness(r.IsActive ? 1 : 0),
+            BorderBrush = LanternGlass.Res("StudioEdgeBrush"),
+            Background = r.IsActive ? LanternGlass.Res("StudioSelectedBrush") : new SolidColorBrush(Colors.Transparent),
+        };
+        AutomationProperties.SetName(b, r.AccessibleName);
+        AutomationProperties.SetAutomationId(b, "Identity_" + r.Id);
+        b.Click += (_, _) =>
+        {
+            _identityFlyout.Hide();
+            pick();
+        };
+        return b;
+    }
+
+    private Button MenuAction(string text, string glyph, string? id, Action click)
+    {
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
+        row.Children.Add(new FontIcon { Glyph = glyph, FontSize = 15, Width = 32 });
+        row.Children.Add(new TextBlock { Text = text, VerticalAlignment = VerticalAlignment.Center });
+        var b = new Button
+        {
+            Content = row,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Left,
+            Padding = new Thickness(8, 8, 8, 8),
+            CornerRadius = new CornerRadius(9),
+            BorderThickness = new Thickness(0),
+            Background = new SolidColorBrush(Colors.Transparent),
+        };
+        AutomationProperties.SetName(b, text);
+        if (id != null) AutomationProperties.SetAutomationId(b, id);
+        b.Click += (_, _) =>
+        {
+            _identityFlyout.Hide();
+            click();
+        };
+        return b;
+    }
+
+    private static TextBlock MenuHeading(string text) => new()
+    {
+        Text = text,
+        FontSize = 12,
+        FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+        Foreground = LanternGlass.Res("StudioMutedBrush"),
+        Margin = new Thickness(10, 6, 10, 2),
+    };
+
+    private static Border Separator() => new() { Height = 1, Margin = new Thickness(6, 6, 6, 6), Background = LanternGlass.Res("StudioEdgeBrush") };
+
+    private static Style IdentityButtonStyle()
+    {
+        var style = new Style(typeof(Button)) { BasedOn = (Style)Application.Current.Resources["DefaultButtonStyle"] };
+        style.Setters.Add(new Setter(Control.BackgroundProperty, LanternGlass.Res("StudioCardBrush")));
+        style.Setters.Add(new Setter(Control.BorderBrushProperty, LanternGlass.Res("StudioEdgeBrush")));
+        style.Setters.Add(new Setter(Control.BorderThicknessProperty, new Thickness(1)));
+        style.Setters.Add(new Setter(Control.CornerRadiusProperty, new CornerRadius(12)));
+        return style;
+    }
+
+    private static Style MenuStyle()
+    {
+        var style = new Style(typeof(FlyoutPresenter));
+        style.Setters.Add(new Setter(Control.BackgroundProperty, LanternGlass.Res("StudioMenuBrush")));
+        style.Setters.Add(new Setter(Control.BorderBrushProperty, LanternGlass.Res("StudioEdgeStrongBrush")));
+        style.Setters.Add(new Setter(Control.BorderThicknessProperty, new Thickness(1)));
+        style.Setters.Add(new Setter(Control.CornerRadiusProperty, new CornerRadius(14)));
+        style.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(8)));
+        style.Setters.Add(new Setter(FrameworkElement.MaxWidthProperty, 400.0));
+        return style;
     }
 
     private async Task SignOutAsync(StudioAccount account)

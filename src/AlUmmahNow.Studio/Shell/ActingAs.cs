@@ -22,12 +22,15 @@ public static class ActingAs
 
     public static string RoleKey(ChannelRole role) => "studio.shell.channelRole." + role.ToString().ToLowerInvariant();
 
-    /// <summary>The tag under a channel's name: "Channel", plus the role when the user isn't the owner.</summary>
-    public static string ChannelTag(StudioChannel channel, Func<string, string> text) =>
-        channel.Role == ChannelRole.Owner ? text(ChannelTagKey) : text(ChannelTagKey) + " · " + text(RoleKey(channel.Role));
+    /// <summary>
+    /// The tag under a channel's name: "Channel", plus the role when the user isn't the owner, joined with
+    /// the language's separator (Localizer.Separator: a middle dot in English, a bullet in Arabic).
+    /// </summary>
+    public static string ChannelTag(StudioChannel channel, Func<string, string> text, string separator) =>
+        channel.Role == ChannelRole.Owner ? text(ChannelTagKey) : text(ChannelTagKey) + separator + text(RoleKey(channel.Role));
 
-    /// <summary>One line for a channel option (screen readers, plain-text lists): "Name · Channel".</summary>
-    public static string OptionText(StudioChannel channel, Func<string, string> text) => channel.Name + " · " + ChannelTag(channel, text);
+    /// <summary>One line for a channel option (screen readers, plain-text lists): name, separator, tag.</summary>
+    public static string OptionText(StudioChannel channel, Func<string, string> text, string separator) => channel.Name + separator + ChannelTag(channel, text, separator);
 
     /// <summary>The grapheme clusters of a short string (e.g. initials "MT" → "M", "T").</summary>
     public static IEnumerable<string> Graphemes(string text)

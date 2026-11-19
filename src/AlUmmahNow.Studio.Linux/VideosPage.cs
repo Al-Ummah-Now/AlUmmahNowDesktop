@@ -28,6 +28,13 @@ public sealed class VideosPage
     private readonly Gtk.Box _deleted = Gtk.Box.New(Gtk.Orientation.Vertical, 6);
     private bool _syncingSearch;
 
+    /// <summary>The header's search: show this text in the search field and search for it.</summary>
+    public void SearchFor(string text)
+    {
+        _search.SetText(text);
+        _vm.Search.Submit(text);
+    }
+
     public VideosPage(Localizer l, VideosViewModel vm, UploadsViewModel uploads, Gtk.Window window)
     {
         _l = l;

@@ -32,6 +32,13 @@ internal sealed class VideosPage
     private readonly CheckBox _all;
     private readonly MenuFlyout _playlistMenu = new();
 
+    /// <summary>The title-bar search: show this text in the search box and search for it.</summary>
+    public void SearchFor(string text)
+    {
+        _search.Text = text;
+        _vm.Search.Submit(text);
+    }
+
     public VideosPage(Localizer l, VideosViewModel vm, UploadsViewModel uploads, Func<XamlRoot?> root)
     {
         _l = l;
