@@ -486,7 +486,7 @@ internal sealed class StudioWindow
     public async Task AddPasskeyAsync()
     {
         var outcome = await _shell.AddPasskeyAsync(_ => OnUiAsync(() => Window.Content?.XamlRoot is { } root
-            ? Confirm.AskAsync(root, _direction, _l["passkey.stepUp.title"], _l["passkey.stepUp.body"], _l["passkey.stepUp.continue"], _l["common.cancel"])
+            ? Confirm.AskAsync(root, _direction, _l["passkey.stepUp.title"], _l["passkey.stepUp.body"], _l["passkey.stepUp.continue"], _l["common.cancel"], destructive: false)
             : Task.FromResult(false)));
         if (Window.Content?.XamlRoot is not { } xamlRoot) return;
         if (outcome == PasskeyOutcome.Done) await Confirm.TellAsync(xamlRoot, _direction, _l["passkey.add"], _l["passkey.added"], _l["passkey.ok"]);
@@ -503,7 +503,7 @@ internal sealed class StudioWindow
             return;
         }
 
-        if (await Confirm.AskAsync(root, _direction, _l["passkey.error.title"], _l.Format(key, PasskeyOutcome.MaxPasskeys), _l["passkey.otherWay"], _l["passkey.ok"])) await _shell.SignInAsync(SignInMode.Default);
+        if (await Confirm.AskAsync(root, _direction, _l["passkey.error.title"], _l.Format(key, PasskeyOutcome.MaxPasskeys), _l["passkey.otherWay"], _l["passkey.ok"], destructive: false)) await _shell.SignInAsync(SignInMode.Default);
     }
 
     private Task<bool> OnUiAsync(Func<Task<bool>> show)

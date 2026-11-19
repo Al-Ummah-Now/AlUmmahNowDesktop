@@ -4,12 +4,13 @@ using Microsoft.UI.Xaml.Controls;
 namespace AlUmmahNow.Studio.WindowsApp;
 
 /// <summary>
-/// In-app confirmation (ContentDialog), never an OS message box. Cancel is the default button, so
-/// Enter and Escape both cancel and Narrator lands on Cancel first.
+/// In-app confirmation (ContentDialog), never an OS message box, in Lantern Glass. For a destructive
+/// action Cancel is the default button, so Enter and Escape both cancel and Narrator lands on Cancel
+/// first, and the action is red; otherwise the action is the gold default.
 /// </summary>
 public static class Confirm
 {
-    public static async Task<bool> AskAsync(XamlRoot root, FlowDirection direction, string title, string body, string confirmLabel, string cancelLabel)
+    public static async Task<bool> AskAsync(XamlRoot root, FlowDirection direction, string title, string body, string confirmLabel, string cancelLabel, bool destructive = true)
     {
         var dialog = new ContentDialog
         {
@@ -21,7 +22,7 @@ public static class Confirm
             CloseButtonText = cancelLabel,
             DefaultButton = ContentDialogButton.Close,
         };
-        return await dialog.ShowAsync() == ContentDialogResult.Primary;
+        return await LanternGlass.Dialog(dialog, destructive).ShowAsync() == ContentDialogResult.Primary;
     }
 
     /// <summary>A message with one button.</summary>
@@ -36,6 +37,6 @@ public static class Confirm
             CloseButtonText = closeLabel,
             DefaultButton = ContentDialogButton.Close,
         };
-        await dialog.ShowAsync();
+        await LanternGlass.Dialog(dialog, destructive: false).ShowAsync();
     }
 }
