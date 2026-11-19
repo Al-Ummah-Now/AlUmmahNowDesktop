@@ -106,7 +106,8 @@ app.OnActivate += (_, _) =>
         {
             settings.RecentSearches = recents.ToList();
             settingsStore.Save(settings);
-        });
+        },
+        language: () => localizer.Language);
     var analyticsVm = new AnalyticsViewModel(shell, api);
     var videos = new VideosPage(localizer, videosVm, uploadsVm, window.Window);
     var analytics = new AnalyticsPage(localizer, analyticsVm);

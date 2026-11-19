@@ -32,13 +32,15 @@ public sealed partial class VideosViewModel : ObservableObject
     [ObservableProperty] private string _query = "";
     [ObservableProperty] private IReadOnlyList<DeletedVideo> _deleted = Array.Empty<DeletedVideo>();
 
-    public VideosViewModel(StudioShellViewModel shell, IStudioApi api, Func<IReadOnlyList<string>> loadRecents, Action<IReadOnlyList<string>> saveRecents, Func<DateTimeOffset>? now = null, Func<TimeSpan, CancellationToken, Task>? delay = null)
+    /// <param name="language">The page language: suggestions show a video's title in it, as its card does.</param>
+    public VideosViewModel(StudioShellViewModel shell, IStudioApi api, Func<IReadOnlyList<string>> loadRecents, Action<IReadOnlyList<string>> saveRecents, Func<DateTimeOffset>? now = null, Func<TimeSpan, CancellationToken, Task>? delay = null, Func<string>? language = null)
     {
         _shell = shell;
         _api = api;
+        _language = language ?? (() => "en");
         Search = new SuggestViewModel(
-            (text, ct) => _api.SuggestAsync(text, _shell.ActiveChannel?.Id, ct),
-            text => Items.Select(v => v.Title),
+            async (text, ct) => (await _api.SuggestAsync(text, _shell.ActiveChannel?.Id, ct).ConfigureAwait(true)).Select(Localized).ToList(),
+            text => Items.Select(v => v.TitleFor(_language())),
             loadRecents(),
             saveRecents,
             delay,
@@ -57,6 +59,17 @@ public sealed partial class VideosViewModel : ObservableObject
     }
 
     public SuggestViewModel Search { get; }
+
+    private readonly Func<string> _language;
+
+    /// <summary>
+    /// A video suggestion shows the title its card shows (the page language's, see <c>TitleFor</c>). The
+    /// API's suggestions carry only the original title, so a video on this page is named from its card.
+    /// </summary>
+    private Suggestion Localized(Suggestion s) =>
+        s.Kind == SuggestionKind.Video && s.Id != null && Items.FirstOrDefault(v => v.Id == s.Id) is { } video
+            ? new Suggestion(video.TitleFor(_language()), s.Kind, s.Id, s.Subtitle)
+            : s;
 
     public IReadOnlyCollection<string> Selected => _selected.ToList();
 

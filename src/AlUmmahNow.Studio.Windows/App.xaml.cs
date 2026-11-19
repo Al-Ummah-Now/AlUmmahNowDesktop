@@ -160,7 +160,8 @@ public sealed partial class App : Application
             {
                 settings.RecentSearches = recents.ToList();
                 settingsStore.Save(settings);
-            });
+            },
+            language: () => localizer.Language);
         var analyticsVm = new AnalyticsViewModel(shell, api);
         var videos = new VideosPage(localizer, videosVm, uploadsVm, () => window.Window.Content?.XamlRoot);
         var analytics = new AnalyticsPage(localizer, analyticsVm);
