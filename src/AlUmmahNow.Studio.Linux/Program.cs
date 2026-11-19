@@ -66,7 +66,10 @@ else
 }
 
 var api = new StudioApiClient(transport);
-var encode = new EncodeQueue(new GStreamerEncodeBackend());
+// Review frames, scene "active": a demo queue with one finished and one running job.
+var encode = demo && scene == "active"
+    ? new EncodeQueue(new AlUmmahNow.Studio.Demo.DemoEncodeBackend("vaapih264enc"), AlUmmahNow.Studio.Demo.DemoEncodeBackend.Clock())
+    : new EncodeQueue(new GStreamerEncodeBackend());
 
 var app = Adw.Application.New("net.alummahnow.Studio", Gio.ApplicationFlags.NonUnique);
 var exitCode = 0;
@@ -156,6 +159,7 @@ app.OnActivate += (_, _) =>
             else if (scene == "channels") window.OpenChannelPicker();
             else if (scene == "signout") window.AskSignOut();
             else if (scene == "scheduled") uploads.RunScene(scene);
+            else if (scene == "active") AlUmmahNow.Studio.Demo.DemoEncodeBackend.Seed(encode, Path.GetTempPath());
             // The demo's second channel has no videos: the Videos empty state.
             else if (scene == "emptychannel") shell.SelectChannel(shell.Channels.ElementAtOrDefault(1));
             else videos.RunScene(scene);

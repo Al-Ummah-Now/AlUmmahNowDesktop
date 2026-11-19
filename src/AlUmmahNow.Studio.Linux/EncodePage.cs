@@ -34,6 +34,10 @@ public sealed class EncodePage
 
     public Gtk.Box Root { get; }
 
+    /// <summary>While running: the percent done, then the time left once there is an estimate (joined by Localizer.Join).</summary>
+    private string? Pace(EncodeJob job) => job.Status != EncodeStatus.Running ? null
+        : _l.Join(_l.Percent(job.Progress), job.Remaining is { } left ? _l.Format("studio.encode.remaining", _l.Duration(Math.Ceiling(left.TotalSeconds))) : null);
+
     public void Tick()
     {
         if (Interlocked.Exchange(ref _dirty, 0) == 0) return;
@@ -63,7 +67,7 @@ public sealed class EncodePage
             var encoder = job.UsedEncoder is { } e ? _l[e.Kind == EncoderKind.Hardware ? "studio.encode.hardware" : "studio.encode.software"] + " (" + e.Name + ")" : "";
             text.Append(name);
             text.Append(bar);
-            var line = Ui.Label(_l.Join(status, encoder), dim: true);
+            var line = Ui.Label(_l.Join(status, Pace(job), encoder), dim: true);
             line.AddCssClass("caption");
             text.Append(line);
             row.Append(text);

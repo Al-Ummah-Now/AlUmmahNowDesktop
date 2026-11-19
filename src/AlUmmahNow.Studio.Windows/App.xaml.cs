@@ -119,7 +119,10 @@ public sealed partial class App : Application
             });
         _uploads = new UploadsViewModel(shell, api, uploadServiceFor, Path.Combine(dataRoot, demo ? "demo" : "studio"));
         var uploadsVm = _uploads;
-        var encode = new EncodeQueue(new MediaFoundationEncodeBackend());
+        // Review frames, scene "active": a demo queue with one finished and one running job.
+        var encode = demo && scene == "active"
+            ? new EncodeQueue(new AlUmmahNow.Studio.Demo.DemoEncodeBackend("Media Foundation H.264"), AlUmmahNow.Studio.Demo.DemoEncodeBackend.Clock())
+            : new EncodeQueue(new MediaFoundationEncodeBackend());
 
         var banner = demo ? localizer["studio.shell.demo"] : environment.Name != "prod" ? localizer.Format("studio.shell.environment", environment.Name.ToUpperInvariant()) : null;
         // Store screenshots (.github/workflows/store-screenshots.yml) show the demo data without the notice.
@@ -216,6 +219,7 @@ public sealed partial class App : Application
                 else if (scene == "signout") window.AskSignOut();
                 else if (scene == "addpasskey") _ = window.AddPasskeyAsync();
                 else if (scene == "scheduled") uploads.RunScene(scene);
+                else if (scene == "active") AlUmmahNow.Studio.Demo.DemoEncodeBackend.Seed(encode, Path.GetTempPath());
                 // The demo's second channel has no videos: the Videos empty state.
                 else if (scene == "emptychannel") shell.SelectChannel(shell.Channels.ElementAtOrDefault(1));
                 else videos.RunScene(scene);
