@@ -90,6 +90,7 @@ app.OnActivate += (_, _) =>
     // Review and store screenshots (AUN_STORE_SHOT=1, as on Windows) show the demo data without the notice:
     // real users never see it.
     if (demo && Environment.GetEnvironmentVariable("AUN_STORE_SHOT") == "1") banner = null;
+    StudioStyle.Apply();
     var window = new StudioWindow(app, localizer, shell, banner);
 
     uploadsVm.Watch(Environment.GetEnvironmentVariable("AUN_WATCH_DIR") is { Length: > 0 } dir ? dir : settings.WatchFolder);
@@ -149,6 +150,7 @@ app.OnActivate += (_, _) =>
         GLib.Functions.TimeoutAdd(0, 4000, () =>
         {
             if (scene == "accounts") window.OpenAccountMenu();
+            else if (scene == "channels") window.OpenChannelPicker();
             else if (scene == "signout") window.AskSignOut();
             else if (scene == "scheduled") uploads.RunScene(scene);
             // The demo's second channel has no videos: the Videos empty state.
