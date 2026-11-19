@@ -161,7 +161,7 @@ public sealed class FollowUpTests
         await analytics.LoadAsync();
         await videos.LoadAsync();
         Assert.Equal(StudioPages.Videos, pages.Current);
-        Assert.Equal(new[] { StudioPages.Videos, StudioPages.Encode, StudioPages.Timeline }, StudioPages.All.Where(pages.IsVisible));
+        Assert.Equal(new[] { StudioPages.Videos, StudioPages.Encode, StudioPages.Timeline, StudioPages.Settings }, StudioPages.All.Where(pages.IsVisible));
         Assert.NotEmpty(videos.Items);
         Assert.False(videos.IsLoading);
         Assert.False(analytics.IsLoading);

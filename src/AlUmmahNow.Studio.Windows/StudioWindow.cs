@@ -36,6 +36,8 @@ internal sealed class StudioWindow
     private readonly Grid _studio = new();
     private readonly Border _sidebar;
     private readonly ListView _nav = new() { SelectionMode = ListViewSelectionMode.Single, IsItemClickEnabled = false };
+    // Settings sits at the foot of the sidebar.
+    private readonly ListView _navFooter = new() { SelectionMode = ListViewSelectionMode.Single, IsItemClickEnabled = false };
     private readonly ContentControl _page = new() { HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch };
     private readonly TextBlock _pageTitle = new() { FontSize = 26, FontWeight = Microsoft.UI.Text.FontWeights.Bold, TextTrimming = TextTrimming.CharacterEllipsis };
     private readonly Dictionary<string, (FrameworkElement Page, string Title, ListViewItem Item, TextBlock Label)> _pages = new();
@@ -75,19 +77,25 @@ internal sealed class StudioWindow
         AutomationProperties.SetAutomationId(_identityButton, "IdentityMenu");
         _identityFlyout.FlyoutPresenterStyle = MenuStyle();
 
-        _nav.SelectionChanged += (_, _) =>
+        foreach (var list in new[] { _nav, _navFooter })
         {
-            if (_nav.SelectedItem is ListViewItem { Tag: string name } && _pages.TryGetValue(name, out var p))
+            var other = list == _nav ? _navFooter : _nav;
+            list.SelectionChanged += (_, _) =>
             {
+                if (list.SelectedItem is not ListViewItem { Tag: string name } || !_pages.TryGetValue(name, out var p)) return;
+                other.SelectedItem = null;
                 _page.Content = new ScrollViewer { Content = p.Page, HorizontalScrollMode = ScrollMode.Disabled, Padding = new Thickness(12, 0, 12, 24) };
                 _pageTitle.Text = p.Title;
                 if (!_syncingPages) _studioPages?.Select(name);
-            }
-        };
+            };
+        }
 
         var side = new Grid { Padding = new Thickness(10, 12, 10, 12) };
         side.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         side.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        side.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        Grid.SetRow(_navFooter, 2);
+        side.Children.Add(_navFooter);
         side.Children.Add(LanternGlass.WithGlow(_identityButton, 12, 0.28f, 22f));
         Grid.SetRow(_nav, 1);
         _nav.Margin = new Thickness(0, 14, 0, 0);
@@ -364,15 +372,30 @@ internal sealed class StudioWindow
         ToolTipService.SetToolTip(item, title);
         label.Visibility = _rail ? Visibility.Collapsed : Visibility.Visible;
         _pages[name] = (page, title, item, label);
-        _order.Add(item);
-        _nav.Items.Add(item);
+        if (name == StudioPages.Settings)
+        {
+            _navFooter.Items.Add(item);
+        }
+        else
+        {
+            _order.Add(item);
+            _nav.Items.Add(item);
+        }
     }
+
+    private IEnumerable<ListViewItem> NavItems => _nav.Items.Concat(_navFooter.Items).OfType<ListViewItem>();
+
+    /// <summary>Signs an account out after the in-app confirmation (Settings).</summary>
+    public Task SignOut(StudioAccount account) => SignOutAsync(account);
 
     public void ShowPage(string name)
     {
-        var item = _nav.Items.OfType<ListViewItem>().FirstOrDefault(i => (string)i.Tag == name && i.Visibility == Visibility.Visible)
-            ?? _nav.Items.OfType<ListViewItem>().FirstOrDefault(i => i.Visibility == Visibility.Visible);
-        _nav.SelectedItem = item;
+        var items = NavItems.ToList();
+        var item = items.FirstOrDefault(i => (string)i.Tag == name && i.Visibility == Visibility.Visible)
+            ?? items.FirstOrDefault(i => i.Visibility == Visibility.Visible);
+        if (item == null) return;
+        if (_navFooter.Items.Contains(item)) _navFooter.SelectedItem = item;
+        else _nav.SelectedItem = item;
     }
 
     /// <summary>Hidden-when-off pages: a page whose feature is off leaves the sidebar, and the window shows <see cref="StudioPages.Current"/>.</summary>
@@ -397,7 +420,8 @@ internal sealed class StudioWindow
                 foreach (var item in visible) _nav.Items.Add(item);
             }
 
-            if ((_nav.SelectedItem as ListViewItem)?.Tag as string != pages.Current) ShowPage(pages.Current);
+            var selected = (_nav.SelectedItem ?? _navFooter.SelectedItem) as ListViewItem;
+            if (selected?.Tag as string != pages.Current) ShowPage(pages.Current);
         }
         finally
         {
@@ -440,23 +464,66 @@ internal sealed class StudioWindow
         RenderIdentity();
     }
 
+    /// <summary>
+    /// A sign-in or status state (Lantern Glass): the app's lantern icon in a gold glow, the title and
+    /// text, a spinner while waiting, and the action(s) in the card's footer, end-aligned.
+    /// </summary>
     private static FrameworkElement Status(string title, string? body, FrameworkElement action, string? note = null)
     {
-        var panel = new StackPanel { Spacing = 16, MaxWidth = 520, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-        var heading = new TextBlock { Text = title, Style = (Style)Application.Current.Resources["SubtitleTextBlockStyle"], TextWrapping = TextWrapping.Wrap, HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center };
+        var panel = new StackPanel { Spacing = 14, HorizontalAlignment = HorizontalAlignment.Stretch };
+        var icon = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage { DecodePixelWidth = 224 };
+        _ = icon.SetSourceAsync(StudioTheme.AppIcon().AsRandomAccessStream());
+        var lantern = new Border
+        {
+            Width = 112,
+            Height = 112,
+            CornerRadius = new CornerRadius(56),
+            BorderThickness = new Thickness(3),
+            BorderBrush = new SolidColorBrush(Color.FromArgb(0x99, LanternGlass.GoldEdge.R, LanternGlass.GoldEdge.G, LanternGlass.GoldEdge.B)),
+            Background = new ImageBrush { ImageSource = icon, Stretch = Stretch.UniformToFill },
+            HorizontalAlignment = HorizontalAlignment.Center,
+        };
+        panel.Children.Add(LanternGlass.WithGlow(lantern, 56, 0.6f, 40f));
+        var heading = new TextBlock { Text = title, FontSize = 22, FontWeight = Microsoft.UI.Text.FontWeights.Bold, TextWrapping = TextWrapping.Wrap, HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center };
         AutomationProperties.SetHeadingLevel(heading, AutomationHeadingLevel.Level1);
         panel.Children.Add(heading);
-        if (!string.IsNullOrEmpty(body)) panel.Children.Add(new TextBlock { Text = body, TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center, Opacity = 0.8 });
-        action.HorizontalAlignment = HorizontalAlignment.Center;
-        panel.Children.Add(action);
+        if (!string.IsNullOrEmpty(body)) panel.Children.Add(new TextBlock { Text = body, TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center, Foreground = LanternGlass.Res("StudioMutedBrush") });
         if (!string.IsNullOrEmpty(note))
         {
-            var n = new TextBlock { Text = note, TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center };
+            var n = new TextBlock { Text = note, TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center, Foreground = LanternGlass.Res("StudioDangerBrush") };
             AutomationProperties.SetLiveSetting(n, AutomationLiveSetting.Assertive);
             panel.Children.Add(n);
         }
 
-        return panel;
+        // A spinner is part of the card; buttons go in its footer.
+        var waiting = action is ProgressRing;
+        if (waiting)
+        {
+            action.HorizontalAlignment = HorizontalAlignment.Center;
+            panel.Children.Add(action);
+        }
+
+        var card = LanternGlass.Card(panel, waiting ? null : action, 18);
+        card.Width = 520;
+        card.HorizontalAlignment = HorizontalAlignment.Center;
+        card.VerticalAlignment = VerticalAlignment.Center;
+        var stage = new Grid
+        {
+            Background = new RadialGradientBrush
+            {
+                Center = new global::Windows.Foundation.Point(0.5, 0.42),
+                GradientOrigin = new global::Windows.Foundation.Point(0.5, 0.42),
+                RadiusX = 0.5,
+                RadiusY = 0.6,
+                GradientStops =
+                {
+                    new GradientStop { Color = Color.FromArgb(0x26, 0xF4, 0xAE, 0x3A), Offset = 0 },
+                    new GradientStop { Color = Color.FromArgb(0x00, 0xF4, 0xAE, 0x3A), Offset = 1 },
+                },
+            },
+        };
+        stage.Children.Add(card);
+        return stage;
     }
 
     /// <summary>
@@ -474,9 +541,12 @@ internal sealed class StudioWindow
         AutomationProperties.SetAutomationId(other, "SignIn");
         AutomationProperties.SetName(other, _l["passkey.otherWay"]);
         other.Click += (_, _) => _ = _shell.SignInAsync(SignInMode.Default);
-        var panel = new StackPanel { Spacing = 8 };
-        panel.Children.Add(passkey);
+        // In the card's footer: the other way first, the passkey (primary) at the end.
+        passkey.HorizontalAlignment = HorizontalAlignment.Stretch;
+        other.HorizontalAlignment = HorizontalAlignment.Stretch;
+        var panel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         panel.Children.Add(other);
+        panel.Children.Add(passkey);
         return panel;
     }
 
