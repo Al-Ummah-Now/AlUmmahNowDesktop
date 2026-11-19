@@ -17,6 +17,7 @@ Gst.Functions.Init(ref gstArgs);
 
 const string Css = """
     .caption-overlay { background-color: rgba(9,48,65,0.82); color: #f7f1e8; padding: 6px 14px; border-radius: 6px; font-size: 20px; }
+    scale > trough > slider { background-color: @fanous_primary; }
     """;
 
 var environment = AppEnvironment.Resolve(Environment.GetEnvironmentVariable("AUN_ENV"), AppEnvironment.BuildDefault);
@@ -32,7 +33,10 @@ var exitAfter = int.TryParse(Environment.GetEnvironmentVariable("AUN_EXIT_AFTER"
 
 var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
 http.DefaultRequestHeaders.UserAgent.ParseAdd("AlUmmahNowLinux/0.1");
-AlUmmahNow.CoreBridge.ICatalogClient catalog = new HttpCatalogClient(http, environment.VideosApi);
+// AUN_DEMO=1: the fixture catalog for review frames and store screenshots (no network, never in a normal launch).
+AlUmmahNow.CoreBridge.ICatalogClient catalog = Environment.GetEnvironmentVariable("AUN_DEMO") == "1"
+    ? new AlUmmahNow.App.Demo.DemoCatalogClient(Environment.GetEnvironmentVariable("AUN_DEMO_THUMBS"))
+    : new HttpCatalogClient(http, environment.VideosApi);
 // CI's watch scenario plays a local fixture (AUN_FIXTURE_MEDIA), never a remote stream.
 if (Environment.GetEnvironmentVariable("AUN_FIXTURE_MEDIA") is { Length: > 0 } fixtureMedia) catalog = new AlUmmahNow.App.Demo.FixtureMediaCatalog(catalog, fixtureMedia);
 var localizer = new Localizer(settings.Language);

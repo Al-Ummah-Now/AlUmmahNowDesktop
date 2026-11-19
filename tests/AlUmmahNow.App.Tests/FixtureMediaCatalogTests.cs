@@ -25,7 +25,15 @@ public class FixtureMediaCatalogTests
         Assert.True(File.Exists(file.LocalPath));
 
         var tracks = await catalog.GetSubtitleTracksAsync(FixtureMediaCatalog.VideoId);
-        var cues = WebVtt.Parse(await catalog.GetTextAsync(Assert.Single(tracks).Url));
+        Assert.Equal(new[] { "en", "ar" }, tracks.Select(t => t.Language));
+        foreach (var track in tracks)
+        {
+            var text = await catalog.GetTextAsync(track.Url);
+            // In-fiction captions: the frames never announce a fixture.
+            Assert.DoesNotContain("fixture", text, StringComparison.OrdinalIgnoreCase);
+        }
+
+        var cues = WebVtt.Parse(await catalog.GetTextAsync(tracks[0].Url));
         // A caption on screen from the first second to past the scenario's 26 s.
         Assert.Equal(0, cues[0].Start);
         Assert.True(cues[cues.Count - 1].End > 26);

@@ -10,7 +10,8 @@ namespace AlUmmahNow.App.Demo
 {
     /// <summary>
     /// Fixture catalog for CI screenshots (<c>AUN_DEMO=1</c>): canned videos in every home rail, no
-    /// network. Never used in a normal launch. Thumbnails are read from <c>thumb-1.png</c>,
+    /// network. Never used in a normal launch. Thumbnails are title cards <c>thumb-1.jpg</c>… (one per
+    /// video), or else <c>thumb-1.png</c>,
     /// <c>thumb-2.png</c>… in an optional folder (the store screenshot workflow draws them); without
     /// it the cards show their placeholder.
     /// </summary>
@@ -62,6 +63,10 @@ namespace AlUmmahNow.App.Demo
         private static string? Thumbnail(string? folder, int index)
         {
             if (string.IsNullOrEmpty(folder)) return null;
+            // A title card per video (thumb-N.jpg, tests/fixtures/viewer-thumbs) when present; else the store
+            // workflow's eight drawn backgrounds (thumb-1.png … thumb-8.png), reused.
+            var card = Path.Combine(folder, "thumb-" + (index + 1) + ".jpg");
+            if (File.Exists(card)) return new Uri(Path.GetFullPath(card)).AbsoluteUri;
             var path = Path.Combine(folder, "thumb-" + (index % 8 + 1) + ".png");
             return File.Exists(path) ? new Uri(Path.GetFullPath(path)).AbsoluteUri : null;
         }
