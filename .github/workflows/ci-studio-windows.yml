@@ -22,7 +22,8 @@ jobs:
       - name: Enable Media Foundation (optional feature on Windows Server)
         run: Install-WindowsFeature Server-Media-Foundation | Format-List
       - name: Install ffmpeg to generate a source clip
-        run: choco install ffmpeg -y --no-progress
+        shell: pwsh
+        run: ./scripts/install-ffmpeg.ps1
       - name: Native passkeys (webauthn.dll) - struct layout against the SDK header, unit tests
         shell: pwsh
         run: |
