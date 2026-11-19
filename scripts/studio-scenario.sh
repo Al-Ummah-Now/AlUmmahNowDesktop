@@ -7,6 +7,11 @@ name=$4 out=$5
 export XDG_CONFIG_HOME=$(mktemp -d) XDG_STATE_HOME=$(mktemp -d) AUN_SIMULATE_UPLOADS=1
 openbox &
 sleep 2
+# Review shots: a compositor, so translucent menus show the window behind them, blurred.
+if [ -n "${AUN_COMPOSITOR:-}" ] && command -v picom >/dev/null; then
+  picom --backend xrender --blur-method kernel --blur-kern 15x15gaussian --blur-background >/dev/null 2>&1 &
+  sleep 1
+fi
 dotnet src/AlUmmahNow.Studio.Linux/bin/Release/net9.0/alummahnow-studio.dll &
 app=$!
 sleep 15

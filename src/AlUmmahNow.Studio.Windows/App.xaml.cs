@@ -191,6 +191,7 @@ public sealed partial class App : Application
             _sceneTimer.Tick += (_, _) =>
             {
                 if (scene == "accounts") window.OpenAccountMenu();
+                else if (scene == "channels") window.OpenChannelPicker();
                 else if (scene == "signout") window.AskSignOut();
                 else if (scene == "addpasskey") _ = window.AddPasskeyAsync();
                 else if (scene == "scheduled") uploads.RunScene(scene);

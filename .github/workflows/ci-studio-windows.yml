@@ -47,6 +47,8 @@ jobs:
           ./scripts/windows-studio-scenario.ps1 $exe ar uploads shell shell-ar $out
           ./scripts/windows-studio-scenario.ps1 $exe en uploads shell shell-en $out
           ./scripts/windows-studio-scenario.ps1 $exe en uploads shell accounts-en $out "" accounts
+          ./scripts/windows-studio-scenario.ps1 $exe en uploads shell channels-en $out "" channels
+          ./scripts/windows-studio-scenario.ps1 $exe ar uploads shell channels-ar $out "" channels
           ./scripts/windows-studio-scenario.ps1 $exe ar uploads shell signout-ar $out "" signout
           ./scripts/windows-studio-scenario.ps1 $exe en uploads shell addpasskey-en $out "" addpasskey
           ./scripts/windows-studio-scenario.ps1 $exe ar uploads shell addpasskey-ar $out "" addpasskey
@@ -78,7 +80,7 @@ jobs:
           }
           if (-not (Select-String -Quiet -SimpleMatch "page=uploads upload=True analytics=True bulkSchedule=True" "artifacts/studio/shell-en.txt")) { throw "shell-en lost Upload or Analytics" }
           if (-not (Select-String -Quiet -SimpleMatch "`tPage_uploads`t" "artifacts/studio/shell-en.uia.txt")) { throw "shell-en has no Upload tab" }
-          foreach ($n in "features-off-en","features-off-ar","uploads-ar","signin-ar","signin-en","shell-ar","shell-en","accounts-en","signout-ar","addpasskey-en","addpasskey-ar","upload-staged-ar","upload-staged-en","videos-ar","videos-en","search-ar","edit-en","bulk-ar","delete-en","analytics-ar","analytics-en","timeline-ar","encode-en") {
+          foreach ($n in "features-off-en","features-off-ar","uploads-ar","signin-ar","signin-en","shell-ar","shell-en","accounts-en","channels-en","channels-ar","signout-ar","addpasskey-en","addpasskey-ar","upload-staged-ar","upload-staged-en","videos-ar","videos-en","search-ar","edit-en","bulk-ar","delete-en","analytics-ar","analytics-en","timeline-ar","encode-en") {
             if (-not (Select-String -Quiet "RESULT PASS" "artifacts/studio/$n.txt")) { throw "$n failed" }
             if (Test-Path "artifacts/studio/$n.txt.hang.txt") { throw "$n did not exit" }
           }
@@ -92,7 +94,9 @@ jobs:
           if (-not (Select-String -Quiet -SimpleMatch "`tAddPasskey`tAdd a passkey" artifacts/studio/accounts-en.uia.txt)) { throw "'Add a passkey' not in the account menu" }
           if (-not (Select-String -Quiet -SimpleMatch "Passkey added" artifacts/studio/addpasskey-en.uia.txt)) { throw "no 'Passkey added' dialog" }
           if (-not (Select-String -Quiet -SimpleMatch "أُضيف مفتاح المرور" artifacts/studio/addpasskey-ar.uia.txt)) { throw "no Arabic 'Passkey added' dialog" }
-          if (-not (Select-String -Quiet "`tChannelPicker`tChannel" artifacts/studio/shell-en.uia.txt)) { throw "channel picker has no accessible name" }
+          if (-not (Select-String -Quiet "`tChannelPicker`tActing as" artifacts/studio/shell-en.uia.txt)) { throw "'Acting as' picker has no accessible name" }
+          if (-not (Select-String -Quiet -SimpleMatch "Masjid Media Team · Channel · Editor" artifacts/studio/channels-en.uia.txt)) { throw "channel options are not tagged 'Channel'" }
+          if (-not (Select-String -Quiet -SimpleMatch "Masjid Media Team · قناة · محرّر" artifacts/studio/channels-ar.uia.txt)) { throw "Arabic channel options are not tagged «قناة»" }
           if (-not (Select-String -Quiet "`tAccountMenu`tAccount: Amina Studio" artifacts/studio/shell-en.uia.txt)) { throw "account menu has no accessible name" }
           if (-not (Select-String -Quiet "Sign out of" artifacts/studio/accounts-en.uia.txt)) { throw "account menu items not exposed" }
           if (-not (Select-String -Quiet "`tVideoSearch`tSearch your videos" artifacts/studio/videos-en.uia.txt)) { throw "video search has no accessible name" }
@@ -102,6 +106,26 @@ jobs:
           if (-not (Select-String -Quiet "h264" artifacts/studio/discover.txt)) { throw "output is not H.264" }
           # ffmpeg -i with no output file always exits 1; the checks above are the gate.
           exit 0
+      - name: Acting as picker review shots (window only; en/ar, default/minimum size, Light/Dark, closed/open)
+        shell: pwsh
+        run: |
+          # The runner's screen is 1024x768: too small for the default window.
+          ./scripts/set-resolution.ps1 1920 1080
+          $out = (New-Item -ItemType Directory -Force artifacts/acting-as).FullName
+          $exe = (Resolve-Path "src/AlUmmahNow.Studio.Windows/bin/x64/Release/net9.0-windows10.0.22621.0/win-x64/AlUmmahNowStudio.exe").Path
+          $failed = @()
+          foreach ($lang in "en","ar") { foreach ($size in @(@("desktop","1280x800"), @("narrow","1100x720"))) { foreach ($theme in "light","dark") { foreach ($state in "active","open") {
+            $name = "studio-windows-picker-$state-$lang-$($size[0])-$theme"
+            $scene = if ($state -eq "open") { "channels" } else { "" }
+            ./scripts/windows-studio-shot.ps1 $exe $lang $theme $size[1] $scene $name $out
+            if (-not (Select-String -Quiet "RESULT PASS" "$out/$name.txt")) { $failed += $name }
+          } } } }
+          if ($failed.Count -gt 0) { throw "shots failed: $failed" }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: studio-windows-acting-as
+          path: artifacts/acting-as
       - uses: actions/upload-artifact@v4
         if: always()
         with:
