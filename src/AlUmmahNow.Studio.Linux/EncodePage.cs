@@ -28,7 +28,12 @@ public sealed class EncodePage
         _empty.SetVisible(true);
         body.Append(_empty);
         body.Append(_rows);
-        Root.Append(Ui.Card(body));
+        // The card keeps its rows' own height: it never spreads the jobs over the page.
+        _rows.SetValign(Gtk.Align.Start);
+        var card = Ui.Card(body);
+        card.SetValign(Gtk.Align.Start);
+        card.SetVexpand(false);
+        Root.Append(card);
         encode.Changed += (_, _) => Interlocked.Exchange(ref _dirty, 1);
     }
 
