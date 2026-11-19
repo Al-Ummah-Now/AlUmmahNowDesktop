@@ -17,8 +17,11 @@ public sealed class StudioPages
     public const string Encode = "encode";
     public const string Timeline = "timeline";
 
+    /// <summary>Studio settings (Light/Dark, language, accounts, passkeys, watched folder): always there.</summary>
+    public const string Settings = "settings";
+
     /// <summary>Navigation order.</summary>
-    public static readonly IReadOnlyList<string> All = new[] { Uploads, Videos, Analytics, Encode, Timeline };
+    public static readonly IReadOnlyList<string> All = new[] { Uploads, Videos, Analytics, Encode, Timeline, Settings };
 
     private readonly StudioShellViewModel _shell;
     private readonly AnalyticsViewModel _analytics;

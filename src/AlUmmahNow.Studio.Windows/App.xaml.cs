@@ -65,7 +65,6 @@ public sealed partial class App : Application
             File.AppendAllText(ResultPath + ".crash.txt", "theme: " + LogScrubber.Scrub(ex.ToString()) + "\n");
         }
 
-        var localizer = new Localizer(Environment.GetEnvironmentVariable("AUN_LANG") is { Length: > 0 } l ? l : "ar");
         var automation = Environment.GetEnvironmentVariable("AUN_AUTOMATION") ?? "";
         var tabName = Environment.GetEnvironmentVariable("AUN_TAB") ?? "uploads";
         var scene = Environment.GetEnvironmentVariable("AUN_SCENE") ?? "";
@@ -87,6 +86,8 @@ public sealed partial class App : Application
 
         var settingsStore = new SettingsStore(Path.Combine(dataRoot, "settings.json"));
         var settings = settingsStore.Load();
+        // The saved language (Settings), Arabic by default; CI and screenshots force one with AUN_LANG.
+        var localizer = new Localizer(Environment.GetEnvironmentVariable("AUN_LANG") is { Length: > 0 } l ? l : settings.Language);
         var userAgent = "AlUmmahNowStudioWindows/" + version;
 
         // The passkey sheet is modal to the Studio window; its handle is filled in once it exists.
@@ -177,6 +178,8 @@ public sealed partial class App : Application
         window.AddPage(StudioPages.Analytics, localizer["studio.tab.analytics"], Symbol.Calculator, analytics.Root);
         window.AddPage(StudioPages.Encode, localizer["studio.tab.encode"], Symbol.Video, encodePage.Root);
         window.AddPage(StudioPages.Timeline, localizer["studio.tab.timeline"], Symbol.Edit, timeline.Root);
+        var settingsPage = new SettingsPage(localizer, settings, settingsStore, shell, uploadsVm, PickFolderAsync, window.SignOut, window.AddPasskeyAsync, version);
+        window.AddPage(StudioPages.Settings, localizer["studio.tab.settings"], Symbol.Setting, settingsPage.Root);
         window.UsePages(pages);
         window.SearchRequested += (_, q) => videos.SearchFor(q);
         window.Window.Activate();

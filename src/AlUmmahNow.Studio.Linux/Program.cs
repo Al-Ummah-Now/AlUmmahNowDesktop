@@ -32,7 +32,6 @@ Gst.Module.Initialize();
 var gstArgs = Array.Empty<string>();
 Gst.Functions.Init(ref gstArgs);
 
-var localizer = new Localizer(Environment.GetEnvironmentVariable("AUN_LANG") is { Length: > 0 } lang ? lang : "ar");
 var automation = Environment.GetEnvironmentVariable("AUN_AUTOMATION") ?? "";
 var tabName = Environment.GetEnvironmentVariable("AUN_TAB") ?? "uploads";
 var scene = Environment.GetEnvironmentVariable("AUN_SCENE") ?? "";
@@ -46,6 +45,8 @@ log.Info($"Al Ummah Now Studio {version} for Linux, environment {environment.Nam
 
 var settingsStore = new SettingsStore(Path.Combine(configDir, "settings.json"));
 var settings = settingsStore.Load();
+// The saved language (Settings), Arabic by default; CI and screenshots force one with AUN_LANG.
+var localizer = new Localizer(Environment.GetEnvironmentVariable("AUN_LANG") is { Length: > 0 } lang ? lang : settings.Language);
 
 var userAgent = "AlUmmahNowStudioLinux/" + version;
 IStudioAccounts accounts;
@@ -123,6 +124,23 @@ app.OnActivate += (_, _) =>
     window.AddPage(StudioPages.Analytics, localizer["studio.tab.analytics"], "power-profile-performance-symbolic", analytics.Root);
     window.AddPage(StudioPages.Encode, localizer["studio.tab.encode"], "video-x-generic-symbolic", encodePage.Root);
     window.AddPage(StudioPages.Timeline, localizer["studio.tab.timeline"], "edit-cut-symbolic", timeline.Root);
+    async Task<string?> ChooseFolderAsync()
+    {
+        try
+        {
+            var dialog = Gtk.FileDialog.New();
+            dialog.SetTitle(localizer["studio.upload.pickFolder"]);
+            var folder = await dialog.SelectFolderAsync(window.Window);
+            return folder?.GetPath();
+        }
+        catch (GLib.GException)
+        {
+            return null;
+        }
+    }
+
+    var settingsPage = new SettingsPage(localizer, settings, settingsStore, shell, uploadsVm, ChooseFolderAsync, window.SignOut, version);
+    window.AddPage(StudioPages.Settings, localizer["studio.tab.settings"], "emblem-system-symbolic", settingsPage.Root);
     window.UsePages(pages);
     window.SearchRequested += (_, q) => videos.SearchFor(q);
     window.Window.Present();

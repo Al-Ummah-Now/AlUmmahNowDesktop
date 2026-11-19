@@ -1,7 +1,7 @@
 # One owner-review screenshot of the Studio window only (no desktop, taskbar or other windows):
 # demo data without the demo notice (AUN_STORE_SHOT=1), a forced Light/Dark theme and window size.
-# Usage: windows-studio-shot.ps1 <exe> <lang> <light|dark> <WIDTHxHEIGHT> <scene> <name> <out folder> [tab]
-param([string]$Exe, [string]$Lang, [string]$Theme, [string]$Size, [string]$Scene, [string]$Name, [string]$Out, [string]$Tab = "uploads")
+# Usage: windows-studio-shot.ps1 <exe> <lang> <light|dark> <WIDTHxHEIGHT> <scene> <name> <out folder> [tab] [demo: 1|0 (signed out)]
+param([string]$Exe, [string]$Lang, [string]$Theme, [string]$Size, [string]$Scene, [string]$Name, [string]$Out, [string]$Tab = "uploads", [string]$Demo = "1")
 Add-Type -AssemblyName System.Drawing
 Add-Type -Namespace AunShot -Name Win -MemberDefinition @"
 [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
@@ -10,7 +10,7 @@ Add-Type -Namespace AunShot -Name Win -MemberDefinition @"
 [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr h, int attr, out RECT r, int size);
 [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
 "@
-$env:AUN_LANG = $Lang; $env:AUN_TAB = $Tab; $env:AUN_AUTOMATION = "shell"; $env:AUN_DEMO = "1"; $env:AUN_STORE_SHOT = "1"
+$env:AUN_LANG = $Lang; $env:AUN_TAB = $Tab; $env:AUN_AUTOMATION = $(if ($Demo -eq "1") { "shell" } else { "" }); $env:AUN_DEMO = $Demo; $env:AUN_STORE_SHOT = "1"
 $env:AUN_THEME = $Theme; $env:AUN_WINDOW_SIZE = $Size; $env:AUN_SCENE = $Scene; $env:AUN_EXIT_AFTER = "30"
 $env:AUN_RESULT = Join-Path $Out "$Name.txt"
 $p = Start-Process -FilePath $Exe -PassThru

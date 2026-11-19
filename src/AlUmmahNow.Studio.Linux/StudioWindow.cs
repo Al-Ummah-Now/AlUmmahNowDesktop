@@ -23,6 +23,8 @@ public sealed class StudioWindow
     private readonly Gtk.Stack _pages = Gtk.Stack.New();
     private readonly Gtk.Box _sidebar = Gtk.Box.New(Gtk.Orientation.Vertical, 0);
     private readonly Gtk.ListBox _nav = Gtk.ListBox.New();
+    // Settings sits at the foot of the sidebar.
+    private readonly Gtk.ListBox _navFooter = Gtk.ListBox.New();
     // The page's title sits on the page (as on Windows); the header holds the search, as on the web.
     private readonly Gtk.Label _title = Gtk.Label.New("");
     private readonly Gtk.Box _searchBox = Gtk.Box.New(Gtk.Orientation.Horizontal, 0);
@@ -35,8 +37,8 @@ public sealed class StudioWindow
     private readonly Dictionary<string, Gdk.Texture> _logos = new();
     private readonly HashSet<string> _logosLoading = new();
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(20) };
-    private readonly Adw.StatusPage _reauth = Adw.StatusPage.New();
-    private readonly Adw.StatusPage _error = Adw.StatusPage.New();
+    private readonly Gtk.Label _reauthText = Ui.Label("", dim: true);
+    private readonly Gtk.Label _errorText = Ui.Label("", dim: true);
     private readonly Gtk.Label _signInError = Ui.Label("", dim: true, start: false);
     private StudioPages? _studioPages;
     private bool _syncingPages;
@@ -87,22 +89,33 @@ public sealed class StudioWindow
         _identityButton.SetMarginTop(12);
         _sidebar.Append(_identityButton);
 
-        _nav.AddCssClass("navigation-sidebar");
-        _nav.AddCssClass("studio-nav");
-        _nav.SetSelectionMode(Gtk.SelectionMode.Single);
-        _nav.SetMarginStart(8);
-        _nav.SetMarginEnd(8);
-        _nav.SetMarginTop(12);
-        _nav.OnRowSelected += (_, e) =>
+        foreach (var list in new[] { _nav, _navFooter })
         {
-            if (e.Row?.GetName() is { Length: > 0 } name && _pageInfo.TryGetValue(name, out var p))
+            list.AddCssClass("navigation-sidebar");
+            list.AddCssClass("studio-nav");
+            list.SetSelectionMode(Gtk.SelectionMode.Single);
+            list.SetMarginStart(8);
+            list.SetMarginEnd(8);
+            var other = list == _nav ? _navFooter : _nav;
+            list.OnRowSelected += (_, e) =>
             {
+                if (e.Row?.GetName() is not { Length: > 0 } name || !_pageInfo.TryGetValue(name, out var p)) return;
+                other.UnselectAll();
                 _pages.SetVisibleChildName(name);
                 _title.SetText(p.Title);
                 if (!_syncingPages) _studioPages?.Select(name);
-            }
-        };
+            };
+        }
+
+        _nav.SetMarginTop(12);
+        _navFooter.SetMarginBottom(12);
+        _nav.SetVexpand(true);
+        _nav.SetValign(Gtk.Align.Start);
         _sidebar.Append(_nav);
+        var spacer = Gtk.Box.New(Gtk.Orientation.Vertical, 0);
+        spacer.SetVexpand(true);
+        _sidebar.Append(spacer);
+        _sidebar.Append(_navFooter);
 
         // The header: the app's icon and name, the search pill (the web's .ah-search), the window controls.
         var header = Adw.HeaderBar.New();
@@ -267,14 +280,19 @@ public sealed class StudioWindow
         box.Append(label);
         row.SetChild(box);
         row.SetTooltipText(title);
-        _nav.Append(row);
+        (name == StudioPages.Settings ? _navFooter : _nav).Append(row);
         _pageInfo[name] = (title, row, label);
     }
+
+    private string? SelectedPage => _nav.GetSelectedRow()?.GetName() ?? _navFooter.GetSelectedRow()?.GetName();
+
+    /// <summary>Signs an account out after the in-app confirmation (Settings).</summary>
+    public Task SignOut(StudioAccount account) => SignOutAsync(account);
 
     public void ShowPage(string name)
     {
         var info = _pageInfo.TryGetValue(name, out var p) && p.Row.GetVisible() ? p : _pageInfo.Values.FirstOrDefault(v => v.Row.GetVisible());
-        if (info.Row != null) _nav.SelectRow(info.Row);
+        if (info.Row != null) (info.Row.GetParent() == _navFooter ? _navFooter : _nav).SelectRow(info.Row);
     }
 
     /// <summary>Hidden-when-off pages: a page whose feature is off leaves the sidebar, and the window shows <see cref="StudioPages.Current"/>.</summary>
@@ -292,7 +310,7 @@ public sealed class StudioWindow
         try
         {
             foreach (var (name, info) in _pageInfo) info.Row.SetVisible(pages.IsVisible(name));
-            if (_nav.GetSelectedRow()?.GetName() != pages.Current) ShowPage(pages.Current);
+            if (SelectedPage != pages.Current) ShowPage(pages.Current);
         }
         finally
         {
@@ -312,54 +330,63 @@ public sealed class StudioWindow
         if (_shell.ActiveAccount is { } a) _ = SignOutAsync(a);
     }
 
-    private void BuildStates()
+    /// <summary>
+    /// A sign-in or status state (Lantern Glass): the app's lantern icon in a gold glow, the title and
+    /// text, and the action(s) in the card's footer, end-aligned.
+    /// </summary>
+    private Gtk.Widget Hero(string title, Gtk.Label body, Gtk.Widget? actions, Gtk.Widget? extra = null)
     {
-        var signIn = Adw.StatusPage.New();
-        signIn.SetIconName("system-users-symbolic");
-        signIn.SetTitle(_l["studio.shell.signInTitle"]);
-        signIn.SetDescription(_l["studio.shell.signInBody"]);
-        var signInBox = Gtk.Box.New(Gtk.Orientation.Vertical, 12);
-        signInBox.SetHalign(Gtk.Align.Center);
-        var signInButton = Ui.Button(_l["auth.signIn"], () => _ = _shell.SignInAsync(SignInMode.Default), "suggested-action");
-        signInButton.AddCssClass("pill");
-        signInBox.Append(signInButton);
-        signInBox.Append(_signInError);
-        signIn.SetChild(signInBox);
-        _body.AddNamed(signIn, "signin");
+        var content = Gtk.Box.New(Gtk.Orientation.Vertical, 12);
+        var icon = Gtk.Picture.NewForPaintable(Gdk.Texture.NewFromBytes(GLib.Bytes.New(ReadAll(StudioTheme.AppIcon()))));
+        icon.SetSizeRequest(112, 112);
+        icon.SetCanShrink(true);
+        icon.SetContentFit(Gtk.ContentFit.Cover);
+        icon.SetHalign(Gtk.Align.Center);
+        icon.AddCssClass("hero-icon");
+        icon.SetOverflow(Gtk.Overflow.Hidden);
+        content.Append(icon);
+        var heading = Gtk.Label.New(title);
+        heading.AddCssClass("title-2");
+        heading.SetWrap(true);
+        heading.SetJustify(Gtk.Justification.Center);
+        content.Append(heading);
+        body.SetJustify(Gtk.Justification.Center);
+        body.SetHalign(Gtk.Align.Center);
+        body.SetXalign(0.5f);
+        content.Append(body);
+        if (extra != null) content.Append(extra);
+        var card = Ui.Card(content, actions);
+        card.AddCssClass("hero-card");
+        card.SetSizeRequest(500, -1);
+        card.SetHalign(Gtk.Align.Center);
+        card.SetValign(Gtk.Align.Center);
+        var stage = Gtk.Box.New(Gtk.Orientation.Vertical, 0);
+        stage.AddCssClass("hero-stage");
+        stage.SetVexpand(true);
+        stage.Append(card);
+        card.SetVexpand(true);
+        return stage;
+    }
 
-        var waiting = Adw.StatusPage.New();
-        waiting.SetTitle(_l["auth.signingIn"]);
+    private static Gtk.Widget Waiting()
+    {
         var spinner = Gtk.Spinner.New();
         spinner.Start();
         spinner.SetSizeRequest(32, 32);
-        waiting.SetChild(spinner);
-        _body.AddNamed(waiting, "signingin");
+        spinner.SetHalign(Gtk.Align.Center);
+        return spinner;
+    }
 
-        var loading = Adw.StatusPage.New();
-        loading.SetTitle(_l["studio.shell.loading"]);
-        var spinner2 = Gtk.Spinner.New();
-        spinner2.Start();
-        spinner2.SetSizeRequest(32, 32);
-        loading.SetChild(spinner2);
-        _body.AddNamed(loading, "loading");
-
-        var none = Adw.StatusPage.New();
-        none.SetIconName("folder-videos-symbolic");
-        none.SetTitle(_l["studio.shell.noChannelTitle"]);
-        none.SetDescription(_l["studio.shell.noChannelBody"]);
-        none.SetChild(Ui.Button(_l["studio.shell.retry"], () => _ = _shell.RetryAsync()));
-        _body.AddNamed(none, "nochannel");
-
-        _error.SetIconName("network-error-symbolic");
-        _error.SetTitle(_l["studio.shell.errorTitle"]);
-        _error.SetChild(Ui.Button(_l["studio.shell.retry"], () => _ = _shell.RetryAsync()));
-        _body.AddNamed(_error, "error");
-
-        _reauth.SetIconName("dialog-password-symbolic");
-        _reauth.SetTitle(_l["studio.shell.reauthTitle"]);
-        _reauth.SetChild(Ui.Button(_l["auth.signIn"], () => _ = _shell.SignInAsync(SignInMode.Default), "suggested-action"));
-        _body.AddNamed(_reauth, "reauth");
-
+    private void BuildStates()
+    {
+        var signIn = Ui.Button(_l["auth.signIn"], () => _ = _shell.SignInAsync(SignInMode.Default), "suggested-action");
+        _signInError.SetJustify(Gtk.Justification.Center);
+        _body.AddNamed(Hero(_l["studio.shell.signInTitle"], Ui.Label(_l["studio.shell.signInBody"], dim: true), signIn, _signInError), "signin");
+        _body.AddNamed(Hero(_l["auth.signingIn"], Ui.Label("", dim: true), null, Waiting()), "signingin");
+        _body.AddNamed(Hero(_l["studio.shell.loading"], Ui.Label("", dim: true), null, Waiting()), "loading");
+        _body.AddNamed(Hero(_l["studio.shell.noChannelTitle"], Ui.Label(_l["studio.shell.noChannelBody"], dim: true), Ui.Button(_l["studio.shell.retry"], () => _ = _shell.RetryAsync(), "suggested-action")), "nochannel");
+        _body.AddNamed(Hero(_l["studio.shell.errorTitle"], _errorText, Ui.Button(_l["studio.shell.retry"], () => _ = _shell.RetryAsync(), "suggested-action")), "error");
+        _body.AddNamed(Hero(_l["studio.shell.reauthTitle"], _reauthText, Ui.Button(_l["auth.signIn"], () => _ = _shell.SignInAsync(SignInMode.Default), "suggested-action")), "reauth");
         _body.AddNamed(_pages, "studio");
     }
 
@@ -391,10 +418,10 @@ public sealed class StudioWindow
         }
         _title.SetVisible(ready);
         if (!ready) _title.SetText(_l["studio.name"]);
-        else if (_nav.GetSelectedRow()?.GetName() is { } name && _pageInfo.TryGetValue(name, out var p)) _title.SetText(p.Title);
+        else if (SelectedPage is { } name && _pageInfo.TryGetValue(name, out var p)) _title.SetText(p.Title);
         _signInError.SetText(_shell.ErrorKey is { } k && state == ShellState.SignedOut ? _l[k] : "");
-        _error.SetDescription(_shell.ErrorKey is { } e ? _l[e] : "");
-        _reauth.SetDescription(_l.Format("studio.shell.reauthBody", Localizer.Isolate(_shell.ActiveAccountName ?? "")));
+        _errorText.SetText(_shell.ErrorKey is { } e ? _l[e] : "");
+        _reauthText.SetText(_l.Format("studio.shell.reauthBody", Localizer.Isolate(_shell.ActiveAccountName ?? "")));
         RenderIdentity();
     }
 

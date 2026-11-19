@@ -126,7 +126,7 @@ jobs:
           $env:AUN_STAGE_DIR = $stage; $env:AUN_WATCH_DIR = $watch
           $failed = @()
           foreach ($lang in "en","ar") { foreach ($theme in "dark","light") {
-            foreach ($shot in @(@("uploads","","1440x900"), @("uploads","channels","1440x900"), @("uploads","","1920x1032"), @("uploads","","1024x700"), @("uploads","scheduled","1440x900"), @("videos","","1440x900"), @("videos","bulk","1440x900"), @("videos","","1920x1032"), @("videos","","1024x700"), @("analytics","","1440x900"), @("analytics","","1920x1032"), @("analytics","","1024x700"), @("timeline","","1440x900"), @("encode","","1440x900"), @("encode","active","1440x900"), @("timeline","","1024x700"))) {
+            foreach ($shot in @(@("uploads","","1440x900"), @("uploads","channels","1440x900"), @("uploads","","1920x1032"), @("uploads","","1024x700"), @("uploads","scheduled","1440x900"), @("videos","","1440x900"), @("videos","bulk","1440x900"), @("videos","","1920x1032"), @("videos","","1024x700"), @("analytics","","1440x900"), @("analytics","","1920x1032"), @("analytics","","1024x700"), @("timeline","","1440x900"), @("encode","","1440x900"), @("encode","active","1440x900"), @("timeline","","1024x700"), @("settings","","1440x900"), @("settings","","1024x700"))) {
               $state = if ($shot[1]) { $shot[1] } else { "closed" }
               $name = "windows-$($shot[0])-$state-$lang-$theme-$($shot[2])"
               ./scripts/windows-studio-shot.ps1 $exe $lang $theme $shot[2] $shot[1] $name $out $shot[0]
@@ -136,6 +136,12 @@ jobs:
           foreach ($lang in "en","ar") { foreach ($scene in "search","edit","delete") {
             $name = "windows-videos-$scene-$lang-dark-1440x900"
             ./scripts/windows-studio-shot.ps1 $exe $lang dark 1440x900 $scene $name $out videos
+            if (-not (Select-String -Quiet "RESULT PASS" "$out/$name.txt")) { $failed += $name }
+          } }
+          foreach ($lang in "en","ar") { foreach ($theme in "dark","light") {
+            # Signed out: the sign-in card.
+            $name = "windows-signin-closed-$lang-$theme-1440x900"
+            ./scripts/windows-studio-shot.ps1 $exe $lang $theme 1440x900 "" $name $out timeline 0
             if (-not (Select-String -Quiet "RESULT PASS" "$out/$name.txt")) { $failed += $name }
           } }
           if ($failed.Count -gt 0) { throw "shots failed: $failed" }
