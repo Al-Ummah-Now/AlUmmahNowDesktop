@@ -90,7 +90,14 @@ internal sealed class AnalyticsPage
         _top.Children.Clear();
         foreach (var v in _vm.Data?.TopVideos ?? Array.Empty<CoreBridge.Studio.TopVideo>())
         {
-            _top.Children.Add(new TextBlock { Text = _l.Join(_l.Format("studio.videos.views", _l.Number(v.Views)), Localizer.Isolate(v.TitleFor(_l.Language))), TextTrimming = TextTrimming.CharacterEllipsis });
+            // The page's direction orders the line, never the title's script: an Arabic title on the English page
+            // must not turn the row right-to-left ("views 1,200").
+            _top.Children.Add(new TextBlock
+            {
+                Text = _l.Join(Localizer.Isolate(_l.Format("studio.videos.views", _l.Number(v.Views))), Localizer.Isolate(v.TitleFor(_l.Language))),
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                TextReadingOrder = TextReadingOrder.UseFlowDirection,
+            });
         }
     }
 
