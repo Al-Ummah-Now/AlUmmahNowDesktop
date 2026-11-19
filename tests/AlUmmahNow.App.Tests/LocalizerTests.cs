@@ -92,3 +92,22 @@ public class LocalizerTests
     public void File_sizes_read_as_the_website(string language, long bytes, int? decimals, string expected) =>
         Assert.Equal(expected, new Localizer(language).Bytes(bytes, decimals));
 }
+
+public sealed class FanousThemeTests
+{
+    [Fact]
+    public void RegistryColoursShipInTheAppLayerForStudioAndTheViewer()
+    {
+        var themes = AlUmmahNow.App.Theme.Fanous.ReadXamlColors(AlUmmahNow.App.Theme.Fanous.File("Fanous.Colors.xaml"));
+        Assert.Equal(0xFFF4AE3Au, themes["Default"]["FanousPrimaryColor"]);
+        Assert.Equal(0xFFF4AE3Au, themes["Light"]["FanousPrimaryColor"]);
+        Assert.Contains("@define-color fanous_primary", AlUmmahNow.App.Theme.Fanous.File("style-dark.css"));
+    }
+
+    [Fact]
+    public void ThereIsNoSystemThemeChoice()
+    {
+        Assert.DoesNotContain("settings.theme.system", new AlUmmahNow.App.I18n.Localizer("en").Bundle("en").Keys);
+        Assert.DoesNotContain("settings.theme.system", new AlUmmahNow.App.I18n.Localizer("ar").Bundle("ar").Keys);
+    }
+}

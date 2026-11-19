@@ -17,9 +17,6 @@ Gst.Functions.Init(ref gstArgs);
 
 const string Css = """
     .caption-overlay { background-color: rgba(9,48,65,0.82); color: #f7f1e8; padding: 6px 14px; border-radius: 6px; font-size: 20px; }
-    @define-color accent_bg_color #ffa037;
-    @define-color accent_color #ffa037;
-    @define-color accent_fg_color #093041;
     """;
 
 var environment = AppEnvironment.Resolve(Environment.GetEnvironmentVariable("AUN_ENV"), AppEnvironment.BuildDefault);
@@ -51,6 +48,16 @@ app.OnActivate += async (_, _) =>
     var provider = Gtk.CssProvider.New();
     provider.LoadFromString(Css);
     Gtk.StyleContext.AddProviderForDisplay(Gdk.Display.GetDefault()!, provider, 600);
+    // The Fawanees tokens from the shared registry (light or dark stylesheet, following Light/Dark).
+    var tokens = Gtk.CssProvider.New();
+    var styles = Adw.StyleManager.GetDefault();
+    void LoadTokens() => tokens.LoadFromString(AlUmmahNow.App.Theme.Fanous.File(styles.GetDark() ? "native-fawanees-dark.css" : "native-fawanees.css"));
+    LoadTokens();
+    styles.OnNotify += (_, e) =>
+    {
+        if (e.Pspec.GetName() == "dark") LoadTokens();
+    };
+    Gtk.StyleContext.AddProviderForDisplay(Gdk.Display.GetDefault()!, tokens, 599);
 
     var mpris = new MprisSession(SynchronizationContext.Current!);
     IMediaSession session = mpris;
