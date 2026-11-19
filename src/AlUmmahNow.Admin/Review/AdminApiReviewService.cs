@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using AlUmmahNow.Admin.Media;
+using AlUmmahNow.CoreBridge;
 using AlUmmahNow.CoreBridge.Logging;
 
 namespace AlUmmahNow.Admin.Review;
@@ -30,6 +31,7 @@ public sealed class AdminApiReviewService : IReviewService, IPushRegistry
     private readonly Func<CancellationToken, Task<string?>> _token;
     private readonly HttpClient _http;
     private readonly string _userAgent;
+    private readonly string _client;
     private readonly Func<StaffProfile?>? _fallbackAccount;
 
     public AdminApiReviewService(Uri adminApi, Uri videosApi, Func<CancellationToken, Task<string?>> token, string userAgent,
@@ -40,6 +42,7 @@ public sealed class AdminApiReviewService : IReviewService, IPushRegistry
         _videosApi = videosApi;
         _token = token;
         _userAgent = userAgent;
+        _client = AunClient.FromUserAgent(userAgent);
         _http = http ?? PrivateHttp.Create();
         _fallbackAccount = fallbackAccount;
     }
@@ -67,6 +70,7 @@ public sealed class AdminApiReviewService : IReviewService, IPushRegistry
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         request.Headers.UserAgent.ParseAdd(_userAgent);
+        request.Headers.TryAddWithoutValidation(AunClient.Header, _client);
         request.Headers.CacheControl = new CacheControlHeaderValue { NoStore = true, NoCache = true };
         if (body != null) request.Content = new StringContent(JsonSerializer.Serialize(body, Json), Encoding.UTF8, "application/json");
         HttpResponseMessage response;
