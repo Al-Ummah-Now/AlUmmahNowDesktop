@@ -144,9 +144,7 @@ public sealed class SettingsPage
         {
             var account = _shell.AccountList.First(a => a.UserId == r.Id);
             var row = Gtk.Box.New(Gtk.Orientation.Horizontal, 12);
-            var avatar = Adw.Avatar.New(32, r.Initials == null ? null : string.Join(" ", ActingAs.Graphemes(r.Initials)), r.Initials != null);
-            avatar.AddCssClass("person");
-            row.Append(avatar);
+            row.Append(Ui.Avatar(r.Initials, null, 32, person: true));
             var text = Gtk.Box.New(Gtk.Orientation.Vertical, 0);
             text.SetHexpand(true);
             text.SetValign(Gtk.Align.Center);
