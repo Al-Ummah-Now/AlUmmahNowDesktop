@@ -19,7 +19,7 @@ public sealed class CoreApiTransport : IApiTransport
     public CoreApiTransport(CoreStudioAccounts accounts, Uri videosApi, string userAgent, string? locale)
     {
         _accounts = accounts;
-        _config = new ApiClientConfig(videosApi.AbsoluteUri.TrimEnd('/'), userAgent, locale, 30_000, 3);
+        _config = new ApiClientConfig(videosApi.AbsoluteUri.TrimEnd('/'), userAgent, locale, 30_000, 3, AunClient.FromUserAgent(userAgent));
     }
 
     public async Task<string> SendAsync(ApiRequest request, CancellationToken cancellationToken = default)

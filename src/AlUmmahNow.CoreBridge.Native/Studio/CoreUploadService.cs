@@ -18,7 +18,7 @@ public sealed class CoreUploadService : IUploadService
         AccountId = accountId;
         try
         {
-            var client = accounts.Manager.ApiClient(new ApiClientConfig(videosApi.AbsoluteUri.TrimEnd('/'), userAgent, null, 60_000, 4), accountId);
+            var client = accounts.Manager.ApiClient(new ApiClientConfig(videosApi.AbsoluteUri.TrimEnd('/'), userAgent, null, 60_000, 4, AunClient.FromUserAgent(userAgent)), accountId);
             var config = AunCoreMethods.UploadConfigDefault();
             Directory.CreateDirectory(storeDir);
             _engine = new UploadEngine(client, storeDir, accountId, config, new SystemConnectivity());

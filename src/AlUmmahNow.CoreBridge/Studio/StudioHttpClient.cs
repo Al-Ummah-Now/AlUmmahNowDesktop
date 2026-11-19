@@ -35,6 +35,7 @@ namespace AlUmmahNow.CoreBridge.Studio
             _http = handler == null ? new HttpClient() : new HttpClient(handler, true);
             _http.Timeout = Timeout.InfiniteTimeSpan;
             _http.DefaultRequestHeaders.UserAgent.TryParseAdd(userAgent);
+            _http.DefaultRequestHeaders.TryAddWithoutValidation(AunClient.Header, AunClient.FromUserAgent(userAgent));
             if (!string.IsNullOrEmpty(locale)) _http.DefaultRequestHeaders.AcceptLanguage.TryParseAdd(locale);
         }
 
