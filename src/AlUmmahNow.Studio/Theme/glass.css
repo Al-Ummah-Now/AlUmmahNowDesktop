@@ -114,3 +114,17 @@ checkbutton check:checked, radiobutton radio:checked { background-color: @fanous
   background-image: linear-gradient(135deg, #184456, #09151e);
   color: #f4ae3a;
 }
+
+/* Videos: thumbnail cards. */
+.video-card { padding: 0; }
+.video-card.selected { border-color: #f4ae3a; box-shadow: 0 0 0 1px #f4ae3a, 0 0 26px -4px alpha(#f4ae3a, 0.7); }
+.video-thumb { border-radius: 14px 14px 0 0; background-color: #09151e; }
+.video-thumb .file-tile { border-radius: 14px 14px 0 0; border: none; }
+.pill-tag { margin: 8px; padding: 2px 8px; border-radius: 999px; font-size: 0.8em; font-weight: 700; background-color: alpha(#09151e, 0.72); color: #f7f1e8; }
+.pill-tag.good { color: #4ade80; }
+.pill-tag.bad { color: #ff9c94; }
+.pill-tag.busy { color: #fbc661; }
+.pill-tag.quiet { color: #d6dfe2; }
+.duration { margin: 6px; padding: 1px 6px; border-radius: 4px; font-size: 0.8em; font-weight: 700; background-color: alpha(#09151e, 0.82); color: #f7f1e8; font-feature-settings: "tnum"; }
+.card-footer.quiet { border-top: none; padding: 4px 10px 8px; }
+.selection-bar { padding: 8px 12px; border-radius: 12px; border: 1px solid alpha(@fanous_primary_edge, 0.45); background-image: linear-gradient(to right, alpha(@fanous_primary, 0.24), alpha(@fanous_primary, 0.07)); }

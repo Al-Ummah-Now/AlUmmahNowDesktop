@@ -19,7 +19,11 @@ public sealed class VideosPage
     private readonly Gtk.Label _suggestionCount = Ui.Label("", dim: true);
     private readonly Gtk.Box _selectionBar = Gtk.Box.New(Gtk.Orientation.Horizontal, 8);
     private readonly Gtk.Label _selectionLabel = Ui.Label("");
-    private readonly Gtk.ListBox _list = Gtk.ListBox.New();
+    // Lantern Glass: a grid of thumbnail cards (Edit and Delete in each card's footer).
+    private readonly Gtk.FlowBox _list = Gtk.FlowBox.New();
+    private readonly Dictionary<string, Gdk.Texture> _thumbs = new();
+    private readonly HashSet<string> _thumbsLoading = new();
+    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(20) };
     private readonly Gtk.Label _empty = Ui.Label("", dim: true);
     private readonly Gtk.Label _error = Ui.Label("");
     private readonly Gtk.Button _more;
@@ -27,6 +31,7 @@ public sealed class VideosPage
     private readonly Gtk.Expander _deletedExpander = Gtk.Expander.New("");
     private readonly Gtk.Box _deleted = Gtk.Box.New(Gtk.Orientation.Vertical, 6);
     private bool _syncingSearch;
+    private Gtk.Box? _deletedCard;
 
     /// <summary>The header's search: show this text in the search field and search for it.</summary>
     public void SearchFor(string text)
@@ -42,7 +47,9 @@ public sealed class VideosPage
         _uploads = uploads;
         _window = window;
         var scroll = Gtk.ScrolledWindow.New();
-        var page = Ui.Page(10);
+        var page = Ui.Page(14);
+        page.SetMarginStart(24);
+        page.SetMarginEnd(24);
         scroll.SetChild(page);
         _toasts.SetChild(scroll);
 
@@ -89,7 +96,9 @@ public sealed class VideosPage
         _error.SetVisible(false);
         page.Append(_error);
 
-        // Selection actions
+        // Selection actions: a gold bar while videos are selected.
+        _selectionBar.AddCssClass("selection-bar");
+        _selectionLabel.AddCssClass("heading");
         _selectionBar.Append(_selectionLabel);
         _selectionBar.Append(Ui.Button(l["studio.videos.bulkEdit"], () => _ = BulkEditAsync()));
         var playlistButton = Gtk.MenuButton.New();
@@ -124,8 +133,13 @@ public sealed class VideosPage
         page.Append(all);
         page.Append(_selectionBar);
 
-        _list.AddCssClass("boxed-list");
         _list.SetSelectionMode(Gtk.SelectionMode.None);
+        _list.SetHomogeneous(true);
+        _list.SetColumnSpacing(16);
+        _list.SetRowSpacing(16);
+        _list.SetMinChildrenPerLine(2);
+        _list.SetMaxChildrenPerLine(6);
+        _list.SetValign(Gtk.Align.Start);
         page.Append(_list);
         page.Append(_empty);
         _more = Ui.Button(l["studio.videos.loadMore"], () => _ = _vm.LoadMoreAsync());
@@ -133,7 +147,8 @@ public sealed class VideosPage
         page.Append(_more);
 
         _deletedExpander.SetChild(_deleted);
-        page.Append(_deletedExpander);
+        _deletedCard = Ui.Card(_deletedExpander);
+        page.Append(_deletedCard);
 
         _vm.PropertyChanged += (_, e) =>
         {
@@ -266,44 +281,127 @@ public sealed class VideosPage
     }
 
     /// <summary>Where a check button's label starts, from its own start edge.</summary>
-    private const int CheckLabelInset = 28;
-
     private void RenderList()
     {
-        while (_list.GetRowAtIndex(0) is { } r) _list.Remove(r);
-        foreach (var v in _vm.Items)
-        {
-            var row = Gtk.Box.New(Gtk.Orientation.Horizontal, 10);
-            row.SetMarginStart(8);
-            row.SetMarginEnd(8);
-            row.SetMarginTop(6);
-            row.SetMarginBottom(6);
-            // The checkbox's label is the title, so Orca reads "<title>, check box".
-            var check = Gtk.CheckButton.NewWithLabel(v.TitleFor(_l.Language));
-            check.SetActive(_vm.IsSelected(v.Id));
-            Ui.Named(check, _l.Format("studio.videos.select", v.TitleFor(_l.Language)));
-            check.OnToggled += (_, _) => _vm.SetSelected(v.Id, check.GetActive());
-            var text = Gtk.Box.New(Gtk.Orientation.Vertical, 2);
-            text.SetHexpand(true);
-            text.Append(check);
-            var meta = Ui.Label(Meta(v), dim: true);
-            // Lines the meta up with the title, past the check indicator (Adwaita: 3px padding, 20px check, 4px gap).
-            meta.SetMarginStart(CheckLabelInset);
-            text.Append(meta);
-            row.Append(text);
-            var edit = Ui.Button(_l["studio.videos.edit"], () => _ = EditAsync(v), "flat");
-            Ui.Named(edit, _l.Format("studio.videos.editOne", v.TitleFor(_l.Language)));
-            row.Append(edit);
-            var delete = Ui.Button(_l["studio.videos.delete"], () => _ = DeleteAsync(new[] { v.Id }), "flat");
-            Ui.Named(delete, _l.Format("studio.videos.deleteOne", v.TitleFor(_l.Language)));
-            row.Append(delete);
-            _list.Append(row);
-        }
+        while (_list.GetChildAtIndex(0) is { } c) _list.Remove(c);
+        foreach (var v in _vm.Items) _list.Append(Card(v));
 
         _list.SetVisible(_vm.Items.Count > 0);
         RenderEmpty();
         _more.SetVisible(_vm.HasMore);
         RenderSelection();
+    }
+
+    /// <summary>
+    /// A video card: the thumbnail (night tile until it loads) with visibility/status and duration on it;
+    /// the title as the selection checkbox's label (Orca reads "title, check box"); views and date;
+    /// Edit and Delete in the footer, end-aligned.
+    /// </summary>
+    private Gtk.Widget Card(StudioVideo v)
+    {
+        var title = v.TitleFor(_l.Language);
+        var thumb = Gtk.Overlay.New();
+        thumb.AddCssClass("video-thumb");
+        thumb.SetOverflow(Gtk.Overflow.Hidden);
+        if (v.ThumbnailUrl is { Length: > 0 } url && _thumbs.TryGetValue(url, out var texture))
+        {
+            var picture = Gtk.Picture.NewForPaintable(texture);
+            picture.SetContentFit(Gtk.ContentFit.Cover);
+            picture.SetCanShrink(true);
+            thumb.SetChild(picture);
+        }
+        else
+        {
+            if (v.ThumbnailUrl is { Length: > 0 } u) _ = LoadThumbAsync(u);
+            var tile = Ui.FileTile(260, 146);
+            tile.SetHexpand(true);
+            thumb.SetChild(tile);
+        }
+
+        thumb.SetSizeRequest(-1, 146);
+        var pill = Gtk.Label.New(v.Status is StudioVideoStatus.Processing or StudioVideoStatus.Failed or StudioVideoStatus.Uploading
+            ? _l["studio.videos.status." + v.Status.ToString().ToLowerInvariant()]
+            : _l["studio.upload.visibility." + (v.IsPublic ? "public" : "private")]);
+        pill.AddCssClass("pill-tag");
+        pill.AddCssClass(v.Status == StudioVideoStatus.Failed ? "bad" : v.Status is StudioVideoStatus.Processing or StudioVideoStatus.Uploading ? "busy" : v.IsPublic ? "good" : "quiet");
+        pill.SetHalign(Gtk.Align.End);
+        pill.SetValign(Gtk.Align.Start);
+        thumb.AddOverlay(pill);
+        if (v.DurationSeconds is { } d && d > 0)
+        {
+            var duration = Gtk.Label.New(_l.Duration(d));
+            duration.AddCssClass("duration");
+            duration.SetHalign(Gtk.Align.End);
+            duration.SetValign(Gtk.Align.End);
+            thumb.AddOverlay(duration);
+        }
+
+        var check = Gtk.CheckButton.NewWithLabel(title);
+        check.SetActive(_vm.IsSelected(v.Id));
+        Ui.Named(check, _l.Format("studio.videos.select", title));
+        check.OnToggled += (_, _) => _vm.SetSelected(v.Id, check.GetActive());
+        if (check.GetChild() is Gtk.Label label)
+        {
+            label.SetWrap(true);
+            label.SetLines(2);
+            label.SetEllipsize(Pango.EllipsizeMode.End);
+            label.SetXalign(0);
+            label.AddCssClass("heading");
+        }
+
+        var meta = Ui.Label(_l.Join(_l.Format("studio.videos.views", _l.Number(v.Views)), v.CreatedAt is { } at ? _l.Date(at) : null, v.Category is { } c ? _l["studio.category." + c] : null), dim: true);
+        meta.AddCssClass("caption");
+        var body = Gtk.Box.New(Gtk.Orientation.Vertical, 4);
+        body.Append(check);
+        body.Append(meta);
+
+        var footer = Gtk.Box.New(Gtk.Orientation.Horizontal, 4);
+        var edit = Ui.Button(_l["studio.videos.edit"], () => _ = EditAsync(v), "flat");
+        Ui.Named(edit, _l.Format("studio.videos.editOne", title));
+        footer.Append(edit);
+        var delete = Ui.Button(_l["studio.videos.delete"], () => _ = DeleteAsync(new[] { v.Id }), "flat");
+        delete.AddCssClass("danger");
+        Ui.Named(delete, _l.Format("studio.videos.deleteOne", title));
+        footer.Append(delete);
+
+        var card = Gtk.Box.New(Gtk.Orientation.Vertical, 0);
+        card.AddCssClass("card");
+        card.AddCssClass("video-card");
+        if (_vm.IsSelected(v.Id)) card.AddCssClass("selected");
+        card.Append(thumb);
+        body.SetMarginStart(14);
+        body.SetMarginEnd(14);
+        body.SetMarginTop(10);
+        card.Append(body);
+        var bar = Gtk.Box.New(Gtk.Orientation.Horizontal, 0);
+        bar.AddCssClass("card-footer");
+        bar.AddCssClass("quiet");
+        footer.SetHalign(Gtk.Align.End);
+        footer.SetHexpand(true);
+        bar.Append(footer);
+        card.Append(bar);
+        card.SetSizeRequest(240, -1);
+        check.OnToggled += (_, _) =>
+        {
+            if (check.GetActive()) card.AddCssClass("selected");
+            else card.RemoveCssClass("selected");
+        };
+        return card;
+    }
+
+    private async Task LoadThumbAsync(string url)
+    {
+        if (!_thumbsLoading.Add(url)) return;
+        try
+        {
+            var data = await Http.GetByteArrayAsync(url);
+            _thumbs[url] = Gdk.Texture.NewFromBytes(GLib.Bytes.New(data));
+            RenderList();
+        }
+        catch (Exception ex) when (ex is HttpRequestException || ex is TaskCanceledException || ex is GLib.GException)
+        {
+            // The night tile stays.
+        }
     }
 
     private void RenderEmpty()
@@ -327,6 +425,7 @@ public sealed class VideosPage
         Ui.Clear(_deleted);
         _deletedExpander.SetLabel(_l.Format("studio.videos.deletedTitle", _vm.Deleted.Count));
         _deletedExpander.SetVisible(_vm.Deleted.Count > 0);
+        _deletedCard?.SetVisible(_vm.Deleted.Count > 0);
         foreach (var d in _vm.Deleted)
         {
             var row = Gtk.Box.New(Gtk.Orientation.Horizontal, 8);

@@ -19,9 +19,23 @@ internal sealed class VideosPage
     private readonly Func<XamlRoot?> _root;
     private readonly FlowDirection _direction;
     private readonly AutoSuggestBox _search;
-    private readonly StackPanel _selectionBar = new() { Orientation = Orientation.Horizontal, Spacing = 8 };
+    // A gold bar while videos are selected.
+    private readonly StackPanel _selectionBar = new()
+    {
+        Orientation = Orientation.Horizontal,
+        Spacing = 8,
+        Padding = new Thickness(14, 8, 10, 8),
+        CornerRadius = new CornerRadius(12),
+        BorderThickness = new Thickness(1),
+        BorderBrush = LanternGlass.Res("StudioEdgeStrongBrush"),
+        Background = LanternGlass.Res("StudioSelectedBrush"),
+    };
     private readonly TextBlock _selectionLabel = new() { VerticalAlignment = VerticalAlignment.Center };
-    private readonly StackPanel _list = new() { Spacing = 4 };
+    // Lantern Glass: a grid of thumbnail cards (Edit and Delete in each card's footer).
+    private readonly ItemsRepeater _list = new()
+    {
+        Layout = new UniformGridLayout { MinItemWidth = 250, MinColumnSpacing = 16, MinRowSpacing = 16, ItemsStretch = UniformGridLayoutItemsStretch.Fill },
+    };
     private readonly TextBlock _empty = new() { Opacity = 0.8 };
     private readonly InfoBar _error = new() { Severity = InfoBarSeverity.Error, IsClosable = true };
     private readonly InfoBar _notice = new() { Severity = InfoBarSeverity.Success, IsClosable = true };
@@ -30,6 +44,7 @@ internal sealed class VideosPage
     private readonly Expander _deletedExpander = new() { HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch };
     private readonly StackPanel _deleted = new() { Spacing = 6 };
     private readonly CheckBox _all;
+    private FrameworkElement? _deletedCard;
     private readonly MenuFlyout _playlistMenu = new();
 
     /// <summary>The title-bar search: show this text in the search box and search for it.</summary>
@@ -46,7 +61,7 @@ internal sealed class VideosPage
         _uploads = uploads;
         _root = root;
         _direction = l.IsRtl ? FlowDirection.RightToLeft : FlowDirection.LeftToRight;
-        Root = new StackPanel { Spacing = 10, Padding = new Thickness(20) };
+        Root = new StackPanel { Spacing = 14, Padding = new Thickness(16, 4, 16, 8) };
 
         _search = new AutoSuggestBox { PlaceholderText = l["studio.videos.search"], QueryIcon = new SymbolIcon(Symbol.Find), MinWidth = 360 };
         AutomationProperties.SetName(_search, l["studio.videos.search"]);
@@ -119,7 +134,9 @@ internal sealed class VideosPage
         _more.Click += (_, _) => _ = _vm.LoadMoreAsync();
         Root.Children.Add(_more);
         _deletedExpander.Content = _deleted;
-        Root.Children.Add(_deletedExpander);
+        _deletedExpander.Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        _deletedCard = LanternGlass.Card(_deletedExpander);
+        Root.Children.Add(_deletedCard);
 
         _vm.PropertyChanged += (_, e) =>
         {
@@ -234,40 +251,119 @@ internal sealed class VideosPage
 
     private void RenderList()
     {
-        _list.Children.Clear();
-        foreach (var v in _vm.Items)
-        {
-            var grid = new Grid { ColumnSpacing = 10, Padding = new Thickness(8, 6, 8, 6) };
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            var check = new CheckBox { IsChecked = _vm.IsSelected(v.Id), MinWidth = 0 };
-            AutomationProperties.SetName(check, _l.Format("studio.videos.select", v.TitleFor(_l.Language)));
-            check.Click += (_, _) => _vm.SetSelected(v.Id, check.IsChecked == true);
-            var text = new StackPanel();
-            text.Children.Add(new TextBlock { Text = v.TitleFor(_l.Language), TextTrimming = TextTrimming.CharacterEllipsis });
-            text.Children.Add(new TextBlock { Text = Meta(v), Opacity = 0.75, FontSize = 12 });
-            Grid.SetColumn(text, 1);
-            var edit = new Button { Content = _l["studio.videos.edit"] };
-            AutomationProperties.SetName(edit, _l.Format("studio.videos.editOne", v.TitleFor(_l.Language)));
-            edit.Click += async (_, _) => await EditAsync(v);
-            Grid.SetColumn(edit, 2);
-            var delete = new Button { Content = _l["studio.videos.delete"] };
-            AutomationProperties.SetName(delete, _l.Format("studio.videos.deleteOne", v.TitleFor(_l.Language)));
-            delete.Click += async (_, _) => await DeleteAsync(new[] { v.Id });
-            Grid.SetColumn(delete, 3);
-            grid.Children.Add(check);
-            grid.Children.Add(text);
-            grid.Children.Add(edit);
-            grid.Children.Add(delete);
-            _list.Children.Add(grid);
-        }
+        _list.ItemsSource = _vm.Items.Select(Card).ToList();
 
         RenderEmpty();
         _more.Visibility = _vm.HasMore ? Visibility.Visible : Visibility.Collapsed;
         RenderSelection();
     }
+
+    /// <summary>
+    /// A video card: the thumbnail (night tile until it loads) with visibility/status and duration on it;
+    /// the title as the selection checkbox's content; views and date; Edit and Delete in the footer, end-aligned.
+    /// </summary>
+    private FrameworkElement Card(StudioVideo v)
+    {
+        var title = v.TitleFor(_l.Language);
+        var gold = new Microsoft.UI.Xaml.Media.SolidColorBrush(LanternGlass.Gold);
+        var thumb = new Grid { Height = 146 };
+        thumb.Children.Add(new Border
+        {
+            CornerRadius = new CornerRadius(13, 13, 0, 0),
+            Background = new Microsoft.UI.Xaml.Media.LinearGradientBrush
+            {
+                StartPoint = new global::Windows.Foundation.Point(0, 0),
+                EndPoint = new global::Windows.Foundation.Point(1, 1),
+                GradientStops =
+                {
+                    new Microsoft.UI.Xaml.Media.GradientStop { Color = global::Windows.UI.Color.FromArgb(0xFF, 0x18, 0x44, 0x56), Offset = 0 },
+                    new Microsoft.UI.Xaml.Media.GradientStop { Color = LanternGlass.Night, Offset = 1 },
+                },
+            },
+            Child = new FontIcon { Glyph = "\uE8B2", FontSize = 40, Foreground = gold },
+        });
+        if (Uri.TryCreate(v.ThumbnailUrl, UriKind.Absolute, out var url))
+        {
+            thumb.Children.Add(new Border
+            {
+                CornerRadius = new CornerRadius(13, 13, 0, 0),
+                Background = new Microsoft.UI.Xaml.Media.ImageBrush { ImageSource = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(url) { DecodePixelWidth = 520 }, Stretch = Microsoft.UI.Xaml.Media.Stretch.UniformToFill },
+            });
+        }
+
+        var busy = v.Status is StudioVideoStatus.Processing or StudioVideoStatus.Failed or StudioVideoStatus.Uploading;
+        var pillText = busy ? _l["studio.videos.status." + v.Status.ToString().ToLowerInvariant()] : _l["studio.upload.visibility." + (v.IsPublic ? "public" : "private")];
+        var pillColor = v.Status == StudioVideoStatus.Failed ? global::Windows.UI.Color.FromArgb(0xFF, 0xFF, 0x9C, 0x94)
+            : busy ? global::Windows.UI.Color.FromArgb(0xFF, 0xFB, 0xC6, 0x61)
+            : v.IsPublic ? global::Windows.UI.Color.FromArgb(0xFF, 0x4A, 0xDE, 0x80) : global::Windows.UI.Color.FromArgb(0xFF, 0xD6, 0xDF, 0xE2);
+        thumb.Children.Add(Chip(pillText, pillColor, HorizontalAlignment.Right, VerticalAlignment.Top));
+        if (v.DurationSeconds is { } d && d > 0) thumb.Children.Add(Chip(_l.Duration(d), LanternGlass.OnNight, HorizontalAlignment.Right, VerticalAlignment.Bottom, 4));
+
+        var check = new CheckBox
+        {
+            IsChecked = _vm.IsSelected(v.Id),
+            MinWidth = 0,
+            Content = new TextBlock { Text = title, TextWrapping = TextWrapping.Wrap, MaxLines = 2, TextTrimming = TextTrimming.CharacterEllipsis, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Height = 40 },
+        };
+        AutomationProperties.SetName(check, _l.Format("studio.videos.select", title));
+        var meta = new TextBlock
+        {
+            Text = _l.Join(_l.Format("studio.videos.views", _l.Number(v.Views)), v.CreatedAt is { } at ? _l.Date(at) : null, v.Category is { } c ? _l["studio.category." + c] : null),
+            Foreground = LanternGlass.Res("StudioMutedBrush"),
+            FontSize = 12.5,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            Margin = new Thickness(28, 0, 0, 0),
+        };
+        var body = new StackPanel { Spacing = 2, Padding = new Thickness(12, 10, 12, 0) };
+        body.Children.Add(check);
+        body.Children.Add(meta);
+
+        var edit = new Button { Content = _l["studio.videos.edit"], Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0), Foreground = LanternGlass.Res("AccentTextFillColorPrimaryBrush") };
+        AutomationProperties.SetName(edit, _l.Format("studio.videos.editOne", title));
+        edit.Click += async (_, _) => await EditAsync(v);
+        var delete = new Button { Content = _l["studio.videos.delete"], Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0), Foreground = LanternGlass.Res("StudioDangerBrush") };
+        AutomationProperties.SetName(delete, _l.Format("studio.videos.deleteOne", title));
+        delete.Click += async (_, _) => await DeleteAsync(new[] { v.Id });
+        var footer = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, HorizontalAlignment = HorizontalAlignment.Right, Padding = new Thickness(8, 4, 8, 8) };
+        footer.Children.Add(edit);
+        footer.Children.Add(delete);
+
+        var grid = new Grid();
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        grid.Children.Add(thumb);
+        Grid.SetRow(body, 1);
+        grid.Children.Add(body);
+        Grid.SetRow(footer, 2);
+        grid.Children.Add(footer);
+        var card = new Border
+        {
+            Background = LanternGlass.Res("StudioCardBrush"),
+            BorderBrush = _vm.IsSelected(v.Id) ? gold : LanternGlass.Res("StudioEdgeBrush"),
+            BorderThickness = new Thickness(_vm.IsSelected(v.Id) ? 2 : 1),
+            CornerRadius = new CornerRadius(14),
+            Child = grid,
+        };
+        check.Click += (_, _) =>
+        {
+            _vm.SetSelected(v.Id, check.IsChecked == true);
+            card.BorderBrush = check.IsChecked == true ? gold : LanternGlass.Res("StudioEdgeBrush");
+            card.BorderThickness = new Thickness(check.IsChecked == true ? 2 : 1);
+        };
+        return LanternGlass.WithGlow(card, 14, 0.22f, 22f);
+    }
+
+    private static Border Chip(string text, global::Windows.UI.Color color, HorizontalAlignment h, VerticalAlignment v, double radius = 999) => new()
+    {
+        HorizontalAlignment = h,
+        VerticalAlignment = v,
+        Margin = new Thickness(8),
+        Padding = new Thickness(8, 2, 8, 2),
+        CornerRadius = new CornerRadius(radius),
+        Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(global::Windows.UI.Color.FromArgb(0xC0, 0x09, 0x15, 0x1E)),
+        Child = new TextBlock { Text = text, FontSize = 11.5, FontWeight = Microsoft.UI.Text.FontWeights.Bold, Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(color) },
+    };
 
     private void RenderEmpty()
     {
@@ -290,6 +386,7 @@ internal sealed class VideosPage
         _deleted.Children.Clear();
         _deletedExpander.Header = _l.Format("studio.videos.deletedTitle", _vm.Deleted.Count);
         _deletedExpander.Visibility = _vm.Deleted.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        if (_deletedCard != null) _deletedCard.Visibility = _deletedExpander.Visibility;
         foreach (var d in _vm.Deleted)
         {
             var row = new Grid { ColumnSpacing = 8 };
