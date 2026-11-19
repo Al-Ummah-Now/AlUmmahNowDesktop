@@ -123,6 +123,19 @@ public static class Ui
         return widget;
     }
 
+    /// <summary>The same, with the label above the control (narrow cards).</summary>
+    public static Gtk.Box LabelledAbove(string text, Gtk.Widget control)
+    {
+        var box = Gtk.Box.New(Gtk.Orientation.Vertical, 4);
+        var label = Gtk.Label.NewWithMnemonic(text);
+        label.SetMnemonicWidget(control);
+        label.SetXalign(0);
+        label.SetWrap(true);
+        box.Append(label);
+        box.Append(control);
+        return box;
+    }
+
     /// <summary>Labels a control for screen readers through a visible label (AT-SPI labelled-by).</summary>
     public static Gtk.Box Labelled(string text, Gtk.Widget control)
     {
