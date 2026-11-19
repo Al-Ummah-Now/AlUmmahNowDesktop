@@ -4,17 +4,17 @@ using AlUmmahNow.CoreBridge.Studio;
 namespace AlUmmahNow.Studio.Shell;
 
 /// <summary>
-/// Wording for the "Acting as" picker, the YouTube/Facebook pattern the website uses: each option
+/// Wording for the channel rows of the identity menu (<see cref="IdentityMenu"/>), the YouTube/Facebook pattern the website uses: each option
 /// shows a logo, a name and a small tag saying what it is. The Studio always works in a channel
 /// (uploads need one), so every option is a channel tagged "Channel"; a personal identity would be
 /// tagged "Personal". Names only: never an @handle.
 /// </summary>
 public static class ActingAs
 {
-    /// <summary>Picker heading: "Acting as" / «تتصرّف باسم».</summary>
+    /// <summary>Channels heading in the identity menu: "Acting as" / «تتصرّف باسم».</summary>
     public const string HeadingKey = "studio.shell.actingAs";
 
-    /// <summary>Accessible name of the picker button: "Acting as {name}".</summary>
+    /// <summary>Accessible name of the identity button: "Acting as {name}".</summary>
     public const string ButtonNameKey = "studio.shell.actingAsMenu";
 
     /// <summary>Small tag on a channel option: "Channel" / «قناة».</summary>
@@ -28,9 +28,6 @@ public static class ActingAs
     /// </summary>
     public static string ChannelTag(StudioChannel channel, Func<string, string> text, string separator) =>
         channel.Role == ChannelRole.Owner ? text(ChannelTagKey) : text(ChannelTagKey) + separator + text(RoleKey(channel.Role));
-
-    /// <summary>One line for a channel option (screen readers, plain-text lists): name, separator, tag.</summary>
-    public static string OptionText(StudioChannel channel, Func<string, string> text, string separator) => channel.Name + separator + ChannelTag(channel, text, separator);
 
     /// <summary>The grapheme clusters of a short string (e.g. initials "MT" → "M", "T").</summary>
     public static IEnumerable<string> Graphemes(string text)

@@ -5,7 +5,7 @@ using Xunit;
 
 namespace AlUmmahNow.Studio.Tests;
 
-/// <summary>The "Acting as" picker wording (YouTube/Facebook pattern, same as the website).</summary>
+/// <summary>The identity menu's channel wording (YouTube/Facebook pattern, same as the website).</summary>
 public sealed class ActingAsTests
 {
     private static StudioChannel Channel(ChannelRole role, string name = "Masjid Media Team") =>
@@ -23,17 +23,24 @@ public sealed class ActingAsTests
     }
 
     [Theory]
-    [InlineData("en", "Masjid Media Team · Channel · Editor")]
-    [InlineData("ar", "Masjid Media Team • قناة • محرّر")]
-    public void NonOwnersSeeTheirRoleAfterTheTag(string language, string expected) =>
-        Assert.Equal(expected, ActingAs.OptionText(Channel(ChannelRole.Editor), k => new Localizer(language)[k], new Localizer(language).Separator));
+    [InlineData("en", "Channel · Editor")]
+    [InlineData("ar", "قناة • محرّر")]
+    public void NonOwnersSeeTheirRoleAfterTheTag(string language, string expected)
+    {
+        var l = new Localizer(language);
+        Assert.Equal(expected, ActingAs.ChannelTag(Channel(ChannelRole.Editor), k => l[k], l.Separator));
+    }
 
     [Fact]
     public void OptionsNeverShowTheHandle()
     {
         var l = new Localizer("en");
-        Assert.DoesNotContain("@", ActingAs.OptionText(Channel(ChannelRole.Owner), k => l[k], l.Separator));
-        Assert.DoesNotContain("masjidmedia", ActingAs.OptionText(Channel(ChannelRole.Admin), k => l[k], l.Separator));
+        var channel = Channel(ChannelRole.Admin);
+        foreach (var row in IdentityMenu.Channels(new[] { channel }, channel, k => l[k], l.Separator))
+        {
+            Assert.DoesNotContain("@", row.Name + row.Tag + row.AccessibleName);
+            Assert.DoesNotContain("masjidmedia", row.Name + row.Tag + row.AccessibleName);
+        }
     }
 
     [Theory]
