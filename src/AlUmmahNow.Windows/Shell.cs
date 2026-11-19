@@ -303,7 +303,7 @@ public sealed class Shell
         controls.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         controls.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-        var transport = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+        var transport = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, FlowDirection = FlowDirection.LeftToRight };
         var back = Icon("", "player.seekBack", () => vm.SkipBack());
         var play = Icon(vm.IsPlaying ? "" : "", vm.IsPlaying ? "player.pause" : "player.play", () => vm.TogglePlay());
         var forward = Icon("", "player.seekForward", () => vm.SkipForward());
@@ -312,7 +312,12 @@ public sealed class Shell
         transport.Children.Add(forward);
         controls.Children.Add(transport);
 
-        var slider = new Slider { Minimum = 0, Maximum = Math.Max(1, vm.Duration), VerticalAlignment = VerticalAlignment.Center, Foreground = new SolidColorBrush(Lantern) };
+        // Media time never mirrors (Apple HIG, Material; our web and mobile players): the seek bar runs left to
+        // right in every language. Its thumb is gold like the fill (the slider's own keys; the app's accent
+        // overrides don't reach the framework's slider brushes).
+        var slider = new Slider { Minimum = 0, Maximum = Math.Max(1, vm.Duration), VerticalAlignment = VerticalAlignment.Center, Foreground = new SolidColorBrush(Lantern), FlowDirection = FlowDirection.LeftToRight };
+        foreach (var key in new[] { "SliderThumbBackground", "SliderThumbBackgroundPointerOver", "SliderThumbBackgroundPressed", "SliderInnerThumbBackground", "SliderInnerThumbBackgroundPointerOver", "SliderInnerThumbBackgroundPressed" })
+            slider.Resources[key] = new SolidColorBrush(Lantern);
         var syncing = false;
         slider.ValueChanged += (_, e) =>
         {
