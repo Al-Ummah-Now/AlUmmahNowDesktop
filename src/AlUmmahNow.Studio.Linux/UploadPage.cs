@@ -20,6 +20,8 @@ public sealed class UploadPage
     private readonly Gtk.Label _stagedTitle = Ui.Label("");
     private readonly Gtk.Button _start = Gtk.Button.NewWithLabel("");
     private readonly Gtk.Button _clear;
+    private readonly Gtk.Label _dropText = Ui.Label("");
+    private readonly Gtk.Box _stagedCard;
     private readonly Gtk.Box _queue = Gtk.Box.New(Gtk.Orientation.Vertical, 8);
     // Rows with nothing to show are hidden: an empty box or blank label still takes the page spacing.
     private readonly Gtk.Box _watchRow = Gtk.Box.New(Gtk.Orientation.Horizontal, 8);
@@ -42,18 +44,42 @@ public sealed class UploadPage
         _vm = vm;
         _shell = shell;
         _window = window;
+        // Lantern Glass: files and the queue on the left, "Set for all" on the right; card actions in each footer.
         Root = Gtk.ScrolledWindow.New();
-        var page = Ui.Page(14);
+        Root.SetPolicy(Gtk.PolicyType.Never, Gtk.PolicyType.Automatic);
+        var page = Gtk.Box.New(Gtk.Orientation.Horizontal, 20);
+        page.SetMarginStart(24);
+        page.SetMarginEnd(24);
+        page.SetMarginTop(18);
+        page.SetMarginBottom(24);
         Root.SetChild(page);
+        var left = Gtk.Box.New(Gtk.Orientation.Vertical, 18);
+        left.SetHexpand(true);
+        page.Append(left);
 
-        // Add
+        // Add: the lantern, where the files go, and the ways to add them.
         var add = Gtk.Box.New(Gtk.Orientation.Horizontal, 8);
         add.Append(Ui.Button(l["studio.upload.addFiles"], () => _ = PickFilesAsync(), "suggested-action"));
         add.Append(Ui.Button(l["studio.upload.addFolder"], () => _ = PickFolderAsync()));
         _recursive = Gtk.CheckButton.NewWithLabel(l["studio.upload.includeSubfolders"]);
         add.Append(_recursive);
         add.Append(Ui.Button(l["studio.upload.watch"], () => _ = PickWatchFolderAsync(rememberWatchFolder)));
-        page.Append(add);
+        var drop = Gtk.Box.New(Gtk.Orientation.Horizontal, 20);
+        drop.AddCssClass("drop-zone");
+        var lantern = Gtk.Image.NewFromIconName("go-up-symbolic");
+        lantern.SetPixelSize(30);
+        lantern.AddCssClass("lantern-ring");
+        lantern.SetValign(Gtk.Align.Center);
+        drop.Append(lantern);
+        var dropText = Gtk.Box.New(Gtk.Orientation.Vertical, 12);
+        dropText.SetValign(Gtk.Align.Center);
+        dropText.SetHexpand(true);
+        _dropText.AddCssClass("heading");
+        dropText.Append(_dropText);
+        dropText.Append(add);
+        drop.Append(dropText);
+        var addBody = Gtk.Box.New(Gtk.Orientation.Vertical, 12);
+        addBody.Append(drop);
         var watchRow = _watchRow;
         watchRow.Append(_watching);
         _stopWatching = Ui.Button(l["studio.upload.stopWatching"], () =>
@@ -62,42 +88,42 @@ public sealed class UploadPage
             rememberWatchFolder(null);
         }, "flat");
         watchRow.Append(_stopWatching);
-        page.Append(watchRow);
+        addBody.Append(watchRow);
         _error.AddCssClass("error");
         _error.SetVisible(false);
-        page.Append(_error);
+        addBody.Append(_error);
+        left.Append(Ui.Card(addBody));
 
-        // Set for all
-        var expander = Gtk.Expander.New(l["studio.upload.forAll"]);
-        expander.SetExpanded(true);
-        expander.SetChild(BuildDefaults());
-        page.Append(expander);
-
-        // Staged
-        _stagedTitle.AddCssClass("heading");
-        page.Append(_stagedTitle);
-        page.Append(_staged);
+        // Ready to upload: the staged files with their titles; Clear list and Upload in the footer.
+        var stagedBody = Gtk.Box.New(Gtk.Orientation.Vertical, 10);
+        _stagedTitle.AddCssClass("title-4");
+        stagedBody.Append(_stagedTitle);
+        stagedBody.Append(_staged);
         var actions = _stagedActions;
+        _clear = Ui.Button(l["studio.upload.clear"], () => _vm.ClearStaged(), "flat");
+        actions.Append(_clear);
         _start.AddCssClass("suggested-action");
         _start.OnClicked += (_, _) => _vm.Start();
         actions.Append(_start);
-        _clear = Ui.Button(l["studio.upload.clear"], () => _vm.ClearStaged(), "flat");
-        actions.Append(_clear);
-        page.Append(actions);
+        _stagedCard = Ui.Card(stagedBody, actions);
+        left.Append(_stagedCard);
 
-        // Queue
-        var queueHeader = Gtk.Box.New(Gtk.Orientation.Horizontal, 8);
-        var queueTitle = Ui.Label(l["studio.upload.queue"]);
-        queueTitle.AddCssClass("heading");
-        // One line, with Clear finished beside it (as on Windows), not wrapped against the far edge.
-        queueTitle.SetWrap(false);
-        queueTitle.SetValign(Gtk.Align.Center);
-        queueHeader.Append(queueTitle);
-        queueHeader.Append(Ui.Button(l["studio.upload.clearFinished"], () => _vm.ClearFinished(), "flat"));
-        page.Append(queueHeader);
+        // Uploads: the queue; Clear finished in the footer.
+        var queueBody = Gtk.Box.New(Gtk.Orientation.Vertical, 10);
+        queueBody.Append(Ui.CardTitle(l["studio.upload.queue"]));
         _queueEmpty = Ui.Label(l["studio.upload.queueEmpty"], dim: true);
-        page.Append(_queueEmpty);
-        page.Append(_queue);
+        queueBody.Append(_queueEmpty);
+        queueBody.Append(_queue);
+        left.Append(Ui.Card(queueBody, Ui.Button(l["studio.upload.clearFinished"], () => _vm.ClearFinished(), "flat")));
+
+        // Set for all.
+        var forAll = Gtk.Box.New(Gtk.Orientation.Vertical, 12);
+        forAll.Append(Ui.CardTitle(l["studio.upload.forAll"]));
+        forAll.Append(BuildDefaults());
+        var right = Ui.Card(forAll);
+        right.SetValign(Gtk.Align.Start);
+        right.SetSizeRequest(400, -1);
+        page.Append(right);
 
         _vm.PropertyChanged += (_, e) =>
         {
@@ -152,11 +178,12 @@ public sealed class UploadPage
             name.SetMnemonicWidget(control);
             name.SetXalign(0);
             name.SetValign(Gtk.Align.Start);
-            grid.Attach(name, 0, row, 1, 1);
+            // Labels above the fields: the form sits in a narrow card.
+            grid.Attach(name, 0, row++, 1, 1);
             control.SetHexpand(true);
             if (hint == null)
             {
-                grid.Attach(control, 1, row, 1, 1);
+                grid.Attach(control, 0, row, 1, 1);
             }
             else
             {
@@ -165,7 +192,7 @@ public sealed class UploadPage
                 var h = Ui.Label(hint, dim: true);
                 h.AddCssClass("caption");
                 box.Append(h);
-                grid.Attach(box, 1, row, 1, 1);
+                grid.Attach(box, 0, row, 1, 1);
             }
 
             row++;
@@ -193,7 +220,7 @@ public sealed class UploadPage
         frame.SetChild(description);
         Add(_l["studio.upload.description"], description);
         grid.Remove(description);
-        grid.Attach(frame, 1, row - 1, 1, 1);
+        grid.Attach(frame, 0, row - 1, 1, 1);
 
         var categories = new[] { (string?)null }.Concat(StudioCatalog.Categories).ToList();
         var category = Gtk.DropDown.NewFromStrings(categories.Select(c => c == null ? _l["studio.upload.none"] : _l["studio.category." + c]).ToArray());
@@ -280,7 +307,7 @@ public sealed class UploadPage
         };
         _scheduleRow.Append(every);
         _scheduleRow.SetVisible(false);
-        grid.Attach(_scheduleRow, 1, row++, 1, 1);
+        grid.Attach(_scheduleRow, 0, row++, 1, 1);
 
         var newPlaylist = Gtk.Entry.New();
         newPlaylist.SetPlaceholderText(_l["studio.upload.newPlaylist"]);
@@ -340,19 +367,15 @@ public sealed class UploadPage
         var staged = _vm.Staged;
         _start.SetLabel(staged.Count == 1 ? _l["studio.upload.startOne"] : _l.Format("studio.upload.start", staged.Count));
         _start.SetSensitive(_vm.CanStart);
-        _start.SetVisible(staged.Count > 0);
-        _clear.SetVisible(staged.Count > 0);
-        _stagedActions.SetVisible(staged.Count > 0);
-        _staged.SetVisible(staged.Count > 0);
-        _stagedTitle.SetText(staged.Count > 0
-            ? _l.Format("studio.upload.stagedTitle", staged.Count)
-            : _l.Format("studio.upload.stagedEmpty", Localizer.Isolate(_shell.ActiveChannel?.Name ?? "")));
+        _stagedCard.SetVisible(staged.Count > 0);
+        _stagedTitle.SetText(_l.Format("studio.upload.stagedTitle", staged.Count));
+        _dropText.SetText(_l.Format("studio.upload.stagedEmpty", Localizer.Isolate(_shell.ActiveChannel?.Name ?? "")));
         if (ReferenceEquals(staged, _renderedStaged)) return;
         _renderedStaged = staged;
         Ui.Clear(_staged);
         foreach (var plan in staged)
         {
-            var row = Gtk.Box.New(Gtk.Orientation.Horizontal, 8);
+            var row = Gtk.Box.New(Gtk.Orientation.Horizontal, 12);
             var file = Path.GetFileName(plan.FilePath);
             var title = Gtk.Entry.New();
             title.SetText(plan.Title);
@@ -361,13 +384,18 @@ public sealed class UploadPage
             title.OnChanged += (_, _) => _vm.RenameStaged(plan.FilePath, title.GetText());
             var meta = Ui.Label(_l.Join(Localizer.Isolate(file), _l.Bytes(plan.Size),
                 plan.PublishAt is { } at ? _l.Format("studio.upload.publishesAt", _l.DateTime(at)) : null), dim: true);
-            meta.SetSizeRequest(320, -1);
-            var remove = Gtk.Button.NewWithLabel(_l["studio.upload.remove"]);
+            meta.AddCssClass("caption");
+            var text = Gtk.Box.New(Gtk.Orientation.Vertical, 4);
+            text.SetHexpand(true);
+            text.Append(title);
+            text.Append(meta);
+            var remove = Gtk.Button.NewFromIconName("window-close-symbolic");
+            remove.SetValign(Gtk.Align.Center);
             remove.AddCssClass("flat");
             Ui.Named(remove, _l.Format("studio.upload.removeStaged", file));
             remove.OnClicked += (_, _) => _vm.RemoveStaged(plan.FilePath);
-            row.Append(title);
-            row.Append(meta);
+            row.Append(Ui.FileTile(96, 54));
+            row.Append(text);
             row.Append(remove);
             _staged.Append(row);
         }
@@ -467,14 +495,16 @@ public sealed class UploadPage
             _id = id;
             Root = Gtk.Box.New(Gtk.Orientation.Horizontal, 12);
             var text = Gtk.Box.New(Gtk.Orientation.Vertical, 2);
-            text.SetSizeRequest(360, -1);
+            text.SetHexpand(true);
+            text.SetValign(Gtk.Align.Center);
             _title.SetEllipsize(Pango.EllipsizeMode.End);
+            _title.AddCssClass("heading");
             text.Append(_title);
+            text.Append(_bar);
             text.Append(_status);
-            _bar.SetHexpand(true);
-            _bar.SetValign(Gtk.Align.Center);
+            _buttons.SetValign(Gtk.Align.Center);
+            Root.Append(Ui.FileTile(80, 45));
             Root.Append(text);
-            Root.Append(_bar);
             Root.Append(_buttons);
         }
 

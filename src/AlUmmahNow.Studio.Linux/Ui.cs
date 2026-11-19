@@ -61,6 +61,56 @@ public static class Ui
         return face;
     }
 
+    /// <summary>
+    /// A Lantern Glass card: gold edge, top sheen, gold glow (glass.css). Buttons go in
+    /// <paramref name="footer"/>, end-aligned under a hairline.
+    /// </summary>
+    public static Gtk.Box Card(Gtk.Widget body, Gtk.Widget? footer = null)
+    {
+        var card = Gtk.Box.New(Gtk.Orientation.Vertical, 0);
+        card.AddCssClass("card");
+        body.SetMarginStart(18);
+        body.SetMarginEnd(18);
+        body.SetMarginTop(14);
+        body.SetMarginBottom(16);
+        card.Append(body);
+        if (footer != null)
+        {
+            var bar = Gtk.Box.New(Gtk.Orientation.Horizontal, 0);
+            bar.AddCssClass("card-footer");
+            footer.SetHalign(Gtk.Align.End);
+            footer.SetHexpand(true);
+            bar.Append(footer);
+            card.Append(bar);
+        }
+
+        return card;
+    }
+
+    /// <summary>A heading inside a card.</summary>
+    public static Gtk.Label CardTitle(string text)
+    {
+        var label = Label(text);
+        label.AddCssClass("title-4");
+        label.SetWrap(false);
+        return label;
+    }
+
+    /// <summary>A video file's tile: night blue with a gold film glyph (the server makes the real thumbnail).</summary>
+    public static Gtk.Widget FileTile(int width, int height)
+    {
+        var tile = Gtk.Box.New(Gtk.Orientation.Vertical, 0);
+        tile.AddCssClass("file-tile");
+        tile.SetSizeRequest(width, height);
+        tile.SetValign(Gtk.Align.Center);
+        var icon = Gtk.Image.NewFromIconName("video-x-generic-symbolic");
+        icon.SetPixelSize(height * 2 / 5);
+        icon.SetVexpand(true);
+        icon.SetValign(Gtk.Align.Center);
+        tile.Append(icon);
+        return tile;
+    }
+
     public static void Clear(Gtk.Box box)
     {
         while (box.GetFirstChild() is { } child) box.Remove(child);

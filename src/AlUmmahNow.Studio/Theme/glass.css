@@ -87,3 +87,30 @@ button.suggested-action label { color: @fanous_on_primary; }
 progressbar > trough > progress { background-image: linear-gradient(to right, @fanous_primary_pressed, @fanous_primary_hover); box-shadow: 0 0 8px alpha(#fbc661, 0.7); }
 switch:checked { background-color: @fanous_primary; }
 checkbutton check:checked, radiobutton radio:checked { background-color: @fanous_primary; color: @fanous_on_primary; }
+
+/* Card footers: actions end-aligned under a hairline. */
+.card-footer { border-top: 1px solid alpha(@fanous_primary_edge, 0.22); padding: 10px 18px; }
+.card-footer button { min-height: 32px; }
+
+/* Upload: the add zone with the lantern, file tiles. */
+.drop-zone {
+  border: 1.5px dashed alpha(@fanous_primary_edge, 0.55);
+  border-radius: 12px;
+  padding: 16px 20px;
+  background-image: radial-gradient(circle at 50% 0, alpha(@fanous_primary, 0.10), transparent 70%);
+}
+.lantern-ring {
+  min-width: 72px;
+  min-height: 72px;
+  border-radius: 36px;
+  border: 2px solid #ffd98a;
+  background-color: alpha(#f4ae3a, 0.20);
+  box-shadow: 0 0 26px alpha(#f4ae3a, 0.55);
+  color: #f4ae3a;
+}
+.file-tile {
+  border-radius: 8px;
+  border: 1px solid alpha(@fanous_primary_edge, 0.28);
+  background-image: linear-gradient(135deg, #184456, #09151e);
+  color: #f4ae3a;
+}
