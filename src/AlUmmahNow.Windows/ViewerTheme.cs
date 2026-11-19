@@ -49,5 +49,10 @@ internal static class ViewerTheme
         t["TextOnAccentFillColorSecondaryBrush"] = new SolidColorBrush(C("OnPrimary"));
         t["AccentTextFillColorPrimaryBrush"] = new SolidColorBrush(C("Link"));
         t["HyperlinkForeground"] = new SolidColorBrush(C("Link"));
+        // The slider's thumb dot has its own keys (the track fill follows AccentFillColorDefaultBrush): without
+        // them the playback thumb stayed Windows blue on a gold track.
+        t["SliderInnerThumbBackground"] = new SolidColorBrush(primary);
+        t["SliderInnerThumbBackgroundPointerOver"] = new SolidColorBrush(C("PrimaryHover"));
+        t["SliderInnerThumbBackgroundPressed"] = new SolidColorBrush(C("PrimaryPressed"));
     }
 }
