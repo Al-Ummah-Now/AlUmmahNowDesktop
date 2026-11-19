@@ -144,6 +144,11 @@ button.kpi:checked {
 .clip-row.current { background-image: linear-gradient(to right, alpha(@fanous_primary, 0.22), alpha(@fanous_primary, 0.05)); box-shadow: inset 0 0 0 1px alpha(@fanous_primary_edge, 0.3); }
 
 /* Sign-in and status states: the lantern icon in a gold glow on a lantern-lit stage. */
-.hero-stage { background-image: radial-gradient(circle at 50% 42%, alpha(@fanous_primary, 0.14), transparent 55%); }
+.hero-stage {
+  background-image: url("@LANTERN@"), radial-gradient(circle at 50% 42%, alpha(@fanous_primary, 0.14), transparent 55%);
+  background-repeat: repeat-x, no-repeat;
+  background-size: auto 150px, 100% 100%;
+  background-position: center top, center;
+}
 .hero-card { padding-top: 26px; }
 .hero-icon { border-radius: 56px; box-shadow: 0 0 0 3px alpha(#ffd98a, 0.6), 0 0 50px 4px alpha(#f4ae3a, 0.45); }

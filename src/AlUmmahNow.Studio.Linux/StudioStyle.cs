@@ -30,7 +30,8 @@ public static class StudioStyle
         };
 
         var studio = Gtk.CssProvider.New();
-        studio.LoadFromString(StudioTheme.Studio("glass.css"));
+        // The owner's lantern string hangs over the sign-in stage (the header itself has no art, as on the web).
+        studio.LoadFromString(StudioTheme.Studio("glass.css").Replace("@LANTERN@", LanternFile()));
         Gtk.StyleContext.AddProviderForDisplay(display, studio, 601);
         Gtk.StyleContext.AddProviderForDisplay(display, _header, 602);
 
@@ -49,6 +50,30 @@ public static class StudioStyle
         // The native registry's stylesheet: Fawanees colours and materials (a solid page since AlUmmahNow#1596).
         _tokens?.LoadFromString(StudioTheme.NativeGtk(dark));
         _header?.LoadFromString(HeaderCss(FawaneesHeader.For(dark)));
+    }
+
+    /// <summary>GTK CSS reads images from files: the lantern string is written once to the cache.</summary>
+    private static string LanternFile()
+    {
+        try
+        {
+            var dir = Path.Combine(Environment.GetEnvironmentVariable("XDG_CACHE_HOME") is { Length: > 0 } c ? c : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cache"), "alummahnow-studio");
+            Directory.CreateDirectory(dir);
+            var path = Path.Combine(dir, "lantern-string.png");
+            using (var source = StudioTheme.LanternString())
+            using (var file = File.Create(path))
+            {
+                source.CopyTo(file);
+            }
+
+            return new Uri(path).AbsoluteUri;
+        }
+        catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+        {
+            // No art: the stage keeps its glow.
+            Logger.Warn("lantern art not written", ex);
+            return "";
+        }
     }
 
     /// <summary>
