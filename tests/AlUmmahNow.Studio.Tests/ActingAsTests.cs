@@ -19,21 +19,21 @@ public sealed class ActingAsTests
         var l = new Localizer(language);
         Assert.Equal(heading, l[ActingAs.HeadingKey]);
         Assert.Equal(heading + " Masjid Media Team", l.Format(ActingAs.ButtonNameKey, "Masjid Media Team"));
-        Assert.Equal(tag, ActingAs.ChannelTag(Channel(ChannelRole.Owner), k => l[k]));
+        Assert.Equal(tag, ActingAs.ChannelTag(Channel(ChannelRole.Owner), k => l[k], l.Separator));
     }
 
     [Theory]
     [InlineData("en", "Masjid Media Team · Channel · Editor")]
-    [InlineData("ar", "Masjid Media Team · قناة · محرّر")]
+    [InlineData("ar", "Masjid Media Team • قناة • محرّر")]
     public void NonOwnersSeeTheirRoleAfterTheTag(string language, string expected) =>
-        Assert.Equal(expected, ActingAs.OptionText(Channel(ChannelRole.Editor), k => new Localizer(language)[k]));
+        Assert.Equal(expected, ActingAs.OptionText(Channel(ChannelRole.Editor), k => new Localizer(language)[k], new Localizer(language).Separator));
 
     [Fact]
     public void OptionsNeverShowTheHandle()
     {
         var l = new Localizer("en");
-        Assert.DoesNotContain("@", ActingAs.OptionText(Channel(ChannelRole.Owner), k => l[k]));
-        Assert.DoesNotContain("masjidmedia", ActingAs.OptionText(Channel(ChannelRole.Admin), k => l[k]));
+        Assert.DoesNotContain("@", ActingAs.OptionText(Channel(ChannelRole.Owner), k => l[k], l.Separator));
+        Assert.DoesNotContain("masjidmedia", ActingAs.OptionText(Channel(ChannelRole.Admin), k => l[k], l.Separator));
     }
 
     [Theory]
@@ -63,9 +63,17 @@ public sealed class StudioWindowSizeTests
     [InlineData(null, 1280, 800)]
     [InlineData("", 1280, 800)]
     [InlineData("nonsense", 1280, 800)]
-    [InlineData("400x800", 1100, 800)]
+    [InlineData("400x800", 1024, 800)]
     [InlineData("1600x900", 1600, 900)]
     [InlineData("1100x720", 1100, 720)]
+    [InlineData("1024x600", 1024, 700)]
     public void InitialSizeNeverGoesBelowTheMinimum(string? value, int width, int height) =>
         Assert.Equal((width, height), StudioWindowSize.Initial(value));
+
+    [Theory]
+    [InlineData(1024, true)]
+    [InlineData(1199, true)]
+    [InlineData(1200, false)]
+    [InlineData(1920, false)]
+    public void NarrowWindowsShowTheRail(double width, bool rail) => Assert.Equal(rail, StudioWindowSize.IsRail(width));
 }

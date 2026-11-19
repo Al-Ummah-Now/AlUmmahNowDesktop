@@ -1,0 +1,89 @@
+/* Lantern Glass for the GTK Studio. Loaded after the Fawanees tokens (fanous/gtk/style*.css), so the
+   @fanous_* colours are the registry's. GTK has no backdrop blur: surfaces are solid with the gold edge,
+   top sheen and gold glow instead of frosted glass. */
+
+/* The header bar's colours (headerbar.night) are the web Fawanees header's, generated in StudioStyle
+   from the registry's web tokens (FawaneesHeader), Light and Dark. */
+headerbar.night .app-icon { border-radius: 5px; }
+
+/* The page: the registry's page material, a solid colour (as the web's Fawanees page). */
+.studio-content { background-color: @fanous_background; background-image: none; }
+
+/* Sidebar: a solid tinted pane with a gold-tinted edge on its inline end. */
+.studio-sidebar { background-color: mix(@fanous_background, @fanous_surface, 0.45); }
+.studio-sidebar:dir(ltr) { box-shadow: inset -1px 0 alpha(@fanous_primary_edge, 0.28); }
+.studio-sidebar:dir(rtl) { box-shadow: inset 1px 0 alpha(@fanous_primary_edge, 0.28); }
+.studio-nav { background: transparent; }
+.studio-nav row { min-height: 40px; border-radius: 10px; margin: 2px 0; padding: 0 12px; color: @fanous_text_secondary; }
+.studio-nav row:hover { background-color: alpha(@fanous_primary, 0.08); }
+.studio-nav row:selected {
+  background-image: linear-gradient(to right, alpha(@fanous_primary, 0.28), alpha(@fanous_primary, 0.08));
+  background-color: transparent;
+  color: @fanous_link;
+  box-shadow: inset 0 0 0 1px alpha(@fanous_primary_edge, 0.30), 0 0 16px -4px alpha(#f4ae3a, 0.45);
+}
+.studio-nav row:selected:dir(rtl) { background-image: linear-gradient(to left, alpha(@fanous_primary, 0.28), alpha(@fanous_primary, 0.08)); }
+.studio-nav row:selected label { font-weight: 700; }
+
+/* The identity button at the head of the sidebar. */
+button.identity {
+  background-color: @card_bg_color;
+  background-image: linear-gradient(to bottom, alpha(#ffd98a, 0.07), transparent 40%);
+  border: 1px solid alpha(@fanous_primary_edge, 0.32);
+  border-radius: 12px;
+  padding: 8px 10px;
+  box-shadow: 0 10px 26px -12px alpha(#f4ae3a, 0.6);
+}
+button.identity:hover { border-color: alpha(@fanous_primary_edge, 0.55); }
+.identity-tag { font-size: 0.85em; color: @fanous_text_muted; }
+.studio-avatar { border-radius: 9999px; font-weight: 700; }
+.studio-avatar.channel {
+  background-image: radial-gradient(circle at 30% 25%, #ffe6a8, #f4ae3a 55%, #b07a22);
+  color: #09151e;
+}
+.studio-avatar.person {
+  background-image: radial-gradient(circle at 30% 25%, #cfe3ea, #5b8fa5 60%, #184456);
+  color: white;
+}
+.identity-heading { font-size: 0.85em; font-weight: 700; color: @fanous_text_muted; margin: 6px 10px 2px; }
+button.identity-row { border-radius: 9px; padding: 6px 8px; }
+button.identity-row.active {
+  background-image: linear-gradient(to right, alpha(@fanous_primary, 0.24), alpha(@fanous_primary, 0.06));
+  box-shadow: inset 0 0 0 1px alpha(@fanous_primary_edge, 0.30);
+}
+button.identity-row .check { color: #f4ae3a; }
+button.danger label, button.danger image { color: @fanous_error_text; }
+
+/* Menus (popovers): gold edge and glow. */
+popover.glass > contents {
+  background-color: @popover_bg_color;
+  border: 1px solid alpha(@fanous_primary_edge, 0.45);
+  border-radius: 14px;
+  box-shadow: 0 0 30px -6px alpha(#f4ae3a, 0.45), 0 18px 40px -12px alpha(black, 0.45);
+  padding: 6px;
+}
+popover.glass > arrow { background-color: @popover_bg_color; border: 1px solid alpha(@fanous_primary_edge, 0.45); }
+
+/* Cards: gold edge, top sheen, gold glow. */
+.card {
+  background-color: @card_bg_color;
+  background-image: linear-gradient(to bottom, alpha(#ffd98a, 0.06), transparent 35%);
+  border: 1px solid alpha(@fanous_primary_edge, 0.28);
+  border-radius: 14px;
+  box-shadow: 0 12px 32px -16px alpha(#f4ae3a, 0.55), 0 1px 3px alpha(black, 0.10);
+}
+
+/* Primary actions: lantern gold with a bright edge. */
+button.suggested-action {
+  background-image: linear-gradient(to bottom, @fanous_primary_hover, @fanous_primary 60%, @fanous_primary_pressed);
+  color: @fanous_on_primary;
+  border: 1px solid #ffd98a;
+  box-shadow: 0 6px 18px -6px alpha(#f4ae3a, 0.75);
+}
+button.suggested-action:hover { background-image: linear-gradient(to bottom, @fanous_primary_sheen, @fanous_primary_hover); }
+button.suggested-action label { color: @fanous_on_primary; }
+
+/* Progress and switches glow gold. */
+progressbar > trough > progress { background-image: linear-gradient(to right, @fanous_primary_pressed, @fanous_primary_hover); box-shadow: 0 0 8px alpha(#fbc661, 0.7); }
+switch:checked { background-color: @fanous_primary; }
+checkbutton check:checked, radiobutton radio:checked { background-color: @fanous_primary; color: @fanous_on_primary; }

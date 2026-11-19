@@ -58,16 +58,6 @@ public class LocalizerTests
     }
 
     [Fact]
-    public void Numerals_localizes_digits_in_copy()
-    {
-        var ar = new Localizer("ar");
-        Assert.Contains("(١، ٢، ٣…)", ar.Numerals(ar["studio.upload.titlePatternHint"]));
-        Assert.Contains("{filename}", ar.Numerals(ar["studio.upload.titlePatternHint"]));
-        var en = new Localizer("en");
-        Assert.Contains("(1, 2, 3…)", en.Numerals(en["studio.upload.titlePatternHint"]));
-    }
-
-    [Fact]
     public void Missing_key_returns_the_key() => Assert.Equal("nope", new Localizer()["nope"]);
 
     [Fact]

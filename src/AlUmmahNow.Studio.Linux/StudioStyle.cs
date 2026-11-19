@@ -1,34 +1,116 @@
+using AlUmmahNow.CoreBridge.Logging;
+using AlUmmahNow.Studio.Shell;
+
 namespace AlUmmahNow.Studio.Linux;
 
 /// <summary>
-/// Surfaces: menus (popovers) and cards are frosted glass (translucent neutral fill, thin bright
-/// edge, soft golden glow); everything else stays flat libadwaita. GTK can't blur what is behind a
-/// surface itself: with a compositor that blurs translucent windows (KWin, Mutter's blur extensions,
-/// picom) the menus are blurred; without one they are translucent.
+/// Lantern Glass on GTK 4: the Fawanees tokens from the shared native theme registry (the light or
+/// dark stylesheet, swapped with libadwaita's colour scheme), then the Studio's own styles
+/// (<c>glass.css</c>): the sidebar, gold-edged cards,
+/// menus and primary buttons. GTK can't blur behind a surface, so surfaces are solid with the
+/// gold edge, sheen and glow.
 /// </summary>
 public static class StudioStyle
 {
-    private const string Css = @"
-popover.glass > contents {
-  background-color: alpha(@popover_bg_color, 0.9);
-  border: 1px solid alpha(white, 0.55);
-  box-shadow: 0 0 18px 2px alpha(#d9b25f, 0.38), 0 6px 18px alpha(black, 0.22);
-}
-popover.glass > arrow {
-  background-color: alpha(@popover_bg_color, 0.9);
-  border: 1px solid alpha(white, 0.55);
-}
-.card {
-  background-color: alpha(@card_bg_color, 0.9);
-  border: 1px solid alpha(white, 0.45);
-  box-shadow: 0 0 14px 1px alpha(#d9b25f, 0.30), 0 2px 6px alpha(black, 0.12);
-}
-";
+    private static readonly Logger Logger = Log.For("ui");
+    private static Gtk.CssProvider? _tokens;
+    private static Gtk.CssProvider? _header;
 
     public static void Apply()
     {
-        var provider = Gtk.CssProvider.New();
-        provider.LoadFromString(Css);
-        Gtk.StyleContext.AddProviderForDisplay(Gdk.Display.GetDefault()!, provider, 600);
+        var display = Gdk.Display.GetDefault()!;
+        var manager = Adw.StyleManager.GetDefault();
+        _tokens = Gtk.CssProvider.New();
+        _header = Gtk.CssProvider.New();
+        LoadTokens(manager.GetDark());
+        Gtk.StyleContext.AddProviderForDisplay(display, _tokens, 600);
+        manager.OnNotify += (_, e) =>
+        {
+            if (e.Pspec.GetName() == "dark") LoadTokens(manager.GetDark());
+        };
+
+        var studio = Gtk.CssProvider.New();
+        studio.LoadFromString(StudioTheme.Studio("glass.css"));
+        Gtk.StyleContext.AddProviderForDisplay(display, studio, 601);
+        Gtk.StyleContext.AddProviderForDisplay(display, _header, 602);
+
+        // Without a compositor (X11, no compositing manager) a menu's glow can't be translucent: GTK paints
+        // its whole margin as a solid block. Menus there keep their gold edge and drop the outer glow.
+        if (!display.IsComposited())
+        {
+            var flat = Gtk.CssProvider.New();
+            flat.LoadFromString("popover.glass > contents, popover.glass > arrow { box-shadow: none; } popover > contents { box-shadow: none; }");
+            Gtk.StyleContext.AddProviderForDisplay(display, flat, 603);
+        }
+    }
+
+    private static void LoadTokens(bool dark)
+    {
+        // The native registry's stylesheet: Fawanees colours and materials (a solid page since AlUmmahNow#1596).
+        _tokens?.LoadFromString(StudioTheme.NativeGtk(dark));
+        _header?.LoadFromString(HeaderCss(FawaneesHeader.For(dark)));
+    }
+
+    /// <summary>
+    /// The header bar, colour for colour the web Fawanees header (<see cref="FawaneesHeader"/>): the 90°
+    /// gradient (no art, no glow, as on the web), the nav-border line over the gold rule at the bottom,
+    /// nav-text and nav-icon, nav-hover on hover, nav-active-* when pressed.
+    /// </summary>
+    public static string HeaderCss(FawaneesHeader h)
+    {
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        var h40 = FawaneesHeader.SearchHeight.ToString(inv);
+        var radius = h.SearchRadius.ToString(inv);
+        var font = FawaneesHeader.SearchFontSize.ToString(inv);
+        var inset = FawaneesHeader.SearchTextInset.ToString(inv);
+        var button = FawaneesHeader.SearchButtonWidth.ToString(inv);
+        return $@"
+headerbar.night {{
+  background-color: {h.Background.Css};
+  /* Top layer: the bottom edge, as the web shows it, the gold rule (1 px) under the nav-border line (1 px).
+     Painted in the background: libadwaita's header bar drew neither a bottom border nor two stacked shadows. */
+  background-image: linear-gradient(to top, {h.GoldRule.Css} 0, {h.GoldRule.Css} 1px, {h.Border.Css} 1px, {h.Border.Css} 2px, transparent 2px),
+    linear-gradient(to right, {h.Background.Css}, {h.Middle.Css} 50%, {h.Background.Css});
+  color: {h.Text.Css};
+  border: none;
+  box-shadow: none;
+  min-height: 48px;
+}}
+headerbar.night label, headerbar.night .title {{ color: {h.Text.Css}; }}
+headerbar.night .subtitle, headerbar.night .dim-label {{ color: {h.Icon.Css}; opacity: 1; }}
+headerbar.night button, headerbar.night windowcontrols button {{ color: {h.Icon.Css}; background-color: transparent; background-image: none; box-shadow: none; }}
+headerbar.night button:hover, headerbar.night windowcontrols button:hover {{ color: {h.Text.Css}; background-color: {h.Hover.Css}; }}
+headerbar.night button:active, headerbar.night button:checked, headerbar.night windowcontrols button:active {{ color: {h.ActiveText.Css}; background-color: {h.ActiveBackground.Css}; }}
+headerbar.night .header-search {{
+  min-height: {h40}px;
+  border-radius: {radius}px;
+  background-color: {h.SearchBackground.Css};
+  box-shadow: inset 0 0 0 1px {h.SearchBorder.Css};
+}}
+headerbar.night .header-search:focus-within {{ box-shadow: inset 0 0 0 2px {h.SearchFocus.Css}; }}
+headerbar.night .header-search entry {{
+  min-height: {h40}px;
+  background: none;
+  border: none;
+  box-shadow: none;
+  outline: none;
+  color: {h.SearchText.Css};
+  font-size: {font}px;
+  padding: 0 8px 0 {inset}px;
+}}
+headerbar.night .header-search entry:dir(rtl) {{ padding: 0 {inset}px 0 8px; }}
+headerbar.night .header-search entry > text > placeholder {{ color: {h.SearchPlaceholder.Css}; }}
+headerbar.night .header-search button {{
+  min-width: {button}px;
+  min-height: {h40}px;
+  padding: 0;
+  border-radius: 0;
+  color: {h.Icon.Css};
+  background-color: transparent;
+  box-shadow: inset 1px 0 {h.SearchBorder.Css};
+}}
+headerbar.night .header-search button:dir(rtl) {{ box-shadow: inset -1px 0 {h.SearchBorder.Css}; }}
+headerbar.night .header-search button:hover {{ background-color: {h.Hover.Css}; color: {h.Icon.Css}; }}
+";
     }
 }

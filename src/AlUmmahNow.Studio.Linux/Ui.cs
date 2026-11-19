@@ -31,6 +31,36 @@ public static class Ui
         return b;
     }
 
+    /// <summary>
+    /// A round logo: our own initials (one grapheme per word, «قناة النور» → «ق») on gold for a channel or
+    /// teal for a person until the picture loads, then the picture. Not Adw.Avatar: its own palette wins.
+    /// </summary>
+    public static Gtk.Widget Avatar(string? initials, Gdk.Texture? picture, int size, bool person)
+    {
+        var face = Gtk.Overlay.New();
+        face.SetSizeRequest(size, size);
+        face.SetHalign(Gtk.Align.Center);
+        face.SetValign(Gtk.Align.Center);
+        face.SetOverflow(Gtk.Overflow.Hidden);
+        face.AddCssClass("studio-avatar");
+        face.AddCssClass(person ? "person" : "channel");
+        var label = Gtk.Label.New(initials ?? "");
+        label.SetHalign(Gtk.Align.Center);
+        label.SetValign(Gtk.Align.Center);
+        label.SetSizeRequest(size, size);
+        label.SetDirection(Gtk.TextDirection.Ltr);
+        face.SetChild(label);
+        if (picture != null)
+        {
+            var image = Gtk.Picture.NewForPaintable(picture);
+            image.SetContentFit(Gtk.ContentFit.Cover);
+            image.SetCanShrink(true);
+            face.AddOverlay(image);
+        }
+
+        return face;
+    }
+
     public static void Clear(Gtk.Box box)
     {
         while (box.GetFirstChild() is { } child) box.Remove(child);

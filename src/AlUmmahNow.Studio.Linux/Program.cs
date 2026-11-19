@@ -74,9 +74,10 @@ var exitCode = 0;
 app.OnActivate += (_, _) =>
 {
     Gtk.Widget.SetDefaultDirection(localizer.IsRtl ? Gtk.TextDirection.Rtl : Gtk.TextDirection.Ltr);
-    // CI and screenshots: AUN_THEME=dark|light; otherwise Studio follows the desktop.
+    // Light or Dark (no "System"): the saved choice, Dark by default; CI and screenshots force one with AUN_THEME=dark|light.
     var theme = Environment.GetEnvironmentVariable("AUN_THEME");
-    if (theme is "dark" or "light") Adw.StyleManager.GetDefault().SetColorScheme(theme == "dark" ? Adw.ColorScheme.ForceDark : Adw.ColorScheme.ForceLight);
+    if (theme is not ("dark" or "light")) theme = settings.Theme == ThemePreference.Light ? "light" : "dark";
+    Adw.StyleManager.GetDefault().SetColorScheme(theme == "dark" ? Adw.ColorScheme.ForceDark : Adw.ColorScheme.ForceLight);
     // The view-model posts its updates to the GTK main loop's synchronization context.
     var shell = new StudioShellViewModel(accounts, api, new FeaturesClient(transport),
             profiles: new ProfileClient(transport), language: localizer.Language,
@@ -116,9 +117,10 @@ app.OnActivate += (_, _) =>
     window.AddPage(StudioPages.Uploads, localizer["studio.tab.upload"], "document-send-symbolic", uploads.Root);
     window.AddPage(StudioPages.Videos, localizer["studio.tab.videos"], "view-list-symbolic", videos.Root);
     window.AddPage(StudioPages.Analytics, localizer["studio.tab.analytics"], "power-profile-performance-symbolic", analytics.Root);
-    window.AddPage(StudioPages.Encode, localizer["studio.tab.encode"], "media-record-symbolic", encodePage.Root);
-    window.AddPage(StudioPages.Timeline, localizer["studio.tab.timeline"], "video-x-generic-symbolic", timeline.Root);
+    window.AddPage(StudioPages.Encode, localizer["studio.tab.encode"], "video-x-generic-symbolic", encodePage.Root);
+    window.AddPage(StudioPages.Timeline, localizer["studio.tab.timeline"], "edit-cut-symbolic", timeline.Root);
     window.UsePages(pages);
+    window.SearchRequested += (_, q) => videos.SearchFor(q);
     window.Window.Present();
     // Features are re-read when Studio comes back to the foreground (at most once a minute).
     window.Window.OnNotify += (sender, e) =>
@@ -170,7 +172,7 @@ app.OnActivate += (_, _) =>
             var pass = automation.StartsWith("encode:", StringComparison.Ordinal) ? encoded
                 : automation == "shell" ? shell.State == ShellState.Ready && shell.ActiveChannel != null
                 : uploadsDone || tabName != "uploads";
-            Log.For("automation").Info($"AUTOMATION {tabName} page={pages.Current} upload={pages.IsVisible(StudioPages.Uploads)} analytics={pages.IsVisible(StudioPages.Analytics)} bulkSchedule={uploadsVm.BulkScheduleOn} scene={scene} shell={shell.State} channel={shell.ActiveChannel?.Id} accounts={shell.AccountList.Count} uploads={items.Count} uploadsDone={uploadsDone} encode={automationJob?.Status} encoder={automationJob?.UsedEncoder?.Name} error={automationJob?.Error} everyText={uploads.ScheduleEveryText} RESULT {(pass ? "PASS" : "FAIL")}");
+            Log.For("automation").Info($"AUTOMATION {tabName} page={pages.Current} upload={pages.IsVisible(StudioPages.Uploads)} analytics={pages.IsVisible(StudioPages.Analytics)} bulkSchedule={uploadsVm.BulkScheduleOn} scene={scene} shell={shell.State} channel={shell.ActiveChannel?.Id} accounts={shell.AccountList.Count} uploads={items.Count} uploadsDone={uploadsDone} encode={automationJob?.Status} encoder={automationJob?.UsedEncoder?.Name} error={automationJob?.Error} everyText={uploads.ScheduleEveryText} searchFocused={window.SearchHasFocus} RESULT {(pass ? "PASS" : "FAIL")}");
             exitCode = pass ? 0 : 3;
             app.Quit();
             return false;
