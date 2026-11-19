@@ -389,7 +389,7 @@ public sealed class UploadPage
             title.SetHexpand(true);
             Ui.Named(title, _l.Format("studio.upload.titleFor", file));
             title.OnChanged += (_, _) => _vm.RenameStaged(plan.FilePath, title.GetText());
-            var meta = Ui.Label(_l.Join(Localizer.Isolate(file), _l.Bytes(plan.Size),
+            var meta = Ui.Label(_l.Join(Localizer.Isolate(file), _l.Bytes(plan.Size, 2),
                 plan.PublishAt is { } at ? _l.Format("studio.upload.publishesAt", _l.DateTime(at)) : null), dim: true);
             meta.AddCssClass("caption");
             var text = Gtk.Box.New(Gtk.Orientation.Vertical, 4);
@@ -523,7 +523,7 @@ public sealed class UploadPage
             _title.SetText(item.Title);
             _bar.SetFraction(item.Fraction);
             var phase = l["studio.phase." + item.Phase.ToString().ToLowerInvariant()];
-            var amount = l.Format("studio.upload.progress", l.Bytes(item.SentBytes), l.Bytes(item.TotalBytes));
+            var amount = l.Format("studio.upload.progress", l.Bytes(item.SentBytes, 2), l.Bytes(item.TotalBytes, 2));
             _status.SetText(item.Phase == UploadPhase.Uploading ? l.Join(phase, amount) : phase);
             Ui.Named(_bar, l.Join(Localizer.Isolate(item.Title), phase));
             if (_phase == item.Phase) return;

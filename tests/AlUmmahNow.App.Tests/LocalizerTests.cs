@@ -78,4 +78,17 @@ public class LocalizerTests
         Assert.Equal("11 Nov", new Localizer("en").ShortDate(new DateTime(2026, 11, 11)));
         Assert.Equal("١١ نوفمبر", new Localizer("ar").ShortDate(new DateTime(2026, 11, 11)));
     }
+
+    // The website's formatBytes (Intl short units, 1024 steps); the expected text is what the web shows.
+    [Theory]
+    [InlineData("en", 512, null, "512 byte")]
+    [InlineData("en", 1536, null, "1.5 kB")]
+    [InlineData("en", 2 * 1024 * 1024, null, "2 MB")]
+    [InlineData("en", 1_500_000, 2, "1.43 MB")]
+    [InlineData("en", 1_536_000, 2, "1.46 MB")]
+    [InlineData("ar", 1_500_000, 2, "١٫٤٣ م.ب")]
+    [InlineData("ar", 1536, null, "١٫٥ كيلوبايت")]
+    [InlineData("ar", 3L * 1024 * 1024 * 1024, null, "٣ غ.ب")]
+    public void File_sizes_read_as_the_website(string language, long bytes, int? decimals, string expected) =>
+        Assert.Equal(expected, new Localizer(language).Bytes(bytes, decimals));
 }
