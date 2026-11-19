@@ -28,6 +28,8 @@ internal sealed class StudioWindow
     private readonly DropDownButton _accountButton;
     private readonly MenuFlyout _accountMenu = new() { Placement = Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.BottomEdgeAlignedRight };
     private bool _syncingPicker;
+    private StudioPages? _studioPages;
+    private bool _syncingPages;
 
     public StudioWindow(Localizer l, StudioShellViewModel shell, string? banner)
     {
@@ -61,7 +63,11 @@ internal sealed class StudioWindow
         };
         _nav.SelectionChanged += (_, e) =>
         {
-            if (e.SelectedItem is NavigationViewItem item && item.Tag is string name && _pages.TryGetValue(name, out var page)) _nav.Content = new ScrollViewer { Content = page };
+            if (e.SelectedItem is NavigationViewItem item && item.Tag is string name && _pages.TryGetValue(name, out var page))
+            {
+                _nav.Content = new ScrollViewer { Content = page };
+                if (!_syncingPages) _studioPages?.Select(name);
+            }
         };
 
         var root = new Grid { FlowDirection = _direction };
@@ -88,8 +94,36 @@ internal sealed class StudioWindow
 
     public void ShowPage(string name)
     {
-        var item = _nav.MenuItems.OfType<NavigationViewItem>().FirstOrDefault(i => (string)i.Tag == name) ?? _nav.MenuItems.OfType<NavigationViewItem>().FirstOrDefault();
+        var item = _nav.MenuItems.OfType<NavigationViewItem>().FirstOrDefault(i => (string)i.Tag == name && i.Visibility == Visibility.Visible)
+            ?? _nav.MenuItems.OfType<NavigationViewItem>().FirstOrDefault(i => i.Visibility == Visibility.Visible);
         _nav.SelectedItem = item;
+    }
+
+    /// <summary>Hidden-when-off pages: a tab whose feature is off is collapsed, and the window shows <see cref="StudioPages.Current"/>.</summary>
+    public void UsePages(StudioPages pages)
+    {
+        _studioPages = pages;
+        pages.Changed += (_, _) => ApplyPages();
+        ApplyPages();
+    }
+
+    private void ApplyPages()
+    {
+        if (_studioPages is not { } pages) return;
+        _syncingPages = true;
+        try
+        {
+            foreach (var item in _nav.MenuItems.OfType<NavigationViewItem>())
+            {
+                item.Visibility = item.Tag is string name && !pages.IsVisible(name) ? Visibility.Collapsed : Visibility.Visible;
+            }
+
+            if ((_nav.SelectedItem as NavigationViewItem)?.Tag as string != pages.Current) ShowPage(pages.Current);
+        }
+        finally
+        {
+            _syncingPages = false;
+        }
     }
 
     /// <summary>For CI screenshots: open the account menu.</summary>
@@ -111,7 +145,7 @@ internal sealed class StudioWindow
             ShellState.Loading => Status(_l["studio.shell.loading"], null, new ProgressRing { IsActive = true }),
             ShellState.NoChannel => Status(_l["studio.shell.noChannelTitle"], _l["studio.shell.noChannelBody"], Action(_l["studio.shell.retry"], () => _ = _shell.RetryAsync())),
             ShellState.Error => Status(_l["studio.shell.errorTitle"], _shell.ErrorKey is { } e ? _l[e] : null, Action(_l["studio.shell.retry"], () => _ = _shell.RetryAsync())),
-            ShellState.NeedsReauth => Status(_l["studio.shell.reauthTitle"], _l.Format("studio.shell.reauthBody", Localizer.Isolate(_shell.ActiveAccount?.Label ?? "")), SignInActions()),
+            ShellState.NeedsReauth => Status(_l["studio.shell.reauthTitle"], _l.Format("studio.shell.reauthBody", Localizer.Isolate(_shell.ActiveAccountName ?? "")), SignInActions()),
             _ => _nav,
         });
         RenderChannels();
@@ -234,18 +268,18 @@ internal sealed class StudioWindow
     {
         var active = _shell.ActiveAccount;
         _accountButton.Visibility = _shell.AccountList.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-        _accountButton.Content = active?.Label ?? _l["studio.shell.account"];
-        AutomationProperties.SetName(_accountButton, active == null ? _l["studio.shell.account"] : _l.Format("studio.shell.accountMenu", active.Label));
+        _accountButton.Content = (active == null ? null : _shell.NameOf(active)) ?? _l["studio.shell.account"];
+        AutomationProperties.SetName(_accountButton, active == null ? _l["studio.shell.account"] : _l.Format("studio.shell.accountMenu", _shell.NameOf(active)));
         _accountMenu.Items.Clear();
         foreach (var account in _shell.AccountList)
         {
             var isActive = account.UserId == active?.UserId;
             var item = new ToggleMenuFlyoutItem
             {
-                Text = _l.Join(account.Label, account.NeedsReauth ? _l["studio.shell.needsReauth"] : null),
+                Text = _l.Join(_shell.NameOf(account), account.NeedsReauth ? _l["studio.shell.needsReauth"] : null),
                 IsChecked = isActive,
             };
-            AutomationProperties.SetName(item, _l.Format("studio.shell.switchTo", account.Label));
+            AutomationProperties.SetName(item, _l.Format("studio.shell.switchTo", _shell.NameOf(account)));
             item.Click += (_, _) => _ = _shell.SwitchAccountAsync(account.UserId);
             _accountMenu.Items.Add(item);
         }
@@ -266,7 +300,7 @@ internal sealed class StudioWindow
         _accountMenu.Items.Add(new MenuFlyoutSeparator());
         foreach (var account in _shell.AccountList)
         {
-            var signOut = new MenuFlyoutItem { Text = _l.Format("studio.shell.signOutOf", account.Label) };
+            var signOut = new MenuFlyoutItem { Text = _l.Format("studio.shell.signOutOf", _shell.NameOf(account)) };
             signOut.Click += (_, _) => _ = SignOutAsync(account);
             _accountMenu.Items.Add(signOut);
         }
@@ -275,7 +309,7 @@ internal sealed class StudioWindow
     private async Task SignOutAsync(StudioAccount account)
     {
         if (Window.Content?.XamlRoot is not { } root) return;
-        var ok = await Confirm.AskAsync(root, _direction, _l.Format("studio.shell.signOutTitle", Localizer.Isolate(account.Label)), _l["studio.shell.signOutBody"], _l["auth.signOut"], _l["common.cancel"]);
+        var ok = await Confirm.AskAsync(root, _direction, _l.Format("studio.shell.signOutTitle", Localizer.Isolate(_shell.NameOf(account))), _l["studio.shell.signOutBody"], _l["auth.signOut"], _l["common.cancel"]);
         if (!ok) return;
         try
         {

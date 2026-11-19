@@ -62,9 +62,15 @@ public sealed class DemoTransport : IApiTransport
     private readonly object _gate = new();
     private readonly List<Dictionary<string, object?>> _videos;
     private readonly List<(Dictionary<string, object?> Video, DateTimeOffset At, string Status)> _deleted = new();
+    private readonly HashSet<string> _off;
 
-    public DemoTransport()
+    /// <param name="featuresOff">
+    /// Features answered as off (CI and screenshots: <c>AUN_DEMO_FEATURES_OFF=upload,analytics</c>): a
+    /// <see cref="UserFeatures"/> key is false in GET /api/me/features; <c>analytics</c> answers 404 <c>feature_off</c>.
+    /// </param>
+    public DemoTransport(IEnumerable<string>? featuresOff = null)
     {
+        _off = new HashSet<string>(featuresOff ?? Array.Empty<string>(), StringComparer.Ordinal);
         // Original title plus the creator's per-language titles, like the API's titleLocalized.
         (string Title, string En, string Ar)[] titles =
         {
@@ -118,10 +124,25 @@ public sealed class DemoTransport : IApiTransport
         }
     }
 
+    /// <summary>Parses <c>AUN_DEMO_FEATURES_OFF</c> ("upload,analytics").</summary>
+    public static IReadOnlyList<string> FeaturesOff(string? value) =>
+        (value ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
     private string Answer(ApiRequest r)
     {
         switch (r.OperationId)
         {
+            case "GET " + FeaturesClient.Route:
+            {
+                var keys = new[]
+                {
+                    UserFeatures.Upload, UserFeatures.CreateChannel, UserFeatures.Live, UserFeatures.CaptionsTranscribe, UserFeatures.CaptionsTranslate,
+                    UserFeatures.InlineTranslate, UserFeatures.ViewerTranslatedTitles, UserFeatures.QuranEditions, UserFeatures.QuranText, UserFeatures.AudioTracks,
+                    UserFeatures.SiteDomains, UserFeatures.SocialAutopost, UserFeatures.YoutubeImport, UserFeatures.AiCategorySuggest, UserFeatures.BulkSchedule,
+                };
+                return Json(new { version = 1, features = keys.ToDictionary(k => k, k => !_off.Contains(k)) });
+            }
+
             case "get_ChannelAccessList":
                 return Json(new
                 {
@@ -214,6 +235,7 @@ public sealed class DemoTransport : IApiTransport
                 return Json(new { data = new[] { new { id = "demo-p1", title = "تفسير القرآن", videos = new[] { "demo-v1" }, isPublic = true }, new { id = "demo-p2", title = "Friday khutbahs", videos = Array.Empty<string>(), isPublic = true } } });
             case "get_AnalyticsChannelGet":
             {
+                if (_off.Contains("analytics")) throw StudioApiException.FromServer("get_AnalyticsChannelGet not found", 404, "feature_off");
                 var start = DateTime.UtcNow.Date.AddDays(-27);
                 return Json(new
                 {

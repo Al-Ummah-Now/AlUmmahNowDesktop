@@ -26,6 +26,8 @@ public sealed class StudioWindow
     private readonly Adw.StatusPage _error = Adw.StatusPage.New();
     private readonly Gtk.Label _signInError = Ui.Label("", dim: true, start: false);
     private bool _syncingPicker;
+    private StudioPages? _studioPages;
+    private bool _syncingPages;
 
     public StudioWindow(Adw.Application app, Localizer l, StudioShellViewModel shell, string? banner)
     {
@@ -83,6 +85,38 @@ public sealed class StudioWindow
         _pages.AddTitledWithIcon(page, name, title, icon);
 
     public void ShowPage(string name) => _pages.SetVisibleChildName(name);
+
+    /// <summary>Hidden-when-off pages: a page whose feature is off leaves the view switcher, and the window shows <see cref="StudioPages.Current"/>.</summary>
+    public void UsePages(StudioPages pages)
+    {
+        _studioPages = pages;
+        _pages.OnNotify += (_, e) =>
+        {
+            if (_syncingPages || e.Pspec.GetName() != "visible-child-name") return;
+            if (_pages.GetVisibleChildName() is { Length: > 0 } name) pages.Select(name);
+        };
+        pages.Changed += (_, _) => ApplyPages();
+        ApplyPages();
+    }
+
+    private void ApplyPages()
+    {
+        if (_studioPages is not { } pages) return;
+        _syncingPages = true;
+        try
+        {
+            foreach (var name in StudioPages.All)
+            {
+                if (_pages.GetChildByName(name) is { } child) _pages.GetPage(child).SetVisible(pages.IsVisible(name));
+            }
+
+            if (_pages.GetVisibleChildName() != pages.Current) _pages.SetVisibleChildName(pages.Current);
+        }
+        finally
+        {
+            _syncingPages = false;
+        }
+    }
 
     /// <summary>For CI screenshots: open the account menu.</summary>
     public void OpenAccountMenu() => _accountButton.Popup();
@@ -159,7 +193,7 @@ public sealed class StudioWindow
         });
         _signInError.SetText(_shell.ErrorKey is { } k && state == ShellState.SignedOut ? _l[k] : "");
         _error.SetDescription(_shell.ErrorKey is { } e ? _l[e] : "");
-        _reauth.SetDescription(_l.Format("studio.shell.reauthBody", Localizer.Isolate(_shell.ActiveAccount?.Label ?? "")));
+        _reauth.SetDescription(_l.Format("studio.shell.reauthBody", Localizer.Isolate(_shell.ActiveAccountName ?? "")));
         RenderChannels();
         RenderAccounts();
     }
@@ -185,18 +219,18 @@ public sealed class StudioWindow
     {
         var active = _shell.ActiveAccount;
         _accountButton.SetVisible(_shell.AccountList.Count > 0);
-        _accountButton.SetLabel(active?.Label ?? _l["studio.shell.account"]);
-        Ui.Named(_accountButton, active == null ? _l["studio.shell.account"] : _l.Format("studio.shell.accountMenu", active.Label));
+        _accountButton.SetLabel((active == null ? null : _shell.NameOf(active)) ?? _l["studio.shell.account"]);
+        Ui.Named(_accountButton, active == null ? _l["studio.shell.account"] : _l.Format("studio.shell.accountMenu", _shell.NameOf(active)));
         Ui.Clear(_accountMenu);
         foreach (var account in _shell.AccountList)
         {
             var isActive = account.UserId == active?.UserId;
-            var text = _l.Join(account.Label, account.NeedsReauth ? _l["studio.shell.needsReauth"] : null);
+            var text = _l.Join(_shell.NameOf(account), account.NeedsReauth ? _l["studio.shell.needsReauth"] : null);
             var row = Gtk.Box.New(Gtk.Orientation.Horizontal, 6);
             var pick = Gtk.Button.NewWithLabel(isActive ? "✓ " + text : text);
             pick.SetHexpand(true);
             pick.AddCssClass("flat");
-            Ui.Named(pick, _l.Format("studio.shell.switchTo", account.Label));
+            Ui.Named(pick, _l.Format("studio.shell.switchTo", _shell.NameOf(account)));
             pick.OnClicked += (_, _) =>
             {
                 _accountPopover.Popdown();
@@ -204,7 +238,7 @@ public sealed class StudioWindow
             };
             var signOut = Gtk.Button.NewWithLabel(_l["auth.signOut"]);
             signOut.AddCssClass("flat");
-            Ui.Named(signOut, _l.Format("studio.shell.signOutOf", account.Label));
+            Ui.Named(signOut, _l.Format("studio.shell.signOutOf", _shell.NameOf(account)));
             signOut.OnClicked += (_, _) =>
             {
                 _accountPopover.Popdown();
@@ -228,7 +262,7 @@ public sealed class StudioWindow
 
     private async Task SignOutAsync(StudioAccount account)
     {
-        var ok = await Confirm.AskAsync(Window, _l.Format("studio.shell.signOutTitle", Localizer.Isolate(account.Label)), _l["studio.shell.signOutBody"], _l["auth.signOut"], _l["common.cancel"]);
+        var ok = await Confirm.AskAsync(Window, _l.Format("studio.shell.signOutTitle", Localizer.Isolate(_shell.NameOf(account))), _l["studio.shell.signOutBody"], _l["auth.signOut"], _l["common.cancel"]);
         if (!ok) return;
         try
         {

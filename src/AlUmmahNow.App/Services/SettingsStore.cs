@@ -15,6 +15,9 @@ namespace AlUmmahNow.App.Services
 
         /// <summary>Studio search history, newest first (local only).</summary>
         public List<string>? RecentSearches { get; set; }
+
+        /// <summary>Studio: each signed-in account's resolved name (user id → name), so the account menu shows names, not emails.</summary>
+        public Dictionary<string, string>? AccountNames { get; set; }
     }
 
     /// <summary>Stores settings as JSON. A corrupt or missing file yields defaults.</summary>

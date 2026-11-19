@@ -23,6 +23,12 @@ public sealed partial class AnalyticsViewModel : ObservableObject
     [ObservableProperty] private string? _errorKey;
     [ObservableProperty] private string _metric = "views";
 
+    /// <summary>
+    /// Analytics answered 404 <c>feature_off</c> or 402 for this channel: the page is hidden, with no text.
+    /// The next load (channel switch) shows it again if the server allows it there.
+    /// </summary>
+    [ObservableProperty] private bool _isHidden;
+
     public AnalyticsViewModel(StudioShellViewModel shell, IStudioApi api, Func<DateTimeOffset>? now = null)
     {
         _shell = shell;
@@ -69,7 +75,11 @@ public sealed partial class AnalyticsViewModel : ObservableObject
     {
         if (_shell.ActiveChannel is not { } channel)
         {
+            // Supersede any load still in flight for the previous channel, and stop its spinner.
+            Interlocked.Increment(ref _generation);
             Data = null;
+            ErrorKey = null;
+            IsLoading = false;
             return;
         }
 
@@ -82,11 +92,35 @@ public sealed partial class AnalyticsViewModel : ObservableObject
             // "Last 28 days" is today and the 27 before it (the API counts both ends)
             var data = await _api.ChannelAnalyticsAsync(channel.Id, to.AddDays(-(Days - 1)), to);
             data.TopVideos = await WithLocalizedTitlesAsync(channel.Id, data.TopVideos);
-            if (gen == _generation) Data = data;
+            if (gen == _generation)
+            {
+                Data = data;
+                IsHidden = false;
+            }
         }
         catch (AuthRequiredException)
         {
             _shell.ReportAuthRequired();
+        }
+        catch (StudioApiException ex) when (ex.HidesFeature)
+        {
+            Logger.Info("analytics is off for this channel: " + ex.Message);
+            if (gen == _generation)
+            {
+                Data = null;
+                IsHidden = true;
+            }
+
+            _ = _shell.RefreshFeaturesAsync(force: true);
+        }
+        catch (RateLimitedException ex)
+        {
+            Logger.Warn("analytics rate limited", ex);
+            if (gen == _generation) ErrorKey = "studio.analytics.failed";
+        }
+        catch (OperationCanceledException)
+        {
+            // Nothing to show for a cancelled load; the finally block stops the spinner.
         }
         catch (StudioApiException ex)
         {

@@ -58,10 +58,21 @@ public sealed partial class UploadsViewModel : ObservableObject, IDisposable
         _shell.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(StudioShellViewModel.ActiveAccount)) SwitchAccount();
+            if (e.PropertyName == nameof(StudioShellViewModel.Features))
+            {
+                OnPropertyChanged(nameof(BulkScheduleOn));
+                ApplyDefaults();
+            }
         };
         _shell.ChannelChanged += (_, _) => _ = LoadPlaylistsAsync();
         SwitchAccount();
     }
+
+    /// <summary>
+    /// "Publish every … hours" across a batch is bulk scheduling (<c>bulkSchedule</c>). Off: the field is hidden and
+    /// every scheduled file publishes at the chosen time.
+    /// </summary>
+    public bool BulkScheduleOn => _shell.Features.IsOn(UserFeatures.BulkSchedule);
 
     public bool CanStart => Staged.Count > 0 && _service != null && _shell.ActiveChannel != null;
 
@@ -205,6 +216,12 @@ public sealed partial class UploadsViewModel : ObservableObject, IDisposable
             Playlists = Playlists.Append(p).ToList();
             return p;
         }
+        catch (StudioApiException ex) when (ex.HidesFeature)
+        {
+            Logger.Info("playlist not created: feature off: " + ex.Message);
+            _ = _shell.RefreshFeaturesAsync(force: true);
+            return null;
+        }
         catch (StudioApiException ex)
         {
             Logger.Warn("playlist not created", ex);
@@ -260,6 +277,13 @@ public sealed partial class UploadsViewModel : ObservableObject, IDisposable
         {
             _shell.ReportAuthRequired();
         }
+        catch (StudioApiException ex) when (ex.HidesFeature)
+        {
+            // Scheduling or another detail is off for this person (404 feature_off / 402): drop it quietly, no retry.
+            Logger.Info("an upload detail is off: " + ex.Message);
+            _steps.Remove(uploadId);
+            _ = _shell.RefreshFeaturesAsync(force: true);
+        }
         catch (StudioApiException ex)
         {
             step.Attempts++;
@@ -286,7 +310,7 @@ public sealed partial class UploadsViewModel : ObservableObject, IDisposable
 
     private void Replan(List<string> files)
     {
-        Staged = UploadPlanner.Plan(files, Defaults, _now());
+        Staged = UploadPlanner.Plan(files, Defaults, _now(), BulkScheduleOn);
         OnPropertyChanged(nameof(CanStart));
     }
 
@@ -296,7 +320,7 @@ public sealed partial class UploadsViewModel : ObservableObject, IDisposable
         var found = _watch.Scan().Select(f => f.Path).ToList();
         if (found.Count == 0) return;
         var keep = Staged;
-        Staged = UploadPlanner.Plan(found, Defaults, _now());
+        Staged = UploadPlanner.Plan(found, Defaults, _now(), BulkScheduleOn);
         Start();
         Staged = keep;
     }

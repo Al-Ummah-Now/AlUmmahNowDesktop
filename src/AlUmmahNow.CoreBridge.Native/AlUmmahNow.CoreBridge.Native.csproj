@@ -8,5 +8,6 @@
     <PackageReference Include="AlUmmahNow.Core" />
     <PackageReference Include="System.Security.Cryptography.ProtectedData" />
     <ProjectReference Include="..\AlUmmahNow.CoreBridge\AlUmmahNow.CoreBridge.csproj" />
+    <InternalsVisibleTo Include="AlUmmahNow.CoreBridge.Native.Tests" />
   </ItemGroup>
 </Project>
