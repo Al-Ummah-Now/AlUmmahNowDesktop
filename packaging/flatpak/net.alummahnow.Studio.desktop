@@ -1,7 +1,9 @@
 [Desktop Entry]
 Type=Application
-Name=Al Ummah Now Studio
-Name[ar]=استوديو الأمة الآن
+Name=Studio
+Name[ar]=الاستوديو
+X-GNOME-FullName=Al Ummah Now Studio
+X-GNOME-FullName[ar]=استوديو الأمة الآن
 Exec=alummahnow-studio
 Icon=net.alummahnow.Studio
 Categories=AudioVideo;Video;AudioVideoEditing;
