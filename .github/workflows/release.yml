@@ -272,7 +272,7 @@ jobs:
       - name: Debian package
         run: |
           scripts/build-deb.sh artifacts/flatpak-input/publish ${{ matrix.deb }} ${{ needs.verify.outputs.version }} ${{ matrix.appid }} ${{ matrix.exe }} \
-            packaging/flatpak/${{ matrix.appid }}.desktop src/AlUmmahNow.Studio.Windows/Assets/Square150x150Logo.png "${{ matrix.description }}" dist
+            packaging/flatpak/${{ matrix.appid }}.desktop packaging/icons/hicolor "${{ matrix.description }}" dist
       # The built .deb with its dependencies, and the smoke test's display tools
       - name: Install the .deb
         if: matrix.smoke
