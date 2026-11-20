@@ -99,32 +99,42 @@ namespace AlUmmahNow.App.I18n
         }
 
         /// <summary>
-        /// Axis labels: 950, 1.2K, 3M («١٫٢ ألف», «٨ آلاف» in Arabic). Truncated to one decimal, never rounded up,
-        /// so 1,999 is "1.9K" and never "2K". The Arabic scale word agrees with the number shown: a whole 2 takes the
-        /// dual («ألفان»), a whole 3–10 the plural («آلاف»), anything else (1, 11+, a decimal like ١٫٣) «ألف».
+        /// Axis labels and other compact numbers without a noun: 950, 1.5K, 3M. Truncated to one decimal, never
+        /// rounded up, so 1,999 is "1.9K" and never "2K". Arabic: exactly 1 is the bare scale word («ألف», «مليون»),
+        /// exactly 2 the dual with no digit («ألفان», «مليونان»; a digit is never followed by the dual), a whole 3–10
+        /// the plural («٣ آلاف», «٣ ملايين»), and 11+ or any decimal the singular («١١ ألف», «١٫٥ ألف»).
         /// </summary>
         public string Compact(double value)
         {
             var abs = Math.Abs(value);
             if (abs < 1_000) return Decimal(value);
             var sign = value < 0 ? "-" : "";
-            return sign + CompactScaled((long)Math.Floor(abs));
+            var (key, number) = Scaled((long)Math.Floor(abs));
+            return sign + Format("num." + key, number);
         }
 
         /// <summary>
         /// A view count with its noun. Under 1,000 the noun takes the CLDR plural of the full count: «مشاهدة واحدة»,
         /// «مشاهدتان», «٣ مشاهدات», «١١ مشاهدة» / "1 view", "3 views". From 1,000 the count is compact and the noun
-        /// is counted by the scale word, so it stays singular: «١٫٣ ألف مشاهدة», «٨ آلاف مشاهدة» / "1.3K views".
+        /// is counted by the scale word, so it stays singular: exactly 1 «ألف مشاهدة», exactly 2 the construct form
+        /// with no digit «ألفا مشاهدة», a whole 3–10 «٣ آلاف مشاهدة», 11+ or any decimal «١٫٣ ألف مشاهدة» /
+        /// "1K views", "1.3K views".
         /// </summary>
         public string Views(long count)
         {
             if (count < 0) count = 0;
-            if (count >= 1_000) return Format("views.compact", CompactScaled(count));
-            return Format("views." + PluralCategory(count), Number(count));
+            if (count < 1_000) return Format("views." + PluralCategory(count), Number(count));
+            var (key, number) = Scaled(count);
+            return key.EndsWith("_one", StringComparison.Ordinal) || key.EndsWith("_two", StringComparison.Ordinal)
+                ? Format("views." + key, number)
+                : Format("views.compact", Format("num." + key, number));
         }
 
-        /// <summary>A count of 1,000 or more as number + scale word, truncated to one decimal.</summary>
-        private string CompactScaled(long n)
+        /// <summary>
+        /// A count of 1,000 or more truncated to one decimal: the scale key ("thousand", "million_one",
+        /// "billion_two", "thousand_plural") and the number shown.
+        /// </summary>
+        private (string Key, string Number) Scaled(long n)
         {
             string scale;
             long unit;
@@ -132,10 +142,9 @@ namespace AlUmmahNow.App.I18n
             else if (n >= 1_000_000) { scale = "million"; unit = 1_000_000; }
             else { scale = "thousand"; unit = 1_000; }
             var tenths = n / (unit / 10);
-            var whole = tenths % 10 == 0;
-            var shown = whole ? tenths / 10 : -1;
-            var form = shown == 2 ? "_dual" : shown >= 3 && shown <= 10 ? "_plural" : "";
-            return Format("num." + scale + form, Decimal(tenths / 10.0));
+            var shown = tenths % 10 == 0 ? tenths / 10 : -1;
+            var form = shown == 1 ? "_one" : shown == 2 ? "_two" : shown >= 3 && shown <= 10 ? "_plural" : "";
+            return (scale + form, Decimal(tenths / 10.0));
         }
 
         /// <summary>The CLDR plural category of a whole number in the active language.</summary>
