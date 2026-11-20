@@ -255,7 +255,7 @@ public sealed class Shell
         if (!string.IsNullOrEmpty(card.ThumbnailUrl)) image.Source = new BitmapImage(new Uri(card.ThumbnailUrl));
         panel.Children.Add(image);
         panel.Children.Add(new TextBlock { Text = card.Title, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis });
-        panel.Children.Add(new TextBlock { Text = card.Meta, Opacity = 0.7, TextTrimming = TextTrimming.CharacterEllipsis });
+        panel.Children.Add(new TextBlock { Text = card.Meta, Opacity = 0.7, TextWrapping = TextWrapping.Wrap, MaxLines = 2, TextTrimming = TextTrimming.CharacterEllipsis });
         var button = new Button { Content = panel, Padding = new Thickness(6), Background = new SolidColorBrush(Colors.Transparent), BorderThickness = new Thickness(0) };
         AutomationName(button, card.Title);
         button.Click += (_, _) => Home.Open(card);

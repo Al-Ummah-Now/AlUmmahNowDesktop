@@ -268,8 +268,14 @@ public sealed class MainWindow
         title.AddCssClass("heading");
         box.Append(title);
 
+        // Channel • views • duration can outgrow one line («١٢٫٨ ألف مشاهدة» is longer than the full number), so the
+        // meta line wraps to a second line before it trims, and the duration is never cut off.
         var meta = Gtk.Label.New(card.Meta);
         meta.SetHalign(Gtk.Align.Start);
+        meta.SetXalign(0);
+        meta.SetWrap(true);
+        meta.SetWrapMode(Pango.WrapMode.WordChar);
+        meta.SetLines(2);
         meta.SetEllipsize(Pango.EllipsizeMode.End);
         meta.SetMaxWidthChars(36);
         meta.AddCssClass("dim-label");
