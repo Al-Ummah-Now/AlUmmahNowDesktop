@@ -61,11 +61,11 @@ jobs:
           # Owner review frames never show QA's test library: home uses the demo catalog and its title cards.
           mkdir -p artifacts/review
           export AUN_DEMO=1 AUN_DEMO_THUMBS=$PWD/tests/fixtures/viewer-thumbs
-          for v in "ar dark home-ar-dark" "en light home-en-light"; do
+          for v in "ar dark home-ar-dark" "en light home-en-light" "ar light home-ar-light" "en dark home-en-dark"; do
             set -- $v
             dbus-run-session -- xvfb-run -a -s "-screen 0 1280x800x24" scripts/linux-scenario.sh "$1" "$2" home "$3" artifacts/review 2>&1 | tee artifacts/review/$3.log || true
           done
-          test "$(cat artifacts/review/*.log | grep -c 'RESULT PASS')" = 2
+          test "$(cat artifacts/review/*.log | grep -c 'RESULT PASS')" = 4
           cp artifacts/linux/watch-*.png artifacts/review/
       - uses: actions/upload-artifact@v4
         if: always()
