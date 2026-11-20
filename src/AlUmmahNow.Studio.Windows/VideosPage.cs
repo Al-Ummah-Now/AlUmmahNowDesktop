@@ -312,7 +312,7 @@ internal sealed class VideosPage
         AutomationProperties.SetName(check, _l.Format("studio.videos.select", title));
         var meta = new TextBlock
         {
-            Text = _l.Join(_l.Format("studio.videos.views", _l.Number(v.Views)), v.CreatedAt is { } at ? _l.Date(at) : null, v.Category is { } c ? _l["studio.category." + c] : null),
+            Text = _l.Join(_l.Views(v.Views), v.CreatedAt is { } at ? _l.Date(at) : null, v.Category is { } c ? _l["studio.category." + c] : null),
             Foreground = LanternGlass.Res("StudioMutedBrush"),
             FontSize = 12.5,
             // Wraps to a second line rather than cutting the category ("Islamic hist…").
@@ -382,7 +382,7 @@ internal sealed class VideosPage
     {
         var parts = new List<string> { _l["studio.upload.visibility." + (v.IsPublic ? "public" : "private")] };
         if (v.Status is StudioVideoStatus.Processing or StudioVideoStatus.Failed or StudioVideoStatus.Uploading) parts.Add(_l["studio.videos.status." + v.Status.ToString().ToLowerInvariant()]);
-        parts.Add(_l.Format("studio.videos.views", _l.Number(v.Views)));
+        parts.Add(_l.Views(v.Views));
         if (v.CreatedAt is { } at) parts.Add(_l.Date(at));
         if (v.Category is { } c) parts.Add(_l["studio.category." + c]);
         return _l.Join(parts);

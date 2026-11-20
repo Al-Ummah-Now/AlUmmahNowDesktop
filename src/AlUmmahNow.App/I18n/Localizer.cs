@@ -98,13 +98,57 @@ namespace AlUmmahNow.App.I18n
             return Digits((fraction * 100).ToString(format, CultureInfo.InvariantCulture) + "%");
         }
 
-        /// <summary>Axis labels: 950, 1.2K, 3M ("١٫٢ ألف" in Arabic).</summary>
+        /// <summary>
+        /// Axis labels: 950, 1.2K, 3M («١٫٢ ألف», «٨ آلاف» in Arabic). Truncated to one decimal, never rounded up,
+        /// so 1,999 is "1.9K" and never "2K". The Arabic scale word agrees with the number shown: a whole 2 takes the
+        /// dual («ألفان»), a whole 3–10 the plural («آلاف»), anything else (1, 11+, a decimal like ١٫٣) «ألف».
+        /// </summary>
         public string Compact(double value)
         {
             var abs = Math.Abs(value);
-            if (abs >= 1_000_000) return Format("num.million", Decimal(Math.Round(value / 1_000_000, 1)));
-            if (abs >= 1_000) return Format("num.thousand", Decimal(Math.Round(value / 1_000, 1)));
-            return Decimal(value);
+            if (abs < 1_000) return Decimal(value);
+            var sign = value < 0 ? "-" : "";
+            return sign + CompactScaled((long)Math.Floor(abs));
+        }
+
+        /// <summary>
+        /// A view count with its noun. Under 1,000 the noun takes the CLDR plural of the full count: «مشاهدة واحدة»,
+        /// «مشاهدتان», «٣ مشاهدات», «١١ مشاهدة» / "1 view", "3 views". From 1,000 the count is compact and the noun
+        /// is counted by the scale word, so it stays singular: «١٫٣ ألف مشاهدة», «٨ آلاف مشاهدة» / "1.3K views".
+        /// </summary>
+        public string Views(long count)
+        {
+            if (count < 0) count = 0;
+            if (count >= 1_000) return Format("views.compact", CompactScaled(count));
+            return Format("views." + PluralCategory(count), Number(count));
+        }
+
+        /// <summary>A count of 1,000 or more as number + scale word, truncated to one decimal.</summary>
+        private string CompactScaled(long n)
+        {
+            string scale;
+            long unit;
+            if (n >= 1_000_000_000) { scale = "billion"; unit = 1_000_000_000; }
+            else if (n >= 1_000_000) { scale = "million"; unit = 1_000_000; }
+            else { scale = "thousand"; unit = 1_000; }
+            var tenths = n / (unit / 10);
+            var whole = tenths % 10 == 0;
+            var shown = whole ? tenths / 10 : -1;
+            var form = shown == 2 ? "_dual" : shown >= 3 && shown <= 10 ? "_plural" : "";
+            return Format("num." + scale + form, Decimal(tenths / 10.0));
+        }
+
+        /// <summary>The CLDR plural category of a whole number in the active language.</summary>
+        private string PluralCategory(long n)
+        {
+            if (_language != "ar") return n == 1 ? "one" : "other";
+            if (n == 0) return "zero";
+            if (n == 1) return "one";
+            if (n == 2) return "two";
+            var mod = n % 100;
+            if (mod >= 3 && mod <= 10) return "few";
+            if (mod >= 11 && mod <= 99) return "many";
+            return "other";
         }
 
         /// <summary>A day for chart labels: "11 Nov" / "١١ نوفمبر".</summary>
