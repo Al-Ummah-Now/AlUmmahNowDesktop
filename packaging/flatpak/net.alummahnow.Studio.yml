@@ -18,8 +18,12 @@ modules:
       - cp -r publish/. /app/lib/alummahnow-studio/
       - ln -s /app/lib/alummahnow-studio/alummahnow-studio /app/bin/alummahnow-studio
       - install -Dm644 net.alummahnow.Studio.desktop /app/share/applications/net.alummahnow.Studio.desktop
+      - for size in 16 24 32 48 64 128 256 512; do install -Dm644 icons/hicolor/${size}x${size}/apps/net.alummahnow.Studio.png /app/share/icons/hicolor/${size}x${size}/apps/net.alummahnow.Studio.png; done
     sources:
       - type: dir
         path: ../../artifacts/flatpak-input
       - type: file
         path: net.alummahnow.Studio.desktop
+      - type: dir
+        path: ../icons
+        dest: icons

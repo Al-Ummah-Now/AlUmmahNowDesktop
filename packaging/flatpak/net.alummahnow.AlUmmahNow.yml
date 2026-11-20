@@ -21,8 +21,12 @@ modules:
       - cp -r publish/. /app/lib/alummahnow/
       - ln -s /app/lib/alummahnow/alummahnow /app/bin/alummahnow
       - install -Dm644 net.alummahnow.AlUmmahNow.desktop /app/share/applications/net.alummahnow.AlUmmahNow.desktop
+      - for size in 16 24 32 48 64 128 256 512; do install -Dm644 icons/hicolor/${size}x${size}/apps/net.alummahnow.AlUmmahNow.png /app/share/icons/hicolor/${size}x${size}/apps/net.alummahnow.AlUmmahNow.png; done
     sources:
       - type: dir
         path: ../../artifacts/flatpak-input
       - type: file
         path: net.alummahnow.AlUmmahNow.desktop
+      - type: dir
+        path: ../icons
+        dest: icons
