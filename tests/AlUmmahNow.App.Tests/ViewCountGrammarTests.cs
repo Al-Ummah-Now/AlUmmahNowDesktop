@@ -73,4 +73,21 @@ public class ViewCountGrammarTests
         Assert.Equal(ar, new Localizer("ar").Compact(value));
         Assert.Equal(en, new Localizer("en").Compact(value));
     }
+
+    /// <summary>English cuts to one decimal exactly as Arabic does (and as Android and Apple do): never "34K" or "3K".</summary>
+    [Theory]
+    [InlineData(1_299, "1.2K")]
+    [InlineData(2_999, "2.9K")]
+    [InlineData(12_000, "12K")]
+    [InlineData(20_600, "20.6K")]
+    [InlineData(33_600, "33.6K")]
+    [InlineData(999_999, "999.9K")]
+    [InlineData(1_250_000, "1.2M")]
+    [InlineData(15_000_000, "15M")]
+    public void English_truncates_like_arabic(long count, string compact)
+    {
+        var en = new Localizer("en");
+        Assert.Equal(compact + " views", en.Views(count));
+        Assert.Equal(compact, en.Compact(count));
+    }
 }
