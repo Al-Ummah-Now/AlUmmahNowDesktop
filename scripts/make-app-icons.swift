@@ -3,14 +3,13 @@
 // adaptive shape, tvOS rounded rect), so each crop is chosen to survive it.
 //
 //   swift scripts/make-app-icons.swift crop <icon-candidates dir>   # refresh art/app-icons/*.png from the originals
-//   swift scripts/make-app-icons.swift apple|android|desktop [--studio qalam|silhouette|lantern]
+//   swift scripts/make-app-icons.swift apple|android|desktop
 //
 // The same file lives in AlUmmahNowApple, AlUmmahNowAndroid and AlUmmahNowDesktop; each repo runs its own mode.
 // Art (owner's choice, matching the web apps in AlUmmahNow packages/app-icons):
 //   Viewer  setC-videos-magnific-v1, framing D (the lit windows with the play button), as the videos web app
 //   Admin   setC-staff-ring-octagon, the whole square (the octagon frame is the admins' mark), as videos admin
-//   Studio  owner to pick: qalam (setC-cms-qalam, lantern with pen), silhouette (setC-account-flat-silhouette,
-//           lantern body and dome), lantern (setC-videos-magnific-v1, the whole square)
+//   Studio  setC-videos-magnific-v1, the whole square (the whole lantern; owner's pick, 2026-11-20)
 import Accelerate
 import CoreGraphics
 import Foundation
@@ -23,8 +22,6 @@ import UniformTypeIdentifiers
 let masters: [String: (file: String, left: Int, top: Int, size: Int)] = [
     "videos": ("setC-videos-magnific-v1.png", 411, 107, 554),
     "admin": ("setC-staff-ring-octagon.png", 411, 107, 554),
-    "qalam": ("setC-cms-qalam.png", 390, 86, 596),
-    "silhouette": ("setC-account-flat-silhouette.png", 397, 93, 582),
 ]
 
 /// A crop inside a master, as fractions of its side (left, top, width, height).
@@ -35,11 +32,6 @@ func square(_ master: String, _ l: Double, _ t: Double, _ s: Double) -> Frame {
     Frame(master: master, x: l / 512, y: t / 512, w: s / 512, h: s / 512)
 }
 
-let studioOptions: [String: Frame] = [
-    "qalam": square("qalam", 30, 82, 430),  // CMS framing C: the lantern with its pen
-    "silhouette": square("silhouette", 60, 45, 400),  // account framing C: lantern body and dome
-    "lantern": square("videos", 0, 0, 512),  // the whole videos square
-]
 
 /// A wide crop of the videos art for TV (full width, `aspect` = width / height), centred on framing D's centre.
 func wide(_ aspect: Double) -> Frame {
@@ -49,18 +41,11 @@ func wide(_ aspect: Double) -> Frame {
 
 // MARK: - Arguments
 
-var args = Array(CommandLine.arguments.dropFirst())
-func option(_ name: String) -> String? {
-    guard let i = args.firstIndex(of: name), i + 1 < args.count else { return nil }
-    defer { args.removeSubrange(i...(i + 1)) }
-    return args[i + 1]
-}
-let studioName = option("--studio") ?? "qalam"
-guard let studio = studioOptions[studioName] else { fail("unknown --studio \(studioName)") }
+let args = Array(CommandLine.arguments.dropFirst())
 let apps: [String: Frame] = [
     "viewer": square("videos", 115, 180, 300),
     "admin": square("admin", 0, 0, 512),
-    "studio": studio,
+    "studio": square("videos", 0, 0, 512),
 ]
 let artDir = "art/app-icons"
 
@@ -355,5 +340,5 @@ case "desktop":
     // Studio's header bar shows its own app icon (embedded resource studio/app-icon.png).
     write(icon(apps["studio"]!, 180, 180), "src/AlUmmahNow.Studio/Assets/app-icon.png")
 default:
-    fail("usage: swift scripts/make-app-icons.swift crop <dir> | apple|android|desktop [--studio qalam|silhouette|lantern]")
+    fail("usage: swift scripts/make-app-icons.swift crop <dir> | apple|android|desktop")
 }
