@@ -22,8 +22,7 @@ namespace AlUmmahNow.App.ViewModels
         public string? ThumbnailUrl => Video.ThumbnailUrl;
         public string Duration => Video.DurationSeconds is { } d ? _localizer.Duration(d) : "";
 
-        /// <summary>Channel, views and duration, each isolated so numbers cannot reorder across segments.</summary>
-        // Join isolates each part (direction), so the parts go in as they are.
+        /// <summary>Channel, views and duration; Join isolates each so numbers cannot reorder across segments.</summary>
         public string Meta => _localizer.Join(new[] { Channel, Views, Duration }.Where(x => x.Length > 0));
 
         public string Views => _localizer.Format("video.views", _localizer.Number(Video.Views));
