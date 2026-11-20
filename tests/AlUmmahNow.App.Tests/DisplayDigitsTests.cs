@@ -19,7 +19,7 @@ public class DisplayDigitsTests
         l.Compact(3_400_000), l.ShortDate(new DateTime(2026, 11, 11)), l.Date(Day), l.DateTime(Day), l.Duration(3725),
         l.Duration(TimeSpan.FromMilliseconds(15_000)), l.Speed(1.5), l.Quality(1080, 0), l.Quality(0, 800_000),
         l.Bytes(12_900_000), l.Bytes(512), l.Money(12.69m, "USD"), l.Money(1500m, "EUR"),
-        l.Format("video.views", 1234), l.Format("studio.analytics.days", 28), l.Format("studio.upload.progress", l.Bytes(1024), l.Bytes(2048)),
+        l.Views(1234), l.Format("studio.analytics.days", 28), l.Format("studio.upload.progress", l.Bytes(1024), l.Bytes(2048)),
         l.Format("studio.videos.deleteBody", 30), l.Format("admin.stepup.body", 15), l.Format("passkey.error.limit", 10),
     };
 
@@ -60,7 +60,7 @@ public class DisplayDigitsTests
         Assert.Equal("⁨٢٠٢٦-١١-١٥⁩", ar.Date(new DateTimeOffset(2026, 11, 15, 12, 0, 0, TimeZoneInfo.Local.GetUtcOffset(new DateTime(2026, 11, 15)))));
         Assert.Equal("⁨١:٠٢:٠٥⁩", ar.Duration(3725));
         Assert.Equal("١٫٥x", ar.Speed(1.5));
-        Assert.Equal("١٬٢٣٤ مشاهدة", ar.Format("video.views", 1234));
+        Assert.Equal("١٫٢ ألف مشاهدة", ar.Views(1234));
     }
 
     [Fact]
@@ -78,7 +78,7 @@ public class DisplayDigitsTests
         Assert.Equal("1.5x", en.Speed(1.5));
         Assert.Equal("1080p", en.Quality(1080, 0));
         Assert.Equal("800 kbps", en.Quality(0, 800_000));
-        Assert.Equal("1,234 views", en.Format("video.views", 1234));
+        Assert.Equal("1.2K views", en.Views(1234));
         Assert.Equal("Last 28 days", en.Format("studio.analytics.days", 28));
         foreach (var text in All(en)) Assert.DoesNotMatch("[٠-٩۰-۹]", text);
     }
@@ -93,8 +93,8 @@ public class DisplayDigitsTests
     [Fact]
     public void Arabic_joins_with_a_bullet_because_the_middle_dot_reads_as_zero()
     {
-        Assert.Equal("\u2068عام\u2069 • \u2068١٬٢٠٠ مشاهدة\u2069", new Localizer("ar").Join("عام", null, "", new Localizer("ar").Format("video.views", 1200)));
-        Assert.Equal("\u2068Public\u2069 · \u20681,200 views\u2069", new Localizer("en").Join("Public", null, "", new Localizer("en").Format("video.views", 1200)));
+        Assert.Equal("\u2068عام\u2069 • \u2068١٫٢ ألف مشاهدة\u2069", new Localizer("ar").Join("عام", null, "", new Localizer("ar").Views(1200)));
+        Assert.Equal("\u2068Public\u2069 · \u20681.2K views\u2069", new Localizer("en").Join("Public", null, "", new Localizer("en").Views(1200)));
     }
 
     [Fact]
