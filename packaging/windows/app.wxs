@@ -1,9 +1,13 @@
 <!--
   Per-machine MSI for an unpackaged, self-contained WinUI 3 app. Built by .github/workflows/release.yml:
     wix build packaging/windows/app.wxs -arch x64 -d Version=1.2.3 -d PublishDir=... -d ProductName=...
-      -d ExeName=... -d InstallDirName=... -d UpgradeCode=... -o out.msi
+      -d ExeName=... -d InstallDirName=... -d UpgradeCode=... [-d ShortcutName=...] -o out.msi
+  ShortcutName is the Start menu name (the short launcher name); ProductName stays the full name in Settings.
   Each app keeps its UpgradeCode forever so a newer MSI replaces the older one.
 -->
+<?ifndef ShortcutName?>
+<?define ShortcutName = $(var.ProductName)?>
+<?endif?>
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
   <Package Name="$(var.ProductName)" Manufacturer="Al Ummah Now" Version="$(var.Version)" UpgradeCode="$(var.UpgradeCode)" Scope="perMachine" Language="1033">
     <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
@@ -19,7 +23,7 @@
     <Feature Id="Main" Title="$(var.ProductName)">
       <Files Directory="INSTALLFOLDER" Include="$(var.PublishDir)\**" />
       <Component Id="StartMenuShortcut" Directory="ProgramMenuFolder" Guid="*">
-        <Shortcut Id="AppShortcut" Name="$(var.ProductName)" Target="[INSTALLFOLDER]$(var.ExeName)" WorkingDirectory="INSTALLFOLDER" />
+        <Shortcut Id="AppShortcut" Name="$(var.ShortcutName)" Target="[INSTALLFOLDER]$(var.ExeName)" WorkingDirectory="INSTALLFOLDER" />
         <RegistryValue Root="HKLM" Key="Software\Al Ummah Now\$(var.InstallDirName)" Name="installed" Type="integer" Value="1" KeyPath="yes" />
       </Component>
     </Feature>

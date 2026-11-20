@@ -1,7 +1,9 @@
 [Desktop Entry]
 Type=Application
-Name=Al Ummah Now
+Name=Ummah Now
 Name[ar]=الأمة الآن
+X-GNOME-FullName=Al Ummah Now
+X-GNOME-FullName[ar]=الأمة الآن
 Exec=alummahnow
 Icon=net.alummahnow.AlUmmahNow
 Categories=AudioVideo;Video;Player;

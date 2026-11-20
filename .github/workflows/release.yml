@@ -96,6 +96,7 @@ jobs:
           - project: AlUmmahNow.Studio.Windows
             package: AlUmmahNow-Studio-Windows
             product: Al Ummah Now Studio
+            shortcut: Studio
             exe: AlUmmahNowStudio.exe
             dir: Al Ummah Now Studio
             upgrade: 174DD000-F5DA-4A3E-944A-13F95EFA96C0
@@ -104,6 +105,7 @@ jobs:
           - project: AlUmmahNow.Windows
             package: AlUmmahNow-Windows
             product: Al Ummah Now
+            shortcut: Ummah Now
             exe: AlUmmahNow.exe
             dir: Al Ummah Now
             upgrade: 0DAC7B41-DEF7-4BCA-B1D5-AF7683E1D605
@@ -134,6 +136,7 @@ jobs:
             -d Version=${{ needs.verify.outputs.numeric }} `
             -d "PublishDir=$((Resolve-Path out/publish).Path)" `
             -d "ProductName=${{ matrix.product }}" `
+            -d "ShortcutName=${{ matrix.shortcut }}" `
             -d "ExeName=${{ matrix.exe }}" `
             -d "InstallDirName=${{ matrix.dir }}" `
             -d "UpgradeCode={${{ matrix.upgrade }}}" `
@@ -147,7 +150,7 @@ jobs:
           if ($p.ExitCode -ne 0) { Get-Content install.log -Tail 50; throw "install failed: $($p.ExitCode)" }
           $exe = "$env:ProgramFiles\${{ matrix.dir }}\${{ matrix.exe }}"
           if (-not (Test-Path $exe)) { throw "not installed at $exe" }
-          if (-not (Test-Path "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\${{ matrix.product }}.lnk")) { throw "no Start menu shortcut" }
+          if (-not (Test-Path "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\${{ matrix.shortcut }}.lnk")) { throw "no Start menu shortcut" }
           New-Item -ItemType Directory -Force smoke | Out-Null
           ./scripts/windows-studio-scenario.ps1 $exe en uploads shell installed (Resolve-Path smoke).Path
           if (-not (Select-String -Quiet "RESULT PASS" smoke/installed.txt)) { throw "installed app did not start" }
