@@ -121,7 +121,7 @@ public sealed class AnalyticsPage
             t.SetEllipsize(Pango.EllipsizeMode.End);
             t.AddCssClass("heading");
             text.Append(t);
-            var views = Ui.Label(_l.Format("studio.videos.views", _l.Number(v.Views)), dim: true);
+            var views = Ui.Label(_l.Views(v.Views), dim: true);
             views.AddCssClass("caption");
             text.Append(views);
             row.Append(text);

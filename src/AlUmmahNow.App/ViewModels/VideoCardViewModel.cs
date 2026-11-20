@@ -25,6 +25,6 @@ namespace AlUmmahNow.App.ViewModels
         /// <summary>Channel, views and duration; Join isolates each so numbers cannot reorder across segments.</summary>
         public string Meta => _localizer.Join(new[] { Channel, Views, Duration }.Where(x => x.Length > 0));
 
-        public string Views => _localizer.Format("video.views", _localizer.Number(Video.Views));
+        public string Views => _localizer.Views(Video.Views);
     }
 }

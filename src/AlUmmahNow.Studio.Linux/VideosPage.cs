@@ -355,7 +355,7 @@ public sealed class VideosPage
             label.AddCssClass("heading");
         }
 
-        var meta = Ui.Label(_l.Join(_l.Format("studio.videos.views", _l.Number(v.Views)), v.CreatedAt is { } at ? _l.Date(at) : null, v.Category is { } c ? _l["studio.category." + c] : null), dim: true);
+        var meta = Ui.Label(_l.Join(_l.Views(v.Views), v.CreatedAt is { } at ? _l.Date(at) : null, v.Category is { } c ? _l["studio.category." + c] : null), dim: true);
         meta.AddCssClass("caption");
         var body = Gtk.Box.New(Gtk.Orientation.Vertical, 4);
         body.Append(check);
@@ -420,7 +420,7 @@ public sealed class VideosPage
     {
         var parts = new List<string> { _l["studio.upload.visibility." + (v.IsPublic ? "public" : "private")] };
         if (v.Status is StudioVideoStatus.Processing or StudioVideoStatus.Failed or StudioVideoStatus.Uploading) parts.Add(_l["studio.videos.status." + v.Status.ToString().ToLowerInvariant()]);
-        parts.Add(_l.Format("studio.videos.views", _l.Number(v.Views)));
+        parts.Add(_l.Views(v.Views));
         if (v.CreatedAt is { } at) parts.Add(_l.Date(at));
         if (v.Category is { } c) parts.Add(_l["studio.category." + c]);
         return _l.Join(parts);
