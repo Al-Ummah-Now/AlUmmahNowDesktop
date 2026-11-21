@@ -29,6 +29,8 @@ public sealed class VideosPage
     private const int TitleBox = 40;
     private readonly Gtk.FlowBox _list = Gtk.FlowBox.New();
     private readonly Dictionary<string, Gdk.Texture> _thumbs = new();
+    private readonly List<Gtk.Widget> _thumbBoxes = new();
+    private int _thumbHeight = 146;
     private readonly HashSet<string> _thumbsLoading = new();
     private readonly Gtk.Label _empty = Ui.Label("", dim: true);
     private readonly Gtk.Label _error = Ui.Label("");
@@ -153,12 +155,22 @@ public sealed class VideosPage
         var columns = 0;
         _list.AddTickCallback((_, _) =>
         {
-            var fit = Math.Clamp((_list.GetWidth() + Gap) / (CardWidth + Gap), 2, 6);
+            var width = _list.GetWidth();
+            var fit = Math.Clamp((width + Gap) / (CardWidth + Gap), 2, 6);
             if (fit != columns)
             {
                 columns = fit;
                 _list.SetMinChildrenPerLine((uint)fit);
                 _list.SetMaxChildrenPerLine((uint)fit);
+            }
+
+            // Thumbnails are 16:9 of a card's width, with one height for every card: the grid hands its spare pixels to
+            // some columns, so measuring each card made one column's thumbnails a pixel taller than the rest.
+            var height = Math.Max(1, ((width - (fit - 1) * Gap) / fit - 2) * 9 / 16);
+            if (width > 0 && height != _thumbHeight)
+            {
+                _thumbHeight = height;
+                foreach (var t in _thumbBoxes) t.SetSizeRequest(-1, height);
             }
 
             return true;
@@ -311,6 +323,7 @@ public sealed class VideosPage
     private void RenderList()
     {
         while (_list.GetChildAtIndex(0) is { } c) _list.Remove(c);
+        _thumbBoxes.Clear();
         foreach (var v in _vm.Items) _list.Append(Card(v));
 
         _list.SetVisible(_vm.Items.Count > 0);
@@ -351,9 +364,10 @@ public sealed class VideosPage
             _ = LoadThumbAsync(u);
         }
 
-        // 16:9 at the width the grid gives the card: a fixed height cropped the title card's top and bottom (the lantern
-        // and the channel mark) at widths where the card is wide and short. The picture fills a box of its own shape.
-        Ui.KeepAspect(thumb, 16, 9);
+        // 16:9 at the width the grid gives the cards (set from the grid's tick): a fixed height cropped the title card's top
+        // and bottom (the lantern and the channel mark) at widths where the card is wide and short.
+        thumb.SetSizeRequest(-1, _thumbHeight);
+        _thumbBoxes.Add(thumb);
         var pill = Gtk.Label.New(v.Status is StudioVideoStatus.Processing or StudioVideoStatus.Failed or StudioVideoStatus.Uploading
             ? _l["studio.videos.status." + v.Status.ToString().ToLowerInvariant()]
             : _l["studio.upload.visibility." + (v.IsPublic ? "public" : "private")]);

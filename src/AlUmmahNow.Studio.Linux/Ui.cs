@@ -104,26 +104,6 @@ public static class Ui
     }
 
     /// <summary>A video file's tile: night blue with a gold film glyph (the server makes the real thumbnail).</summary>
-    /// <summary>
-    /// Keeps a widget's height at <paramref name="ratioHeight"/>/<paramref name="ratioWidth"/> of the width it is given.
-    /// GTK 4 has no height-for-width box of a fixed shape, so the height request follows the allocated width each frame.
-    /// </summary>
-    public static void KeepAspect(Gtk.Widget widget, int ratioWidth, int ratioHeight, int minWidth = -1)
-    {
-        var last = -1;
-        widget.AddTickCallback((w, _) =>
-        {
-            var px = w.GetWidth();
-            if (px > 0 && px != last)
-            {
-                last = px;
-                w.SetSizeRequest(minWidth, (int)Math.Round(px * (double)ratioHeight / ratioWidth));
-            }
-
-            return true;
-        });
-    }
-
     public static Gtk.Widget FileTile(int width, int height)
     {
         var tile = Gtk.Box.New(Gtk.Orientation.Vertical, 0);
