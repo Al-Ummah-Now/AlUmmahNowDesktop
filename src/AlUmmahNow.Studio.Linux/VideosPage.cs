@@ -23,10 +23,11 @@ public sealed class VideosPage
     private const int Gap = 16, CardWidth = 280;
 
     /// <summary>
-    /// The title's box: two heading lines in either script, whether the title takes one line or two, so every card in a
-    /// row has the same height and the thumbnails above stay the same size.
+    /// The title's box in pixels, the same for one line or two and for either script: two Latin heading lines take 43 px
+    /// and two Arabic ones 36, so a box of 40 grew for a wrapped English title and pushed that card's meta line down.
+    /// 44 holds both, and the title never takes more than two lines.
     /// </summary>
-    private const int TitleBox = 40;
+    private const int TitleBox = 44;
     private readonly Gtk.FlowBox _list = Gtk.FlowBox.New();
     private readonly Dictionary<string, Gdk.Texture> _thumbs = new();
     private readonly List<Gtk.Widget> _thumbBoxes = new();
@@ -414,7 +415,9 @@ public sealed class VideosPage
         titleRow.SetSizeRequest(-1, TitleBox);
         check.SetValign(Gtk.Align.Start);
         titleRow.Append(check);
-        var body = Gtk.Box.New(Gtk.Orientation.Vertical, 4);
+        // The body's spacing and top margin give back the 4 px the title box grew by, so two rows still fit whole in the
+        // 1440x900 window.
+        var body = Gtk.Box.New(Gtk.Orientation.Vertical, 3);
         body.Append(titleRow);
         body.Append(meta);
 
@@ -434,7 +437,7 @@ public sealed class VideosPage
         card.Append(thumb);
         body.SetMarginStart(14);
         body.SetMarginEnd(14);
-        body.SetMarginTop(10);
+        body.SetMarginTop(7);
         // The title and meta line must not set the card's minimum width: in English it came out wider than in Arabic, so
         // the grid's columns no longer fit the window. An external horizontal policy ignores the text's width request;
         // the body takes the width the grid gives the card and the labels wrap or ellipsize inside it.

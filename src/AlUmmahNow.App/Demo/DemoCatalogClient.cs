@@ -19,18 +19,19 @@ namespace AlUmmahNow.App.Demo
     {
         // Category, titles, then a hand-made life for each video, as a real catalog has: the channel that posted it, its
         // length in seconds, its views and how many hours ago it went up. Nothing follows a formula, so no rail repeats
-        // a pattern (lengths, views, channels or upload times).
+        // a pattern (lengths, views, channels or upload times). No length equals a Studio demo video's (DemoBackend), or the
+        // viewer would read as Studio's channel copied.
         private static readonly (string Category, string En, string Ar, int Channel, int Seconds, long Views, int HoursAgo)[] Fixtures =
         {
             ("quran_recitation", "Surah Al-Mulk, full recitation", "سورة الملك كاملة", 1, 1834, 48210, 5),
             ("quran_recitation", "Surah Ar-Rahman", "سورة الرحمن", 2, 1412, 126400, 52),
-            ("quran_tafsir", "Reflections on Surah Al-Hujurat", "تأملات في سورة الحجرات", 0, 2675, 8730, 20),
+            ("quran_tafsir", "Reflections on Surah Al-Hujurat", "تأملات في سورة الحجرات", 0, 2531, 8730, 20),
             ("quran_tafsir", "The meaning of Al-Fatiha", "معاني سورة الفاتحة", 0, 1148, 31950, 98),
-            ("hadith_studies", "Hadith of the week: honesty", "حديث الأسبوع: الصدق", 1, 486, 5410, 9),
+            ("hadith_studies", "Hadith of the week: honesty", "حديث الأسبوع: الصدق", 1, 517, 5410, 9),
             ("hadith_studies", "Forty hadith, episode 2", "الأربعون النووية، الحلقة الثانية", 2, 1567, 2980, 140),
-            ("fiqh", "Q&A: combining prayers", "سؤال وجواب: الجمع بين الصلاتين", 2, 903, 17620, 31),
-            ("fiqh", "Fasting: common questions", "الصيام: أسئلة شائعة", 0, 1291, 64300, 210),
-            ("islamic_history", "Seerah: the Hijrah to Madinah", "السيرة: الهجرة إلى المدينة", 3, 3390, 22840, 15),
+            ("fiqh", "Q&A: combining prayers", "سؤال وجواب: الجمع بين الصلاتين", 2, 958, 17620, 31),
+            ("fiqh", "Fasting: common questions", "الصيام: أسئلة شائعة", 0, 1349, 64300, 210),
+            ("islamic_history", "Seerah: the Hijrah to Madinah", "السيرة: الهجرة إلى المدينة", 3, 3127, 22840, 15),
             ("islamic_history", "Al-Andalus: a short history", "الأندلس: تاريخ موجز", 3, 2218, 9640, 76),
             ("islamic_nasheed", "Tala'a al-Badru 'Alayna", "طلع البدر علينا", 1, 264, 241500, 400),
             ("islamic_nasheed", "A nasheed for the morning", "نشيد الصباح", 0, 197, 13280, 44),
