@@ -20,6 +20,7 @@ public sealed class VideosPage
     private readonly Gtk.Box _selectionBar = Gtk.Box.New(Gtk.Orientation.Horizontal, 8);
     private readonly Gtk.Label _selectionLabel = Ui.Label("");
     // Lantern Glass: a grid of thumbnail cards (Edit and Delete in each card's footer).
+    private const int Gap = 16, CardWidth = 280;
     private readonly Gtk.FlowBox _list = Gtk.FlowBox.New();
     private readonly Dictionary<string, Gdk.Texture> _thumbs = new();
     private readonly HashSet<string> _thumbsLoading = new();
@@ -136,11 +137,26 @@ public sealed class VideosPage
 
         _list.SetSelectionMode(Gtk.SelectionMode.None);
         _list.SetHomogeneous(true);
-        _list.SetColumnSpacing(16);
-        _list.SetRowSpacing(16);
+        _list.SetColumnSpacing(Gap);
+        _list.SetRowSpacing(Gap);
         _list.SetMinChildrenPerLine(2);
         _list.SetMaxChildrenPerLine(6);
         _list.SetValign(Gtk.Align.Start);
+        // FlowBox picks its columns from the cards' natural width, which follows the text, so English and Arabic got a
+        // different count at the same window width. The count comes from the grid's own width instead.
+        var columns = 0;
+        _list.AddTickCallback((_, _) =>
+        {
+            var fit = Math.Clamp((_list.GetWidth() + Gap) / (CardWidth + Gap), 2, 6);
+            if (fit != columns)
+            {
+                columns = fit;
+                _list.SetMinChildrenPerLine((uint)fit);
+                _list.SetMaxChildrenPerLine((uint)fit);
+            }
+
+            return true;
+        });
         page.Append(_list);
         page.Append(_empty);
         _more = Ui.Button(l["studio.videos.loadMore"], () => _ = _vm.LoadMoreAsync());
