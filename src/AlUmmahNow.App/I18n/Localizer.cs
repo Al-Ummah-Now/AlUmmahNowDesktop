@@ -12,8 +12,8 @@ namespace AlUmmahNow.App.I18n
     /// <summary>
     /// Holds the active language and is the one display formatter of the apps: every number, count, date,
     /// time, duration, percentage, file size and amount of money shown to people goes through it.
-    /// Arabic always shows Eastern Arabic (Hindi) numerals ٠–٩ with the Arabic separators ٫ ٬ ٪, whatever
-    /// the operating system's region or digit settings (owner decision 2026-11-15). Text is formatted with
+    /// Arabic always shows Eastern Arabic (Hindi) numerals ٠–٩ with «٫» and «٪» and no grouping, whatever
+    /// the operating system's region or digit settings (owner decisions 2026-11-15 and 2026-11-21). Text is formatted with
     /// the invariant culture and the digits are then mapped, so the output is the same on every machine.
     /// English keeps Arabic numerals 0–9. Ids, URLs, version numbers, CSV/ISO wire values and text that
     /// people type stay as typed; <see cref="NormalizeDigits"/> turns typed ٠–٩ back into 0–9.
@@ -78,31 +78,36 @@ namespace AlUmmahNow.App.I18n
             _ => arg,
         };
 
-        /// <summary>A whole number with grouping: "1,234" / "١٬٢٣٤".</summary>
-        public string Number(long value) => Digits(value.ToString("N0", CultureInfo.InvariantCulture));
+        /// <summary>A whole number: grouped in English ("1,234"), never grouped in Arabic ("١٢٣٤").</summary>
+        public string Number(long value) => Figure(value.ToString("N0", CultureInfo.InvariantCulture));
 
         /// <summary>A number with at most one decimal ("1.5", "١٫٥" in Arabic).</summary>
-        public string Decimal(double value) => Digits(value.ToString("#,0.#", CultureInfo.InvariantCulture));
+        public string Decimal(double value) => Figure(value.ToString("#,0.#", CultureInfo.InvariantCulture));
 
         /// <summary>
         /// A headline total for a stat tile. Zero is a word in Arabic («لا يوجد»): the Eastern Arabic zero «٠»
-        /// is a single dot, which on its own in a tile reads as an empty value.
+        /// is a single dot, which on its own in a tile reads as an empty value. A count of 1,000 or more is compact,
+        /// like every large count ("4.8K", «٤٫٨ ألف»; owner 2026-11-21); a measure with decimals (watch hours) stays exact.
         /// </summary>
         public string Stat(double value, bool decimals = false) =>
-            value == 0 ? this["stat.zero"] : decimals ? Decimal(value) : Number((long)Math.Round(value));
+            value == 0 ? this["stat.zero"]
+            : decimals ? Decimal(value)
+            : Math.Abs(value) >= 1_000 ? Compact(Math.Round(value))
+            : Number((long)Math.Round(value));
 
         /// <summary>A share of 1 as a percentage: 0.25 → "25%" / "٢٥٪".</summary>
         public string Percent(double fraction, int decimals = 0)
         {
             var format = decimals <= 0 ? "#,0" : "#,0." + new string('#', decimals);
-            return Digits((fraction * 100).ToString(format, CultureInfo.InvariantCulture) + "%");
+            return Figure((fraction * 100).ToString(format, CultureInfo.InvariantCulture) + "%");
         }
 
         /// <summary>
         /// Axis labels and other compact numbers without a noun: 950, 1.5K, 3M. Truncated to one decimal, never
-        /// rounded up, so 1,999 is "1.9K" and never "2K". Arabic: exactly 1 is the bare scale word («ألف», «مليون»),
-        /// exactly 2 the dual with no digit («ألفان», «مليونان»; a digit is never followed by the dual), a whole 3–10
-        /// the plural («٣ آلاف», «٣ ملايين»), and 11+ or any decimal the singular («١١ ألف», «١٫٥ ألف»).
+        /// rounded up, so 1,999 is "1.9K" and never "2K". Arabic thousands and billions: exactly 1 is the bare scale
+        /// word («ألف», «مليار»), exactly 2 the dual with no digit («ألفان», «ملياران»), a whole 3–10 the plural
+        /// («٣ آلاف»), and 11+ or any decimal the singular («١١ ألف», «١٫٥ ألف»). Millions are always «{n} م»
+        /// («١ م», «١٫٢ م»; owner 2026-11-21).
         /// </summary>
         public string Compact(double value)
         {
@@ -117,8 +122,8 @@ namespace AlUmmahNow.App.I18n
         /// A view count with its noun. Under 1,000 the noun takes the CLDR plural of the full count: «مشاهدة واحدة»,
         /// «مشاهدتان», «٣ مشاهدات», «١١ مشاهدة» / "1 view", "3 views". From 1,000 the count is compact and the noun
         /// is counted by the scale word, so it stays singular: exactly 1 «ألف مشاهدة», exactly 2 the construct form
-        /// with no digit «ألفا مشاهدة», a whole 3–10 «٣ آلاف مشاهدة», 11+ or any decimal «١٫٣ ألف مشاهدة» /
-        /// "1K views", "1.3K views".
+        /// with no digit «ألفا مشاهدة», a whole 3–10 «٣ آلاف مشاهدة», 11+ or any decimal «١٫٣ ألف مشاهدة»; millions
+        /// «١٫٢ م مشاهدة» / "1K views", "1.3K views", "1.2M views".
         /// </summary>
         public string Views(long count)
         {
@@ -225,7 +230,7 @@ namespace AlUmmahNow.App.I18n
             }
 
             var format = decimals is { } d && d > 0 ? "#,0." + new string('0', d) : decimals != null || u == 0 ? "#,0" : "#,0.#";
-            return Format(units[u], Digits(v.ToString(format, CultureInfo.InvariantCulture)));
+            return Format(units[u], Figure(v.ToString(format, CultureInfo.InvariantCulture)));
         }
 
         /// <summary>
@@ -240,7 +245,7 @@ namespace AlUmmahNow.App.I18n
             if (_language == "ar")
             {
                 var name = this["currency." + code];
-                return sign + Digits(number) + " " + (name == "currency." + code ? code : name);
+                return sign + Figure(number) + " " + (name == "currency." + code ? code : name);
             }
 
             return code == "USD" ? sign + "$" + number : sign + code + " " + number;
@@ -285,6 +290,13 @@ namespace AlUmmahNow.App.I18n
 
             return sb.ToString();
         }
+
+        /// <summary>
+        /// A formatted number in the language's digits. Arabic numbers are never grouped (owner decision 2026-11-21, which
+        /// replaces 2026-11-15's «٬»): in most Arabic UI fonts «٬» and the decimal mark «٫» look alike, so «٫» is the only
+        /// comma-like mark («٤٨٨٧», «١٢٣٤٫٥»). English keeps "4,887".
+        /// </summary>
+        private string Figure(string invariant) => Digits(_language == "ar" ? invariant.Replace(",", "") : invariant);
 
         /// <summary>Maps invariant-formatted number text to the language's digits and separators.</summary>
         private string Digits(string text)

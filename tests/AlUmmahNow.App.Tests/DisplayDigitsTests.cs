@@ -52,7 +52,7 @@ public class DisplayDigitsTests
     public void Arabic_uses_arabic_separators_and_currency_names()
     {
         var ar = new Localizer("ar");
-        Assert.Equal("١٬٢٣٤٬٥٦٧", ar.Number(1_234_567));
+        Assert.Equal("١٢٣٤٥٦٧", ar.Number(1_234_567));
         Assert.Equal("١٢٫٥", ar.Decimal(12.5));
         Assert.Equal("٢٥٪", ar.Percent(0.25));
         Assert.Equal("١٢٫٦٩ دولار أمريكي", ar.Money(12.69m, "USD"));
@@ -112,7 +112,15 @@ public class DisplayDigitsTests
         Assert.Equal("لا يوجد", new Localizer("ar").Stat(0));
         Assert.Equal("٣١٣٫٥", new Localizer("ar").Stat(313.5, decimals: true));
         Assert.Equal("0", new Localizer("en").Stat(0));
-        Assert.Equal("15,046", new Localizer("en").Stat(15046));
+        // Counts from 1,000 are compact (owner 2026-11-21); Arabic numbers are never grouped.
+        Assert.Equal("15K", new Localizer("en").Stat(15046));
+        Assert.Equal("4.8K", new Localizer("en").Stat(4887));
+        Assert.Equal("٤٫٨ ألف", new Localizer("ar").Stat(4887));
+        Assert.Equal("٨٨٧", new Localizer("ar").Stat(887));
+        Assert.Equal("١٫٢ م", new Localizer("ar").Stat(1_234_567));
+        Assert.Equal("١٢٣٤٫٥", new Localizer("ar").Decimal(1234.5));
+        Assert.Equal("4,887", new Localizer("en").Number(4887));
+        Assert.Equal("٤٨٨٧", new Localizer("ar").Number(4887));
     }
 
     [Fact]
