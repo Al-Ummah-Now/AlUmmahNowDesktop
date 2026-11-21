@@ -46,6 +46,20 @@ public class DemoDataTests
     }
 
     [Fact]
+    public async Task ViewerVideosHaveTheirOwnLengths()
+    {
+        var studio = await new StudioApiClient(new DemoTransport()).ListVideosAsync(new StudioVideoQuery { ChannelId = "demo-c1", Limit = 100 });
+        var studioLengths = studio.Items.Where(v => v.DurationSeconds is > 0).Select(v => (long)Math.Round(v.DurationSeconds!.Value)).ToHashSet();
+        Assert.NotEmpty(studioLengths);
+        var viewer = await new AlUmmahNow.App.Demo.DemoCatalogClient().ListVideosAsync(new AlUmmahNow.CoreBridge.VideoQuery { Limit = 100 });
+        Assert.Equal(28, viewer.Items.Count);
+        // A viewer video with exactly a Studio video's length reads as Studio's catalogue copied.
+        Assert.All(viewer.Items, v => Assert.DoesNotContain((long)Math.Round((double)(v.DurationSeconds ?? -1)), studioLengths));
+        // And the viewer's own lengths are all different from each other.
+        Assert.Equal(viewer.Items.Count, viewer.Items.Select(v => v.DurationSeconds).Distinct().Count());
+    }
+
+    [Fact]
     public void TheDailySeriesIsNotARepeatingRamp()
     {
         var days = DemoSeries.Days(new DateTime(2026, 10, 25, 0, 0, 0, DateTimeKind.Utc), 28, 5960, 208, 36, 46);

@@ -15,6 +15,9 @@ public sealed class AnalyticsPage
     private readonly Gtk.Box _top = Gtk.Box.New(Gtk.Orientation.Vertical, 4);
     private readonly Gtk.Label _status = Ui.Label("", dim: true);
 
+    /// <summary>A metric tile's height in pixels, above the natural height of either script's two lines.</summary>
+    private const int KpiHeight = 84;
+
     public AnalyticsPage(Localizer l, AnalyticsViewModel vm)
     {
         _l = l;
@@ -197,6 +200,9 @@ public sealed class AnalyticsPage
 
         tile.AddCssClass("card");
         tile.AddCssClass("kpi");
+        // One height in both scripts: the Arabic name and value lines are shorter than the Latin ones, so the tiles came
+        // out 76 px tall in Arabic against 80 in English and the cards below started 4 px apart.
+        tile.SetSizeRequest(-1, KpiHeight);
         box.SetMarginStart(4);
         box.SetMarginEnd(4);
         _totals.Append(tile);
