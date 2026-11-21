@@ -63,14 +63,23 @@ public sealed class DemoTransport : IApiTransport
     private readonly List<Dictionary<string, object?>> _videos;
     private readonly List<(Dictionary<string, object?> Video, DateTimeOffset At, string Status)> _deleted = new();
     private readonly HashSet<string> _off;
+    private readonly string? _thumbs;
+    private readonly string _language;
 
     /// <param name="featuresOff">
     /// Features answered as off (CI and screenshots: <c>AUN_DEMO_FEATURES_OFF=upload,analytics</c>): a
     /// <see cref="UserFeatures"/> key is false in GET /api/me/features; <c>analytics</c> answers 404 <c>feature_off</c>.
     /// </param>
-    public DemoTransport(IEnumerable<string>? featuresOff = null)
+    /// <param name="thumbnailFolder">
+    /// Title-card thumbnails (<c>AUN_DEMO_THUMBS</c>, tests/fixtures/studio-thumbs): <c>thumb-N.jpg</c> in English and
+    /// <c>thumb-N.ar.jpg</c> in Arabic, one per video. Without it the cards show their night tile.
+    /// </param>
+    /// <param name="language">The UI language, which picks the title card's language.</param>
+    public DemoTransport(IEnumerable<string>? featuresOff = null, string? thumbnailFolder = null, string language = "ar")
     {
         _off = new HashSet<string>(featuresOff ?? Array.Empty<string>(), StringComparer.Ordinal);
+        _thumbs = thumbnailFolder;
+        _language = language;
         // Original title plus the creator's per-language titles, like the API's titleLocalized.
         (string Title, string En, string Ar)[] titles =
         {
@@ -100,6 +109,7 @@ public sealed class DemoTransport : IApiTransport
             ["likesCount"] = 40 - (i * 4),
             ["commentsCount"] = 8 - i,
             ["duration"] = 600 + (i * 95),
+            ["thumbnailUrl"] = Thumbnail(i),
             ["dateCreated"] = new DateTimeOffset(2026, 11, 9, 9, 0, 0, TimeSpan.Zero).AddDays(-i * 3).ToString("O"),
         }).ToList();
     }
@@ -248,14 +258,18 @@ public sealed class DemoTransport : IApiTransport
             {
                 if (_off.Contains("analytics")) throw StudioApiException.FromServer("get_AnalyticsChannelGet not found", 404, "feature_off");
                 var start = DateTime.UtcNow.Date.AddDays(-27);
+                long Sum(string key) => _videos.Sum(v => Convert.ToInt64(v[key], System.Globalization.CultureInfo.InvariantCulture));
                 return Json(new
                 {
-                    totalViews = 18240,
-                    totalLikes = 912,
-                    totalComments = 143,
-                    totalSubscribers = 1310,
-                    topPerformingVideos = _videos.Take(5).Select(v => new { videoId = v["id"], title = v["title"], views = v["views"] }),
-                    recentMetrics = Enumerable.Range(0, 28).Select(i => new { date = start.AddDays(i).ToString("yyyy-MM-dd"), views = 400 + ((i * 37) % 260), watchTime = 36000 + ((i * 1700) % 9000) }),
+                    // Lifetime totals are the library's own numbers, so nothing on screen contradicts the video list.
+                    totalViews = Sum("views"),
+                    totalLikes = Sum("likesCount"),
+                    totalComments = Sum("commentsCount"),
+                    totalSubscribers = 212,
+                    topPerformingVideos = _videos.OrderByDescending(v => Convert.ToInt64(v["views"], System.Globalization.CultureInfo.InvariantCulture)).Take(5)
+                        .Select(v => new { videoId = v["id"], title = v["title"], titleLocalized = v["titleLocalized"], views = v["views"], thumbnailUrl = v["thumbnailUrl"] }),
+                    recentMetrics = DemoSeries.Days(start, 28, Sum("views"), Sum("likesCount"), Sum("commentsCount"), subscribers: 46)
+                        .Select(d => new { date = d.Date.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture), views = d.Views, likes = d.Likes, comments = d.Comments, subscribers = d.Subscribers, watchTime = d.WatchSeconds }),
                 });
             }
 
@@ -264,6 +278,15 @@ public sealed class DemoTransport : IApiTransport
             default:
                 return "{\"success\":true}";
         }
+    }
+
+    private string? Thumbnail(int index)
+    {
+        if (string.IsNullOrEmpty(_thumbs)) return null;
+        var localized = Path.Combine(_thumbs, $"thumb-{index + 1}.{_language}.jpg");
+        var english = Path.Combine(_thumbs, $"thumb-{index + 1}.jpg");
+        var path = _language != "en" && File.Exists(localized) ? localized : english;
+        return File.Exists(path) ? new Uri(Path.GetFullPath(path)).AbsoluteUri : null;
     }
 
     private static object? Plain(JsonElement e) => e.ValueKind switch
@@ -277,4 +300,44 @@ public sealed class DemoTransport : IApiTransport
     };
 
     private static string Json(object value) => JsonSerializer.Serialize(value);
+}
+
+/// <summary>
+/// The demo channel's last <c>n</c> days: a weekly rhythm (Friday highest, Tuesday lowest), seeded day-to-day noise and two
+/// spikes, the way a real channel moves. The period totals are fixed shares of the library's lifetime numbers, so the
+/// Views card never exceeds what the videos add up to.
+/// </summary>
+public static class DemoSeries
+{
+    public sealed record DemoDay(DateTime Date, long Views, long Likes, long Comments, long Subscribers, long WatchSeconds);
+
+    public static IReadOnlyList<DemoDay> Days(DateTime start, int n, long libraryViews, long libraryLikes, long libraryComments, long subscribers)
+    {
+        var random = new Random(1447);
+        double Weekday(DayOfWeek d) => d switch
+        {
+            DayOfWeek.Friday => 1.45, DayOfWeek.Saturday => 1.2, DayOfWeek.Thursday => 1.1, DayOfWeek.Sunday => 1.0,
+            DayOfWeek.Wednesday => 0.9, DayOfWeek.Monday => 0.85, _ => 0.78,
+        };
+        var dates = Enumerable.Range(0, n).Select(i => start.AddDays(i)).ToList();
+        // A slow climb across the period, plus a new-upload spike on day 6 and a shared-link spike on day 19.
+        var weights = dates.Select((d, i) => Weekday(d.DayOfWeek) * (0.85 + 0.3 * i / Math.Max(1, n - 1)) * (0.82 + 0.36 * random.NextDouble())
+            * (i == 6 ? 2.1 : i == 19 ? 1.7 : i == 7 ? 1.35 : 1.0)).ToList();
+        var views = Split((long)Math.Round(libraryViews * 0.82), weights);
+        var likes = Split((long)Math.Round(libraryLikes * 0.85), weights.Select(w => w * (0.7 + 0.6 * random.NextDouble())).ToList());
+        var comments = Split((long)Math.Round(libraryComments * 0.85), weights.Select(w => w * (0.5 + random.NextDouble())).ToList());
+        var subs = Split(subscribers, weights.Select(w => w * (0.6 + 0.8 * random.NextDouble())).ToList());
+        return dates.Select((d, i) => new DemoDay(d, views[i], likes[i], comments[i], subs[i], (long)Math.Round(views[i] * (255 + 70 * random.NextDouble())))).ToList();
+    }
+
+    /// <summary>Splits <paramref name="total"/> in proportion to <paramref name="weights"/> (largest remainder), so the parts add up exactly.</summary>
+    public static long[] Split(long total, IReadOnlyList<double> weights)
+    {
+        var sum = weights.Sum();
+        var exact = weights.Select(w => total * w / sum).ToArray();
+        var parts = exact.Select(x => (long)Math.Floor(x)).ToArray();
+        var left = total - parts.Sum();
+        foreach (var i in Enumerable.Range(0, parts.Length).OrderByDescending(i => exact[i] - parts[i]).Take((int)left)) parts[i]++;
+        return parts;
+    }
 }

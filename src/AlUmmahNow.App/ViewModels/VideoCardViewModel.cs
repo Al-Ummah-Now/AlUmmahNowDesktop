@@ -25,7 +25,7 @@ namespace AlUmmahNow.App.ViewModels
         public string Views => _localizer.Views(Video.Views);
 
         /// <summary>
-        /// The card's second meta line under the channel: views and duration («١٢٫٨ ألف مشاهدة • ٤:٠٠»). The channel
+        /// The card's second meta line under the channel: views and duration («١٢٫٨ ألف مشاهدة، ٤:٠٠»). The channel
         /// gets its own line so a compact Arabic count, a word longer than the full number, never pushes the duration
         /// out of a narrow card. Join isolates each part so numbers cannot reorder across them.
         /// </summary>

@@ -23,7 +23,6 @@ public sealed class VideosPage
     private readonly Gtk.FlowBox _list = Gtk.FlowBox.New();
     private readonly Dictionary<string, Gdk.Texture> _thumbs = new();
     private readonly HashSet<string> _thumbsLoading = new();
-    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(20) };
     private readonly Gtk.Label _empty = Ui.Label("", dim: true);
     private readonly Gtk.Label _error = Ui.Label("");
     private readonly Gtk.Button _more;
@@ -357,6 +356,9 @@ public sealed class VideosPage
 
         var meta = Ui.Label(_l.Join(_l.Views(v.Views), v.CreatedAt is { } at ? _l.Date(at) : null, v.Category is { } c ? _l["studio.category." + c] : null), dim: true);
         meta.AddCssClass("caption");
+        // Ellipsized, so the line's natural width never sets the card's minimum width: English and Arabic get the same
+        // number of columns at the same window width.
+        meta.SetEllipsize(Pango.EllipsizeMode.End);
         var body = Gtk.Box.New(Gtk.Orientation.Vertical, 4);
         body.Append(check);
         body.Append(meta);
@@ -400,11 +402,11 @@ public sealed class VideosPage
         if (!_thumbsLoading.Add(url)) return;
         try
         {
-            var data = await Http.GetByteArrayAsync(url);
+            var data = await Ui.ThumbnailBytesAsync(url);
             _thumbs[url] = Gdk.Texture.NewFromBytes(GLib.Bytes.New(data));
             RenderList();
         }
-        catch (Exception ex) when (ex is HttpRequestException || ex is TaskCanceledException || ex is GLib.GException)
+        catch (Exception ex) when (ex is HttpRequestException || ex is IOException || ex is TaskCanceledException || ex is GLib.GException)
         {
             // The night tile stays.
         }

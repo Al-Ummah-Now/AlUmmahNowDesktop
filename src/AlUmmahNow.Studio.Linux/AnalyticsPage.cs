@@ -112,7 +112,7 @@ public sealed class AnalyticsPage
             n.SetSizeRequest(18, -1);
             n.SetValign(Gtk.Align.Center);
             row.Append(n);
-            row.Append(Ui.FileTile(72, 40));
+            row.Append(Ui.Thumbnail(v.ThumbnailUrl, 72, 40));
             var text = Gtk.Box.New(Gtk.Orientation.Vertical, 2);
             text.SetHexpand(true);
             text.SetValign(Gtk.Align.Center);

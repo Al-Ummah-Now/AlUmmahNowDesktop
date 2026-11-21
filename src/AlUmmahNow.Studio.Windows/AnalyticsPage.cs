@@ -107,13 +107,17 @@ internal sealed class AnalyticsPage
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             row.Children.Add(new TextBlock { Text = _l.Number(++rank), FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = LanternGlass.Res("StudioMutedBrush"), VerticalAlignment = VerticalAlignment.Center });
+            // The video's thumbnail when the API gives one (clipped by the corner radius as a brush), else the night tile.
+            var hasThumb = Uri.TryCreate(v.ThumbnailUrl, UriKind.Absolute, out var thumbUrl);
             var tile = new Border
             {
                 Width = 72,
                 Height = 40,
                 CornerRadius = new CornerRadius(6),
-                Background = new SolidColorBrush(global::Windows.UI.Color.FromArgb(0xFF, 0x18, 0x44, 0x56)),
-                Child = new FontIcon { Glyph = "\uE8B2", FontSize = 16, Foreground = new SolidColorBrush(LanternGlass.Gold) },
+                Background = hasThumb
+                    ? new ImageBrush { ImageSource = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(thumbUrl) { DecodePixelWidth = 144 }, Stretch = Stretch.UniformToFill }
+                    : new SolidColorBrush(global::Windows.UI.Color.FromArgb(0xFF, 0x18, 0x44, 0x56)),
+                Child = hasThumb ? null : new FontIcon { Glyph = "\uE8B2", FontSize = 16, Foreground = new SolidColorBrush(LanternGlass.Gold) },
             };
             Grid.SetColumn(tile, 1);
             row.Children.Add(tile);

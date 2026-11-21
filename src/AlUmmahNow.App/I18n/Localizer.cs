@@ -247,12 +247,13 @@ namespace AlUmmahNow.App.I18n
         }
 
         /// <summary>
-        /// Joins values on one line. Arabic uses " • " because the middle dot «·» reads as the Eastern
-        /// Arabic zero «٠»; English keeps " · ". Empty parts are skipped. Each part is a direction isolate,
+        /// Joins values on one line. Arabic uses the Arabic comma ("، "): the Eastern Arabic zero «٠» is a dot,
+        /// so any dot separator («·» or «•») beside a number reads as one more zero («٤:٠٠ •» as «٤:٠٠٠»).
+        /// English keeps " · ". Empty parts are skipped. Each part is a direction isolate,
         /// so an Arabic name in an English line (or the reverse) keeps its own order and cannot pull a
         /// neighbouring number into its run ("1.5 · الأمة الآنK views").
         /// </summary>
-        public string Separator => _language == "ar" ? " \u2022 " : " \u00B7 ";
+        public string Separator => _language == "ar" ? "\u060C " : " \u00B7 ";
 
         public string Join(IEnumerable<string?> parts) =>
             string.Join(Separator, parts.Where(p => !string.IsNullOrEmpty(p)).Select(p => Isolate(p!)));

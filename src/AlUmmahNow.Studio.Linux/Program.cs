@@ -55,7 +55,7 @@ Func<string, IUploadService> uploadServiceFor;
 if (demo)
 {
     accounts = new DemoAccounts();
-    transport = new DemoTransport(DemoTransport.FeaturesOff(Environment.GetEnvironmentVariable("AUN_DEMO_FEATURES_OFF")));
+    transport = new DemoTransport(DemoTransport.FeaturesOff(Environment.GetEnvironmentVariable("AUN_DEMO_FEATURES_OFF")), Environment.GetEnvironmentVariable("AUN_DEMO_THUMBS"), localizer.Language);
     uploadServiceFor = account => new SimulatedUploadService(account, TimeSpan.FromMilliseconds(250));
 }
 else

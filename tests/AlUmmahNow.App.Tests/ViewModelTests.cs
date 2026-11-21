@@ -18,7 +18,7 @@ public class HomeViewModelTests
         v.DurationSeconds = 240;
         var card = new VideoCardViewModel(v, new Localizer("ar"));
         Assert.Equal("Noor Channel", card.Channel);
-        Assert.Equal("\u2068١٢٫٨ ألف مشاهدة\u2069 \u2022 \u2068\u2068٤:٠٠\u2069\u2069", card.Stats);
+        Assert.Equal("\u2068١٢٫٨ ألف مشاهدة\u2069\u060C \u2068\u2068٤:٠٠\u2069\u2069", card.Stats);
         Assert.Equal("\u20682K views\u2069 \u00B7 \u2068\u20684:00\u2069\u2069", new VideoCardViewModel(new Video { Views = 2_000, DurationSeconds = 240 }, new Localizer("en")).Stats);
     }
 
