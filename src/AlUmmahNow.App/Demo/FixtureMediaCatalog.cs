@@ -43,7 +43,7 @@ namespace AlUmmahNow.App.Demo
                 {
                     Id = VideoId,
                     // The frames show this page: a real-looking video (its own title card), never "fixture" text.
-                    Title = new LocalizedText("Reflections on Surah Al-Kahf, part 1", new Dictionary<string, string> { ["en"] = "Reflections on Surah Al-Kahf, part 1", ["ar"] = "تأملات في سورة الكهف، الجزء الأول" }),
+                    Title = new LocalizedText("Reflections on Surah Al-Hujurat", new Dictionary<string, string> { ["en"] = "Reflections on Surah Al-Hujurat", ["ar"] = "تأملات في سورة الحجرات" }),
                     Description = new LocalizedText(""),
                     ChannelName = DemoCatalogClient.ChannelName(2, _language),
                     PlayUrl = _video,

@@ -19,7 +19,12 @@ public class DemoDataTests
         Assert.True(analytics.Totals.Likes > 0);
         Assert.True(analytics.Totals.Comments > 0);
         Assert.True(analytics.Totals.Subscribers > 0);
-        Assert.All(analytics.TopVideos, t => Assert.Contains(videos.Items, v => v.Id == t.Id && v.Views == t.Views));
+        // A top video's period views are its share of its lifetime views, so the top five fit inside the Views card.
+        Assert.All(analytics.TopVideos, t => Assert.Contains(videos.Items, v => v.Id == t.Id && t.Views == (long)Math.Floor(v.Views * DemoSeries.PeriodShare)));
+        Assert.InRange(analytics.TopVideos.Sum(t => t.Views), 1, analytics.Totals.Views);
+        // Every video with views went up before the chart's first day.
+        var windowStart = new DateTimeOffset(DateTime.UtcNow.Date.AddDays(-27), TimeSpan.Zero);
+        Assert.All(videos.Items.Where(v => v.Views > 0), v => Assert.True(v.CreatedAt < windowStart, $"{v.Id} uploaded inside the chart window"));
         Assert.Equal(analytics.TopVideos.Select(t => t.Views).OrderByDescending(v => v), analytics.TopVideos.Select(t => t.Views));
     }
 
@@ -33,7 +38,7 @@ public class DemoDataTests
         Assert.All(weeks, w => Assert.False(w.Zip(w.Skip(1), (a, b) => b > a).All(up => up)));
         // Fridays are above the week's average (the weekly rhythm).
         Assert.True(days.Where(d => d.Date.DayOfWeek == DayOfWeek.Friday).Average(d => d.Views) > days.Average(d => d.Views));
-        Assert.Equal((long)Math.Round(5960 * 0.82), days.Sum(d => d.Views));
+        Assert.Equal((long)Math.Round(5960 * DemoSeries.PeriodShare), days.Sum(d => d.Views));
         Assert.Equal(46, days.Sum(d => d.Subscribers));
     }
 
