@@ -180,7 +180,7 @@ public sealed class DemoTransport : IApiTransport
                     success = true,
                     data = new object[]
                     {
-                        new { id = "demo-c1", userId = "demo-1", name = "قناة النور", handle = "alnoor", isMain = true, role = "owner", capabilities = Array.Empty<string>() },
+                        new { id = "demo-c1", userId = "demo-1", name = _language == "ar" ? "قناة النور" : "Noor Channel", handle = "alnoor", isMain = true, role = "owner", capabilities = Array.Empty<string>() },
                         new { id = "demo-c2", userId = "demo-9", name = _language == "ar" ? "فريق إعلام المسجد" : "Masjid Media Team", handle = "masjidmedia", isMain = false, role = "editor", capabilities = new[] { "video.upload", "video.edit" } },
                     },
                 });

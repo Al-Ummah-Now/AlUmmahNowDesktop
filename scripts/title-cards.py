@@ -60,7 +60,7 @@ STUDIO = [  # (category, English, Arabic): DemoTransport's videos, in order
     ("islamic_history", "Stories of the prophets: Yunus", "قصص الأنبياء: يونس عليه السلام"),
     ("fiqh", "Q&A: prayer while travelling", "سؤال وجواب: الصلاة في السفر"),
 ]
-STUDIO_CHANNEL = ("قناة النور", "قناة النور")  # the demo channel's own name (get_ChannelAccessList)
+STUDIO_CHANNEL = ("Noor Channel", "قناة النور")  # the demo channel's own name in each language (DemoBackend)
 
 # Fawanees night, teal, green, wine and ink grounds; every card keeps the lantern-gold rule and mark.
 GROUNDS = {
