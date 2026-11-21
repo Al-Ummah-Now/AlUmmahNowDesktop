@@ -54,9 +54,9 @@ public class DemoCatalogClientTests
             File.WriteAllBytes(Path.Combine(dir.FullName, "thumb-1.ar.jpg"), new byte[] { 1 });
             var ar = await new DemoCatalogClient(dir.FullName, "ar").GetVideoAsync("demo-v1");
             var en = await new DemoCatalogClient(dir.FullName, "en").GetVideoAsync("demo-v1");
-            Assert.Equal("قناة النور", ar.ChannelName);
+            Assert.Equal("قناة الهدى", ar.ChannelName);
             Assert.EndsWith("/thumb-1.ar.jpg", ar.ThumbnailUrl);
-            Assert.Equal("Noor Channel", en.ChannelName);
+            Assert.Equal("Al-Huda Channel", en.ChannelName);
             Assert.EndsWith("/thumb-1.jpg", en.ThumbnailUrl);
             for (var i = 0; i < 4; i++) Assert.DoesNotMatch("[A-Za-z]", DemoCatalogClient.ChannelName(i, "ar"));
         }

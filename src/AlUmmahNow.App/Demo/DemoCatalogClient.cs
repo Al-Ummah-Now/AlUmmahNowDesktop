@@ -54,9 +54,10 @@ namespace AlUmmahNow.App.Demo
         };
 
         // Each channel's name as its creator gives it in each language (an Arabic page never shows a Latin name).
+        // None is Studio's demo channel (Noor Channel), so the viewer never shows that channel with videos Studio doesn't list.
         private static readonly (string En, string Ar)[] Channels =
         {
-            ("Al Ummah Now", "الأمة الآن"), ("Noor Channel", "قناة النور"), ("Masjid Live", "المسجد مباشر"), ("Seerah Stories", "قصص السيرة"),
+            ("Al Ummah Now", "الأمة الآن"), ("Al-Huda Channel", "قناة الهدى"), ("Masjid Live", "المسجد مباشر"), ("Seerah Stories", "قصص السيرة"),
         };
 
         /// <summary>A demo channel's name in <paramref name="language"/>.</summary>

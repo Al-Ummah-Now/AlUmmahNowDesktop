@@ -48,7 +48,7 @@ VIEWER = [  # (category, English, Arabic, channel): DemoCatalogClient.Fixtures
     ("ramadan", "Laylat al-Qadr reminders", "تذكير بليلة القدر", 0),
     ("ramadan", "Suhoor ideas for busy days", "أفكار للسحور في الأيام المزدحمة", 2),
 ]
-VIEWER_CHANNELS = [("Al Ummah Now", "الأمة الآن"), ("Noor Channel", "قناة النور"), ("Masjid Live", "المسجد مباشر"), ("Seerah Stories", "قصص السيرة")]
+VIEWER_CHANNELS = [("Al Ummah Now", "الأمة الآن"), ("Al-Huda Channel", "قناة الهدى"), ("Masjid Live", "المسجد مباشر"), ("Seerah Stories", "قصص السيرة")]
 
 STUDIO = [  # (category, English, Arabic): DemoTransport's videos, in order
     ("quran_tafsir", "Reflections on Surah Al-Kahf, part one", "تأملات في سورة الكهف — الجزء الأول"),
