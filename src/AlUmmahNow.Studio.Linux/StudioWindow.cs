@@ -483,7 +483,7 @@ public sealed class StudioWindow
         _identityMenu.Append(MenuAction(_l["studio.shell.addAccount"], "list-add-symbolic", () => _ = _shell.SignInAsync(SignInMode.AddAccount)));
         if (_shell.ActiveAccount is { } active)
         {
-            var signOut = MenuAction(_l.Format("studio.shell.signOutOf", _shell.NameOf(active)), "system-log-out-symbolic", () => _ = SignOutAsync(active));
+            var signOut = MenuAction(_l.Format("studio.shell.signOutOf", _shell.NameOf(active).Replace(' ', '\u00A0')), "system-log-out-symbolic", () => _ = SignOutAsync(active));
             signOut.AddCssClass("danger");
             _identityMenu.Append(signOut);
         }
@@ -527,7 +527,8 @@ public sealed class StudioWindow
         image.SetSizeRequest(32, -1);
         box.Append(image);
         // Wraps to the menu's width instead of cutting the account name short («تسجيل الخروج من Ami…»); a small natural
-        // width keeps a long name from widening the menu past the sidebar.
+        // width keeps a long name from widening the menu past the sidebar. The sign-out item joins the name's words with
+        // no-break spaces, so the name moves to the next line whole ("Sign out of" / "Amina Studio").
         var label = Gtk.Label.New(text);
         label.SetXalign(0);
         label.SetWrap(true);

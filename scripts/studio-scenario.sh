@@ -7,6 +7,9 @@ name=$4 out=$5
 export XDG_CONFIG_HOME=$(mktemp -d) XDG_STATE_HOME=$(mktemp -d) AUN_SIMULATE_UPLOADS=1
 openbox &
 sleep 2
+# Xvfb starts the pointer at the screen's centre, over whatever control the layout puts there, and GTK then shows that
+# control's tooltip in the frame. Park it in the bottom corner (the window's edge) before the window opens.
+command -v xdotool >/dev/null && xdotool mousemove 100000 100000
 # Review shots: a compositor, so translucent menus show the window behind them, blurred.
 if [ -n "${AUN_COMPOSITOR:-}" ] && command -v picom >/dev/null; then
   picom --backend xrender --blur-method kernel --blur-kern 15x15gaussian --blur-background >/dev/null 2>&1 &
