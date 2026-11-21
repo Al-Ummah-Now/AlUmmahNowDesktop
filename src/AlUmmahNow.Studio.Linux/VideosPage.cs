@@ -164,10 +164,11 @@ public sealed class VideosPage
                 _list.SetMaxChildrenPerLine((uint)fit);
             }
 
-            // Thumbnails are 16:9 of a card's width, with one height for every card: the grid hands its spare pixels to
-            // some columns, so measuring each card made one column's thumbnails a pixel taller than the rest.
-            var height = Math.Max(1, ((width - (fit - 1) * Gap) / fit - 2) * 9 / 16);
-            if (width > 0 && height != _thumbHeight)
+            // Thumbnails are 16:9 of the narrowest card's width, one height for every card: the grid hands its spare
+            // pixels to some columns, so measuring each card made one column's thumbnails a pixel taller than the rest.
+            var narrowest = _thumbBoxes.Select(t => t.GetWidth()).Where(w => w > 0).DefaultIfEmpty(0).Min();
+            var height = narrowest * 9 / 16;
+            if (height > 0 && height != _thumbHeight)
             {
                 _thumbHeight = height;
                 foreach (var t in _thumbBoxes) t.SetSizeRequest(-1, height);
