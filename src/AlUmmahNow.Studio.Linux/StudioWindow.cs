@@ -78,7 +78,8 @@ public sealed class StudioWindow
         _identityMenu.SetMarginEnd(4);
         _identityMenu.SetMarginTop(4);
         _identityMenu.SetMarginBottom(4);
-        _identityMenu.SetSizeRequest(300, -1);
+        // As wide as the identity button above it, so the open menu stays over the sidebar and never covers the page.
+        _identityMenu.SetSizeRequest(SidebarWidth - 40, -1);
         _identityPopover.SetChild(_identityMenu);
         _identityPopover.AddCssClass("glass");
         _identityPopover.SetHasArrow(false);
@@ -140,6 +141,7 @@ public sealed class StudioWindow
         _body.AddCssClass("studio-content");
         _title.AddCssClass("title-1");
         _title.SetXalign(0);
+        _title.SetSizeRequest(-1, Ui.PageTitleLine);
         _title.SetMarginStart(28);
         _title.SetMarginEnd(28);
         _title.SetMarginTop(20);
@@ -481,7 +483,7 @@ public sealed class StudioWindow
         _identityMenu.Append(MenuAction(_l["studio.shell.addAccount"], "list-add-symbolic", () => _ = _shell.SignInAsync(SignInMode.AddAccount)));
         if (_shell.ActiveAccount is { } active)
         {
-            var signOut = MenuAction(_l.Format("studio.shell.signOutOf", _shell.NameOf(active)), "system-log-out-symbolic", () => _ = SignOutAsync(active));
+            var signOut = MenuAction(_l.Format("studio.shell.signOutOf", _shell.NameOf(active).Replace(' ', '\u00A0')), "system-log-out-symbolic", () => _ = SignOutAsync(active));
             signOut.AddCssClass("danger");
             _identityMenu.Append(signOut);
         }
@@ -524,8 +526,15 @@ public sealed class StudioWindow
         var image = Gtk.Image.NewFromIconName(icon);
         image.SetSizeRequest(32, -1);
         box.Append(image);
+        // Wraps to the menu's width instead of cutting the account name short («تسجيل الخروج من Ami…»); a small natural
+        // width keeps a long name from widening the menu past the sidebar. The sign-out item joins the name's words with
+        // no-break spaces, so the name moves to the next line whole ("Sign out of" / "Amina Studio").
         var label = Gtk.Label.New(text);
         label.SetXalign(0);
+        label.SetWrap(true);
+        label.SetWrapMode(Pango.WrapMode.WordChar);
+        label.SetMaxWidthChars(12);
+        label.SetHexpand(true);
         box.Append(label);
         var button = Gtk.Button.New();
         button.SetChild(box);
@@ -552,7 +561,8 @@ public sealed class StudioWindow
         var name = Gtk.Label.New(r.Name);
         name.SetXalign(0);
         name.SetEllipsize(Pango.EllipsizeMode.End);
-        name.SetMaxWidthChars(22);
+        // Natural width capped so the menu keeps the sidebar's width; a longer name ellipsizes.
+        name.SetMaxWidthChars(16);
         name.AddCssClass("heading");
         var tag = Gtk.Label.New(r.Tag);
         tag.SetXalign(0);

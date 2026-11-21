@@ -40,7 +40,11 @@ public sealed class MainWindow
         _store = store;
         _home = new HomeViewModel(catalog, localizer, navigator);
         _window = Adw.ApplicationWindow.New(app);
-        _window.SetDefaultSize(1280, 800);
+        // Review frames ask for a size ("WIDTHxHEIGHT", AUN_WINDOW_SIZE), such as a full-page capture; else 1280x800.
+        var size = (Environment.GetEnvironmentVariable("AUN_WINDOW_SIZE") ?? "").Split('x');
+        _window.SetDefaultSize(
+            size.Length == 2 && int.TryParse(size[0], out var w) && w >= 1024 ? w : 1280,
+            size.Length == 2 && int.TryParse(size[1], out var h) && h >= 700 ? h : 800);
 
         var keys = Gtk.EventControllerKey.New();
         keys.OnKeyPressed += (_, a) => OnKey(a.Keyval);
@@ -236,12 +240,17 @@ public sealed class MainWindow
             title.AddCssClass("title-3");
             column.Append(title);
 
-            var row = Gtk.Box.New(Gtk.Orientation.Horizontal, 14);
-            foreach (var card in rail.Items) row.Append(BuildCard(card));
-            var scroller = Gtk.ScrolledWindow.New();
-            scroller.SetPolicy(Gtk.PolicyType.Automatic, Gtk.PolicyType.Never);
-            scroller.SetChild(row);
-            column.Append(scroller);
+            // One row of RailColumns whole cards that share the width (a short rail keeps the same card size): never a
+            // card cut off at the window edge, as a horizontally scrolled rail had.
+            var grid = Gtk.Grid.New();
+            grid.SetColumnHomogeneous(true);
+            grid.SetColumnSpacing(14);
+            for (var i = 0; i < RailColumns; i++)
+            {
+                grid.Attach(i < rail.Items.Count ? BuildCard(rail.Items[i]) : Gtk.Box.New(Gtk.Orientation.Vertical, 0), i, 0, 1, 1);
+            }
+
+            column.Append(grid);
         }
 
         var page = Gtk.ScrolledWindow.New();
@@ -250,36 +259,74 @@ public sealed class MainWindow
         return page;
     }
 
+    /// <summary>Cards per home rail: four, sharing the width.</summary>
+    private const int RailColumns = 4;
+
+    /// <summary>Line boxes for a card's title and meta lines, tall enough for Arabic with any fallback glyph.</summary>
+    private const int TitleLine = 28, MetaLine = 22;
+
     private Gtk.Widget BuildCard(VideoCardViewModel card)
     {
         var box = Gtk.Box.New(Gtk.Orientation.Vertical, 6);
-        box.SetSizeRequest(260, -1);
+        box.SetSizeRequest(200, -1);
 
         var picture = Gtk.Picture.New();
-        picture.SetSizeRequest(260, 146);
+        picture.SetSizeRequest(200, 112);
         picture.SetContentFit(Gtk.ContentFit.Cover);
+        // Full cell width and exactly 16:9 of it, so every card in every rail and language is the same size: the picture's
+        // own height-for-width came out 3 px shorter in English than in Arabic, where the row was measured differently.
+        picture.SetHexpand(true);
+        picture.SetValign(Gtk.Align.Start);
+        KeepAspect(picture, 16, 9, 200);
         box.Append(picture);
         _ = LoadThumbnailAsync(picture, card.ThumbnailUrl);
 
         var title = Gtk.Label.New(card.Title);
         title.SetHalign(Gtk.Align.Start);
+        // Fixed line boxes: a line that falls back to another font for one glyph (an Arabic decimal mark, a shadda) is a
+        // few pixels taller, which put the meta lines of neighbouring cards out of line.
+        title.SetSizeRequest(-1, TitleLine);
         title.SetEllipsize(Pango.EllipsizeMode.End);
         title.SetMaxWidthChars(30);
         title.AddCssClass("heading");
         box.Append(title);
 
-        var meta = Gtk.Label.New(card.Meta);
-        meta.SetHalign(Gtk.Align.Start);
-        meta.SetEllipsize(Pango.EllipsizeMode.End);
-        meta.SetMaxWidthChars(36);
-        meta.AddCssClass("dim-label");
-        box.Append(meta);
+        // Channel on one line, views · duration on the next: a compact Arabic count («١٢٫٨ ألف مشاهدة») is a word longer
+        // than the full number, and on one shared line it pushed the duration out of the 260 px card.
+        foreach (var text in new[] { card.Channel, card.Stats })
+        {
+            if (string.IsNullOrEmpty(text)) continue;
+            var meta = Gtk.Label.New(text);
+            meta.SetHalign(Gtk.Align.Start);
+            meta.SetEllipsize(Pango.EllipsizeMode.End);
+            meta.SetMaxWidthChars(36);
+            meta.AddCssClass("dim-label");
+            meta.SetSizeRequest(-1, MetaLine);
+            box.Append(meta);
+        }
 
         var button = Gtk.Button.New();
         button.AddCssClass("flat");
         button.SetChild(box);
         button.OnClicked += (_, _) => _home.Open(card);
         return button;
+    }
+
+    /// <summary>Keeps a widget's height at ratioHeight/ratioWidth of the width it is given (re-checked each frame).</summary>
+    private static void KeepAspect(Gtk.Widget widget, int ratioWidth, int ratioHeight, int minWidth)
+    {
+        var last = -1;
+        widget.AddTickCallback((w, _) =>
+        {
+            var px = w.GetWidth();
+            if (px > 0 && px != last)
+            {
+                last = px;
+                w.SetSizeRequest(minWidth, (int)Math.Round(px * (double)ratioHeight / ratioWidth));
+            }
+
+            return true;
+        });
     }
 
     private async Task LoadThumbnailAsync(Gtk.Picture picture, string? url)

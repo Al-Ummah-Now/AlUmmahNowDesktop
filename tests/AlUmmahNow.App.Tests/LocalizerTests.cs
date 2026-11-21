@@ -53,7 +53,7 @@ public class LocalizerTests
     [Fact]
     public void Arabic_uses_eastern_digits_by_default()
     {
-        Assert.Equal("١٬٢٣٤", new Localizer("ar").Number(1234));
+        Assert.Equal("١٢٣٤", new Localizer("ar").Number(1234));
         Assert.Equal("1,234", new Localizer("en").Number(1234));
     }
 

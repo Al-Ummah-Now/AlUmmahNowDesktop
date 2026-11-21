@@ -52,11 +52,30 @@ public sealed class AnalyticsPage
         _chart.SetHasTooltip(true);
         chartBody.Append(_chart);
         chartBody.Append(_summary);
-        var tableExpander = Gtk.Expander.New(l["studio.analytics.table"]);
         _table.SetColumnSpacing(24);
         _table.SetRowSpacing(2);
-        tableExpander.SetChild(_table);
-        chartBody.Append(tableExpander);
+        // A disclosure of our own, not Gtk.Expander: the theme draws the expander's closed arrow from an icon that
+        // falls back to a right-pointing one on Arabic pages. Closed, the arrow points along the reading direction.
+        var closedIcon = l.IsRtl ? "pan-start-symbolic" : "pan-end-symbolic";
+        var arrow = Gtk.Image.NewFromIconName(closedIcon);
+        var toggleRow = Gtk.Box.New(Gtk.Orientation.Horizontal, 6);
+        toggleRow.Append(arrow);
+        toggleRow.Append(Gtk.Label.New(l["studio.analytics.table"]));
+        var tableToggle = Gtk.ToggleButton.New();
+        tableToggle.SetChild(toggleRow);
+        tableToggle.AddCssClass("flat");
+        tableToggle.SetHalign(Gtk.Align.Start);
+        var tableReveal = Gtk.Revealer.New();
+        tableReveal.SetTransitionType(Gtk.RevealerTransitionType.SlideDown);
+        tableReveal.SetChild(_table);
+        tableToggle.OnToggled += (_, _) =>
+        {
+            var open = tableToggle.GetActive();
+            arrow.SetFromIconName(open ? "pan-down-symbolic" : closedIcon);
+            tableReveal.SetRevealChild(open);
+        };
+        chartBody.Append(tableToggle);
+        chartBody.Append(tableReveal);
         var chartCard = Ui.Card(chartBody);
         chartCard.SetHexpand(true);
         chartCard.SetValign(Gtk.Align.Start);
@@ -112,16 +131,18 @@ public sealed class AnalyticsPage
             n.SetSizeRequest(18, -1);
             n.SetValign(Gtk.Align.Center);
             row.Append(n);
-            row.Append(Ui.FileTile(72, 40));
+            row.Append(Ui.Thumbnail(v.ThumbnailUrl, 72, 40));
             var text = Gtk.Box.New(Gtk.Orientation.Vertical, 2);
             text.SetHexpand(true);
             text.SetValign(Gtk.Align.Center);
+            // Two lines before an ellipsis, as on Windows: the card is narrow at the 1024 window.
             var t = Ui.Label(Localizer.Isolate(v.TitleFor(_l.Language)));
-            t.SetWrap(false);
+            t.SetWrap(true);
+            t.SetLines(2);
             t.SetEllipsize(Pango.EllipsizeMode.End);
             t.AddCssClass("heading");
             text.Append(t);
-            var views = Ui.Label(_l.Format("studio.videos.views", _l.Number(v.Views)), dim: true);
+            var views = Ui.Label(_l.Views(v.Views), dim: true);
             views.AddCssClass("caption");
             text.Append(views);
             row.Append(text);
@@ -167,7 +188,11 @@ public sealed class AnalyticsPage
         }
         else
         {
-            tile = box;
+            // A box of its own around the text, as the button is for Views and Watch time: the text's margins then sit
+            // inside every tile, so all five tiles take the same width and the gaps between them are equal.
+            var plain = Gtk.Box.New(Gtk.Orientation.Vertical, 0);
+            plain.Append(box);
+            tile = plain;
         }
 
         tile.AddCssClass("card");

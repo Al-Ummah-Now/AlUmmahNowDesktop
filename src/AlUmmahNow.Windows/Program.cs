@@ -69,10 +69,10 @@ public sealed partial class App : Application
         http.DefaultRequestHeaders.UserAgent.ParseAdd("AlUmmahNowWindows/0.1");
         // AUN_DEMO=1: fixture catalog for the store screenshots (no network, never in a normal launch).
         ICatalogClient catalog = Environment.GetEnvironmentVariable("AUN_DEMO") == "1"
-            ? new DemoCatalogClient(Environment.GetEnvironmentVariable("AUN_DEMO_THUMBS"))
+            ? new DemoCatalogClient(Environment.GetEnvironmentVariable("AUN_DEMO_THUMBS"), settings.Language)
             : new HttpCatalogClient(http, environment.VideosApi);
         // CI's watch scenario plays a local fixture (AUN_FIXTURE_MEDIA), never a remote stream.
-        if (Environment.GetEnvironmentVariable("AUN_FIXTURE_MEDIA") is { Length: > 0 } fixtureMedia) catalog = new FixtureMediaCatalog(catalog, fixtureMedia);
+        if (Environment.GetEnvironmentVariable("AUN_FIXTURE_MEDIA") is { Length: > 0 } fixtureMedia) catalog = new FixtureMediaCatalog(catalog, fixtureMedia, settings.Language);
         var localizer = new Localizer(settings.Language);
         var navigator = new Navigator();
         var secureStore = new DpapiSecureStore(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AlUmmahNow", "secure"));

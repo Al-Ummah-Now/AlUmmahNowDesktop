@@ -199,18 +199,22 @@ namespace AlUmmahNow.CoreBridge.Studio
 
     public sealed class TopVideo
     {
-        public TopVideo(string id, string title, long views, IReadOnlyDictionary<string, string>? titleLocalized = null)
+        public TopVideo(string id, string title, long views, IReadOnlyDictionary<string, string>? titleLocalized = null, string? thumbnailUrl = null)
         {
             Id = id;
             Title = title;
             Views = views;
             TitleLocalized = titleLocalized ?? new Dictionary<string, string>();
+            ThumbnailUrl = thumbnailUrl;
         }
 
         public string Id { get; }
         public string Title { get; }
         public long Views { get; }
         public IReadOnlyDictionary<string, string> TitleLocalized { get; }
+
+        /// <summary>The video's thumbnail (the API's optional <c>thumbnailUrl</c>); null shows the night tile.</summary>
+        public string? ThumbnailUrl { get; }
 
         /// <summary>The title in <paramref name="language"/> when the creator gave one, else the original title.</summary>
         public string TitleFor(string language) => LocalizedTitle.Pick(Title, TitleLocalized, language);

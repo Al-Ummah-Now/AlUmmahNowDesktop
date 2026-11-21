@@ -15,7 +15,7 @@ public sealed class IdentityMenuTests
 
     [Theory]
     [InlineData("en", "Channel", "Channel · Editor", "Personal")]
-    [InlineData("ar", "قناة", "قناة • محرّر", "شخصي")]
+    [InlineData("ar", "قناة", "قناة، محرّر", "شخصي")]
     public void ChannelsThenPeopleWithTheirTags(string language, string owner, string editor, string personal)
     {
         var l = new Localizer(language);
@@ -63,6 +63,6 @@ public sealed class IdentityMenuTests
         var team = Channel("c2", "Masjid Media Team", ChannelRole.Editor);
         Assert.Equal("Masjid Media Team · Channel · Editor", IdentityMenu.Channels(new[] { team }, null, k => l[k], l.Separator)[0].AccessibleName);
         var ar = new Localizer("ar");
-        Assert.Equal("Masjid Media Team • قناة • محرّر", IdentityMenu.Channels(new[] { team }, null, k => ar[k], ar.Separator)[0].AccessibleName);
+        Assert.Equal("Masjid Media Team، قناة، محرّر", IdentityMenu.Channels(new[] { team }, null, k => ar[k], ar.Separator)[0].AccessibleName);
     }
 }

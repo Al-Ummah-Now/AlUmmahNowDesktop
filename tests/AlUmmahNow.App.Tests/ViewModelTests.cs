@@ -10,15 +10,16 @@ namespace AlUmmahNow.App.Tests;
 public class HomeViewModelTests
 {
     [Fact]
-    public void Card_meta_isolates_every_segment()
+    public void Card_stats_isolate_views_and_duration()
     {
         var v = FakeCatalog.Ready("a");
-        v.ChannelName = "QA Nasheeds";
-        v.Views = 258;
-        v.DurationSeconds = 20;
-        var meta = new VideoCardViewModel(v, new Localizer("ar")).Meta;
-        Assert.Equal(3, meta.Count(c => c == '\u2068') - 1);
-        Assert.StartsWith("\u2068QA Nasheeds\u2069 \u2022 \u2068", meta);
+        v.ChannelName = "Noor Channel";
+        v.Views = 12_820;
+        v.DurationSeconds = 240;
+        var card = new VideoCardViewModel(v, new Localizer("ar"));
+        Assert.Equal("Noor Channel", card.Channel);
+        Assert.Equal("\u2068١٢٫٨ ألف مشاهدة\u2069\u060C \u2068\u2068٤:٠٠\u2069\u2069", card.Stats);
+        Assert.Equal("\u20682K views\u2069 \u00B7 \u2068\u20684:00\u2069\u2069", new VideoCardViewModel(new Video { Views = 2_000, DurationSeconds = 240 }, new Localizer("en")).Stats);
     }
 
     [Fact]

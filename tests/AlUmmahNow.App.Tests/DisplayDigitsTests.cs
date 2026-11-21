@@ -19,7 +19,7 @@ public class DisplayDigitsTests
         l.Compact(3_400_000), l.ShortDate(new DateTime(2026, 11, 11)), l.Date(Day), l.DateTime(Day), l.Duration(3725),
         l.Duration(TimeSpan.FromMilliseconds(15_000)), l.Speed(1.5), l.Quality(1080, 0), l.Quality(0, 800_000),
         l.Bytes(12_900_000), l.Bytes(512), l.Money(12.69m, "USD"), l.Money(1500m, "EUR"),
-        l.Format("video.views", 1234), l.Format("studio.analytics.days", 28), l.Format("studio.upload.progress", l.Bytes(1024), l.Bytes(2048)),
+        l.Views(1234), l.Format("studio.analytics.days", 28), l.Format("studio.upload.progress", l.Bytes(1024), l.Bytes(2048)),
         l.Format("studio.videos.deleteBody", 30), l.Format("admin.stepup.body", 15), l.Format("passkey.error.limit", 10),
     };
 
@@ -52,7 +52,7 @@ public class DisplayDigitsTests
     public void Arabic_uses_arabic_separators_and_currency_names()
     {
         var ar = new Localizer("ar");
-        Assert.Equal("١٬٢٣٤٬٥٦٧", ar.Number(1_234_567));
+        Assert.Equal("١٢٣٤٥٦٧", ar.Number(1_234_567));
         Assert.Equal("١٢٫٥", ar.Decimal(12.5));
         Assert.Equal("٢٥٪", ar.Percent(0.25));
         Assert.Equal("١٢٫٦٩ دولار أمريكي", ar.Money(12.69m, "USD"));
@@ -60,7 +60,7 @@ public class DisplayDigitsTests
         Assert.Equal("⁨٢٠٢٦-١١-١٥⁩", ar.Date(new DateTimeOffset(2026, 11, 15, 12, 0, 0, TimeZoneInfo.Local.GetUtcOffset(new DateTime(2026, 11, 15)))));
         Assert.Equal("⁨١:٠٢:٠٥⁩", ar.Duration(3725));
         Assert.Equal("١٫٥x", ar.Speed(1.5));
-        Assert.Equal("١٬٢٣٤ مشاهدة", ar.Format("video.views", 1234));
+        Assert.Equal("١٫٢ ألف مشاهدة", ar.Views(1234));
     }
 
     [Fact]
@@ -78,7 +78,7 @@ public class DisplayDigitsTests
         Assert.Equal("1.5x", en.Speed(1.5));
         Assert.Equal("1080p", en.Quality(1080, 0));
         Assert.Equal("800 kbps", en.Quality(0, 800_000));
-        Assert.Equal("1,234 views", en.Format("video.views", 1234));
+        Assert.Equal("1.2K views", en.Views(1234));
         Assert.Equal("Last 28 days", en.Format("studio.analytics.days", 28));
         foreach (var text in All(en)) Assert.DoesNotMatch("[٠-٩۰-۹]", text);
     }
@@ -93,8 +93,8 @@ public class DisplayDigitsTests
     [Fact]
     public void Arabic_joins_with_a_bullet_because_the_middle_dot_reads_as_zero()
     {
-        Assert.Equal("\u2068عام\u2069 • \u2068١٬٢٠٠ مشاهدة\u2069", new Localizer("ar").Join("عام", null, "", new Localizer("ar").Format("video.views", 1200)));
-        Assert.Equal("\u2068Public\u2069 · \u20681,200 views\u2069", new Localizer("en").Join("Public", null, "", new Localizer("en").Format("video.views", 1200)));
+        Assert.Equal("\u2068عام\u2069، \u2068١٫٢ ألف مشاهدة\u2069", new Localizer("ar").Join("عام", null, "", new Localizer("ar").Views(1200)));
+        Assert.Equal("\u2068Public\u2069 · \u20681.2K views\u2069", new Localizer("en").Join("Public", null, "", new Localizer("en").Views(1200)));
     }
 
     [Fact]
@@ -103,7 +103,7 @@ public class DisplayDigitsTests
         // An Arabic channel name in an English line keeps its order and does not pull the number after it into its run.
         Assert.Equal("\u2068الأمة الآن\u2069 · \u20681.5K views\u2069", new Localizer("en").Join("الأمة الآن", "1.5K views"));
         // And an English name in an Arabic line.
-        Assert.Equal("\u2068Al Ummah Now\u2069 • \u2068١٫٥ ألف مشاهدة\u2069", new Localizer("ar").Join("Al Ummah Now", "١٫٥ ألف مشاهدة"));
+        Assert.Equal("\u2068Al Ummah Now\u2069، \u2068١٫٥ ألف مشاهدة\u2069", new Localizer("ar").Join("Al Ummah Now", "١٫٥ ألف مشاهدة"));
     }
 
     [Fact]
@@ -112,7 +112,15 @@ public class DisplayDigitsTests
         Assert.Equal("لا يوجد", new Localizer("ar").Stat(0));
         Assert.Equal("٣١٣٫٥", new Localizer("ar").Stat(313.5, decimals: true));
         Assert.Equal("0", new Localizer("en").Stat(0));
-        Assert.Equal("15,046", new Localizer("en").Stat(15046));
+        // Counts from 1,000 are compact (owner 2026-11-21); Arabic numbers are never grouped.
+        Assert.Equal("15K", new Localizer("en").Stat(15046));
+        Assert.Equal("4.8K", new Localizer("en").Stat(4887));
+        Assert.Equal("٤٫٨ ألف", new Localizer("ar").Stat(4887));
+        Assert.Equal("٨٨٧", new Localizer("ar").Stat(887));
+        Assert.Equal("١٫٢ م", new Localizer("ar").Stat(1_234_567));
+        Assert.Equal("١٢٣٤٫٥", new Localizer("ar").Decimal(1234.5));
+        Assert.Equal("4,887", new Localizer("en").Number(4887));
+        Assert.Equal("٤٨٨٧", new Localizer("ar").Number(4887));
     }
 
     [Fact]

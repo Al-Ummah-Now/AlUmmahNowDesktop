@@ -88,11 +88,18 @@ public static class Ui
     }
 
     /// <summary>A heading inside a card.</summary>
+    /// <summary>
+    /// Line boxes (px) for one line of text in either script. An Arabic line is a few pixels shorter than a Latin one, so
+    /// without them every English card and form came out taller than its Arabic twin.
+    /// </summary>
+    public const int PageTitleLine = 40, CardTitleLine = 30, FieldLabelLine = 24, CaptionLine = 20;
+
     public static Gtk.Label CardTitle(string text)
     {
         var label = Label(text);
         label.AddCssClass("title-4");
         label.SetWrap(false);
+        label.SetSizeRequest(-1, CardTitleLine);
         return label;
     }
 
@@ -109,6 +116,74 @@ public static class Ui
         icon.SetValign(Gtk.Align.Center);
         tile.Append(icon);
         return tile;
+    }
+
+    private static readonly HttpClient ThumbHttp = new() { Timeout = TimeSpan.FromSeconds(20) };
+
+    /// <summary>The bytes of a thumbnail: a local file (the demo's title cards) from disk, else over HTTP.</summary>
+    public static Task<byte[]> ThumbnailBytesAsync(string url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.IsFile ? File.ReadAllBytesAsync(uri.LocalPath) : ThumbHttp.GetByteArrayAsync(url);
+
+    /// <summary>A small thumbnail: the night tile until the image loads (or when there is none).</summary>
+    public static Gtk.Widget Thumbnail(string? url, int width, int height)
+    {
+        var frame = Gtk.Overlay.New();
+        frame.SetSizeRequest(width, height);
+        frame.SetValign(Gtk.Align.Center);
+        frame.SetOverflow(Gtk.Overflow.Hidden);
+        frame.AddCssClass("file-tile");
+        frame.SetChild(FileTile(width, height));
+        if (url is { Length: > 0 }) _ = LoadAsync();
+        return frame;
+
+        async Task LoadAsync()
+        {
+            try
+            {
+                var data = await ThumbnailBytesAsync(url);
+                var picture = Gtk.Picture.NewForPaintable(Gdk.Texture.NewFromBytes(GLib.Bytes.New(data)));
+                picture.SetContentFit(Gtk.ContentFit.Cover);
+                picture.SetCanShrink(true);
+                frame.AddOverlay(picture);
+            }
+            catch (Exception ex) when (ex is HttpRequestException or IOException or TaskCanceledException or GLib.GException)
+            {
+                // The night tile stays.
+            }
+        }
+    }
+
+    /// <summary>
+    /// A file on this computer, shown by its own first frame: the night tile until GStreamer has read the frame, and for
+    /// good when the file can't be decoded.
+    /// </summary>
+    public static Gtk.Widget LocalPoster(string path, int width, int height)
+    {
+        var frame = Gtk.Overlay.New();
+        frame.SetSizeRequest(width, height);
+        frame.SetValign(Gtk.Align.Center);
+        frame.SetOverflow(Gtk.Overflow.Hidden);
+        frame.AddCssClass("file-tile");
+        frame.SetChild(FileTile(width, height));
+        _ = LoadAsync();
+        return frame;
+
+        async Task LoadAsync()
+        {
+            var data = await VideoPoster.FrameAsync(path);
+            if (data == null) return;
+            try
+            {
+                var picture = Gtk.Picture.NewForPaintable(Gdk.Texture.NewFromBytes(GLib.Bytes.New(data)));
+                picture.SetContentFit(Gtk.ContentFit.Cover);
+                picture.SetCanShrink(true);
+                frame.AddOverlay(picture);
+            }
+            catch (GLib.GException)
+            {
+                // The night tile stays.
+            }
+        }
     }
 
     public static void Clear(Gtk.Box box)

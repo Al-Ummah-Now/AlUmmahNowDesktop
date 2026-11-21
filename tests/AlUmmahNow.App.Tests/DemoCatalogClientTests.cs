@@ -44,4 +44,25 @@ public class DemoCatalogClientTests
         }
         finally { dir.Delete(true); }
     }
+    [Fact]
+    public async Task ArabicPagesNameChannelsAndPickTitleCardsInArabic()
+    {
+        var dir = Directory.CreateTempSubdirectory();
+        try
+        {
+            File.WriteAllBytes(Path.Combine(dir.FullName, "thumb-1.jpg"), new byte[] { 1 });
+            File.WriteAllBytes(Path.Combine(dir.FullName, "thumb-1.ar.jpg"), new byte[] { 1 });
+            var ar = await new DemoCatalogClient(dir.FullName, "ar").GetVideoAsync("demo-v1");
+            var en = await new DemoCatalogClient(dir.FullName, "en").GetVideoAsync("demo-v1");
+            Assert.Equal("قناة الهدى", ar.ChannelName);
+            Assert.EndsWith("/thumb-1.ar.jpg", ar.ThumbnailUrl);
+            Assert.Equal("Al-Huda Channel", en.ChannelName);
+            Assert.EndsWith("/thumb-1.jpg", en.ThumbnailUrl);
+            for (var i = 0; i < 4; i++) Assert.DoesNotMatch("[A-Za-z]", DemoCatalogClient.ChannelName(i, "ar"));
+        }
+        finally
+        {
+            dir.Delete(true);
+        }
+    }
 }

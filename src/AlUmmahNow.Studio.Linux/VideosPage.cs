@@ -20,10 +20,18 @@ public sealed class VideosPage
     private readonly Gtk.Box _selectionBar = Gtk.Box.New(Gtk.Orientation.Horizontal, 8);
     private readonly Gtk.Label _selectionLabel = Ui.Label("");
     // Lantern Glass: a grid of thumbnail cards (Edit and Delete in each card's footer).
+    private const int Gap = 16, CardWidth = 280;
+
+    /// <summary>
+    /// The title's box: two heading lines in either script, whether the title takes one line or two, so every card in a
+    /// row has the same height and the thumbnails above stay the same size.
+    /// </summary>
+    private const int TitleBox = 40;
     private readonly Gtk.FlowBox _list = Gtk.FlowBox.New();
     private readonly Dictionary<string, Gdk.Texture> _thumbs = new();
+    private readonly List<Gtk.Widget> _thumbBoxes = new();
+    private int _thumbHeight = 146;
     private readonly HashSet<string> _thumbsLoading = new();
-    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(20) };
     private readonly Gtk.Label _empty = Ui.Label("", dim: true);
     private readonly Gtk.Label _error = Ui.Label("");
     private readonly Gtk.Button _more;
@@ -137,11 +145,36 @@ public sealed class VideosPage
 
         _list.SetSelectionMode(Gtk.SelectionMode.None);
         _list.SetHomogeneous(true);
-        _list.SetColumnSpacing(16);
-        _list.SetRowSpacing(16);
+        _list.SetColumnSpacing(Gap);
+        _list.SetRowSpacing(Gap);
         _list.SetMinChildrenPerLine(2);
         _list.SetMaxChildrenPerLine(6);
         _list.SetValign(Gtk.Align.Start);
+        // FlowBox picks its columns from the cards' natural width, which follows the text, so English and Arabic got a
+        // different count at the same window width. The count comes from the grid's own width instead.
+        var columns = 0;
+        _list.AddTickCallback((_, _) =>
+        {
+            var width = _list.GetWidth();
+            var fit = Math.Clamp((width + Gap) / (CardWidth + Gap), 2, 6);
+            if (fit != columns)
+            {
+                columns = fit;
+                _list.SetMinChildrenPerLine((uint)fit);
+                _list.SetMaxChildrenPerLine((uint)fit);
+            }
+
+            // Thumbnails are 16:9 of a card's width, with one height for every card: the grid hands its spare pixels to
+            // some columns, so measuring each card made one column's thumbnails a pixel taller than the rest.
+            var height = Math.Max(1, ((width - (fit - 1) * Gap) / fit - 2) * 9 / 16);
+            if (width > 0 && height != _thumbHeight)
+            {
+                _thumbHeight = height;
+                foreach (var t in _thumbBoxes) t.SetSizeRequest(-1, height);
+            }
+
+            return true;
+        });
         page.Append(_list);
         page.Append(_empty);
         _more = Ui.Button(l["studio.videos.loadMore"], () => _ = _vm.LoadMoreAsync());
@@ -290,6 +323,7 @@ public sealed class VideosPage
     private void RenderList()
     {
         while (_list.GetChildAtIndex(0) is { } c) _list.Remove(c);
+        _thumbBoxes.Clear();
         foreach (var v in _vm.Items) _list.Append(Card(v));
 
         _list.SetVisible(_vm.Items.Count > 0);
@@ -309,22 +343,31 @@ public sealed class VideosPage
         var thumb = Gtk.Overlay.New();
         thumb.AddCssClass("video-thumb");
         thumb.SetOverflow(Gtk.Overflow.Hidden);
+        // The night tile sizes the card; a loaded thumbnail is an overlay on it, because an overlay never adds its own
+        // size (a picture's natural width is the image's, which would widen every card and drop grid columns).
+        var tile = Ui.FileTile(260, 146);
+        tile.SetHexpand(true);
+        thumb.SetChild(tile);
+        // The tile's icon expands, and that expand reached the thumbnail, which then took a row's spare height whenever a
+        // neighbour's card was taller. The thumbnail never takes spare height; the card's body does.
+        thumb.SetVexpand(false);
+        thumb.SetValign(Gtk.Align.Start);
         if (v.ThumbnailUrl is { Length: > 0 } url && _thumbs.TryGetValue(url, out var texture))
         {
             var picture = Gtk.Picture.NewForPaintable(texture);
             picture.SetContentFit(Gtk.ContentFit.Cover);
             picture.SetCanShrink(true);
-            thumb.SetChild(picture);
+            thumb.AddOverlay(picture);
         }
-        else
+        else if (v.ThumbnailUrl is { Length: > 0 } u)
         {
-            if (v.ThumbnailUrl is { Length: > 0 } u) _ = LoadThumbAsync(u);
-            var tile = Ui.FileTile(260, 146);
-            tile.SetHexpand(true);
-            thumb.SetChild(tile);
+            _ = LoadThumbAsync(u);
         }
 
-        thumb.SetSizeRequest(-1, 146);
+        // 16:9 at the width the grid gives the cards (set from the grid's tick): a fixed height cropped the title card's top
+        // and bottom (the lantern and the channel mark) at widths where the card is wide and short.
+        thumb.SetSizeRequest(-1, _thumbHeight);
+        _thumbBoxes.Add(thumb);
         var pill = Gtk.Label.New(v.Status is StudioVideoStatus.Processing or StudioVideoStatus.Failed or StudioVideoStatus.Uploading
             ? _l["studio.videos.status." + v.Status.ToString().ToLowerInvariant()]
             : _l["studio.upload.visibility." + (v.IsPublic ? "public" : "private")]);
@@ -342,23 +385,36 @@ public sealed class VideosPage
             thumb.AddOverlay(duration);
         }
 
-        var check = Gtk.CheckButton.NewWithLabel(title);
+        // Our own label as the check button's child: the label a CheckButton makes from NewWithLabel is internal (GetChild
+        // returns null), so it could never wrap and a long title ran one line to the card's edge. This one wraps to two
+        // lines inside the width the card gets, then ellipsizes; a small natural width keeps it from widening the card.
+        var label = Gtk.Label.New(title);
+        label.SetWrap(true);
+        label.SetWrapMode(Pango.WrapMode.WordChar);
+        label.SetLines(2);
+        label.SetEllipsize(Pango.EllipsizeMode.End);
+        label.SetMaxWidthChars(18);
+        label.SetXalign(0);
+        label.SetHexpand(true);
+        label.AddCssClass("heading");
+        var check = Gtk.CheckButton.New();
+        check.SetChild(label);
         check.SetActive(_vm.IsSelected(v.Id));
         Ui.Named(check, _l.Format("studio.videos.select", title));
         check.OnToggled += (_, _) => _vm.SetSelected(v.Id, check.GetActive());
-        if (check.GetChild() is Gtk.Label label)
-        {
-            label.SetWrap(true);
-            label.SetLines(2);
-            label.SetEllipsize(Pango.EllipsizeMode.End);
-            label.SetXalign(0);
-            label.AddCssClass("heading");
-        }
 
-        var meta = Ui.Label(_l.Join(_l.Format("studio.videos.views", _l.Number(v.Views)), v.CreatedAt is { } at ? _l.Date(at) : null, v.Category is { } c ? _l["studio.category." + c] : null), dim: true);
+        var meta = Ui.Label(_l.Join(_l.Views(v.Views), v.CreatedAt is { } at ? _l.Date(at) : null, v.Category is { } c ? _l["studio.category." + c] : null), dim: true);
         meta.AddCssClass("caption");
+        // Ellipsized, so the line's natural width never sets the card's minimum width: English and Arabic get the same
+        // number of columns at the same window width.
+        meta.SetEllipsize(Pango.EllipsizeMode.End);
+        meta.SetMaxWidthChars(24);
+        var titleRow = Gtk.Box.New(Gtk.Orientation.Vertical, 0);
+        titleRow.SetSizeRequest(-1, TitleBox);
+        check.SetValign(Gtk.Align.Start);
+        titleRow.Append(check);
         var body = Gtk.Box.New(Gtk.Orientation.Vertical, 4);
-        body.Append(check);
+        body.Append(titleRow);
         body.Append(meta);
 
         var footer = Gtk.Box.New(Gtk.Orientation.Horizontal, 4);
@@ -378,7 +434,15 @@ public sealed class VideosPage
         body.SetMarginStart(14);
         body.SetMarginEnd(14);
         body.SetMarginTop(10);
-        card.Append(body);
+        // The title and meta line must not set the card's minimum width: in English it came out wider than in Arabic, so
+        // the grid's columns no longer fit the window. An external horizontal policy ignores the text's width request;
+        // the body takes the width the grid gives the card and the labels wrap or ellipsize inside it.
+        var bodyFrame = Gtk.ScrolledWindow.New();
+        bodyFrame.SetPolicy(Gtk.PolicyType.External, Gtk.PolicyType.Never);
+        bodyFrame.SetPropagateNaturalHeight(true);
+        bodyFrame.SetChild(body);
+        bodyFrame.SetVexpand(true);
+        card.Append(bodyFrame);
         var bar = Gtk.Box.New(Gtk.Orientation.Horizontal, 0);
         bar.AddCssClass("card-footer");
         bar.AddCssClass("quiet");
@@ -400,11 +464,11 @@ public sealed class VideosPage
         if (!_thumbsLoading.Add(url)) return;
         try
         {
-            var data = await Http.GetByteArrayAsync(url);
+            var data = await Ui.ThumbnailBytesAsync(url);
             _thumbs[url] = Gdk.Texture.NewFromBytes(GLib.Bytes.New(data));
             RenderList();
         }
-        catch (Exception ex) when (ex is HttpRequestException || ex is TaskCanceledException || ex is GLib.GException)
+        catch (Exception ex) when (ex is HttpRequestException || ex is IOException || ex is TaskCanceledException || ex is GLib.GException)
         {
             // The night tile stays.
         }
@@ -420,7 +484,7 @@ public sealed class VideosPage
     {
         var parts = new List<string> { _l["studio.upload.visibility." + (v.IsPublic ? "public" : "private")] };
         if (v.Status is StudioVideoStatus.Processing or StudioVideoStatus.Failed or StudioVideoStatus.Uploading) parts.Add(_l["studio.videos.status." + v.Status.ToString().ToLowerInvariant()]);
-        parts.Add(_l.Format("studio.videos.views", _l.Number(v.Views)));
+        parts.Add(_l.Views(v.Views));
         if (v.CreatedAt is { } at) parts.Add(_l.Date(at));
         if (v.Category is { } c) parts.Add(_l["studio.category." + c]);
         return _l.Join(parts);
