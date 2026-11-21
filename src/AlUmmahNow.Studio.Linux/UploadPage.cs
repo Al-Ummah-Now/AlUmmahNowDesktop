@@ -47,7 +47,11 @@ public sealed class UploadPage
         // Lantern Glass: files and the queue on the left, "Set for all" on the right; card actions in each footer.
         Root = Gtk.ScrolledWindow.New();
         Root.SetPolicy(Gtk.PolicyType.Never, Gtk.PolicyType.Automatic);
-        var page = Gtk.Box.New(Gtk.Orientation.Horizontal, 20);
+        // Seven equal columns, four for the files and three for "Set for all": the split is the same in every language
+        // (a box would size each side by its text).
+        var page = Gtk.Grid.New();
+        page.SetColumnHomogeneous(true);
+        page.SetColumnSpacing(20);
         page.SetMarginStart(24);
         page.SetMarginEnd(24);
         page.SetMarginTop(18);
@@ -55,7 +59,7 @@ public sealed class UploadPage
         Root.SetChild(page);
         var left = Gtk.Box.New(Gtk.Orientation.Vertical, 18);
         left.SetHexpand(true);
-        page.Append(left);
+        page.Attach(left, 0, 0, 4, 1);
 
         // Add: the lantern, where the files go, and the ways to add them.
         // Two rows, so the actions fit the card down to the 1024 window.
@@ -127,9 +131,11 @@ public sealed class UploadPage
         forAll.Append(BuildDefaults());
         var right = Ui.Card(forAll);
         right.SetValign(Gtk.Align.Start);
-        // 360: the page fits the 1024 minimum window (with the rail) without growing the window.
-        right.SetSizeRequest(360, -1);
-        page.Append(right);
+        // 340 (three of seven columns): the page fits the 1024 minimum window (with the rail) without growing the window;
+        // the grid gives it about 375 there.
+        right.SetSizeRequest(340, -1);
+        right.SetHexpand(true);
+        page.Attach(right, 4, 0, 3, 1);
 
         _vm.PropertyChanged += (_, e) =>
         {
@@ -401,7 +407,8 @@ public sealed class UploadPage
             remove.AddCssClass("flat");
             Ui.Named(remove, _l.Format("studio.upload.removeStaged", file));
             remove.OnClicked += (_, _) => _vm.RemoveStaged(plan.FilePath);
-            row.Append(Ui.FileTile(96, 54));
+            // The file's own first frame, so each staged video is recognisable at a glance.
+            row.Append(Ui.LocalPoster(plan.FilePath, 96, 54));
             row.Append(text);
             row.Append(remove);
             _staged.Append(row);
@@ -495,6 +502,8 @@ public sealed class UploadPage
         private readonly Gtk.Label _status = Ui.Label("", dim: true);
         private readonly Gtk.Box _buttons = Gtk.Box.New(Gtk.Orientation.Horizontal, 4);
         private UploadPhase? _phase;
+        private Gtk.Widget _tile = Ui.FileTile(80, 45);
+        private bool _posted;
 
         public QueueRow(UploadPage page, string id)
         {
@@ -510,7 +519,7 @@ public sealed class UploadPage
             text.Append(_bar);
             text.Append(_status);
             _buttons.SetValign(Gtk.Align.Center);
-            Root.Append(Ui.FileTile(80, 45));
+            Root.Append(_tile);
             Root.Append(text);
             Root.Append(_buttons);
         }
@@ -519,6 +528,15 @@ public sealed class UploadPage
 
         public void Update(UploadSnapshot item)
         {
+            if (!_posted && item.FilePath is { Length: > 0 } path)
+            {
+                // The file's own first frame once its path is known (the night tile until then, or when it can't be read).
+                _posted = true;
+                Root.Remove(_tile);
+                _tile = Ui.LocalPoster(path, 80, 45);
+                Root.Prepend(_tile);
+            }
+
             var l = _page._l;
             _title.SetText(item.Title);
             _bar.SetFraction(item.Fraction);

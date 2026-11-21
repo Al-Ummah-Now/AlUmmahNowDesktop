@@ -118,14 +118,28 @@ jobs:
               scripts/studio-scenario.sh $3 $1 shell "$name" artifacts/review "" "$2" > "artifacts/review/$name.log" 2>&1 || true
           }
           # Upload with three staged files and two watched ones uploading (simulated), so every card shows.
-          mkdir -p staged watched
-          truncate -s 1500000 "staged/درس 1.mp4" "staged/درس 2.mp4" "staged/lesson 10.mp4"
+          # Staged files are real short videos (title cards, scripts/title-cards.py) named in the frame's language, so each
+          # staged row shows its own first frame and an Arabic frame shows Arabic file names.
+          video() { # <card.jpg> <out.webm>
+            gst-launch-1.0 -q multifilesrc location="$1" loop=true num-buffers=40 caps="image/jpeg,framerate=8/1" ! jpegdec ! videoconvert \
+              ! vp8enc deadline=1 target-bitrate=4000000 keyframe-max-dist=8 ! webmmux ! filesink location="$2"
+          }
+          cards=tests/fixtures/viewer-thumbs
+          mkdir -p staged-en staged-ar watched
+          video $cards/thumb-15.jpg "staged-en/Surah Yasin, full recitation.webm"
+          video $cards/thumb-18.jpg "staged-en/Ayat al-Kursi explained.webm"
+          video $cards/thumb-22.jpg "staged-en/Wudu step by step.webm"
+          video $cards/thumb-15.ar.jpg "staged-ar/سورة يس كاملة.webm"
+          video $cards/thumb-18.ar.jpg "staged-ar/شرح آية الكرسي.webm"
+          video $cards/thumb-22.ar.jpg "staged-ar/الوضوء خطوة بخطوة.webm"
+          ls -la staged-en staged-ar
           truncate -s 2000000 watched/friday-khutbah.mp4 watched/seerah-part-4.mov
-          export AUN_STAGE_DIR=$PWD/staged AUN_WATCH_DIR=$PWD/watched
+          export AUN_WATCH_DIR=$PWD/watched
           # Title-card thumbnails in the frame's language (tests/fixtures/studio-thumbs, scripts/title-cards.py).
           export AUN_DEMO_THUMBS=$PWD/tests/fixtures/studio-thumbs
           n=0
           for lang in en ar; do for theme in dark light; do
+            export AUN_STAGE_DIR=$PWD/staged-$lang
             shot uploads "" $lang $theme 1440x900; shot uploads channels $lang $theme 1440x900
             shot uploads "" $lang $theme 1920x1080; shot uploads "" $lang $theme 1024x700
             shot uploads scheduled $lang $theme 1440x900
@@ -147,7 +161,7 @@ jobs:
           grep -P "\tActing as$" artifacts/review/linux-uploads-channels-en-light-1440x900.atspi.txt
           grep -P "\tتتصرّف باسم$" artifacts/review/linux-uploads-channels-ar-light-1440x900.atspi.txt
           grep -P "^button\t.*Masjid Media Team Channel · Editor$" artifacts/review/linux-uploads-channels-en-light-1440x900.atspi.txt
-          grep -P "^button\t.*Masjid Media Team قناة، محرّر$" artifacts/review/linux-uploads-channels-ar-light-1440x900.atspi.txt
+          grep -P "^button\t.*فريق إعلام المسجد قناة، محرّر$" artifacts/review/linux-uploads-channels-ar-light-1440x900.atspi.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:

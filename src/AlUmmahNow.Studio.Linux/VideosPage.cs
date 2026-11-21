@@ -352,6 +352,9 @@ public sealed class VideosPage
             label.SetWrap(true);
             label.SetLines(2);
             label.SetEllipsize(Pango.EllipsizeMode.End);
+            // The grid flows at the cards' natural width, so a long one-line title would drop a column in one language
+            // only; capped, every language gets the night tile's width and the same number of columns.
+            label.SetMaxWidthChars(18);
             label.SetXalign(0);
             label.AddCssClass("heading");
         }
@@ -361,6 +364,7 @@ public sealed class VideosPage
         // Ellipsized, so the line's natural width never sets the card's minimum width: English and Arabic get the same
         // number of columns at the same window width.
         meta.SetEllipsize(Pango.EllipsizeMode.End);
+        meta.SetMaxWidthChars(24);
         var body = Gtk.Box.New(Gtk.Orientation.Vertical, 4);
         body.Append(check);
         body.Append(meta);

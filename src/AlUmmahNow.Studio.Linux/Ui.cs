@@ -146,6 +146,39 @@ public static class Ui
         }
     }
 
+    /// <summary>
+    /// A file on this computer, shown by its own first frame: the night tile until GStreamer has read the frame, and for
+    /// good when the file can't be decoded.
+    /// </summary>
+    public static Gtk.Widget LocalPoster(string path, int width, int height)
+    {
+        var frame = Gtk.Overlay.New();
+        frame.SetSizeRequest(width, height);
+        frame.SetValign(Gtk.Align.Center);
+        frame.SetOverflow(Gtk.Overflow.Hidden);
+        frame.AddCssClass("file-tile");
+        frame.SetChild(FileTile(width, height));
+        _ = LoadAsync();
+        return frame;
+
+        async Task LoadAsync()
+        {
+            var data = await VideoPoster.FrameAsync(path);
+            if (data == null) return;
+            try
+            {
+                var picture = Gtk.Picture.NewForPaintable(Gdk.Texture.NewFromBytes(GLib.Bytes.New(data)));
+                picture.SetContentFit(Gtk.ContentFit.Cover);
+                picture.SetCanShrink(true);
+                frame.AddOverlay(picture);
+            }
+            catch (GLib.GException)
+            {
+                // The night tile stays.
+            }
+        }
+    }
+
     public static void Clear(Gtk.Box box)
     {
         while (box.GetFirstChild() is { } child) box.Remove(child);
