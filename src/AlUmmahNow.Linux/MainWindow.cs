@@ -262,6 +262,9 @@ public sealed class MainWindow
     /// <summary>Cards per home rail: four, sharing the width.</summary>
     private const int RailColumns = 4;
 
+    /// <summary>Line boxes for a card's title and meta lines, tall enough for Arabic with any fallback glyph.</summary>
+    private const int TitleLine = 28, MetaLine = 22;
+
     private Gtk.Widget BuildCard(VideoCardViewModel card)
     {
         var box = Gtk.Box.New(Gtk.Orientation.Vertical, 6);
@@ -270,14 +273,17 @@ public sealed class MainWindow
         var picture = Gtk.Picture.New();
         picture.SetSizeRequest(200, 112);
         picture.SetContentFit(Gtk.ContentFit.Cover);
-        // 16:9 at any cell width: the grid stretches its cards to fill the row, and a fixed height would crop the title card.
-        var frame = Gtk.AspectFrame.New(0.5f, 0.5f, 16f / 9f, false);
-        frame.SetChild(picture);
-        box.Append(frame);
+        // Full cell width, with the height the 16:9 title card asks for at that width, so every card in every rail and
+        // language is the same size (an aspect frame shrank a card whose row was measured a little short).
+        picture.SetHexpand(true);
+        box.Append(picture);
         _ = LoadThumbnailAsync(picture, card.ThumbnailUrl);
 
         var title = Gtk.Label.New(card.Title);
         title.SetHalign(Gtk.Align.Start);
+        // Fixed line boxes: a line that falls back to another font for one glyph (an Arabic decimal mark, a shadda) is a
+        // few pixels taller, which put the meta lines of neighbouring cards out of line.
+        title.SetSizeRequest(-1, TitleLine);
         title.SetEllipsize(Pango.EllipsizeMode.End);
         title.SetMaxWidthChars(30);
         title.AddCssClass("heading");
@@ -293,6 +299,7 @@ public sealed class MainWindow
             meta.SetEllipsize(Pango.EllipsizeMode.End);
             meta.SetMaxWidthChars(36);
             meta.AddCssClass("dim-label");
+            meta.SetSizeRequest(-1, MetaLine);
             box.Append(meta);
         }
 

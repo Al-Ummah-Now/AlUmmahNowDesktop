@@ -78,7 +78,8 @@ public sealed class StudioWindow
         _identityMenu.SetMarginEnd(4);
         _identityMenu.SetMarginTop(4);
         _identityMenu.SetMarginBottom(4);
-        _identityMenu.SetSizeRequest(300, -1);
+        // As wide as the identity button above it, so the open menu stays over the sidebar and never covers the page.
+        _identityMenu.SetSizeRequest(SidebarWidth - 40, -1);
         _identityPopover.SetChild(_identityMenu);
         _identityPopover.AddCssClass("glass");
         _identityPopover.SetHasArrow(false);
@@ -526,6 +527,9 @@ public sealed class StudioWindow
         box.Append(image);
         var label = Gtk.Label.New(text);
         label.SetXalign(0);
+        label.SetEllipsize(Pango.EllipsizeMode.End);
+        label.SetMaxWidthChars(20);
+        label.SetHexpand(true);
         box.Append(label);
         var button = Gtk.Button.New();
         button.SetChild(box);
@@ -552,7 +556,8 @@ public sealed class StudioWindow
         var name = Gtk.Label.New(r.Name);
         name.SetXalign(0);
         name.SetEllipsize(Pango.EllipsizeMode.End);
-        name.SetMaxWidthChars(22);
+        // Natural width capped so the menu keeps the sidebar's width; a longer name ellipsizes.
+        name.SetMaxWidthChars(16);
         name.AddCssClass("heading");
         var tag = Gtk.Label.New(r.Tag);
         tag.SetXalign(0);
