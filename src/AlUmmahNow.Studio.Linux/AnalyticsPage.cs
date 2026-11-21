@@ -188,7 +188,11 @@ public sealed class AnalyticsPage
         }
         else
         {
-            tile = box;
+            // A box of its own around the text, as the button is for Views and Watch time: the text's margins then sit
+            // inside every tile, so all five tiles take the same width and the gaps between them are equal.
+            var plain = Gtk.Box.New(Gtk.Orientation.Vertical, 0);
+            plain.Append(box);
+            tile = plain;
         }
 
         tile.AddCssClass("card");

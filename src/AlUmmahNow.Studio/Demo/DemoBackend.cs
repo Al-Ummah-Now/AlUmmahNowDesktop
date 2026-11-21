@@ -86,21 +86,21 @@ public sealed class DemoTransport : IApiTransport
         var videos = new[]
         {
             new DemoVideo("تأملات في سورة الكهف — الجزء الأول", "Reflections on Surah Al-Kahf, part one", "تأملات في سورة الكهف — الجزء الأول",
-                "quran_tafsir", "ar", true, 3412, 186, 27, 2675, Ago(32, "18:40"), new[] { "تفسير", "سورة الكهف" }),
+                "quran_tafsir", "ar", true, 3412, 186, 27, 2675, Ago(31, "18:40"), new[] { "تفسير", "سورة الكهف" }),
             new DemoVideo("Seerah: the early years in Makkah", "Seerah: the early years in Makkah", "السيرة: السنوات الأولى في مكة",
                 "islamic_history", "en", true, 0, 0, 0, 3390, Ago(1, "21:05"), new[] { "seerah", "makkah" }),
             new DemoVideo("أحكام الصيام للمبتدئين", "Fasting rulings for beginners", "أحكام الصيام للمبتدئين",
-                "fiqh", "ar", false, 1046, 58, 9, 1291, Ago(35, "06:15"), new[] { "صيام", "فقه" }),
+                "fiqh", "ar", false, 1046, 58, 9, 1291, Ago(36, "06:15"), new[] { "صيام", "فقه" }),
             new DemoVideo("Arabic grammar, part 3", "Arabic grammar, part 3", "النحو العربي، الجزء الثالث",
-                "islamic_lectures", "en", true, 587, 31, 4, 2214, Ago(38, "16:30"), new[] { "arabic", "nahw" }),
+                "islamic_lectures", "en", true, 587, 31, 4, 2214, Ago(37, "16:30"), new[] { "arabic", "nahw" }),
             new DemoVideo("خطبة الجمعة: الصبر", "Friday khutbah: patience", "خطبة الجمعة: الصبر",
-                "khutbah", "ar", true, 7935, 402, 61, 1688, Ago(41, "13:10"), new[] { "خطبة", "الصبر" }),
+                "khutbah", "ar", true, 7935, 402, 61, 1688, Ago(43, "13:10"), new[] { "خطبة", "الصبر" }),
             new DemoVideo("Hadith of the week: intentions", "Hadith of the week: intentions", "حديث الأسبوع: النيات",
-                "hadith_studies", "en", false, 248, 12, 2, 486, Ago(45, "09:20"), new[] { "hadith", "niyyah" }),
+                "hadith_studies", "en", false, 248, 12, 2, 486, Ago(47, "09:20"), new[] { "hadith", "niyyah" }),
             new DemoVideo("قصص الأنبياء: يونس عليه السلام", "Stories of the prophets: Yunus", "قصص الأنبياء: يونس عليه السلام",
-                "islamic_history", "ar", true, 2193, 97, 14, 1462, Ago(52, "19:45"), new[] { "قصص الأنبياء", "يونس" }),
+                "islamic_history", "ar", true, 2193, 97, 14, 1462, Ago(53, "19:45"), new[] { "قصص الأنبياء", "يونس" }),
             new DemoVideo("Q&A: prayer while travelling", "Q&A: prayer while travelling", "سؤال وجواب: الصلاة في السفر",
-                "fiqh", "en", true, 1608, 73, 22, 903, Ago(58, "11:00"), new[] { "salah", "travel" }),
+                "fiqh", "en", true, 1608, 73, 22, 903, Ago(61, "11:00"), new[] { "salah", "travel" }),
         };
         _videos = videos.Select((v, i) => new Dictionary<string, object?>
         {

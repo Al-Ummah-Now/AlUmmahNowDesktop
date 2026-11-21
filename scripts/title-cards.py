@@ -3,7 +3,10 @@
 
 One card per demo video and language: tests/fixtures/viewer-thumbs/thumb-N.jpg (English) and thumb-N.ar.jpg
 (Arabic) for the viewer's DemoCatalogClient, and tests/fixtures/studio-thumbs/ the same for Studio's DemoTransport.
-A card shows only its own language (title, gold rule, category, channel), so an Arabic frame never carries English.
+tests/fixtures/staged-cards/ holds the cards CI turns into the files staged on Studio's Upload page (Noor Channel's own
+new short clips). A card shows only its own language (title, gold rule, category, channel), so an Arabic frame never
+carries English. A viewer card names its category as the home rail it sits in does (home.rail.*), a Studio card as
+Studio's category list does (studio.category.*).
 
 Usage (macOS, Google Chrome for Arabic shaping, sips for JPEG): scripts/title-cards.py
 The lists below must match DemoCatalogClient.Fixtures/Channels and DemoTransport's titles (same order).
@@ -60,6 +63,13 @@ STUDIO = [  # (category, English, Arabic): DemoTransport's videos, in order
     ("islamic_history", "Stories of the prophets: Yunus", "قصص الأنبياء: يونس عليه السلام"),
     ("fiqh", "Q&A: prayer while travelling", "سؤال وجواب: الصلاة في السفر"),
 ]
+# Noor Channel's new short clips, staged on the Upload page (ci-studio-linux.yml). File names come from the titles, so
+# each English title and its Arabic twin sort to the same place: the staged list has one order in both languages.
+STAGED = [  # (category, English, Arabic)
+    ("hadith_studies", "Hadith of the week, kindness in one minute", "حديث الأسبوع، الرفق في دقيقة"),
+    ("khutbah", "Khutbah highlights, gratitude", "خطبة الجمعة، مقتطفات عن الشكر"),
+    ("quran_tafsir", "Surah Al-Kahf part two, preview", "سورة الكهف الجزء الثاني، مقدمة"),
+]
 STUDIO_CHANNEL = ("Noor Channel", "قناة النور")  # the demo channel's own name in each language (DemoBackend)
 
 # Fawanees night, teal, green, wine and ink grounds; every card keeps the lantern-gold rule and mark.
@@ -92,12 +102,26 @@ h1{{font-size:{size}px;line-height:1.25;margin:0 120px;font-weight:700;text-shad
 <div class="mark"><i></i><span>{channel}</span></div></html>"""
 
 
-def labels(lang):
-    data = json.loads((ROOT / "src/AlUmmahNow.App/I18n" / f"{lang}.json").read_text(encoding="utf-8"))
-    return {k.removeprefix("studio.category."): v for k, v in data.items() if k.startswith("studio.category.")}
+# The viewer's home rail for each category (MainWindow / HomeViewModel rails, home.rail.* strings).
+RAILS = {
+    "quran_recitation": "quran", "quran_tafsir": "tafsir", "hadith_studies": "hadith", "fiqh": "fiqh",
+    "islamic_history": "history", "islamic_nasheed": "nasheed", "ramadan": "ramadan",
+}
 
 
-def draw(out, lang, title, category, channel, work):
+def strings(lang):
+    return json.loads((ROOT / "src/AlUmmahNow.App/I18n" / f"{lang}.json").read_text(encoding="utf-8"))
+
+
+def studio_label(lang, category):
+    return strings(lang)["studio.category." + category]
+
+
+def viewer_label(lang, category):
+    return strings(lang)["home.rail." + RAILS[category]]
+
+
+def draw(out, lang, title, category, channel, work, label=studio_label):
     arabic = lang == "ar"
     a, b = GROUNDS[category]
     page = work / (out.stem + ".html")
@@ -106,7 +130,7 @@ def draw(out, lang, title, category, channel, work):
         start="right" if arabic else "left", end="left" if arabic else "right",
         font="'Noto Sans Arabic','SF Arabic','Geeza Pro',sans-serif" if arabic else "'Noto Sans','Inter','Helvetica Neue',sans-serif",
         size=88 if len(title) <= 26 else 74 if len(title) <= 36 else 64,
-        title=" ".join(f"<span>{html.escape(w)}</span>" for w in title.split()), cat=html.escape(labels(lang)[category]), channel=html.escape(channel)), encoding="utf-8")
+        title=" ".join(f"<span>{html.escape(w)}</span>" for w in title.split()), cat=html.escape(label(lang, category)), channel=html.escape(channel)), encoding="utf-8")
     png = work / (out.stem + ".png")
     subprocess.run([CHROME, "--headless=new", "--disable-gpu", "--hide-scrollbars", "--force-device-scale-factor=1",
                     "--window-size=1280,720", f"--screenshot={png}", page.as_uri()], check=True, capture_output=True)
@@ -121,11 +145,16 @@ def main():
         studio.mkdir(parents=True, exist_ok=True)
         for i, (category, en, ar, owner) in enumerate(VIEWER):
             channel = VIEWER_CHANNELS[owner]
-            draw(viewer / f"thumb-{i + 1}.jpg", "en", en, category, channel[0], work)
-            draw(viewer / f"thumb-{i + 1}.ar.jpg", "ar", ar, category, channel[1], work)
+            draw(viewer / f"thumb-{i + 1}.jpg", "en", en, category, channel[0], work, viewer_label)
+            draw(viewer / f"thumb-{i + 1}.ar.jpg", "ar", ar, category, channel[1], work, viewer_label)
         for i, (category, en, ar) in enumerate(STUDIO):
             draw(studio / f"thumb-{i + 1}.jpg", "en", en, category, STUDIO_CHANNEL[0], work)
             draw(studio / f"thumb-{i + 1}.ar.jpg", "ar", ar, category, STUDIO_CHANNEL[1], work)
+        staged = ROOT / "tests/fixtures/staged-cards"
+        staged.mkdir(parents=True, exist_ok=True)
+        for i, (category, en, ar) in enumerate(STAGED):
+            draw(staged / f"card-{i + 1}.jpg", "en", en, category, STUDIO_CHANNEL[0], work)
+            draw(staged / f"card-{i + 1}.ar.jpg", "ar", ar, category, STUDIO_CHANNEL[1], work)
     return 0
 
 

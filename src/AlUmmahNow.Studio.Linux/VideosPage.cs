@@ -21,6 +21,12 @@ public sealed class VideosPage
     private readonly Gtk.Label _selectionLabel = Ui.Label("");
     // Lantern Glass: a grid of thumbnail cards (Edit and Delete in each card's footer).
     private const int Gap = 16, CardWidth = 280;
+
+    /// <summary>
+    /// The title's box: two heading lines in either script, whether the title takes one line or two, so every card in a
+    /// row has the same height and the thumbnails above stay the same size.
+    /// </summary>
+    private const int TitleBox = 40;
     private readonly Gtk.FlowBox _list = Gtk.FlowBox.New();
     private readonly Dictionary<string, Gdk.Texture> _thumbs = new();
     private readonly HashSet<string> _thumbsLoading = new();
@@ -329,6 +335,10 @@ public sealed class VideosPage
         var tile = Ui.FileTile(260, 146);
         tile.SetHexpand(true);
         thumb.SetChild(tile);
+        // The tile's icon expands, and that expand reached the thumbnail, which then took a row's spare height whenever a
+        // neighbour's card was taller. The thumbnail never takes spare height; the card's body does.
+        thumb.SetVexpand(false);
+        thumb.SetValign(Gtk.Align.Start);
         if (v.ThumbnailUrl is { Length: > 0 } url && _thumbs.TryGetValue(url, out var texture))
         {
             var picture = Gtk.Picture.NewForPaintable(texture);
@@ -341,7 +351,9 @@ public sealed class VideosPage
             _ = LoadThumbAsync(u);
         }
 
-        thumb.SetSizeRequest(-1, 146);
+        // 16:9 at the width the grid gives the card: a fixed height cropped the title card's top and bottom (the lantern
+        // and the channel mark) at widths where the card is wide and short. The picture fills a box of its own shape.
+        Ui.KeepAspect(thumb, 16, 9);
         var pill = Gtk.Label.New(v.Status is StudioVideoStatus.Processing or StudioVideoStatus.Failed or StudioVideoStatus.Uploading
             ? _l["studio.videos.status." + v.Status.ToString().ToLowerInvariant()]
             : _l["studio.upload.visibility." + (v.IsPublic ? "public" : "private")]);
@@ -383,8 +395,12 @@ public sealed class VideosPage
         // number of columns at the same window width.
         meta.SetEllipsize(Pango.EllipsizeMode.End);
         meta.SetMaxWidthChars(24);
+        var titleRow = Gtk.Box.New(Gtk.Orientation.Vertical, 0);
+        titleRow.SetSizeRequest(-1, TitleBox);
+        check.SetValign(Gtk.Align.Start);
+        titleRow.Append(check);
         var body = Gtk.Box.New(Gtk.Orientation.Vertical, 4);
-        body.Append(check);
+        body.Append(titleRow);
         body.Append(meta);
 
         var footer = Gtk.Box.New(Gtk.Orientation.Horizontal, 4);
@@ -411,6 +427,7 @@ public sealed class VideosPage
         bodyFrame.SetPolicy(Gtk.PolicyType.External, Gtk.PolicyType.Never);
         bodyFrame.SetPropagateNaturalHeight(true);
         bodyFrame.SetChild(body);
+        bodyFrame.SetVexpand(true);
         card.Append(bodyFrame);
         var bar = Gtk.Box.New(Gtk.Orientation.Horizontal, 0);
         bar.AddCssClass("card-footer");

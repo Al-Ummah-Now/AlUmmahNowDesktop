@@ -273,9 +273,11 @@ public sealed class MainWindow
         var picture = Gtk.Picture.New();
         picture.SetSizeRequest(200, 112);
         picture.SetContentFit(Gtk.ContentFit.Cover);
-        // Full cell width, with the height the 16:9 title card asks for at that width, so every card in every rail and
-        // language is the same size (an aspect frame shrank a card whose row was measured a little short).
+        // Full cell width and exactly 16:9 of it, so every card in every rail and language is the same size: the picture's
+        // own height-for-width came out 3 px shorter in English than in Arabic, where the row was measured differently.
         picture.SetHexpand(true);
+        picture.SetValign(Gtk.Align.Start);
+        KeepAspect(picture, 16, 9, 200);
         box.Append(picture);
         _ = LoadThumbnailAsync(picture, card.ThumbnailUrl);
 
@@ -308,6 +310,23 @@ public sealed class MainWindow
         button.SetChild(box);
         button.OnClicked += (_, _) => _home.Open(card);
         return button;
+    }
+
+    /// <summary>Keeps a widget's height at ratioHeight/ratioWidth of the width it is given (re-checked each frame).</summary>
+    private static void KeepAspect(Gtk.Widget widget, int ratioWidth, int ratioHeight, int minWidth)
+    {
+        var last = -1;
+        widget.AddTickCallback((w, _) =>
+        {
+            var px = w.GetWidth();
+            if (px > 0 && px != last)
+            {
+                last = px;
+                w.SetSizeRequest(minWidth, (int)Math.Round(px * (double)ratioHeight / ratioWidth));
+            }
+
+            return true;
+        });
     }
 
     private async Task LoadThumbnailAsync(Gtk.Picture picture, string? url)
