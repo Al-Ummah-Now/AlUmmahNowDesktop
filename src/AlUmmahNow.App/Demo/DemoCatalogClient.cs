@@ -60,7 +60,8 @@ namespace AlUmmahNow.App.Demo
                 // Never fetched: the screenshots stay on the home page.
                 PlayUrl = "https://demo.invalid/" + (i + 1) + ".m3u8",
                 DurationSeconds = 240 + i * 97,
-                Views = 1200 + (Fixtures.Length - i) * 830,
+                // Popularity doesn't follow upload order, so the Most viewed rail differs from the Latest one.
+                Views = 1200 + (i * 5 % Fixtures.Length) * 830 + (i * 137 % 400),
                 PublishedAt = start.AddHours(-11 * i),
                 Category = f.Category,
                 IsPublic = true,

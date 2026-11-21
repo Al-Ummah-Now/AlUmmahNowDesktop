@@ -116,8 +116,10 @@ public sealed class AnalyticsPage
             var text = Gtk.Box.New(Gtk.Orientation.Vertical, 2);
             text.SetHexpand(true);
             text.SetValign(Gtk.Align.Center);
+            // Two lines before an ellipsis, as on Windows: the card is narrow at the 1024 window.
             var t = Ui.Label(Localizer.Isolate(v.TitleFor(_l.Language)));
-            t.SetWrap(false);
+            t.SetWrap(true);
+            t.SetLines(2);
             t.SetEllipsize(Pango.EllipsizeMode.End);
             t.AddCssClass("heading");
             text.Append(t);

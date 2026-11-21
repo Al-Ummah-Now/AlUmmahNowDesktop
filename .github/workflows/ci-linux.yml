@@ -64,7 +64,7 @@ jobs:
           # Home at full-page height (every rail, nothing cut at the window's bottom edge), en/ar in Light and Dark.
           for v in "ar dark home-ar-dark" "ar light home-ar-light" "en dark home-en-dark" "en light home-en-light"; do
             set -- $v
-            AUN_WINDOW_SIZE=1280x3000 dbus-run-session -- xvfb-run -a -s "-screen 0 1280x3000x24" scripts/linux-scenario.sh "$1" "$2" home "$3" artifacts/review 2>&1 | tee artifacts/review/$3.log || true
+            AUN_WINDOW_SIZE=1280x2800 dbus-run-session -- xvfb-run -a -s "-screen 0 1280x2800x24" scripts/linux-scenario.sh "$1" "$2" home "$3" artifacts/review 2>&1 | tee artifacts/review/$3.log || true
           done
           test "$(cat artifacts/review/*.log | grep -c 'RESULT PASS')" = 4
           cp artifacts/linux/watch-*.png artifacts/review/

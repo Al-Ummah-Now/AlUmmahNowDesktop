@@ -308,19 +308,21 @@ public sealed class VideosPage
         var thumb = Gtk.Overlay.New();
         thumb.AddCssClass("video-thumb");
         thumb.SetOverflow(Gtk.Overflow.Hidden);
+        // The night tile sizes the card; a loaded thumbnail is an overlay on it, because an overlay never adds its own
+        // size (a picture's natural width is the image's, which would widen every card and drop grid columns).
+        var tile = Ui.FileTile(260, 146);
+        tile.SetHexpand(true);
+        thumb.SetChild(tile);
         if (v.ThumbnailUrl is { Length: > 0 } url && _thumbs.TryGetValue(url, out var texture))
         {
             var picture = Gtk.Picture.NewForPaintable(texture);
             picture.SetContentFit(Gtk.ContentFit.Cover);
             picture.SetCanShrink(true);
-            thumb.SetChild(picture);
+            thumb.AddOverlay(picture);
         }
-        else
+        else if (v.ThumbnailUrl is { Length: > 0 } u)
         {
-            if (v.ThumbnailUrl is { Length: > 0 } u) _ = LoadThumbAsync(u);
-            var tile = Ui.FileTile(260, 146);
-            tile.SetHexpand(true);
-            thumb.SetChild(tile);
+            _ = LoadThumbAsync(u);
         }
 
         thumb.SetSizeRequest(-1, 146);

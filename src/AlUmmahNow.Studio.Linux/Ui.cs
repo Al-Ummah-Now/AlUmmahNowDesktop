@@ -137,8 +137,7 @@ public static class Ui
                 var picture = Gtk.Picture.NewForPaintable(Gdk.Texture.NewFromBytes(GLib.Bytes.New(data)));
                 picture.SetContentFit(Gtk.ContentFit.Cover);
                 picture.SetCanShrink(true);
-                picture.SetSizeRequest(width, height);
-                frame.SetChild(picture);
+                frame.AddOverlay(picture);
             }
             catch (Exception ex) when (ex is HttpRequestException or IOException or TaskCanceledException or GLib.GException)
             {
