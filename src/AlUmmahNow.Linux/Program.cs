@@ -35,10 +35,10 @@ var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
 http.DefaultRequestHeaders.UserAgent.ParseAdd("AlUmmahNowLinux/0.1");
 // AUN_DEMO=1: the fixture catalog for review frames and store screenshots (no network, never in a normal launch).
 AlUmmahNow.CoreBridge.ICatalogClient catalog = Environment.GetEnvironmentVariable("AUN_DEMO") == "1"
-    ? new AlUmmahNow.App.Demo.DemoCatalogClient(Environment.GetEnvironmentVariable("AUN_DEMO_THUMBS"))
+    ? new AlUmmahNow.App.Demo.DemoCatalogClient(Environment.GetEnvironmentVariable("AUN_DEMO_THUMBS"), settings.Language)
     : new HttpCatalogClient(http, environment.VideosApi);
 // CI's watch scenario plays a local fixture (AUN_FIXTURE_MEDIA), never a remote stream.
-if (Environment.GetEnvironmentVariable("AUN_FIXTURE_MEDIA") is { Length: > 0 } fixtureMedia) catalog = new AlUmmahNow.App.Demo.FixtureMediaCatalog(catalog, fixtureMedia);
+if (Environment.GetEnvironmentVariable("AUN_FIXTURE_MEDIA") is { Length: > 0 } fixtureMedia) catalog = new AlUmmahNow.App.Demo.FixtureMediaCatalog(catalog, fixtureMedia, settings.Language);
 var localizer = new Localizer(settings.Language);
 var navigator = new Navigator();
 var authSession = new PkceAuthSession(http, environment.AuthIssuer, environment.ViewerClientId, new LibSecretStore("alummahnow"), new ShellBrowserLauncher(), localizer["auth.browser.done"]);

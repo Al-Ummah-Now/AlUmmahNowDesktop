@@ -261,7 +261,7 @@ namespace AlUmmahNow.CoreBridge.Studio
                 .OrderBy(m => m.Date)
                 .Select(m => new AnalyticsDay(m.Date!.Value, m.Views, m.Watch))
                 .ToList();
-            var top = Array(root, "topPerformingVideos").Select(v => new TopVideo(Str(v, "videoId") ?? "", Str(v, "title") ?? "", Long(v, "views"), ReadLocalized(v, "titleLocalized"))).Where(v => v.Id.Length > 0).ToList();
+            var top = Array(root, "topPerformingVideos").Select(v => new TopVideo(Str(v, "videoId") ?? "", Str(v, "title") ?? "", Long(v, "views"), ReadLocalized(v, "titleLocalized"), Str(v, "thumbnailUrl"))).Where(v => v.Id.Length > 0).ToList();
             // The cards are the chosen period's numbers, the sum of the chart (the total* fields are lifetime)
             var days = Array(root, "recentMetrics").ToList();
             return new ChannelAnalytics

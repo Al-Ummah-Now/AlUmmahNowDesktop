@@ -40,7 +40,11 @@ public sealed class MainWindow
         _store = store;
         _home = new HomeViewModel(catalog, localizer, navigator);
         _window = Adw.ApplicationWindow.New(app);
-        _window.SetDefaultSize(1280, 800);
+        // Review frames ask for a size ("WIDTHxHEIGHT", AUN_WINDOW_SIZE), such as a full-page capture; else 1280x800.
+        var size = (Environment.GetEnvironmentVariable("AUN_WINDOW_SIZE") ?? "").Split('x');
+        _window.SetDefaultSize(
+            size.Length == 2 && int.TryParse(size[0], out var w) && w >= 1024 ? w : 1280,
+            size.Length == 2 && int.TryParse(size[1], out var h) && h >= 700 ? h : 800);
 
         var keys = Gtk.EventControllerKey.New();
         keys.OnKeyPressed += (_, a) => OnKey(a.Keyval);
@@ -236,12 +240,17 @@ public sealed class MainWindow
             title.AddCssClass("title-3");
             column.Append(title);
 
-            var row = Gtk.Box.New(Gtk.Orientation.Horizontal, 14);
-            foreach (var card in rail.Items) row.Append(BuildCard(card));
-            var scroller = Gtk.ScrolledWindow.New();
-            scroller.SetPolicy(Gtk.PolicyType.Automatic, Gtk.PolicyType.Never);
-            scroller.SetChild(row);
-            column.Append(scroller);
+            // One row of RailColumns whole cards that share the width (a short rail keeps the same card size): never a
+            // card cut off at the window edge, as a horizontally scrolled rail had.
+            var grid = Gtk.Grid.New();
+            grid.SetColumnHomogeneous(true);
+            grid.SetColumnSpacing(14);
+            for (var i = 0; i < RailColumns; i++)
+            {
+                grid.Attach(i < rail.Items.Count ? BuildCard(rail.Items[i]) : Gtk.Box.New(Gtk.Orientation.Vertical, 0), i, 0, 1, 1);
+            }
+
+            column.Append(grid);
         }
 
         var page = Gtk.ScrolledWindow.New();
@@ -250,15 +259,21 @@ public sealed class MainWindow
         return page;
     }
 
+    /// <summary>Cards per home rail: four, sharing the width.</summary>
+    private const int RailColumns = 4;
+
     private Gtk.Widget BuildCard(VideoCardViewModel card)
     {
         var box = Gtk.Box.New(Gtk.Orientation.Vertical, 6);
-        box.SetSizeRequest(260, -1);
+        box.SetSizeRequest(200, -1);
 
         var picture = Gtk.Picture.New();
-        picture.SetSizeRequest(260, 146);
+        picture.SetSizeRequest(200, 112);
         picture.SetContentFit(Gtk.ContentFit.Cover);
-        box.Append(picture);
+        // 16:9 at any cell width: the grid stretches its cards to fill the row, and a fixed height would crop the title card.
+        var frame = Gtk.AspectFrame.New(0.5f, 0.5f, 16f / 9f, false);
+        frame.SetChild(picture);
+        box.Append(frame);
         _ = LoadThumbnailAsync(picture, card.ThumbnailUrl);
 
         var title = Gtk.Label.New(card.Title);
@@ -268,7 +283,7 @@ public sealed class MainWindow
         title.AddCssClass("heading");
         box.Append(title);
 
-        // Channel on one line, views • duration on the next: a compact Arabic count («١٢٫٨ ألف مشاهدة») is a word longer
+        // Channel on one line, views · duration on the next: a compact Arabic count («١٢٫٨ ألف مشاهدة») is a word longer
         // than the full number, and on one shared line it pushed the duration out of the 260 px card.
         foreach (var text in new[] { card.Channel, card.Stats })
         {

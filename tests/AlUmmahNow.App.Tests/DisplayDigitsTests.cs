@@ -93,7 +93,7 @@ public class DisplayDigitsTests
     [Fact]
     public void Arabic_joins_with_a_bullet_because_the_middle_dot_reads_as_zero()
     {
-        Assert.Equal("\u2068عام\u2069 • \u2068١٫٢ ألف مشاهدة\u2069", new Localizer("ar").Join("عام", null, "", new Localizer("ar").Views(1200)));
+        Assert.Equal("\u2068عام\u2069، \u2068١٫٢ ألف مشاهدة\u2069", new Localizer("ar").Join("عام", null, "", new Localizer("ar").Views(1200)));
         Assert.Equal("\u2068Public\u2069 · \u20681.2K views\u2069", new Localizer("en").Join("Public", null, "", new Localizer("en").Views(1200)));
     }
 
@@ -103,7 +103,7 @@ public class DisplayDigitsTests
         // An Arabic channel name in an English line keeps its order and does not pull the number after it into its run.
         Assert.Equal("\u2068الأمة الآن\u2069 · \u20681.5K views\u2069", new Localizer("en").Join("الأمة الآن", "1.5K views"));
         // And an English name in an Arabic line.
-        Assert.Equal("\u2068Al Ummah Now\u2069 • \u2068١٫٥ ألف مشاهدة\u2069", new Localizer("ar").Join("Al Ummah Now", "١٫٥ ألف مشاهدة"));
+        Assert.Equal("\u2068Al Ummah Now\u2069، \u2068١٫٥ ألف مشاهدة\u2069", new Localizer("ar").Join("Al Ummah Now", "١٫٥ ألف مشاهدة"));
     }
 
     [Fact]

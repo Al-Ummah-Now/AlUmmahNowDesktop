@@ -61,7 +61,7 @@ public sealed partial class AnalyticsViewModel : ObservableObject
             var page = await _api.ListVideosAsync(new StudioVideoQuery { ChannelId = channelId, Limit = 100 });
             var byId = page.Items.GroupBy(v => v.Id).ToDictionary(g => g.Key, g => g.First().TitleLocalized);
             return top.Select(v => v.TitleLocalized.Count == 0 && byId.TryGetValue(v.Id, out var localized)
-                ? new TopVideo(v.Id, v.Title, v.Views, localized)
+                ? new TopVideo(v.Id, v.Title, v.Views, localized, v.ThumbnailUrl)
                 : v).ToList();
         }
         catch (StudioApiException ex)

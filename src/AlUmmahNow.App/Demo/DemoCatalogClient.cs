@@ -10,8 +10,8 @@ namespace AlUmmahNow.App.Demo
 {
     /// <summary>
     /// Fixture catalog for CI screenshots (<c>AUN_DEMO=1</c>): canned videos in every home rail, no
-    /// network. Never used in a normal launch. Thumbnails are title cards <c>thumb-1.jpg</c>… (one per
-    /// video), or else <c>thumb-1.png</c>,
+    /// network. Never used in a normal launch. Thumbnails are title cards in the UI language
+    /// (<c>thumb-1.jpg</c>… in English, <c>thumb-1.ar.jpg</c>… in Arabic, one per video), or else <c>thumb-1.png</c>,
     /// <c>thumb-2.png</c>… in an optional folder (the store screenshot workflow draws them); without
     /// it the cards show their placeholder.
     /// </summary>
@@ -35,11 +35,19 @@ namespace AlUmmahNow.App.Demo
             ("ramadan", "Iftar around the world", "الإفطار حول العالم"),
         };
 
-        private static readonly string[] Channels = { "Al Ummah Now", "Noor Channel", "Masjid Live", "Seerah Stories" };
+        // Each channel's name as its creator gives it in each language (an Arabic page never shows a Latin name).
+        private static readonly (string En, string Ar)[] Channels =
+        {
+            ("Al Ummah Now", "الأمة الآن"), ("Noor Channel", "قناة النور"), ("Masjid Live", "المسجد مباشر"), ("Seerah Stories", "قصص السيرة"),
+        };
+
+        /// <summary>A demo channel's name in <paramref name="language"/>.</summary>
+        public static string ChannelName(int index, string language) =>
+            language == "ar" ? Channels[index % Channels.Length].Ar : Channels[index % Channels.Length].En;
 
         private readonly IReadOnlyList<Video> _videos;
 
-        public DemoCatalogClient(string? thumbnailFolder = null)
+        public DemoCatalogClient(string? thumbnailFolder = null, string language = "ar")
         {
             var start = new DateTimeOffset(2026, 11, 1, 9, 0, 0, TimeSpan.Zero);
             _videos = Fixtures.Select((f, i) => new Video
@@ -47,8 +55,8 @@ namespace AlUmmahNow.App.Demo
                 Id = "demo-v" + (i + 1),
                 Title = new LocalizedText(f.En, new Dictionary<string, string> { ["en"] = f.En, ["ar"] = f.Ar }),
                 Description = new LocalizedText(""),
-                ChannelName = Channels[i % Channels.Length],
-                ThumbnailUrl = Thumbnail(thumbnailFolder, i),
+                ChannelName = ChannelName(i, language),
+                ThumbnailUrl = Thumbnail(thumbnailFolder, i, language),
                 // Never fetched: the screenshots stay on the home page.
                 PlayUrl = "https://demo.invalid/" + (i + 1) + ".m3u8",
                 DurationSeconds = 240 + i * 97,
@@ -60,11 +68,13 @@ namespace AlUmmahNow.App.Demo
             }).ToList();
         }
 
-        private static string? Thumbnail(string? folder, int index)
+        private static string? Thumbnail(string? folder, int index, string language)
         {
             if (string.IsNullOrEmpty(folder)) return null;
-            // A title card per video (thumb-N.jpg, tests/fixtures/viewer-thumbs) when present; else the store
-            // workflow's eight drawn backgrounds (thumb-1.png … thumb-8.png), reused.
+            // A title card per video in the UI language (thumb-N.ar.jpg / thumb-N.jpg, tests/fixtures/viewer-thumbs)
+            // when present; else the store workflow's eight drawn backgrounds (thumb-1.png … thumb-8.png), reused.
+            var localized = Path.Combine(folder, "thumb-" + (index + 1) + "." + language + ".jpg");
+            if (language != "en" && File.Exists(localized)) return new Uri(Path.GetFullPath(localized)).AbsoluteUri;
             var card = Path.Combine(folder, "thumb-" + (index + 1) + ".jpg");
             if (File.Exists(card)) return new Uri(Path.GetFullPath(card)).AbsoluteUri;
             var path = Path.Combine(folder, "thumb-" + (index % 8 + 1) + ".png");

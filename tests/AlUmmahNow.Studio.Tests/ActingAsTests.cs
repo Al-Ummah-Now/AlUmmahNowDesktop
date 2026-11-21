@@ -24,7 +24,7 @@ public sealed class ActingAsTests
 
     [Theory]
     [InlineData("en", "Channel · Editor")]
-    [InlineData("ar", "قناة • محرّر")]
+    [InlineData("ar", "قناة، محرّر")]
     public void NonOwnersSeeTheirRoleAfterTheTag(string language, string expected)
     {
         var l = new Localizer(language);

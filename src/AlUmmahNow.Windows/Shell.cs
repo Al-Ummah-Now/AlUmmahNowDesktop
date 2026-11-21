@@ -233,34 +233,42 @@ public sealed class Shell
         foreach (var rail in Home.Rails)
         {
             column.Children.Add(new TextBlock { Text = rail.Title, FontSize = 20, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-            var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 14 };
-            foreach (var card in rail.Items) row.Children.Add(BuildCard(card));
-            column.Children.Add(new ScrollViewer
+            // One row of RailColumns whole cards that share the width (a short rail keeps the same card size): never a
+            // card cut off at the window edge, as a horizontally scrolled rail had.
+            var grid = new Grid { ColumnSpacing = 14 };
+            for (var i = 0; i < RailColumns; i++)
             {
-                Content = row,
-                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
-                HorizontalScrollMode = ScrollMode.Enabled,
-                VerticalScrollMode = ScrollMode.Disabled,
-                VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
-            });
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                if (i >= rail.Items.Count) continue;
+                var card = BuildCard(rail.Items[i]);
+                Grid.SetColumn(card, i);
+                grid.Children.Add(card);
+            }
+
+            column.Children.Add(grid);
         }
 
         return new ScrollViewer { Content = column };
     }
 
+    /// <summary>Cards per home rail: four, sharing the width.</summary>
+    private const int RailColumns = 4;
+
     private FrameworkElement BuildCard(VideoCardViewModel card)
     {
-        var panel = new StackPanel { Width = 260, Spacing = 4 };
-        var image = new Image { Width = 260, Height = 146, Stretch = Stretch.UniformToFill };
+        var panel = new StackPanel { Spacing = 4 };
+        var image = new Image { Height = 146, Stretch = Stretch.UniformToFill };
+        // 16:9 at the card's width (the cards share the rail's width).
+        panel.SizeChanged += (_, e) => image.Height = e.NewSize.Width * 9 / 16;
         if (!string.IsNullOrEmpty(card.ThumbnailUrl)) image.Source = new BitmapImage(new Uri(card.ThumbnailUrl));
         panel.Children.Add(image);
         panel.Children.Add(new TextBlock { Text = card.Title, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis });
-        // Channel on one line, views • duration on the next, so a compact Arabic count never trims the duration.
+        // Channel on one line, views · duration on the next, so a compact Arabic count never trims the duration.
         foreach (var text in new[] { card.Channel, card.Stats })
         {
             if (!string.IsNullOrEmpty(text)) panel.Children.Add(new TextBlock { Text = text, Opacity = 0.7, TextTrimming = TextTrimming.CharacterEllipsis });
         }
-        var button = new Button { Content = panel, Padding = new Thickness(6), Background = new SolidColorBrush(Colors.Transparent), BorderThickness = new Thickness(0) };
+        var button = new Button { Content = panel, Padding = new Thickness(6), Background = new SolidColorBrush(Colors.Transparent), BorderThickness = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Top };
         AutomationName(button, card.Title);
         button.Click += (_, _) => Home.Open(card);
         return button;

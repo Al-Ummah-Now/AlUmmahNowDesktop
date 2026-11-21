@@ -122,14 +122,17 @@ jobs:
           truncate -s 1500000 "staged/درس 1.mp4" "staged/درس 2.mp4" "staged/lesson 10.mp4"
           truncate -s 2000000 watched/friday-khutbah.mp4 watched/seerah-part-4.mov
           export AUN_STAGE_DIR=$PWD/staged AUN_WATCH_DIR=$PWD/watched
+          # Title-card thumbnails in the frame's language (tests/fixtures/studio-thumbs, scripts/title-cards.py).
+          export AUN_DEMO_THUMBS=$PWD/tests/fixtures/studio-thumbs
           n=0
           for lang in en ar; do for theme in dark light; do
             shot uploads "" $lang $theme 1440x900; shot uploads channels $lang $theme 1440x900
             shot uploads "" $lang $theme 1920x1080; shot uploads "" $lang $theme 1024x700
             shot uploads scheduled $lang $theme 1440x900
             shot videos "" $lang $theme 1440x900; shot videos bulk $lang $theme 1440x900
-            shot videos "" $lang $theme 1920x1080; shot videos "" $lang $theme 1024x700
-            shot analytics "" $lang $theme 1440x900; shot analytics "" $lang $theme 1920x1080; shot analytics "" $lang $theme 1024x700
+            # The narrow window (icon rail) at full-page height for the scrolling pages, so no card or chart is cut off.
+            shot videos "" $lang $theme 1920x1080; shot videos "" $lang $theme 1024x1180
+            shot analytics "" $lang $theme 1440x900; shot analytics "" $lang $theme 1920x1080; shot analytics "" $lang $theme 1024x820
             shot timeline "" $lang $theme 1440x900; shot encode "" $lang $theme 1440x900; shot timeline "" $lang $theme 1024x700
             shot settings "" $lang $theme 1440x900; shot settings "" $lang $theme 1024x700
             # Signed out: the sign-in card.

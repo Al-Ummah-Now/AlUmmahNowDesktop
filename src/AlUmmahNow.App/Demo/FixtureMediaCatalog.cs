@@ -22,9 +22,12 @@ namespace AlUmmahNow.App.Demo
         private readonly string _captions;
         private readonly string _arabicCaptions;
 
-        public FixtureMediaCatalog(ICatalogClient inner, string folder)
+        private readonly string _language;
+
+        public FixtureMediaCatalog(ICatalogClient inner, string folder, string language = "ar")
         {
             _inner = inner;
+            _language = language;
             var root = Path.GetFullPath(folder);
             _video = new Uri(Path.Combine(root, "watch.mp4")).AbsoluteUri;
             _captions = new Uri(Path.Combine(root, "watch.vtt")).AbsoluteUri;
@@ -42,7 +45,7 @@ namespace AlUmmahNow.App.Demo
                     // The frames show this page: a real-looking video (its own title card), never "fixture" text.
                     Title = new LocalizedText("Reflections on Surah Al-Kahf, part 1", new Dictionary<string, string> { ["en"] = "Reflections on Surah Al-Kahf, part 1", ["ar"] = "تأملات في سورة الكهف، الجزء الأول" }),
                     Description = new LocalizedText(""),
-                    ChannelName = "Masjid Live",
+                    ChannelName = DemoCatalogClient.ChannelName(2, _language),
                     PlayUrl = _video,
                     DurationSeconds = 40,
                     IsPublic = true,
