@@ -402,7 +402,14 @@ public sealed class VideosPage
         body.SetMarginStart(14);
         body.SetMarginEnd(14);
         body.SetMarginTop(10);
-        card.Append(body);
+        // The title and meta line must not set the card's minimum width: in English it came out wider than in Arabic, so
+        // the grid's columns no longer fit the window. An external horizontal policy ignores the text's width request;
+        // the body takes the width the grid gives the card and the labels wrap or ellipsize inside it.
+        var bodyFrame = Gtk.ScrolledWindow.New();
+        bodyFrame.SetPolicy(Gtk.PolicyType.External, Gtk.PolicyType.Never);
+        bodyFrame.SetPropagateNaturalHeight(true);
+        bodyFrame.SetChild(body);
+        card.Append(bodyFrame);
         var bar = Gtk.Box.New(Gtk.Orientation.Horizontal, 0);
         bar.AddCssClass("card-footer");
         bar.AddCssClass("quiet");
