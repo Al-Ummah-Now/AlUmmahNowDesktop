@@ -1,6 +1,4 @@
 using System.Collections.Concurrent;
-using System.Security.Cryptography;
-using System.Text;
 using AlUmmahNow.CoreBridge.Logging;
 
 namespace AlUmmahNow.Studio.Linux;
@@ -19,7 +17,9 @@ public static class VideoPoster
 
     private static async Task<byte[]?> Read(string path)
     {
-        var output = Path.Combine(Path.GetTempPath(), "aun-poster-" + Hash(path) + ".jpg");
+        // A fresh directory only this user can open (0700), so no other account can plant a link where the frame is written.
+        var dir = Directory.CreateTempSubdirectory("aun-poster-");
+        var output = Path.Combine(dir.FullName, "frame.jpg");
         Gst.Element? pipeline = null;
         try
         {
@@ -52,17 +52,15 @@ public static class VideoPoster
             pipeline?.SetState(Gst.State.Null);
             try
             {
-                File.Delete(output);
+                dir.Delete(true);
             }
             catch (IOException)
             {
-                // A temporary file left behind is harmless.
+                // A private temporary folder left behind is harmless.
             }
         }
     }
 
     /// <summary>A gst-launch string literal: quoted, with backslashes and quotes escaped.</summary>
     public static string Quote(string value) => "\"" + value.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
-
-    private static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)))[..16];
 }
