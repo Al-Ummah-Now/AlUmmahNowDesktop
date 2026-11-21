@@ -86,21 +86,21 @@ public sealed class DemoTransport : IApiTransport
         var videos = new[]
         {
             new DemoVideo("تأملات في سورة الكهف — الجزء الأول", "Reflections on Surah Al-Kahf, part one", "تأملات في سورة الكهف — الجزء الأول",
-                "quran_tafsir", "ar", true, 3412, 186, 27, 2675, "2026-11-17T18:40:00Z", new[] { "تفسير", "سورة الكهف" }),
+                "quran_tafsir", "ar", true, 3412, 186, 27, 2675, Ago(32, "18:40"), new[] { "تفسير", "سورة الكهف" }),
             new DemoVideo("Seerah: the early years in Makkah", "Seerah: the early years in Makkah", "السيرة: السنوات الأولى في مكة",
-                "islamic_history", "en", true, 0, 0, 0, 3390, "2026-11-20T21:05:00Z", new[] { "seerah", "makkah" }),
+                "islamic_history", "en", true, 0, 0, 0, 3390, Ago(1, "21:05"), new[] { "seerah", "makkah" }),
             new DemoVideo("أحكام الصيام للمبتدئين", "Fasting rulings for beginners", "أحكام الصيام للمبتدئين",
-                "fiqh", "ar", false, 1046, 58, 9, 1291, "2026-11-14T06:15:00Z", new[] { "صيام", "فقه" }),
+                "fiqh", "ar", false, 1046, 58, 9, 1291, Ago(35, "06:15"), new[] { "صيام", "فقه" }),
             new DemoVideo("Arabic grammar, part 3", "Arabic grammar, part 3", "النحو العربي، الجزء الثالث",
-                "islamic_lectures", "en", true, 587, 31, 4, 2214, "2026-11-12T16:30:00Z", new[] { "arabic", "nahw" }),
+                "islamic_lectures", "en", true, 587, 31, 4, 2214, Ago(38, "16:30"), new[] { "arabic", "nahw" }),
             new DemoVideo("خطبة الجمعة: الصبر", "Friday khutbah: patience", "خطبة الجمعة: الصبر",
-                "khutbah", "ar", true, 7935, 402, 61, 1688, "2026-11-06T13:10:00Z", new[] { "خطبة", "الصبر" }),
+                "khutbah", "ar", true, 7935, 402, 61, 1688, Ago(41, "13:10"), new[] { "خطبة", "الصبر" }),
             new DemoVideo("Hadith of the week: intentions", "Hadith of the week: intentions", "حديث الأسبوع: النيات",
-                "hadith_studies", "en", false, 248, 12, 2, 486, "2026-11-04T09:20:00Z", new[] { "hadith", "niyyah" }),
+                "hadith_studies", "en", false, 248, 12, 2, 486, Ago(45, "09:20"), new[] { "hadith", "niyyah" }),
             new DemoVideo("قصص الأنبياء: يونس عليه السلام", "Stories of the prophets: Yunus", "قصص الأنبياء: يونس عليه السلام",
-                "islamic_history", "ar", true, 2193, 97, 14, 1462, "2026-10-29T19:45:00Z", new[] { "قصص الأنبياء", "يونس" }),
+                "islamic_history", "ar", true, 2193, 97, 14, 1462, Ago(52, "19:45"), new[] { "قصص الأنبياء", "يونس" }),
             new DemoVideo("Q&A: prayer while travelling", "Q&A: prayer while travelling", "سؤال وجواب: الصلاة في السفر",
-                "fiqh", "en", true, 1608, 73, 22, 903, "2026-10-23T11:00:00Z", new[] { "salah", "travel" }),
+                "fiqh", "en", true, 1608, 73, 22, 903, Ago(58, "11:00"), new[] { "salah", "travel" }),
         };
         _videos = videos.Select((v, i) => new Dictionary<string, object?>
         {
@@ -288,7 +288,7 @@ public sealed class DemoTransport : IApiTransport
                     totalComments = Sum("commentsCount"),
                     totalSubscribers = 212,
                     topPerformingVideos = _videos.OrderByDescending(v => Convert.ToInt64(v["views"], System.Globalization.CultureInfo.InvariantCulture)).Take(5)
-                        .Select(v => new { videoId = v["id"], title = v["title"], titleLocalized = v["titleLocalized"], views = v["views"], thumbnailUrl = v["thumbnailUrl"] }),
+                        .Select(v => new { videoId = v["id"], title = v["title"], titleLocalized = v["titleLocalized"], views = PeriodViews(v), thumbnailUrl = v["thumbnailUrl"] }),
                     recentMetrics = DemoSeries.Days(start, 28, Sum("views"), Sum("likesCount"), Sum("commentsCount"), subscribers: 46)
                         .Select(d => new { date = d.Date.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture), views = d.Views, likes = d.Likes, comments = d.Comments, subscribers = d.Subscribers, watchTime = d.WatchSeconds }),
                 });
@@ -300,6 +300,20 @@ public sealed class DemoTransport : IApiTransport
                 return "{\"success\":true}";
         }
     }
+
+    /// <summary>
+    /// Upload days relative to today: every ready video went up before the 28-day chart window, so the analytics never
+    /// credit a video with views from before its upload. Only the processing video (no views yet) is from yesterday.
+    /// </summary>
+    private static string Ago(int days, string time) =>
+        DateTime.UtcNow.Date.AddDays(-days).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) + "T" + time + ":00Z";
+
+    /// <summary>
+    /// A top video's views in the 28-day period: the same share of its lifetime views as the period's Views card takes of
+    /// the library's (<see cref="DemoSeries.PeriodShare"/>), so the top five never add up to more than the card.
+    /// </summary>
+    private static long PeriodViews(Dictionary<string, object?> video) =>
+        (long)Math.Floor(Convert.ToInt64(video["views"], System.Globalization.CultureInfo.InvariantCulture) * DemoSeries.PeriodShare);
 
     private string? Thumbnail(int index)
     {
@@ -333,6 +347,9 @@ public sealed class DemoTransport : IApiTransport
 /// </summary>
 public static class DemoSeries
 {
+    /// <summary>The share of the library's lifetime views that falls in the 28-day period.</summary>
+    public const double PeriodShare = 0.82;
+
     public sealed record DemoDay(DateTime Date, long Views, long Likes, long Comments, long Subscribers, long WatchSeconds);
 
     public static IReadOnlyList<DemoDay> Days(DateTime start, int n, long libraryViews, long libraryLikes, long libraryComments, long subscribers)
@@ -347,7 +364,7 @@ public static class DemoSeries
         // A slow climb across the period, plus a new-upload spike on day 6 and a shared-link spike on day 19.
         var weights = dates.Select((d, i) => Weekday(d.DayOfWeek) * (0.85 + 0.3 * i / Math.Max(1, n - 1)) * (0.82 + 0.36 * random.NextDouble())
             * (i == 6 ? 2.1 : i == 19 ? 1.7 : i == 7 ? 1.35 : 1.0)).ToList();
-        var views = Split((long)Math.Round(libraryViews * 0.82), weights);
+        var views = Split((long)Math.Round(libraryViews * PeriodShare), weights);
         var likes = Split((long)Math.Round(libraryLikes * 0.85), weights.Select(w => w * (0.7 + 0.6 * random.NextDouble())).ToList());
         var comments = Split((long)Math.Round(libraryComments * 0.85), weights.Select(w => w * (0.5 + random.NextDouble())).ToList());
         var subs = Split(subscribers, weights.Select(w => w * (0.6 + 0.8 * random.NextDouble())).ToList());
