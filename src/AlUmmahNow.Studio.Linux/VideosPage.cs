@@ -359,21 +359,23 @@ public sealed class VideosPage
             thumb.AddOverlay(duration);
         }
 
-        var check = Gtk.CheckButton.NewWithLabel(title);
+        // Our own label as the check button's child: the label a CheckButton makes from NewWithLabel is internal (GetChild
+        // returns null), so it could never wrap and a long title ran one line to the card's edge. This one wraps to two
+        // lines inside the width the card gets, then ellipsizes; a small natural width keeps it from widening the card.
+        var label = Gtk.Label.New(title);
+        label.SetWrap(true);
+        label.SetWrapMode(Pango.WrapMode.WordChar);
+        label.SetLines(2);
+        label.SetEllipsize(Pango.EllipsizeMode.End);
+        label.SetMaxWidthChars(18);
+        label.SetXalign(0);
+        label.SetHexpand(true);
+        label.AddCssClass("heading");
+        var check = Gtk.CheckButton.New();
+        check.SetChild(label);
         check.SetActive(_vm.IsSelected(v.Id));
         Ui.Named(check, _l.Format("studio.videos.select", title));
         check.OnToggled += (_, _) => _vm.SetSelected(v.Id, check.GetActive());
-        if (check.GetChild() is Gtk.Label label)
-        {
-            label.SetWrap(true);
-            label.SetLines(2);
-            label.SetEllipsize(Pango.EllipsizeMode.End);
-            // The grid flows at the cards' natural width, so a long one-line title would drop a column in one language
-            // only; capped, every language gets the night tile's width and the same number of columns.
-            label.SetMaxWidthChars(18);
-            label.SetXalign(0);
-            label.AddCssClass("heading");
-        }
 
         var meta = Ui.Label(_l.Join(_l.Views(v.Views), v.CreatedAt is { } at ? _l.Date(at) : null, v.Category is { } c ? _l["studio.category." + c] : null), dim: true);
         meta.AddCssClass("caption");
