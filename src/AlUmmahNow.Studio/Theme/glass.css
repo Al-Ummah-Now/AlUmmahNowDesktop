@@ -152,6 +152,3 @@ button.kpi:checked {
 }
 .hero-card { padding-top: 26px; }
 .hero-icon { border-radius: 56px; box-shadow: 0 0 0 3px alpha(#ffd98a, 0.6), 0 0 50px 4px alpha(#f4ae3a, 0.45); }
-/* A closed expander points toward the reading direction. The Adwaita stylesheet asks for "pan-end-symbolic-rtl",
-   which the icon theme lacks, so the lookup falls back to the right-pointing arrow on Arabic pages. */
-expander-widget expander:dir(rtl):not(:checked) { -gtk-icon-source: -gtk-icontheme("pan-start-symbolic"); }
