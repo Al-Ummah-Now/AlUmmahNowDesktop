@@ -33,6 +33,21 @@ namespace AlUmmahNow.App.Demo
             ("islamic_nasheed", "A nasheed for the morning", "نشيد الصباح"),
             ("ramadan", "Preparing for Ramadan", "الاستعداد لرمضان"),
             ("ramadan", "Iftar around the world", "الإفطار حول العالم"),
+            // Four per category, so every category rail fills its row.
+            ("quran_recitation", "Surah Yasin, full recitation", "سورة يس كاملة"),
+            ("quran_recitation", "Surah Al-Waqi'ah", "سورة الواقعة"),
+            ("quran_tafsir", "Reflections on Surah Yusuf", "تأملات في سورة يوسف"),
+            ("quran_tafsir", "Ayat al-Kursi explained", "شرح آية الكرسي"),
+            ("hadith_studies", "Hadith of the week: mercy", "حديث الأسبوع: الرحمة"),
+            ("hadith_studies", "Forty hadith, episode 3", "الأربعون النووية، الحلقة الثالثة"),
+            ("fiqh", "Zakat: who pays and how", "الزكاة: على من تجب وكيف تُخرج"),
+            ("fiqh", "Wudu step by step", "الوضوء خطوة بخطوة"),
+            ("islamic_history", "The House of Wisdom in Baghdad", "بيت الحكمة في بغداد"),
+            ("islamic_history", "Salah al-Din and Jerusalem", "صلاح الدين والقدس"),
+            ("islamic_nasheed", "A nasheed for the evening", "نشيد المساء"),
+            ("islamic_nasheed", "Mawlay salli wa sallim", "مولاي صلّ وسلّم"),
+            ("ramadan", "Laylat al-Qadr reminders", "تذكير بليلة القدر"),
+            ("ramadan", "Suhoor ideas for busy days", "أفكار للسحور في الأيام المزدحمة"),
         };
 
         // Each channel's name as its creator gives it in each language (an Arabic page never shows a Latin name).

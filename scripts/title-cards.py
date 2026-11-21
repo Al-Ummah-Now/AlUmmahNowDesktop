@@ -33,6 +33,20 @@ VIEWER = [  # (category, English, Arabic): DemoCatalogClient.Fixtures
     ("islamic_nasheed", "A nasheed for the morning", "نشيد الصباح"),
     ("ramadan", "Preparing for Ramadan", "الاستعداد لرمضان"),
     ("ramadan", "Iftar around the world", "الإفطار حول العالم"),
+    ("quran_recitation", "Surah Yasin, full recitation", "سورة يس كاملة"),
+    ("quran_recitation", "Surah Al-Waqi'ah", "سورة الواقعة"),
+    ("quran_tafsir", "Reflections on Surah Yusuf", "تأملات في سورة يوسف"),
+    ("quran_tafsir", "Ayat al-Kursi explained", "شرح آية الكرسي"),
+    ("hadith_studies", "Hadith of the week: mercy", "حديث الأسبوع: الرحمة"),
+    ("hadith_studies", "Forty hadith, episode 3", "الأربعون النووية، الحلقة الثالثة"),
+    ("fiqh", "Zakat: who pays and how", "الزكاة: على من تجب وكيف تُخرج"),
+    ("fiqh", "Wudu step by step", "الوضوء خطوة بخطوة"),
+    ("islamic_history", "The House of Wisdom in Baghdad", "بيت الحكمة في بغداد"),
+    ("islamic_history", "Salah al-Din and Jerusalem", "صلاح الدين والقدس"),
+    ("islamic_nasheed", "A nasheed for the evening", "نشيد المساء"),
+    ("islamic_nasheed", "Mawlay salli wa sallim", "مولاي صلّ وسلّم"),
+    ("ramadan", "Laylat al-Qadr reminders", "تذكير بليلة القدر"),
+    ("ramadan", "Suhoor ideas for busy days", "أفكار للسحور في الأيام المزدحمة"),
 ]
 VIEWER_CHANNELS = [("Al Ummah Now", "الأمة الآن"), ("Noor Channel", "قناة النور"), ("Masjid Live", "المسجد مباشر"), ("Seerah Stories", "قصص السيرة")]
 
@@ -63,7 +77,7 @@ CARD = """<!doctype html><html lang="{lang}" dir="{dir}"><meta charset="utf-8"><
 html,body{{margin:0;width:1280px;height:720px;overflow:hidden}}
 body{{background:radial-gradient(120% 140% at {glow} 0%,{b} 0%,{a} 70%);font-family:{font};color:#f6ecd6;
   display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;position:relative}}
-.lamp{{position:absolute;top:-40px;{end}:120px;width:4px;height:150px;background:linear-gradient(#e9b54b00,#e9b54b)}}
+.lamp{{position:absolute;top:-40px;{start}:120px;width:4px;height:150px;background:linear-gradient(#e9b54b00,#e9b54b)}}
 .lamp::after{{content:"";position:absolute;bottom:-34px;left:-26px;width:56px;height:56px;border-radius:50%;
   background:radial-gradient(circle at 40% 35%,#ffe9a8,#e9a63a 60%,#b9761e);box-shadow:0 0 60px 18px #e9b54b55}}
 h1{{font-size:{size}px;line-height:1.25;margin:0 120px;font-weight:700;text-shadow:0 4px 18px #0008}}
