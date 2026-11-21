@@ -9,6 +9,7 @@ namespace AlUmmahNow.Studio.Linux;
 /// </summary>
 public static class VideoPoster
 {
+    private static readonly Logger Logger = Log.For("ui");
     private const int Width = 320;
     private static readonly TimeSpan Limit = TimeSpan.FromSeconds(10);
     private static readonly ConcurrentDictionary<string, Task<byte[]?>> Frames = new(StringComparer.Ordinal);
