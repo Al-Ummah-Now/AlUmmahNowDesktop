@@ -52,11 +52,30 @@ public sealed class AnalyticsPage
         _chart.SetHasTooltip(true);
         chartBody.Append(_chart);
         chartBody.Append(_summary);
-        var tableExpander = Gtk.Expander.New(l["studio.analytics.table"]);
         _table.SetColumnSpacing(24);
         _table.SetRowSpacing(2);
-        tableExpander.SetChild(_table);
-        chartBody.Append(tableExpander);
+        // A disclosure of our own, not Gtk.Expander: the theme draws the expander's closed arrow from an icon that
+        // falls back to a right-pointing one on Arabic pages. Closed, the arrow points along the reading direction.
+        var closedIcon = l.IsRtl ? "pan-start-symbolic" : "pan-end-symbolic";
+        var arrow = Gtk.Image.NewFromIconName(closedIcon);
+        var toggleRow = Gtk.Box.New(Gtk.Orientation.Horizontal, 6);
+        toggleRow.Append(arrow);
+        toggleRow.Append(Gtk.Label.New(l["studio.analytics.table"]));
+        var tableToggle = Gtk.ToggleButton.New();
+        tableToggle.SetChild(toggleRow);
+        tableToggle.AddCssClass("flat");
+        tableToggle.SetHalign(Gtk.Align.Start);
+        var tableReveal = Gtk.Revealer.New();
+        tableReveal.SetTransitionType(Gtk.RevealerTransitionType.SlideDown);
+        tableReveal.SetChild(_table);
+        tableToggle.OnToggled += (_, _) =>
+        {
+            var open = tableToggle.GetActive();
+            arrow.SetFromIconName(open ? "pan-down-symbolic" : closedIcon);
+            tableReveal.SetRevealChild(open);
+        };
+        chartBody.Append(tableToggle);
+        chartBody.Append(tableReveal);
         var chartCard = Ui.Card(chartBody);
         chartCard.SetHexpand(true);
         chartCard.SetValign(Gtk.Align.Start);
