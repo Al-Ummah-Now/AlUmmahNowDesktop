@@ -29,6 +29,23 @@ public class DemoDataTests
     }
 
     [Fact]
+    public async Task UploadDatesAreNotEvenlySpaced()
+    {
+        var api = new StudioApiClient(new DemoTransport());
+        var videos = await api.ListVideosAsync(new StudioVideoQuery { ChannelId = "demo-c1", Limit = 100 });
+        // A real channel does not upload every third day: the gaps between uploads with views differ.
+        var days = videos.Items.Where(v => v.Views > 0 && v.CreatedAt != null).Select(v => v.CreatedAt!.Value.UtcDateTime.Date)
+            .OrderByDescending(d => d).ToList();
+        var gaps = days.Zip(days.Skip(1), (a, b) => (a - b).Days).ToList();
+        Assert.True(gaps.Count >= 3);
+        Assert.True(gaps.Distinct().Count() > gaps.Count / 2, "upload gaps repeat: " + string.Join(",", gaps));
+        Assert.NotEqual(gaps[0], gaps[1]);
+        Assert.NotEqual(gaps[1], gaps[2]);
+        // The processing video is the only recent one.
+        Assert.Contains(videos.Items, v => v.Views == 0 && v.CreatedAt > DateTimeOffset.UtcNow.AddDays(-3));
+    }
+
+    [Fact]
     public void TheDailySeriesIsNotARepeatingRamp()
     {
         var days = DemoSeries.Days(new DateTime(2026, 10, 25, 0, 0, 0, DateTimeKind.Utc), 28, 5960, 208, 36, 46);

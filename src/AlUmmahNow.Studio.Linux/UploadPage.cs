@@ -190,6 +190,9 @@ public sealed class UploadPage
             name.SetMnemonicWidget(control);
             name.SetXalign(0);
             name.SetValign(Gtk.Align.Start);
+            // Fixed line boxes: an Arabic line is a few pixels shorter than a Latin one, so the panel ended 25 px higher
+            // in Arabic. With these, both languages' panels have the same height.
+            name.SetSizeRequest(-1, Ui.FieldLabelLine);
             // Labels above the fields: the form sits in a narrow card.
             grid.Attach(name, 0, row++, 1, 1);
             control.SetHexpand(true);
@@ -203,6 +206,7 @@ public sealed class UploadPage
                 box.Append(control);
                 var h = Ui.Label(hint, dim: true);
                 h.AddCssClass("caption");
+                h.SetSizeRequest(-1, Ui.CaptionLine);
                 box.Append(h);
                 grid.Attach(box, 0, row, 1, 1);
             }

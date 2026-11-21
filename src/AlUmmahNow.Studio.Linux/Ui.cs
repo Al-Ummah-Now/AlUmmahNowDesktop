@@ -88,15 +88,42 @@ public static class Ui
     }
 
     /// <summary>A heading inside a card.</summary>
+    /// <summary>
+    /// Line boxes (px) for one line of text in either script. An Arabic line is a few pixels shorter than a Latin one, so
+    /// without them every English card and form came out taller than its Arabic twin.
+    /// </summary>
+    public const int PageTitleLine = 40, CardTitleLine = 30, FieldLabelLine = 24, CaptionLine = 20;
+
     public static Gtk.Label CardTitle(string text)
     {
         var label = Label(text);
         label.AddCssClass("title-4");
         label.SetWrap(false);
+        label.SetSizeRequest(-1, CardTitleLine);
         return label;
     }
 
     /// <summary>A video file's tile: night blue with a gold film glyph (the server makes the real thumbnail).</summary>
+    /// <summary>
+    /// Keeps a widget's height at <paramref name="ratioHeight"/>/<paramref name="ratioWidth"/> of the width it is given.
+    /// GTK 4 has no height-for-width box of a fixed shape, so the height request follows the allocated width each frame.
+    /// </summary>
+    public static void KeepAspect(Gtk.Widget widget, int ratioWidth, int ratioHeight, int minWidth = -1)
+    {
+        var last = -1;
+        widget.AddTickCallback((w, _) =>
+        {
+            var px = w.GetWidth();
+            if (px > 0 && px != last)
+            {
+                last = px;
+                w.SetSizeRequest(minWidth, (int)Math.Round(px * (double)ratioHeight / ratioWidth));
+            }
+
+            return true;
+        });
+    }
+
     public static Gtk.Widget FileTile(int width, int height)
     {
         var tile = Gtk.Box.New(Gtk.Orientation.Vertical, 0);

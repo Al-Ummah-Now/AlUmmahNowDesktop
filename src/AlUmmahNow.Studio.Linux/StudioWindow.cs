@@ -141,6 +141,7 @@ public sealed class StudioWindow
         _body.AddCssClass("studio-content");
         _title.AddCssClass("title-1");
         _title.SetXalign(0);
+        _title.SetSizeRequest(-1, Ui.PageTitleLine);
         _title.SetMarginStart(28);
         _title.SetMarginEnd(28);
         _title.SetMarginTop(20);
@@ -525,10 +526,13 @@ public sealed class StudioWindow
         var image = Gtk.Image.NewFromIconName(icon);
         image.SetSizeRequest(32, -1);
         box.Append(image);
+        // Wraps to the menu's width instead of cutting the account name short («تسجيل الخروج من Ami…»); a small natural
+        // width keeps a long name from widening the menu past the sidebar.
         var label = Gtk.Label.New(text);
         label.SetXalign(0);
-        label.SetEllipsize(Pango.EllipsizeMode.End);
-        label.SetMaxWidthChars(20);
+        label.SetWrap(true);
+        label.SetWrapMode(Pango.WrapMode.WordChar);
+        label.SetMaxWidthChars(12);
         label.SetHexpand(true);
         box.Append(label);
         var button = Gtk.Button.New();

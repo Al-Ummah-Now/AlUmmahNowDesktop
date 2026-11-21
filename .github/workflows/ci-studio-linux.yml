@@ -118,20 +118,25 @@ jobs:
               scripts/studio-scenario.sh $3 $1 shell "$name" artifacts/review "" "$2" > "artifacts/review/$name.log" 2>&1 || true
           }
           # Upload with three staged files and two watched ones uploading (simulated), so every card shows.
-          # Staged files are real short videos (title cards, scripts/title-cards.py) named in the frame's language, so each
-          # staged row shows its own first frame and an Arabic frame shows Arabic file names.
-          video() { # <card.jpg> <out.webm>
-            gst-launch-1.0 -q multifilesrc location="$1" loop=true num-buffers=40 caps="image/jpeg,framerate=8/1" ! jpegdec ! videoconvert \
-              ! vp8enc deadline=1 target-bitrate=4000000 keyframe-max-dist=8 ! webmmux ! filesink location="$2"
+          # Staged files are Noor Channel's own new short clips (title cards with the Noor badge, scripts/title-cards.py
+          # STAGED), named in the frame's language: each staged row shows its own first frame, an Arabic frame shows Arabic
+          # names, and both languages sort to the same order. A clip runs its real length (one frame a second); a still card
+          # compresses to almost nothing, so each file is then padded to the size a 720p clip of that length has, the same
+          # in both languages.
+          video() { # <card.jpg> <seconds> <bytes> <out.webm>
+            gst-launch-1.0 -q multifilesrc location="$1" loop=true num-buffers="$2" caps="image/jpeg,framerate=1/1" ! jpegdec ! videoconvert \
+              ! vp8enc deadline=1 target-bitrate=2000000 keyframe-max-dist=8 ! webmmux ! filesink location="$4"
+            test "$(stat -c %s "$4")" -lt "$3"
+            truncate -s "$3" "$4"
           }
-          cards=tests/fixtures/viewer-thumbs
+          cards=tests/fixtures/staged-cards
           mkdir -p staged-en staged-ar watched
-          video $cards/thumb-15.jpg "staged-en/Surah Yasin, full recitation.webm"
-          video $cards/thumb-18.jpg "staged-en/Ayat al-Kursi explained.webm"
-          video $cards/thumb-22.jpg "staged-en/Wudu step by step.webm"
-          video $cards/thumb-15.ar.jpg "staged-ar/سورة يس كاملة.webm"
-          video $cards/thumb-18.ar.jpg "staged-ar/شرح آية الكرسي.webm"
-          video $cards/thumb-22.ar.jpg "staged-ar/الوضوء خطوة بخطوة.webm"
+          video $cards/card-1.jpg 60 14632817 "staged-en/Hadith of the week, kindness in one minute.webm"
+          video $cards/card-2.jpg 90 21407253 "staged-en/Khutbah highlights, gratitude.webm"
+          video $cards/card-3.jpg 45 10894402 "staged-en/Surah Al-Kahf part two, preview.webm"
+          video $cards/card-1.ar.jpg 60 14632817 "staged-ar/حديث الأسبوع، الرفق في دقيقة.webm"
+          video $cards/card-2.ar.jpg 90 21407253 "staged-ar/خطبة الجمعة، مقتطفات عن الشكر.webm"
+          video $cards/card-3.ar.jpg 45 10894402 "staged-ar/سورة الكهف الجزء الثاني، مقدمة.webm"
           ls -la staged-en staged-ar
           truncate -s 2000000 watched/friday-khutbah.mp4 watched/seerah-part-4.mov
           export AUN_WATCH_DIR=$PWD/watched
