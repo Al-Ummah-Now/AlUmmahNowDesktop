@@ -72,6 +72,9 @@ public sealed partial class UploadsViewModel : ObservableObject, IDisposable
     /// "Publish every … hours" across a batch is bulk scheduling (<c>bulkSchedule</c>). Off: the field is hidden and
     /// every scheduled file publishes at the chosen time.
     /// </summary>
+    /// <summary>The page's clock: the real local time, or the demo's pinned day (AUN_DEMO_TODAY).</summary>
+    public DateTimeOffset Now => _now();
+
     public bool BulkScheduleOn => _shell.Features.IsOn(UserFeatures.BulkSchedule);
 
     public bool CanStart => Staged.Count > 0 && _service != null && _shell.ActiveChannel != null;

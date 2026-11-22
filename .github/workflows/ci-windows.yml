@@ -26,6 +26,8 @@ jobs:
       - name: Build unpackaged app
         run: dotnet build src/AlUmmahNow.Windows -c Release -p:Platform=x64
       - name: Run viewer scenarios (ar and en, home and watch)
+        env:
+          AUN_DEMO_TODAY: "2026-11-21"  # one demo "today" for every frame (DemoClock)
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force artifacts/windows | Out-Null
@@ -50,6 +52,8 @@ jobs:
             if (Test-Path "artifacts/windows/$n.txt.hang.txt") { throw "$n did not exit" }
           }
       - name: Review frames (demo catalog with title cards; the watch frames from the fixture runs)
+        env:
+          AUN_DEMO_TODAY: "2026-11-21"  # one demo "today" for every frame (DemoClock)
         shell: pwsh
         run: |
           # Owner review frames never show QA's test library: home uses the demo catalog and its title cards.

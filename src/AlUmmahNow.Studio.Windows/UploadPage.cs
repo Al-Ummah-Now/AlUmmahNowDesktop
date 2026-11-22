@@ -283,7 +283,7 @@ internal sealed class UploadPage
         panel.Children.Add(row);
 
         D.TimeZone = Formats.LocalTimeZone();
-        D.ScheduleStart ??= DateTimeOffset.Now.Date.AddDays(1).AddHours(9);
+        D.ScheduleStart ??= _vm.Now.Date.AddDays(1).AddHours(9);
         var start = new TextBox { Header = _l["studio.upload.scheduleStart"], Text = _l.InputDigits(Formats.ToLocalInput(D.ScheduleStart.Value)), MinWidth = 220 };
         start.TextChanged += (_, _) =>
         {

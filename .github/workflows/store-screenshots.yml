@@ -40,6 +40,8 @@ jobs:
         shell: pwsh
         run: ./scripts/set-resolution.ps1 1920 1080
       - name: Viewer (fixture catalog)
+        env:
+          AUN_DEMO_TODAY: "2026-11-21"  # one demo "today" for every frame (DemoClock)
         shell: pwsh
         run: |
           $out = (New-Item -ItemType Directory -Force shots/viewer).FullName
@@ -53,6 +55,8 @@ jobs:
             ./scripts/store-shot.ps1 $exe "home-$lang-$theme" $out 20
           } }
       - name: Studio (demo accounts)
+        env:
+          AUN_DEMO_TODAY: "2026-11-21"  # one demo "today" for every frame (DemoClock)
         shell: pwsh
         run: |
           $out = (New-Item -ItemType Directory -Force shots/studio).FullName

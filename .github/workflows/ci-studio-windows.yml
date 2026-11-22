@@ -34,6 +34,8 @@ jobs:
       - name: Build Studio
         run: dotnet build src/AlUmmahNow.Studio.Windows -c Release -p:Platform=x64
       - name: Run Studio scenarios
+        env:
+          AUN_DEMO_TODAY: "2026-11-21"  # one demo "today" for every frame (DemoClock)
         shell: pwsh
         run: |
           $out = (New-Item -ItemType Directory -Force artifacts/studio).FullName
@@ -112,6 +114,8 @@ jobs:
           # ffmpeg -i with no output file always exits 1; the checks above are the gate.
           exit 0
       - name: Lantern Glass review frames (the window only; en/ar, Light/Dark; 1440x900 with the identity menu closed and open, 1920 and the 1024 minimum)
+        env:
+          AUN_DEMO_TODAY: "2026-11-21"  # one demo "today" for every frame (DemoClock)
         shell: pwsh
         run: |
           # The runner's screen is 1024x768: too small for the windows.

@@ -23,6 +23,17 @@ public class DemoCatalogClientTests
     }
 
     [Fact]
+    public async Task UploadTimesCountBackFromThePinnedNow()
+    {
+        var now = new DateTimeOffset(2026, 11, 21, 12, 0, 0, TimeSpan.Zero);
+        var page = await new DemoCatalogClient(null, "en", now).ListVideosAsync(new VideoQuery { Limit = 100 });
+        Assert.Equal(28, page.Items.Count);
+        Assert.All(page.Items, v => Assert.True(v.PublishedAt < now));
+        // The newest went up three hours before the pinned now (Laylat al-Qadr reminders).
+        Assert.Equal(now.AddHours(-3), page.Items.Max(v => v.PublishedAt));
+    }
+
+    [Fact]
     public async Task TitlesAreTranslated()
     {
         var video = await new DemoCatalogClient().GetVideoAsync("demo-v1");

@@ -26,6 +26,7 @@ jobs:
       - run: dotnet build src/AlUmmahNow.Studio.Linux -c Release
       - name: Run Studio scenarios
         env:
+          AUN_DEMO_TODAY: "2026-11-21"  # one demo "today" for every frame (DemoClock)
           GDK_BACKEND: x11
           GSK_RENDERER: cairo
           LIBGL_ALWAYS_SOFTWARE: "1"
@@ -106,6 +107,7 @@ jobs:
       - run: dotnet build src/AlUmmahNow.Studio.Linux -c Release
       - name: Capture
         env:
+          AUN_DEMO_TODAY: "2026-11-21"  # one demo "today" for every frame (DemoClock)
           GDK_BACKEND: x11
           GSK_RENDERER: cairo
           LIBGL_ALWAYS_SOFTWARE: "1"

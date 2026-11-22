@@ -52,6 +52,12 @@ button.identity-row.active {
   box-shadow: inset 0 0 0 1px alpha(@fanous_primary_edge, 0.30);
 }
 button.identity-row .check { color: #f4ae3a; }
+/* Fixed line boxes in the account menu, the same for Latin and Arabic: each script's own font metrics put the Arabic
+   name/tag pairs and the wrapped sign-out lines 2 px apart against 8 in English, and the menu 17 px shorter. */
+.menu-name { line-height: 20px; }
+.menu-tag { line-height: 18px; }
+.menu-action { line-height: 22px; }
+.menu-heading { line-height: 18px; }
 button.danger label, button.danger image { color: @fanous_error_text; }
 
 /* Menus (popovers): gold edge and glow. */
