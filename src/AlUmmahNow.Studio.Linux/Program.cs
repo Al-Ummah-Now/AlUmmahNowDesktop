@@ -90,7 +90,8 @@ app.OnActivate += (_, _) =>
                 settings.AccountNames = names.ToDictionary(kv => kv.Key, kv => kv.Value);
                 settingsStore.Save(settings);
             });
-    var uploadsVm = new UploadsViewModel(shell, api, uploadServiceFor, Path.Combine(stateDir, demo ? "demo" : "studio"));
+    var uploadsVm = new UploadsViewModel(shell, api, uploadServiceFor, Path.Combine(stateDir, demo ? "demo" : "studio"),
+        demo ? () => AlUmmahNow.App.Demo.DemoClock.Now : null);
     var banner = demo ? localizer["studio.shell.demo"] : environment.Name != "prod" ? localizer.Format("studio.shell.environment", environment.Name.ToUpperInvariant()) : null;
     // Review and store screenshots (AUN_STORE_SHOT=1, as on Windows) show the demo data without the notice:
     // real users never see it.
@@ -112,7 +113,7 @@ app.OnActivate += (_, _) =>
             settingsStore.Save(settings);
         },
         language: () => localizer.Language);
-    var analyticsVm = new AnalyticsViewModel(shell, api);
+    var analyticsVm = new AnalyticsViewModel(shell, api, demo ? () => AlUmmahNow.App.Demo.DemoClock.Now : null);
     var videos = new VideosPage(localizer, videosVm, uploadsVm, window.Window);
     var analytics = new AnalyticsPage(localizer, analyticsVm);
     // Upload (creator tier) and Analytics (feature_off) are left out of the navigation when off.

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using AlUmmahNow.App.Demo;
 using AlUmmahNow.CoreBridge.Passkeys;
 using AlUmmahNow.CoreBridge.Studio;
 
@@ -65,6 +66,7 @@ public sealed class DemoTransport : IApiTransport
     private readonly HashSet<string> _off;
     private readonly string? _thumbs;
     private readonly string _language;
+    private readonly DateTime _today;
 
     /// <param name="featuresOff">
     /// Features answered as off (CI and screenshots: <c>AUN_DEMO_FEATURES_OFF=upload,analytics</c>): a
@@ -75,8 +77,13 @@ public sealed class DemoTransport : IApiTransport
     /// <c>thumb-N.ar.jpg</c> in Arabic, one per video. Without it the cards show their night tile.
     /// </param>
     /// <param name="language">The UI language, which picks the title card's language.</param>
-    public DemoTransport(IEnumerable<string>? featuresOff = null, string? thumbnailFolder = null, string language = "ar")
+    /// <param name="today">
+    /// The day every demo date counts from: upload days, the analytics window and the processing video's day. Defaults to
+    /// <see cref="DemoClock.Today"/> (<c>AUN_DEMO_TODAY</c> when CI pins it, else the real day).
+    /// </param>
+    public DemoTransport(IEnumerable<string>? featuresOff = null, string? thumbnailFolder = null, string language = "ar", DateTime? today = null)
     {
+        _today = (today ?? DemoClock.Today).Date;
         _off = new HashSet<string>(featuresOff ?? Array.Empty<string>(), StringComparer.Ordinal);
         _thumbs = thumbnailFolder;
         _language = language;
@@ -233,7 +240,7 @@ public sealed class DemoTransport : IApiTransport
                     if (r.OperationId == "post_VideoBulkDelete" && _videos.FirstOrDefault(v => (string)v["id"]! == id) is { } v)
                     {
                         _videos.Remove(v);
-                        _deleted.Add((v, DateTimeOffset.UtcNow, "deleted"));
+                        _deleted.Add((v, DemoClock.Now, "deleted"));
                     }
                     else if (_deleted.FindIndex(d => (string)d.Video["id"]! == id) is var i and >= 0)
                     {
@@ -278,7 +285,7 @@ public sealed class DemoTransport : IApiTransport
             case "get_AnalyticsChannelGet":
             {
                 if (_off.Contains("analytics")) throw StudioApiException.FromServer("get_AnalyticsChannelGet not found", 404, "feature_off");
-                var start = DateTime.UtcNow.Date.AddDays(-27);
+                var start = _today.AddDays(-27);
                 long Sum(string key) => _videos.Sum(v => Convert.ToInt64(v[key], System.Globalization.CultureInfo.InvariantCulture));
                 return Json(new
                 {
@@ -302,11 +309,12 @@ public sealed class DemoTransport : IApiTransport
     }
 
     /// <summary>
-    /// Upload days relative to today: every ready video went up before the 28-day chart window, so the analytics never
-    /// credit a video with views from before its upload. Only the processing video (no views yet) is from yesterday.
+    /// Upload days relative to the demo's today: every ready video went up before the 28-day chart window, so the
+    /// analytics never credit a video with views from before its upload. Only the processing video (no views yet) is
+    /// from yesterday.
     /// </summary>
-    private static string Ago(int days, string time) =>
-        DateTime.UtcNow.Date.AddDays(-days).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) + "T" + time + ":00Z";
+    private string Ago(int days, string time) =>
+        _today.AddDays(-days).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) + "T" + time + ":00Z";
 
     /// <summary>
     /// A top video's views in the 28-day period: the same share of its lifetime views as the period's Views card takes of

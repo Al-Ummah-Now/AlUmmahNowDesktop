@@ -118,7 +118,8 @@ public sealed partial class App : Application
                 settings.AccountNames = names.ToDictionary(kv => kv.Key, kv => kv.Value);
                 settingsStore.Save(settings);
             });
-        _uploads = new UploadsViewModel(shell, api, uploadServiceFor, Path.Combine(dataRoot, demo ? "demo" : "studio"));
+        _uploads = new UploadsViewModel(shell, api, uploadServiceFor, Path.Combine(dataRoot, demo ? "demo" : "studio"),
+            demo ? () => AlUmmahNow.App.Demo.DemoClock.Now : null);
         var uploadsVm = _uploads;
         // Review frames, scene "active": a demo queue with one finished and one running job.
         var encode = demo && scene == "active"
@@ -166,7 +167,7 @@ public sealed partial class App : Application
                 settingsStore.Save(settings);
             },
             language: () => localizer.Language);
-        var analyticsVm = new AnalyticsViewModel(shell, api);
+        var analyticsVm = new AnalyticsViewModel(shell, api, demo ? () => AlUmmahNow.App.Demo.DemoClock.Now : null);
         var videos = new VideosPage(localizer, videosVm, uploadsVm, () => window.Window.Content?.XamlRoot);
         var analytics = new AnalyticsPage(localizer, analyticsVm);
         // Upload (creator tier) and Analytics (feature_off) are left out of the navigation when off.

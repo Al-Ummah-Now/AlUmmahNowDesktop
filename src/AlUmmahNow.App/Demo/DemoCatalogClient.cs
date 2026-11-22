@@ -67,9 +67,10 @@ namespace AlUmmahNow.App.Demo
 
         private readonly IReadOnlyList<Video> _videos;
 
-        public DemoCatalogClient(string? thumbnailFolder = null, string language = "ar")
+        /// <param name="now">The moment upload times count back from; defaults to <see cref="DemoClock.Now"/>.</param>
+        public DemoCatalogClient(string? thumbnailFolder = null, string language = "ar", DateTimeOffset? now = null)
         {
-            var start = new DateTimeOffset(2026, 11, 1, 9, 0, 0, TimeSpan.Zero);
+            var start = now ?? DemoClock.Now;
             _videos = Fixtures.Select((f, i) => new Video
             {
                 Id = "demo-v" + (i + 1),

@@ -238,6 +238,10 @@ public sealed class MainWindow
             var title = Gtk.Label.New(rail.Title);
             title.SetHalign(Gtk.Align.Start);
             title.AddCssClass("title-3");
+            // A fixed line box, above both scripts' natural height: the Arabic heading came out 3 px shorter than the
+            // English one, and by the last rail the Arabic page sat 27 px higher.
+            title.SetSizeRequest(-1, RailHeadingLine);
+            title.SetValign(Gtk.Align.Start);
             column.Append(title);
 
             // One row of RailColumns whole cards that share the width (a short rail keeps the same card size): never a
@@ -262,8 +266,9 @@ public sealed class MainWindow
     /// <summary>Cards per home rail: four, sharing the width.</summary>
     private const int RailColumns = 4;
 
-    /// <summary>Line boxes for a card's title and meta lines, tall enough for Arabic with any fallback glyph.</summary>
-    private const int TitleLine = 28, MetaLine = 22;
+    /// <summary>Line boxes for the rail heading and a card's title and meta lines: above the natural line height of both
+    /// Latin and Arabic (with any fallback glyph), so a card and a rail are the same height in either language.</summary>
+    private const int RailHeadingLine = 36, TitleLine = 32, MetaLine = 26;
 
     private Gtk.Widget BuildCard(VideoCardViewModel card)
     {

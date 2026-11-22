@@ -270,7 +270,7 @@ public sealed class UploadPage
         Add(_l["studio.upload.visibility"], visibility);
 
         D.TimeZone = Formats.LocalTimeZone();
-        D.ScheduleStart ??= DateTimeOffset.Now.Date.AddDays(1).AddHours(9);
+        D.ScheduleStart ??= _vm.Now.Date.AddDays(1).AddHours(9);
         // Prefilled in the UI's digits (٠–٩ in Arabic); typed digits of either kind read back.
         _scheduleStart.SetText(_l.InputDigits(Formats.ToLocalInput(D.ScheduleStart.Value)));
         var scheduleError = Ui.Label("");

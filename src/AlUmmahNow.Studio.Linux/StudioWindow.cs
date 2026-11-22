@@ -489,11 +489,16 @@ public sealed class StudioWindow
         }
     }
 
+    /// <summary>Line boxes of the account menu (glass.css .menu-*), identical for both scripts.</summary>
+    private const int MenuNameLine = 20, MenuTagLine = 18, MenuActionLine = 22, MenuHeadingLine = 18;
+
     private static Gtk.Label Heading(string text)
     {
         var heading = Gtk.Label.New(text);
         heading.SetXalign(0);
         heading.AddCssClass("identity-heading");
+        heading.AddCssClass("menu-heading");
+        heading.SetSizeRequest(-1, MenuHeadingLine);
         return heading;
     }
 
@@ -535,6 +540,9 @@ public sealed class StudioWindow
         label.SetWrapMode(Pango.WrapMode.WordChar);
         label.SetMaxWidthChars(12);
         label.SetHexpand(true);
+        // A fixed 22 px per line (glass.css .menu-action), so the wrapped sign-out item is as tall in Arabic as in English.
+        label.AddCssClass("menu-action");
+        label.SetSizeRequest(-1, MenuActionLine);
         box.Append(label);
         var button = Gtk.Button.New();
         button.SetChild(box);
@@ -564,9 +572,13 @@ public sealed class StudioWindow
         // Natural width capped so the menu keeps the sidebar's width; a longer name ellipsizes.
         name.SetMaxWidthChars(16);
         name.AddCssClass("heading");
+        name.AddCssClass("menu-name");
+        name.SetSizeRequest(-1, MenuNameLine);
         var tag = Gtk.Label.New(r.Tag);
         tag.SetXalign(0);
         tag.AddCssClass("identity-tag");
+        tag.AddCssClass("menu-tag");
+        tag.SetSizeRequest(-1, MenuTagLine);
         text.Append(name);
         text.Append(tag);
         row.Append(text);

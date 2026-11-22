@@ -60,6 +60,40 @@ public class DemoDataTests
     }
 
     [Fact]
+    public async Task APinnedTodayDrivesTheSeriesAndTheUploadDates()
+    {
+        // CI pins the demo's today (AUN_DEMO_TODAY), so frames shot either side of midnight UTC show the same dates.
+        var today = new DateTime(2026, 11, 21, 0, 0, 0, DateTimeKind.Utc);
+        var api = new StudioApiClient(new DemoTransport(today: today));
+        var videos = await api.ListVideosAsync(new StudioVideoQuery { ChannelId = "demo-c1", Limit = 100 });
+        var analytics = await api.ChannelAnalyticsAsync("demo-c1", new DateTimeOffset(today.AddDays(-28)), new DateTimeOffset(today));
+
+        Assert.Equal(today.AddDays(-27), analytics.Daily[0].Date.Date);
+        Assert.Equal(today, analytics.Daily[^1].Date.Date);
+        var processing = Assert.Single(videos.Items, v => v.Views == 0);
+        Assert.Equal(new DateTime(2026, 11, 20), processing.CreatedAt!.Value.UtcDateTime.Date);
+        Assert.Equal(new DateTime(2026, 10, 21), videos.Items.Where(v => v.Views > 0).Max(v => v.CreatedAt!.Value.UtcDateTime.Date));
+        Assert.Equal(new DateTime(2026, 9, 21), videos.Items.Min(v => v.CreatedAt!.Value.UtcDateTime.Date));
+
+        // Another day moves every date with it.
+        var later = await new StudioApiClient(new DemoTransport(today: today.AddDays(5))).ListVideosAsync(new StudioVideoQuery { ChannelId = "demo-c1", Limit = 100 });
+        Assert.Equal(videos.Items.Select(v => v.CreatedAt!.Value.AddDays(5)), later.Items.Select(v => v.CreatedAt!.Value));
+    }
+
+    [Theory]
+    [InlineData("2026-11-21", 2026, 11, 21)]
+    [InlineData(" 2027-01-05 ", 2027, 1, 5)]
+    public void DemoTodayReadsTheDay(string value, int y, int m, int d) =>
+        Assert.Equal(new DateTime(y, m, d, 0, 0, 0, DateTimeKind.Utc), AlUmmahNow.App.Demo.DemoClock.Parse(value));
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("21/11/2026")]
+    [InlineData("tomorrow")]
+    public void WithoutAValidDayTheDemoKeepsTheRealClock(string? value) => Assert.Null(AlUmmahNow.App.Demo.DemoClock.Parse(value));
+
+    [Fact]
     public void TheDailySeriesIsNotARepeatingRamp()
     {
         var days = DemoSeries.Days(new DateTime(2026, 10, 25, 0, 0, 0, DateTimeKind.Utc), 28, 5960, 208, 36, 46);

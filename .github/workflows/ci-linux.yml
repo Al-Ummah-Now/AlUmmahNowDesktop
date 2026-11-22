@@ -29,6 +29,7 @@ jobs:
       - run: dotnet build src/AlUmmahNow.Linux -c Release
       - name: Run viewer scenarios (ar and en, home and watch)
         env:
+          AUN_DEMO_TODAY: "2026-11-21"  # one demo "today" for every frame (DemoClock)
           GDK_BACKEND: x11
           GSK_RENDERER: cairo
           LIBGL_ALWAYS_SOFTWARE: "1"
@@ -54,6 +55,7 @@ jobs:
           grep -q "MPRIS after: (<'Paused'>,)" artifacts/linux/watch-ar-dark.log
       - name: Review frames (demo catalog with title cards; the watch frames from the fixture runs)
         env:
+          AUN_DEMO_TODAY: "2026-11-21"  # one demo "today" for every frame (DemoClock)
           GDK_BACKEND: x11
           GSK_RENDERER: cairo
           LIBGL_ALWAYS_SOFTWARE: "1"
