@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using AlUmmahNow.App.I18n;
+using AlUmmahNow.CoreBridge.Studio;
 
 namespace AlUmmahNow.App.Media
 {
@@ -112,6 +114,19 @@ namespace AlUmmahNow.App.Media
                 CancelSleepTimer();
             }
         }
+
+        /// <summary>Wires `listenMode` directly from `GET /api/me/features`.</summary>
+        public void ApplyFeatures(UserFeatures features) =>
+            SetFeatureEnabled(features.IsOn(UserFeatures.ListenMode));
+
+        /// <summary>Formats a sleep timer preset using <see cref="Localizer"/> (Eastern Arabic digits ٠–٩ in Arabic).</summary>
+        public static string FormatSleepTimerLabel(Localizer localizer, SleepTimerPreset preset) => preset.Kind switch
+        {
+            SleepTimerKind.Off => localizer["player.sleepTimer.off"],
+            SleepTimerKind.EndOfEpisode => localizer["player.sleepTimer.endOfEpisode"],
+            SleepTimerKind.Minutes => localizer.Format("player.sleepTimer.minutes", preset.Minutes),
+            _ => localizer["player.sleepTimer.off"],
+        };
 
         /// <summary>
         /// Toggles Listen (audio-only) mode, preserving current playback position, speed, and play state.
