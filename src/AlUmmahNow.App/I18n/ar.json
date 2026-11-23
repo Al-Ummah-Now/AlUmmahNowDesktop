@@ -466,6 +466,5 @@
   "downloads.title": "التنزيلات",
   "downloads.empty": "لا توجد مرئيات منزّلة بعد.",
   "downloads.wifiOnly": "التنزيل عبر الشبكات غير المحدودة فقط",
-  "downloads.remove": "إزالة التنزيل",
-  "downloads.expired": "انتهت صلاحية الترخيص، اتصل بالإنترنت للتجديد."
+  "downloads.remove": "إزالة التنزيل"
 }
