@@ -29,7 +29,7 @@ public sealed class OfflineAndListenTests
         var e3 = new ListenQueueEntry("v3", "Third", "Channel A", "https://media/v3/master.m3u8");
 
         controller.SetNowPlaying(e1);
-        player.Open(e1.PlayUrl, 45, autoPlay: true);
+        player.Open(e1.PlayUrl, 45, true);
         player.Rate = 1.5;
 
         controller.SetAudioOnly(true, player, session);
