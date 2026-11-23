@@ -65,6 +65,16 @@ namespace AlUmmahNow.App.ViewModels
         public string Title => Video?.Title.For(_localizer.Language) ?? "";
         public string Description => Video?.Description.For(_localizer.Language) ?? "";
         public string Channel => Video?.ChannelName ?? "";
+        public string ShareAtPositionLabel => _localizer.Format("watch.shareAtTime", _localizer.Duration(Position));
+
+        /// <summary>Builds the canonical <c>alummahnow.link</c> short URL for the loaded video (#39).</summary>
+        public string? ShareUrl(string shortLinkHost = ShortLinks.ProdHost, bool atCurrentPosition = false)
+        {
+            if (Video == null || string.IsNullOrEmpty(Video.Id)) return null;
+            var secs = atCurrentPosition && Position >= 1 ? (long?)Math.Floor(Position) : null;
+            var lang = _localizer.Language == "ar" ? "ar" : null;
+            return ShortLinks.Video(Video.Id, shortLinkHost, startSeconds: secs, lang: lang);
+        }
 
         public async Task LoadAsync(string videoId, CancellationToken cancellationToken = default)
         {
