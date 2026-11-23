@@ -12,6 +12,12 @@ namespace AlUmmahNow.App.Navigation
             public Watch(string videoId) => VideoId = videoId;
             public string VideoId { get; }
         }
+
+        public sealed class Live : Route
+        {
+            public Live(string streamId) => StreamId = streamId;
+            public string StreamId { get; }
+        }
     }
 
     /// <summary>A back stack shared by every shell. Each shell renders <see cref="Current"/>.</summary>

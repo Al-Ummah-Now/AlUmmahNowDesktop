@@ -70,4 +70,37 @@ public class HttpCatalogClientTests
         h.Status = HttpStatusCode.InternalServerError;
         await Assert.ThrowsAsync<CatalogException>(() => c.GetVideoAsync("v"));
     }
+
+    [Fact]
+    public async Task Live_stream_chat_and_reminders_parse_and_fast_filter_validates_links()
+    {
+        var (c, h) = Make("""
+        {"data":{"id":"live-1","channelId":"ch-1","channelName":"Al Ummah","title":"Friday Khutbah",
+        "titleLocalized":{"ar":"خطبة الجمعة"},"status":"live","streamKind":"premiere","eventType":"jummah","viewerCount":42}}
+        """);
+        var stream = await c.GetLiveStreamAsync("live-1");
+        Assert.Equal("/api/live/streams/live-1", h.Last!.PathAndQuery);
+        Assert.Equal(LiveStreamStatus.Live, stream.Status);
+        Assert.Equal(LiveStreamKind.Premiere, stream.StreamKind);
+        Assert.Equal(LiveEventType.Jummah, stream.EventType);
+        Assert.Equal("خطبة الجمعة", stream.Title.For("ar"));
+
+        h.Body = """
+        {"data":[{"id":"m1","streamId":"live-1","userId":"u1","channelId":"ch-1","authorName":"Ahmad",
+        "authorRole":"moderator","text":"Assalamu alaikum","offsetMs":12000}],
+        "settings":{"chatEnabled":true,"slowModeSeconds":10,"linksAllowed":false}}
+        """;
+        var chat = await c.GetLiveChatMessagesAsync("live-1");
+        Assert.Single(chat.Items);
+        Assert.Equal(LiveAuthorRole.Moderator, chat.Items[0].AuthorRole);
+        Assert.Equal(10, chat.Settings.SlowModeSeconds);
+
+        h.Body = """{"data":{"reminded":true,"reminderCount":15}}""";
+        var rem = await c.SetLiveReminderAsync("live-1", true);
+        Assert.True(rem.Reminded);
+        Assert.Equal(15, rem.ReminderCount);
+
+        Assert.Null(LiveChatFastFilter.Validate("Assalamu alaikum", linksAllowed: false));
+        Assert.Equal(LiveChatValidationError.LinksNotAllowed, LiveChatFastFilter.Validate("Check https://spam.example", linksAllowed: false));
+    }
 }

@@ -17,6 +17,10 @@ namespace AlUmmahNow.CoreBridge.Studio
         public const string Upload = "upload";
         public const string CreateChannel = "createChannel";
         public const string Live = "live";
+        public const string LiveChat = "liveChat";
+        public const string LivePremieres = "livePremieres";
+        public const string LiveReminders = "liveReminders";
+        public const string LiveEvents = "liveEvents";
         public const string CaptionsTranscribe = "captionsTranscribe";
         public const string CaptionsTranslate = "captionsTranslate";
         public const string InlineTranslate = "inlineTranslate";

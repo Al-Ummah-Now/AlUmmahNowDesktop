@@ -236,3 +236,193 @@ public class WatchViewModelTests
         Assert.Single(p.Opened);
     }
 }
+
+public class LiveWatchViewModelTests
+{
+    private sealed class FakeLiveCatalog : ILiveCatalogClient
+    {
+        public LiveStream Stream { get; set; } = new()
+        {
+            Id = "live-1",
+            ChannelId = "ch-1",
+            ChannelName = "الأمة الآن",
+            Title = new LocalizedText("Friday Khutbah", new Dictionary<string, string> { ["ar"] = "خطبة الجمعة" }),
+            Status = LiveStreamStatus.Live,
+            StreamKind = LiveStreamKind.Live,
+            EventType = LiveEventType.Jummah,
+            ViewerCount = 80,
+            PeakViewerCount = 100,
+            PlaybackUrl = "https://cdn/live-1/index.m3u8",
+            VodUrl = "https://cdn/live-1/vod.m3u8",
+            Category = "khutbah",
+        };
+
+        public List<LiveChatMessage> Messages { get; } = new()
+        {
+            new LiveChatMessage
+            {
+                Id = "m1",
+                StreamId = "live-1",
+                UserId = "u1",
+                ChannelId = "ch-1",
+                AuthorName = "أحمد",
+                Text = "السلام عليكم",
+                OffsetMs = 5_000,
+                Status = LiveChatStatus.Published,
+            },
+        };
+
+        public LiveReminderStatus Reminder { get; set; } = new(false, 9);
+
+        public Task<LiveStream> GetLiveStreamAsync(string id, CancellationToken ct = default) =>
+            Task.FromResult(Stream);
+
+        public Task<LiveStreamState> GetLiveStreamStateAsync(string id, CancellationToken ct = default) =>
+            Task.FromResult(new LiveStreamState
+            {
+                Id = Stream.Id,
+                Status = Stream.Status,
+                StreamKind = Stream.StreamKind,
+                EventType = Stream.EventType,
+                ViewerCount = Stream.ViewerCount,
+                PeakViewerCount = Stream.PeakViewerCount,
+                PlaybackUrl = Stream.PlaybackUrl,
+                VodUrl = Stream.VodUrl,
+                ChatEnabled = Stream.ChatEnabled,
+            });
+
+        public Task<LiveStreamState> SendLiveHeartbeatAsync(string id, string viewerId, CancellationToken ct = default) =>
+            Task.FromResult(new LiveStreamState
+            {
+                Id = Stream.Id,
+                Status = Stream.Status,
+                ViewerCount = 128,
+                PeakViewerCount = 140,
+                PlaybackUrl = Stream.PlaybackUrl,
+                ChatEnabled = Stream.ChatEnabled,
+            });
+
+        public Task<LiveChatPage> GetLiveChatMessagesAsync(string streamId, string? afterId = null, long? maxOffsetMs = null, int limit = 50, CancellationToken ct = default) =>
+            Task.FromResult(new LiveChatPage(Messages.ToList(), settings: new LiveChatSettings { ChatEnabled = true, SlowModeSeconds = 5, LinksAllowed = false }));
+
+        public Task<LiveChatMessage> PostLiveChatMessageAsync(string streamId, string text, long? offsetMs = null, CancellationToken ct = default) =>
+            Task.FromResult(new LiveChatMessage
+            {
+                Id = "m-posted",
+                StreamId = streamId,
+                UserId = "u-me",
+                ChannelId = "ch-1",
+                AuthorName = "عمر",
+                Text = text,
+                OffsetMs = offsetMs ?? 0,
+                Status = LiveChatStatus.Published,
+            });
+
+        public Task<LiveChatMessage> ModerateLiveChatMessageAsync(string streamId, string messageId, LiveModerationAction action, CancellationToken ct = default)
+        {
+            var msg = Messages.FirstOrDefault(m => m.Id == messageId) ?? new LiveChatMessage { Id = messageId, Text = "x" };
+            return Task.FromResult(new LiveChatMessage
+            {
+                Id = msg.Id,
+                StreamId = streamId,
+                AuthorName = msg.AuthorName,
+                Text = msg.Text,
+                OffsetMs = msg.OffsetMs,
+                Status = action == LiveModerationAction.Remove ? LiveChatStatus.Removed : LiveChatStatus.Published,
+                IsPinned = action == LiveModerationAction.Pin,
+            });
+        }
+
+        public Task ReportLiveChatMessageAsync(string streamId, string messageId, LiveReportReason reason, string? details = null, CancellationToken ct = default) =>
+            Task.CompletedTask;
+
+        public Task<LiveReminderStatus> GetLiveReminderStatusAsync(string streamId, CancellationToken ct = default) =>
+            Task.FromResult(Reminder);
+
+        public Task<LiveReminderStatus> SetLiveReminderAsync(string streamId, bool remind, CancellationToken ct = default)
+        {
+            Reminder = new LiveReminderStatus(remind, remind ? Reminder.ReminderCount + 1 : Reminder.ReminderCount - 1);
+            return Task.FromResult(Reminder);
+        }
+    }
+
+    [Fact]
+    public async Task Live_stream_loads_beats_viewer_validates_chat_and_moderates()
+    {
+        var cat = new FakeLiveCatalog();
+        var player = new FakePlayer();
+        var session = new FakeSession();
+        var vm = new LiveWatchViewModel(cat, player, session, new Localizer("ar"), canModerate: true);
+
+        await vm.LoadAsync("live-1");
+        Assert.Equal(LoadState.Content, vm.State);
+        Assert.Equal("خطبة الجمعة", vm.Title);
+        Assert.Equal("صلاة الجمعة", vm.EventBadgeText);
+        Assert.Single(vm.VisibleChatMessages);
+        Assert.Single(player.Opened);
+
+        await vm.BeatViewerAsync();
+        Assert.Equal(128, vm.Stream!.ViewerCount);
+        Assert.Contains("١٢٨ يشاهدون الآن", vm.MetaLine);
+
+        vm.DraftMessage = "Visit https://spam.example";
+        await vm.SendChatMessageAsync();
+        Assert.Equal("live.chat.error.links", vm.ChatErrorKey);
+
+        vm.DraftMessage = "بارك الله فيكم";
+        await vm.SendChatMessageAsync();
+        Assert.Null(vm.ChatErrorKey);
+        Assert.Equal(2, vm.VisibleChatMessages.Count);
+        Assert.Equal("", vm.DraftMessage);
+
+        var first = vm.VisibleChatMessages[0];
+        vm.RequestRemoveMessage(first);
+        Assert.Equal(first.Id, vm.PendingRemovalMessage?.Id);
+        await vm.ConfirmRemoveMessageAsync();
+        Assert.Single(vm.VisibleChatMessages);
+    }
+
+    [Fact]
+    public async Task Scheduled_premiere_toggles_reminder_and_vod_replays_chat_by_position()
+    {
+        var cat = new FakeLiveCatalog();
+        cat.Stream.Status = LiveStreamStatus.Scheduled;
+        cat.Stream.StreamKind = LiveStreamKind.Premiere;
+        var player = new FakePlayer();
+        var vm = new LiveWatchViewModel(cat, player, new FakeSession(), new Localizer("ar"));
+
+        await vm.LoadAsync("live-1");
+        Assert.Empty(player.Opened);
+        Assert.True(vm.ShowReminderButton);
+        Assert.Equal("ذكّرني", vm.ReminderButtonText);
+
+        await vm.ToggleReminderAsync();
+        Assert.True(vm.Reminder.Reminded);
+        Assert.Equal("تم ضبط التذكير (١٠)", vm.ReminderButtonText);
+
+        // VOD chat replay filters by playback position
+        cat.Stream.Status = LiveStreamStatus.Ended;
+        cat.Messages.Add(new LiveChatMessage
+        {
+            Id = "m2",
+            StreamId = "live-1",
+            AuthorName = "زيد",
+            Text = "جزاكم الله خيرا",
+            OffsetMs = 30_000,
+            Status = LiveChatStatus.Published,
+        });
+        await vm.LoadAsync("live-1");
+        Assert.Empty(vm.VisibleChatMessages);
+
+        player.Tick(10);
+        Assert.Equal(new[] { "m1" }, vm.VisibleChatMessages.Select(m => m.Id));
+
+        player.Tick(35);
+        Assert.Equal(new[] { "m1", "m2" }, vm.VisibleChatMessages.Select(m => m.Id));
+
+        // Ummah Kids category hides live chat
+        cat.Stream.Category = "islamic_kids";
+        await vm.LoadAsync("live-1");
+        Assert.False(vm.ShowChatPanel);
+    }
+}
