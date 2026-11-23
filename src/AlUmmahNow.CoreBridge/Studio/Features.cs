@@ -29,6 +29,8 @@ namespace AlUmmahNow.CoreBridge.Studio
         public const string YoutubeImport = "youtubeImport";
         public const string AiCategorySuggest = "aiCategorySuggest";
         public const string BulkSchedule = "bulkSchedule";
+        public const string ListenMode = "listenMode";
+        public const string OfflineDownloads = "offlineDownloads";
 
         /// <summary>Nothing on: before the first answer, signed out, or an unreadable answer.</summary>
         public static readonly UserFeatures None = new UserFeatures(Array.Empty<string>());

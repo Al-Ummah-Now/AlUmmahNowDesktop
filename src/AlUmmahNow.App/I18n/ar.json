@@ -452,5 +452,19 @@
   "currency.SAR": "ريال سعودي",
   "currency.AED": "درهم إماراتي",
   "currency.EGP": "جنيه مصري",
-  "stat.zero": "لا يوجد"
+  "stat.zero": "لا يوجد",
+  "player.listen": "استماع",
+  "player.video": "المرئي",
+  "player.audioOnly": "صوت فقط",
+  "player.sleepTimer": "مؤقت النوم",
+  "player.sleepTimer.off": "إيقاف",
+  "player.sleepTimer.minutes": "{0} دقيقة",
+  "player.sleepTimer.endOfEpisode": "نهاية الحلقة",
+  "player.queue": "التالي",
+  "player.queue.empty": "قائمة التشغيل فارغة.",
+  "player.queue.clear": "مسح القائمة",
+  "downloads.title": "التنزيلات",
+  "downloads.empty": "لا توجد مرئيات منزّلة بعد.",
+  "downloads.wifiOnly": "التنزيل عبر الشبكات غير المحدودة فقط",
+  "downloads.remove": "إزالة التنزيل"
 }
