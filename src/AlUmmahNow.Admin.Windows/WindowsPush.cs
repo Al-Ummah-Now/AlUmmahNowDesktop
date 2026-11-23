@@ -1,6 +1,7 @@
 using AlUmmahNow.Admin.Push;
 using AlUmmahNow.Admin.Review;
 using AlUmmahNow.App.I18n;
+using AlUmmahNow.CoreBridge;
 using AlUmmahNow.CoreBridge.Logging;
 using Microsoft.Windows.AppNotifications;
 using Windows.Networking.PushNotifications;

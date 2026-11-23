@@ -16,6 +16,7 @@ namespace AlUmmahNow.App.ViewModels
         private readonly Localizer _localizer;
 
         [ObservableProperty] private LoadState _state = LoadState.Loading;
+        [ObservableProperty] private bool _isQuietHoursEnabled;
         [ObservableProperty] private NotificationBadge _badge = new NotificationBadge();
         [ObservableProperty] private NotificationQuietHours _quietHours = new NotificationQuietHours();
 
@@ -35,6 +36,66 @@ namespace AlUmmahNow.App.ViewModels
         public string BadgeText => _localizer.BadgeCap9(Badge.VisibleCount);
         public bool HasBadge => Badge.VisibleCount > 0;
         public bool HasUnread => Items.Any(i => i.IsUnread);
+        public bool IsPrayerQuietVisible => IsQuietHoursEnabled && QuietHours.PrayerWindows.Count > 0;
+
+        public string TitleFor(NotificationEntry entry)
+        {
+            string Param(string name) =>
+                entry.Parameters.TryGetValue(name, out var v) && !string.IsNullOrWhiteSpace(v) ? v : "";
+
+            var isAr = _localizer.Language == "ar";
+            var video = Param("videoTitle");
+            var stream = Param("streamTitle");
+            var channel = Param("channelName");
+            if (string.IsNullOrEmpty(channel)) channel = Param("channel");
+            var tier = isAr ? Param("tier_ar") : Param("tier_en");
+            if (string.IsNullOrEmpty(tier)) tier = Param("tier");
+
+            switch (entry.NotificationKey)
+            {
+                case "newVideo" when !string.IsNullOrEmpty(channel) && !string.IsNullOrEmpty(video):
+                    return _localizer.Format("notifications.msg.newVideo", channel, video);
+                case "liveStarted" when !string.IsNullOrEmpty(channel) && !string.IsNullOrEmpty(stream.Length > 0 ? stream : video):
+                    return _localizer.Format("notifications.msg.liveStarted", channel, stream.Length > 0 ? stream : video);
+                case "commentReply" when !string.IsNullOrEmpty(Param("actorName")):
+                    return _localizer.Format("notifications.msg.commentReply", Param("actorName"));
+                case "newComment" when !string.IsNullOrEmpty(video):
+                    return _localizer.Format("notifications.msg.newComment", video);
+                case "newSubscriber" when !string.IsNullOrEmpty(channel):
+                    return _localizer.Format("notifications.msg.newSubscriber", channel);
+                case "uploadReady" when !string.IsNullOrEmpty(video):
+                    return _localizer.Format("notifications.msg.uploadReady", video);
+                case "uploadFailed" when !string.IsNullOrEmpty(video):
+                    return _localizer.Format("notifications.msg.uploadFailed", video);
+                case "reviewApproved" when !string.IsNullOrEmpty(video):
+                    return _localizer.Format("notifications.msg.reviewApproved", video);
+                case "reviewRejected" when !string.IsNullOrEmpty(video):
+                    return _localizer.Format("notifications.msg.reviewRejected", video);
+                case "reviewNeeded" when !string.IsNullOrEmpty(video):
+                    return _localizer.Format("notifications.msg.reviewNeeded", video);
+                case "channelInviteReceived" when !string.IsNullOrEmpty(Param("inviter")) && !string.IsNullOrEmpty(channel):
+                    return _localizer.Format("notifications.msg.channelInviteReceived", Param("inviter"), channel);
+                case "channelInviteAccepted" when !string.IsNullOrEmpty(Param("member")) && !string.IsNullOrEmpty(channel):
+                    return _localizer.Format("notifications.msg.channelInviteAccepted", Param("member"), channel);
+                case "channelRoleChanged" when !string.IsNullOrEmpty(channel):
+                    return _localizer.Format("notifications.msg.channelRoleChanged", channel);
+                case "channelMemberRemoved" when !string.IsNullOrEmpty(channel):
+                    return _localizer.Format("notifications.msg.channelMemberRemoved", channel);
+                case "channelMemberLeft" when !string.IsNullOrEmpty(Param("member")) && !string.IsNullOrEmpty(channel):
+                    return _localizer.Format("notifications.msg.channelMemberLeft", Param("member"), channel);
+                case "tierRequestApproved" when !string.IsNullOrEmpty(tier):
+                    return _localizer.Format("notifications.msg.tierRequestApproved", tier);
+                case "tierRequestDeclined" when !string.IsNullOrEmpty(tier):
+                    return _localizer.Format("notifications.msg.tierRequestDeclined", tier);
+                case "tierRequestReceived" when !string.IsNullOrEmpty(tier):
+                    return _localizer.Format("notifications.msg.tierRequestReceived", tier);
+            }
+
+            var titleKey = "notifications.title." + entry.NotificationKey;
+            var resolved = _localizer[titleKey];
+            if (resolved != titleKey) return resolved;
+            return !string.IsNullOrWhiteSpace(entry.Title) ? entry.Title : _localizer["notifications.title.default"];
+        }
 
         public string QuietWindowLabel => _localizer.Format(
             "notifications.quietWindow",
@@ -60,13 +121,17 @@ namespace AlUmmahNow.App.ViewModels
             State = LoadState.Loading;
             try
             {
+                var features = await _client.GetViewerFeaturesAsync(cancellationToken);
+                IsQuietHoursEnabled = features.IsOn(UserFeatures.QuietHours);
                 var page = await _client.ListAsync(20, cancellationToken);
                 Items.Clear();
                 foreach (var item in page.Items) Items.Add(item);
                 Badge = page.Items.Count > 0
                     ? await _client.MarkSeenAsync(page.Items.Select(i => i.Id).ToArray(), cancellationToken)
                     : page.Badge;
-                QuietHours = await _client.GetQuietHoursAsync(cancellationToken);
+                QuietHours = IsQuietHoursEnabled
+                    ? await _client.GetQuietHoursAsync(cancellationToken)
+                    : new NotificationQuietHours();
                 RaiseComputed();
                 State = Items.Count == 0 ? LoadState.Empty : LoadState.Content;
             }
@@ -81,7 +146,7 @@ namespace AlUmmahNow.App.ViewModels
             try
             {
                 Badge = await _client.MarkAllReadAsync(cancellationToken);
-                var updated = Items.Select(i => new NotificationEntry(i.Id, i.Category, i.NotificationType, i.NotificationKey, i.Title, false, i.CreatedAtMs)).ToList();
+                var updated = Items.Select(i => new NotificationEntry(i.Id, i.Category, i.NotificationType, i.NotificationKey, i.Title, false, i.CreatedAtMs, i.Parameters)).ToList();
                 Items.Clear();
                 foreach (var item in updated) Items.Add(item);
                 RaiseComputed();
@@ -91,20 +156,42 @@ namespace AlUmmahNow.App.ViewModels
             }
         }
 
-        public async Task SetDailyQuietAsync(bool enabled, CancellationToken cancellationToken = default) =>
+        public async Task SetDailyQuietAsync(bool enabled, CancellationToken cancellationToken = default)
+        {
+            if (!IsQuietHoursEnabled) return;
             await SaveQuietAsync(QuietHours.With(enabled: enabled), cancellationToken);
+        }
 
-        public async Task SetPrayerQuietAsync(bool enabled, CancellationToken cancellationToken = default) =>
+        public async Task SetPrayerQuietAsync(bool enabled, CancellationToken cancellationToken = default)
+        {
+            if (!IsPrayerQuietVisible) return;
             await SaveQuietAsync(QuietHours.With(prayerQuietEnabled: enabled), cancellationToken);
+        }
+
+        /// <summary>
+        /// Syncs locally computed prayer quiet windows (Epic 21.1) when non-empty and changed.
+        /// </summary>
+        public async Task SyncPrayerWindowsAsync(IReadOnlyList<PrayerQuietWindow> localWindows, string timezone, CancellationToken cancellationToken = default)
+        {
+            if (!IsQuietHoursEnabled || localWindows.Count == 0) return;
+            var trimmed = localWindows.Take(5).ToArray();
+            var sameZone = QuietHours.Timezone == timezone;
+            var sameWindows = QuietHours.PrayerWindows.Count == trimmed.Length
+                && QuietHours.PrayerWindows.Zip(trimmed, (a, b) => a.StartMinute == b.StartMinute && a.EndMinute == b.EndMinute).All(x => x);
+            if (sameZone && sameWindows) return;
+            await SaveQuietAsync(QuietHours.With(timezone: timezone, prayerWindows: trimmed), cancellationToken);
+        }
 
         private async Task SaveQuietAsync(NotificationQuietHours next, CancellationToken cancellationToken)
         {
             QuietHours = next;
             OnPropertyChanged(nameof(QuietWindowLabel));
+            OnPropertyChanged(nameof(IsPrayerQuietVisible));
             try
             {
                 QuietHours = await _client.UpdateQuietHoursAsync(next, cancellationToken);
                 OnPropertyChanged(nameof(QuietWindowLabel));
+                OnPropertyChanged(nameof(IsPrayerQuietVisible));
             }
             catch (CatalogException)
             {
@@ -117,6 +204,7 @@ namespace AlUmmahNow.App.ViewModels
             OnPropertyChanged(nameof(HasBadge));
             OnPropertyChanged(nameof(HasUnread));
             OnPropertyChanged(nameof(QuietWindowLabel));
+            OnPropertyChanged(nameof(IsPrayerQuietVisible));
         }
     }
 

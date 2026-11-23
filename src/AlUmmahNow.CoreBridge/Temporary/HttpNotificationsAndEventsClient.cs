@@ -26,6 +26,14 @@ namespace AlUmmahNow.CoreBridge.Temporary
             _accessToken = accessToken;
         }
 
+        public async Task<UserFeatures> GetViewerFeaturesAsync(CancellationToken cancellationToken = default)
+        {
+            var token = await _accessToken(cancellationToken).ConfigureAwait(false);
+            if (string.IsNullOrEmpty(token)) return UserFeatures.None;
+            using var doc = await SendJsonAsync(HttpMethod.Get, "/api/me/features", null, token, cancellationToken).ConfigureAwait(false);
+            return UserFeatures.Parse(doc.RootElement.GetRawText());
+        }
+
         public async Task<NotificationBadge> GetBadgeAsync(CancellationToken cancellationToken = default)
         {
             var token = await _accessToken(cancellationToken).ConfigureAwait(false);
@@ -48,10 +56,18 @@ namespace AlUmmahNow.CoreBridge.Temporary
                 foreach (var item in arr.EnumerateArray())
                 {
                     var key = Str(item, "notificationKey") ?? "";
+                    var parameters = new Dictionary<string, string>(StringComparer.Ordinal);
                     string? title = null;
                     if (item.TryGetProperty("params", out var p) && p.ValueKind == JsonValueKind.Object)
                     {
-                        title = Str(p, "videoTitle") ?? Str(p, "channelName");
+                        foreach (var prop in p.EnumerateObject())
+                        {
+                            parameters[prop.Name] = prop.Value.ValueKind == JsonValueKind.String
+                                ? (prop.Value.GetString() ?? "")
+                                : prop.Value.GetRawText();
+                        }
+
+                        title = Str(p, "videoTitle") ?? Str(p, "streamTitle") ?? Str(p, "channelName");
                     }
 
                     var isUnread = !item.TryGetProperty("readAt", out var r) || r.ValueKind == JsonValueKind.Null;
@@ -61,9 +77,10 @@ namespace AlUmmahNow.CoreBridge.Temporary
                         Str(item, "category") ?? "",
                         Str(item, "notificationType") ?? "",
                         key,
-                        title ?? key,
+                        title ?? "",
                         isUnread,
-                        createdAt));
+                        createdAt,
+                        parameters));
                 }
             }
 

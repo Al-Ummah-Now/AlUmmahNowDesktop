@@ -30,6 +30,7 @@ namespace AlUmmahNow.CoreBridge.Studio
         public const string AiCategorySuggest = "aiCategorySuggest";
         public const string BulkSchedule = "bulkSchedule";
         public const string EventCalendar = "eventCalendar";
+        public const string QuietHours = "quietHours";
 
         /// <summary>Nothing on: before the first answer, signed out, or an unreadable answer.</summary>
         public static readonly UserFeatures None = new UserFeatures(Array.Empty<string>());

@@ -104,10 +104,19 @@ public class NotificationsSharingEventsTests
     {
         var responses = new Queue<string>(new[]
         {
-            """{"result":{"items":[{"id":"n1","category":"live","notificationType":"stream","notificationKey":"liveStarted","params":{"videoTitle":"Weekly Halqa"},"readAt":null,"createdAt":1795450000000}],"unreadCount":12,"unseenCount":12,"menuOpen":"seen"}}""",
-            """{"result":{"unreadCount":12,"unseenCount":0,"menuOpen":"seen"}}""",
+            // 1) OpenInboxAsync when quietHours switch is OFF -> skips GetQuietHoursAsync
+            """{"version":1,"features":{"quietHours":false}}""",
+            """{"result":{"items":[{"id":"n1","category":"subscribers","notificationType":"subscription","notificationKey":"newSubscriber","params":{},"readAt":null,"createdAt":1795450000000},{"id":"n2","category":"account","notificationType":"system","notificationKey":"tierRequestApproved","params":{"tier_en":"Creator","tier_ar":"صانع محتوى"},"readAt":null,"createdAt":1795450001000}],"unreadCount":2,"unseenCount":2,"menuOpen":"seen"}}""",
+            """{"result":{"unreadCount":2,"unseenCount":0,"menuOpen":"seen"}}""",
+            // 2) OpenInboxAsync when quietHours switch is ON -> fetches quietHours; prayerWindows starts empty so IsPrayerQuietVisible is false
+            """{"version":1,"features":{"quietHours":true}}""",
+            """{"result":{"items":[{"id":"n3","category":"live","notificationType":"stream","notificationKey":"liveStarted","params":{"channelName":"المنار","videoTitle":"الحلقة الأسبوعية"},"readAt":null,"createdAt":1795450002000}],"unreadCount":1,"unseenCount":1,"menuOpen":"seen"}}""",
+            """{"result":{"unreadCount":1,"unseenCount":0,"menuOpen":"seen"}}""",
             """{"result":{"quietHours":{"enabled":true,"timezone":"Asia/Riyadh","startMinute":1320,"endMinute":360,"prayerQuietEnabled":false,"prayerWindows":[]}}}""",
-            """{"result":{"quietHours":{"enabled":true,"timezone":"Asia/Riyadh","startMinute":1320,"endMinute":360,"prayerQuietEnabled":true,"prayerWindows":[]}}}""",
+            // 3) SyncPrayerWindowsAsync -> supplies local windows so IsPrayerQuietVisible turns true, then SetPrayerQuietAsync(true)
+            """{"result":{"quietHours":{"enabled":true,"timezone":"Asia/Riyadh","startMinute":1320,"endMinute":360,"prayerQuietEnabled":false,"prayerWindows":[{"startMinute":735,"endMinute":760}]}}}""",
+            """{"result":{"quietHours":{"enabled":true,"timezone":"Asia/Riyadh","startMinute":1320,"endMinute":360,"prayerQuietEnabled":true,"prayerWindows":[{"startMinute":735,"endMinute":760}]}}}""",
+            // 4) EventsCalendarViewModel feature gate off -> on
             """{"version":1,"features":{"eventCalendar":false}}""",
             """{"version":1,"features":{"eventCalendar":true}}""",
             """{"result":{"items":[{"streamId":"str_1","channelId":"ch_1","channelName":"Al-Manar","channelNameAr":"المنار","title":"Weekly Halqa","kind":"live","eventType":"halqa","status":"scheduled","scheduledStartAt":"2026-11-28T19:00:00Z","watchPath":"/live/str_1"}]}}""",
@@ -126,10 +135,29 @@ public class NotificationsSharingEventsTests
 
         var localizer = new Localizer("ar");
         var notifsVm = new NotificationsViewModel(notifsClient, localizer);
+
         await notifsVm.OpenInboxAsync();
-        Assert.Single(notifsVm.Items);
-        Assert.Equal("Weekly Halqa", notifsVm.Items[0].Title);
+        Assert.False(notifsVm.IsQuietHoursEnabled);
+        Assert.False(notifsVm.IsPrayerQuietVisible);
+        Assert.Equal("مشترك جديد", notifsVm.TitleFor(notifsVm.Items[0]));
+        Assert.Equal("أصبحت لديك فئة صانع محتوى", notifsVm.TitleFor(notifsVm.Items[1]));
+        localizer.Language = "en";
+        Assert.Equal("New subscriber", notifsVm.TitleFor(notifsVm.Items[0]));
+        Assert.Equal("You now have the Creator tier", notifsVm.TitleFor(notifsVm.Items[1]));
+        localizer.Language = "ar";
+
+        await notifsVm.OpenInboxAsync();
+        Assert.True(notifsVm.IsQuietHoursEnabled);
+        Assert.False(notifsVm.IsPrayerQuietVisible);
+        Assert.Equal("المنار تبث مباشرة: الحلقة الأسبوعية", notifsVm.TitleFor(notifsVm.Items[0]));
         Assert.False(notifsVm.HasBadge);
+
+        // Prayer toggle is ignored until local windows exist
+        await notifsVm.SetPrayerQuietAsync(true);
+        Assert.False(notifsVm.QuietHours.PrayerQuietEnabled);
+
+        await notifsVm.SyncPrayerWindowsAsync(new[] { new PrayerQuietWindow(735, 760) }, "Asia/Riyadh");
+        Assert.True(notifsVm.IsPrayerQuietVisible);
         await notifsVm.SetPrayerQuietAsync(true);
         Assert.True(notifsVm.QuietHours.PrayerQuietEnabled);
 
@@ -146,8 +174,8 @@ public class NotificationsSharingEventsTests
         await pushRegistrar.RegisterAsync("viewer", "inst_12345678", "https://wns.example/ch", "ar", "0.1.0");
         Assert.Contains("PUT /api/devices/inst_12345678", paths);
 
-        Assert.False(new AppPushConfig("AlUmmahNow.Dev", packaged: true).CanRegister);
-        Assert.True(new AppPushConfig("AlUmmahNow.Viewer", packaged: true).CanRegister);
+        Assert.False(new PushConfig("AlUmmahNow.Dev", packaged: true).CanRegister);
+        Assert.True(new PushConfig("AlUmmahNow.Viewer", packaged: true).CanRegister);
     }
 
     private sealed class StubHandler : HttpMessageHandler
