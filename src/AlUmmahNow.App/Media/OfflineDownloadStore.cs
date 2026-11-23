@@ -35,7 +35,7 @@ namespace AlUmmahNow.App.Media
         public string? ChannelName { get; set; }
         public string? ThumbnailPath { get; set; }
         public double? DurationSeconds { get; set; }
-        public OfflineDownloadQuality Quality { get; set; } = OfflineDownloadQuality.Audio;
+        public OfflineDownloadQuality Quality { get; set; } = OfflineDownloadQuality.Q480p;
         public string FileName { get; set; } = "";
         public long Bytes { get; set; }
         public long DownloadedAtMs { get; set; }
@@ -51,8 +51,7 @@ namespace AlUmmahNow.App.Media
 
         public bool WifiOnly { get; set; } = true;
         public long MaxStorageBytes { get; set; } = DefaultMaxStorageBytes;
-        public int? MaxVideos { get; set; }
-        public OfflineDownloadQuality DefaultQuality { get; set; } = OfflineDownloadQuality.Audio;
+        public OfflineDownloadQuality DefaultQuality { get; set; } = OfflineDownloadQuality.Q480p;
         public bool AutoDownloadEnabled { get; set; }
     }
 
@@ -86,19 +85,6 @@ namespace AlUmmahNow.App.Media
         public long MaxStorageBytes { get; }
     }
 
-    public sealed class MaxVideosExceededException : InvalidOperationException
-    {
-        public MaxVideosExceededException(int activeCount, int maxVideos)
-            : base($"max_videos_exceeded: active={activeCount} cap={maxVideos}")
-        {
-            ActiveCount = activeCount;
-            MaxVideos = maxVideos;
-        }
-
-        public int ActiveCount { get; }
-        public int MaxVideos { get; }
-    }
-
     public enum DownloadTransferAllowance
     {
         Allowed,
@@ -123,8 +109,8 @@ namespace AlUmmahNow.App.Media
     }
 
     /// <summary>
-    /// Plain-file local offline download store for Desktop (E14-S10, E14-D1):
-    /// - Saves plain progressive `audio.m4a` / `video.mp4` files played directly by Windows Media Foundation / GStreamer.
+    /// Plain-file local offline download store for Desktop (E14-S10, E14-D1, E14-D5):
+    /// - Saves plain progressive R2 `video.mp4` (or existing audio rendition) files played directly by Windows Media Foundation / GStreamer.
     /// - No encryption, DRM, OS key storage, or license expiry.
     /// - Keyed by `(UserId, VideoId)` and forbids signed URL persistence.
     /// - Never silently evicts active downloads; deletes copies on availability sync when videos go private or are deleted.
@@ -200,13 +186,7 @@ namespace AlUmmahNow.App.Media
                 PurgeInactiveLocked();
 
                 var key = RecordKey(userId, videoId);
-                var replacing = _records.TryGetValue(key, out var existing);
-                if (!replacing && Settings.MaxVideos.HasValue)
-                {
-                    var activeCount = _records.Values.Count(r => string.Equals(r.UserId, userId, StringComparison.Ordinal) && r.IsPlayable);
-                    if (activeCount >= Settings.MaxVideos.Value)
-                        throw new MaxVideosExceededException(activeCount, Settings.MaxVideos.Value);
-                }
+                _records.TryGetValue(key, out var existing);
 
                 var cap = Settings.MaxStorageBytes;
                 var used = _records.Values.Sum(r => r.Bytes) - (existing?.Bytes ?? 0);

@@ -48,7 +48,7 @@ namespace AlUmmahNow.App.Tests
                 title: "Surah Al-Kahf",
                 channelName: "Recitations",
                 playUrl: "https://media.example/pub/vid-1/r1/master.m3u8",
-                audioUrl: "https://media.example/pub/vid-1/r1/audio.m4a",
+                audioUrl: "https://media.example/pub/vid-1/r1/a/orig/index.m3u8",
                 durationSeconds: 600);
             listen.SetNowPlaying(entry);
 
@@ -58,7 +58,7 @@ namespace AlUmmahNow.App.Tests
             listen.ApplyFeatures(new UserFeatures(new HashSet<string> { UserFeatures.ListenMode }));
             listen.SetAudioOnly(true, player);
             Assert.True(listen.IsAudioOnly);
-            Assert.Equal("https://media.example/pub/vid-1/r1/audio.m4a", player.LoadedUrl);
+            Assert.Equal("https://media.example/pub/vid-1/r1/a/orig/index.m3u8", player.LoadedUrl);
             Assert.Equal(45, player.Position);
             Assert.Equal(1.5, player.Rate);
             Assert.Equal(PlayerState.Playing, player.State);
@@ -75,7 +75,7 @@ namespace AlUmmahNow.App.Tests
             try
             {
                 var store = new OfflineDownloadStore(dir, offlineDownloadsEnabled: false);
-                store.UpdateSettings(new OfflineDownloadSettings { WifiOnly = true, MaxStorageBytes = 5_000, MaxVideos = 2 });
+                store.UpdateSettings(new OfflineDownloadSettings { WifiOnly = true, MaxStorageBytes = 5_000 });
 
                 var payload = new byte[1_500];
                 new Random(42).NextBytes(payload);
@@ -92,16 +92,16 @@ namespace AlUmmahNow.App.Tests
                         "user-a", "vid-1", "Lecture", OfflineDownloadQuality.Audio, new MemoryStream(payload),
                         thumbnailPath: "https://cdn.example/signed.jpg?sig=abc"));
 
-                // Saves plain .m4a file directly playable via path
+                // Saves plain .mp4 file directly playable via path
                 var saved = store.SaveFromStream(
-                    "user-a", "vid-1", "Lecture", OfflineDownloadQuality.Audio, new MemoryStream(payload),
+                    "user-a", "vid-1", "Lecture", OfflineDownloadQuality.Q480p, new MemoryStream(payload),
                     thumbnailPath: "/local/thumbs/vid-1.jpg");
-                Assert.EndsWith(".m4a", saved.FileName);
+                Assert.EndsWith(".mp4", saved.FileName);
                 var playablePath = store.GetPlayableFilePath("user-a", "vid-1");
                 Assert.Equal(payload, File.ReadAllBytes(playablePath));
 
                 // Multi-account isolation
-                store.SaveFromStream("user-b", "vid-1", "Lecture", OfflineDownloadQuality.Audio, new MemoryStream(payload));
+                store.SaveFromStream("user-b", "vid-1", "Lecture", OfflineDownloadQuality.Q480p, new MemoryStream(payload));
                 Assert.Single(store.PlayableDownloads("user-a"));
                 Assert.Single(store.PlayableDownloads("user-b"));
 
@@ -110,11 +110,6 @@ namespace AlUmmahNow.App.Tests
                 Assert.Throws<StorageBudgetExceededException>(() =>
                     store.SaveFromStream("user-a", "vid-big", "Big", OfflineDownloadQuality.Q480p, new MemoryStream(big), expectedBytes: big.Length));
                 Assert.Single(store.PlayableDownloads("user-a"));
-
-                // Tier maxVideos cap enforced
-                store.UpdateSettings(new OfflineDownloadSettings { WifiOnly = true, MaxStorageBytes = 50_000, MaxVideos = 1 });
-                Assert.Throws<MaxVideosExceededException>(() =>
-                    store.SaveFromStream("user-a", "vid-2", "Second", OfflineDownloadQuality.Audio, new MemoryStream(payload)));
 
                 // Availability sync deletes local files for private/deleted/disabled videos
                 var deleted = store.ApplyAvailabilitySync(new[]
