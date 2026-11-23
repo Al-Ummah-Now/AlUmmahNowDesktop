@@ -211,6 +211,21 @@ namespace AlUmmahNow.App.I18n
         /// <summary>A timecode (player position, frame time), same shape as <see cref="Duration"/>.</summary>
         public string Duration(TimeSpan value) => Duration(value.TotalSeconds);
 
+        /// <summary>Capped notification badge count: empty when zero, "1".."9" / "١".."٩", or "9+" / "٩+".</summary>
+        public string BadgeCap9(int count) =>
+            count <= 0 ? ""
+            : count > 9 ? Digits("9") + "+"
+            : Digits(count.ToString(CultureInfo.InvariantCulture));
+
+        /// <summary>Formats minutes from midnight (0..1439) as 24h HH:mm in the active language's digits, isolated.</summary>
+        public string MinuteOfDay(int minute)
+        {
+            var clamped = ((minute % 1440) + 1440) % 1440;
+            var h = (clamped / 60).ToString("00", CultureInfo.InvariantCulture);
+            var m = (clamped % 60).ToString("00", CultureInfo.InvariantCulture);
+            return Isolate(Digits(h + ":" + m));
+        }
+
         /// <summary>A playback speed: "1.5x" / "١٫٥x".</summary>
         public string Speed(double rate) => Digits(rate.ToString("0.##", CultureInfo.InvariantCulture)) + "x";
 

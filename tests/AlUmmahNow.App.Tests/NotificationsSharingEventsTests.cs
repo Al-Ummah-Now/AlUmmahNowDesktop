@@ -1,0 +1,164 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Net;
+using System.Net.Http;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+using AlUmmahNow.App.I18n;
+using AlUmmahNow.App.ViewModels;
+using AlUmmahNow.CoreBridge;
+using AlUmmahNow.CoreBridge.Studio;
+using AlUmmahNow.CoreBridge.Temporary;
+using Xunit;
+
+namespace AlUmmahNow.App.Tests;
+
+public class NotificationsSharingEventsTests
+{
+    private const string WebHost = "videos.qa.alummahnow.net";
+    private const string ShortHost = "qa.alummahnow.link";
+
+    [Fact]
+    public void Short_links_build_and_parse_across_all_supported_routes()
+    {
+        var videoUrl = ShortLinks.Video("vid_123", ShortHost, startSeconds: 95, playlistId: "pl_1", playlistIndex: 2, lang: "ar");
+        Assert.Equal("https://qa.alummahnow.link/v/vid_123?t=95&list=pl_1&index=2&lang=ar", videoUrl);
+        var parsed = ShortLinks.Parse(videoUrl, WebHost, ShortHost);
+        Assert.NotNull(parsed);
+        Assert.Equal(AppLinkKind.Video, parsed!.Kind);
+        Assert.Equal("vid_123", parsed.IdOrHandle);
+        Assert.Equal("ar", parsed.Lang);
+        Assert.Equal(95L, parsed.StartSeconds);
+        Assert.Equal("pl_1", parsed.PlaylistId);
+        Assert.Equal(2, parsed.PlaylistIndex);
+
+        var liveUrl = ShortLinks.Live("str_7", ShortHost, lang: "ar");
+        Assert.Equal("https://qa.alummahnow.link/e/str_7?lang=ar", liveUrl);
+        Assert.Equal(AppLinkKind.Live, ShortLinks.Parse(liveUrl, WebHost, ShortHost)!.Kind);
+
+        var handleUrl = ShortLinks.ChannelHandle("@الأمة", ShortHost, lang: "ar");
+        var handleParsed = ShortLinks.Parse(handleUrl, WebHost, ShortHost);
+        Assert.Equal(AppLinkKind.ChannelHandle, handleParsed!.Kind);
+        Assert.Equal("الأمة", handleParsed.IdOrHandle);
+
+        Assert.Equal(AppLinkKind.Short, ShortLinks.Parse(ShortLinks.Short("sh_1", ShortHost), WebHost, ShortHost)!.Kind);
+        Assert.Equal(AppLinkKind.ChannelId, ShortLinks.Parse(ShortLinks.ChannelId("ch_1", ShortHost), WebHost, ShortHost)!.Kind);
+        Assert.Equal(AppLinkKind.Post, ShortLinks.Parse(ShortLinks.Post("po_1", ShortHost), WebHost, ShortHost)!.Kind);
+        Assert.Equal(AppLinkKind.Playlist, ShortLinks.Parse(ShortLinks.Playlist("pl_1", ShortHost), WebHost, ShortHost)!.Kind);
+
+        Assert.Null(ShortLinks.Video("bad/id", ShortHost));
+        Assert.Null(ShortLinks.Parse("https://evil.example/v/vid_123", WebHost, ShortHost));
+    }
+
+    [Fact]
+    public async Task WatchViewModel_builds_short_share_link_with_optional_position_and_locale()
+    {
+        var c = new FakeCatalog();
+        c.Videos.Add(FakeCatalog.Ready("vid_42"));
+        var p = new FakePlayer();
+        var s = new FakeSession();
+        var vm = new WatchViewModel(c, p, s, new Localizer("ar"));
+        await vm.LoadAsync("vid_42");
+        p.Tick(83);
+
+        Assert.Equal("https://alummahnow.link/v/vid_42?lang=ar", vm.ShareUrl());
+        Assert.Equal("https://alummahnow.link/v/vid_42?t=83&lang=ar", vm.ShareUrl(atCurrentPosition: true));
+        Assert.Contains("١:٢٣", vm.ShareAtPositionLabel);
+    }
+
+    [Fact]
+    public void Localizer_formats_capped_badges_and_quiet_window_times_in_both_languages()
+    {
+        var ar = new Localizer("ar");
+        var en = new Localizer("en");
+
+        Assert.Equal("", ar.BadgeCap9(0));
+        Assert.Equal("٤", ar.BadgeCap9(4));
+        Assert.Equal("٩+", ar.BadgeCap9(14));
+        Assert.Equal("9+", en.BadgeCap9(14));
+
+        Assert.Equal("\u2068٢٢:٠٠\u2069", ar.MinuteOfDay(1320));
+        Assert.Equal("\u206806:05\u2069", en.MinuteOfDay(365));
+    }
+
+    [Fact]
+    public void Quiet_hours_evaluate_overnight_and_prayer_windows()
+    {
+        var qh = new NotificationQuietHours(
+            enabled: true,
+            timezone: "Asia/Riyadh",
+            startMinute: 1320,
+            endMinute: 360,
+            prayerQuietEnabled: true,
+            prayerWindows: new[] { new PrayerQuietWindow(735, 760) });
+        Assert.True(qh.ContainsMinute(1380));
+        Assert.True(qh.ContainsMinute(120));
+        Assert.False(qh.ContainsMinute(600));
+        Assert.True(qh.ContainsMinute(745));
+    }
+
+    [Fact]
+    public async Task Notifications_and_events_view_models_and_http_clients_work_end_to_end()
+    {
+        var responses = new Queue<string>(new[]
+        {
+            """{"result":{"items":[{"id":"n1","category":"live","notificationType":"stream","notificationKey":"liveStarted","params":{"videoTitle":"Weekly Halqa"},"readAt":null,"createdAt":1795450000000}],"unreadCount":12,"unseenCount":12,"menuOpen":"seen"}}""",
+            """{"result":{"unreadCount":12,"unseenCount":0,"menuOpen":"seen"}}""",
+            """{"result":{"quietHours":{"enabled":true,"timezone":"Asia/Riyadh","startMinute":1320,"endMinute":360,"prayerQuietEnabled":false,"prayerWindows":[]}}}""",
+            """{"result":{"quietHours":{"enabled":true,"timezone":"Asia/Riyadh","startMinute":1320,"endMinute":360,"prayerQuietEnabled":true,"prayerWindows":[]}}}""",
+            """{"version":1,"features":{"eventCalendar":false}}""",
+            """{"version":1,"features":{"eventCalendar":true}}""",
+            """{"result":{"items":[{"streamId":"str_1","channelId":"ch_1","channelName":"Al-Manar","channelNameAr":"المنار","title":"Weekly Halqa","kind":"live","eventType":"halqa","status":"scheduled","scheduledStartAt":"2026-11-28T19:00:00Z","watchPath":"/live/str_1"}]}}""",
+            """{"success":true}""",
+        });
+        var paths = new List<string>();
+        using var http = new HttpClient(new StubHandler((req) =>
+        {
+            paths.Add(req.Method.Method + " " + req.RequestUri!.PathAndQuery);
+            return responses.Dequeue();
+        }));
+        var baseUri = new Uri("https://videos.api.qa.alummahnow.net");
+        var notifsClient = new HttpNotificationsClient(http, baseUri, _ => Task.FromResult<string?>("tok"));
+        var eventsClient = new HttpEventsClient(http, baseUri, _ => Task.FromResult<string?>("tok"));
+        var pushRegistrar = new HttpAppPushRegistrar(http, baseUri, _ => Task.FromResult<string?>("tok"));
+
+        var localizer = new Localizer("ar");
+        var notifsVm = new NotificationsViewModel(notifsClient, localizer);
+        await notifsVm.OpenInboxAsync();
+        Assert.Single(notifsVm.Items);
+        Assert.Equal("Weekly Halqa", notifsVm.Items[0].Title);
+        Assert.False(notifsVm.HasBadge);
+        await notifsVm.SetPrayerQuietAsync(true);
+        Assert.True(notifsVm.QuietHours.PrayerQuietEnabled);
+
+        var eventsVm = new EventsCalendarViewModel(eventsClient, localizer);
+        await eventsVm.RefreshAsync();
+        Assert.False(eventsVm.IsFeatureEnabled);
+        Assert.Empty(eventsVm.Items);
+
+        await eventsVm.RefreshAsync();
+        Assert.True(eventsVm.IsFeatureEnabled);
+        Assert.Single(eventsVm.Items);
+        Assert.Contains("المنار", eventsVm.SubtitleFor(eventsVm.Items[0]));
+
+        await pushRegistrar.RegisterAsync("viewer", "inst_12345678", "https://wns.example/ch", "ar", "0.1.0");
+        Assert.Contains("PUT /api/devices/inst_12345678", paths);
+
+        Assert.False(new AppPushConfig("AlUmmahNow.Dev", packaged: true).CanRegister);
+        Assert.True(new AppPushConfig("AlUmmahNow.Viewer", packaged: true).CanRegister);
+    }
+
+    private sealed class StubHandler : HttpMessageHandler
+    {
+        private readonly Func<HttpRequestMessage, string> _respond;
+        public StubHandler(Func<HttpRequestMessage, string> respond) => _respond = respond;
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(_respond(request), Encoding.UTF8, "application/json"),
+            });
+    }
+}
