@@ -69,14 +69,18 @@ namespace AlUmmahNow.CoreBridge
         public bool PrayerQuietEnabled { get; }
         public IReadOnlyList<PrayerQuietWindow> PrayerWindows { get; }
 
-        public NotificationQuietHours With(bool? enabled = null, bool? prayerQuietEnabled = null) =>
+        public NotificationQuietHours With(
+            bool? enabled = null,
+            string? timezone = null,
+            bool? prayerQuietEnabled = null,
+            IReadOnlyList<PrayerQuietWindow>? prayerWindows = null) =>
             new NotificationQuietHours(
                 enabled ?? Enabled,
-                Timezone,
+                timezone ?? Timezone,
                 StartMinute,
                 EndMinute,
                 prayerQuietEnabled ?? PrayerQuietEnabled,
-                PrayerWindows);
+                prayerWindows ?? PrayerWindows);
 
         public bool ContainsMinute(int minuteOfDay)
         {
@@ -99,6 +103,8 @@ namespace AlUmmahNow.CoreBridge
 
     public sealed class NotificationEntry
     {
+        private static readonly IReadOnlyDictionary<string, string> EmptyParams = new Dictionary<string, string>();
+
         public NotificationEntry(
             string id,
             string category,
@@ -106,7 +112,8 @@ namespace AlUmmahNow.CoreBridge
             string notificationKey,
             string title,
             bool isUnread,
-            long createdAtMs)
+            long createdAtMs,
+            IReadOnlyDictionary<string, string>? parameters = null)
         {
             Id = id;
             Category = category;
@@ -115,6 +122,7 @@ namespace AlUmmahNow.CoreBridge
             Title = title;
             IsUnread = isUnread;
             CreatedAtMs = createdAtMs;
+            Parameters = parameters ?? EmptyParams;
         }
 
         public string Id { get; }
@@ -124,6 +132,7 @@ namespace AlUmmahNow.CoreBridge
         public string Title { get; }
         public bool IsUnread { get; }
         public long CreatedAtMs { get; }
+        public IReadOnlyDictionary<string, string> Parameters { get; }
     }
 
     public sealed class NotificationsPage
@@ -192,18 +201,21 @@ namespace AlUmmahNow.CoreBridge
     }
 
     /// <summary>
-    /// WNS package-identity readiness for Viewer and Studio on Windows. Without Partner Center MSIX
-    /// identity, push stays off cleanly without crashing or polling.
+    /// WNS package-identity readiness for Windows apps (Admin, Viewer, and Studio). Without Partner Center
+    /// MSIX identity, push stays off cleanly without crashing or polling.
     /// </summary>
-    public sealed class AppPushConfig
+    public sealed class PushConfig
     {
-        public AppPushConfig(string? packageIdentity, bool packaged)
+        public PushConfig(string? packageIdentity, bool packaged)
         {
             PackageIdentity = packageIdentity;
             Packaged = packaged;
         }
 
+        /// <summary>The Partner Center identity name stamped into the MSIX at release; empty in dev builds.</summary>
         public string? PackageIdentity { get; }
+
+        /// <summary>Running from an MSIX (WNS channels need package identity).</summary>
         public bool Packaged { get; }
 
         public bool CanRegister =>
@@ -214,6 +226,7 @@ namespace AlUmmahNow.CoreBridge
 
     public interface INotificationsClient
     {
+        Task<UserFeatures> GetViewerFeaturesAsync(CancellationToken cancellationToken = default);
         Task<NotificationBadge> GetBadgeAsync(CancellationToken cancellationToken = default);
         Task<NotificationsPage> ListAsync(int limit = 20, CancellationToken cancellationToken = default);
         Task<NotificationBadge> MarkSeenAsync(IReadOnlyList<string> ids, CancellationToken cancellationToken = default);

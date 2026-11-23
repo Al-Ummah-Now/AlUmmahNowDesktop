@@ -5,6 +5,7 @@ using AlUmmahNow.Admin.Push;
 using AlUmmahNow.Admin.Review;
 using AlUmmahNow.Admin.Security;
 using AlUmmahNow.App.I18n;
+using AlUmmahNow.CoreBridge;
 using AlUmmahNow.CoreBridge.Logging;
 using Xunit;
 

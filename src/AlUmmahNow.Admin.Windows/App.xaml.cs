@@ -7,6 +7,7 @@ using AlUmmahNow.Admin.Review;
 using AlUmmahNow.Admin.Security;
 using AlUmmahNow.App.I18n;
 using AlUmmahNow.App.Services;
+using AlUmmahNow.CoreBridge;
 using AlUmmahNow.CoreBridge.Logging;
 using AlUmmahNow.CoreBridge.Native;
 using AlUmmahNow.CoreBridge.Passkeys;

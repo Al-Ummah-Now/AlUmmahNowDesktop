@@ -85,25 +85,3 @@ public sealed class PushClear
 }
 
 public enum PushState { NotConfigured, Off, Registering, Registered, Failed }
-
-/// <summary>
-/// Whether this build can receive pushes. WNS needs the app's package identity (Partner Center
-/// Package SID + secret on the server, the matching identity in the signed MSIX); until the owner
-/// supplies them the build ships with push off and says so.
-/// </summary>
-public sealed class PushConfig
-{
-    public PushConfig(string? packageIdentity, bool packaged)
-    {
-        PackageIdentity = packageIdentity;
-        Packaged = packaged;
-    }
-
-    /// <summary>The Partner Center identity name stamped into the MSIX at release; empty in dev builds.</summary>
-    public string? PackageIdentity { get; }
-
-    /// <summary>Running from an MSIX (WNS channels need package identity).</summary>
-    public bool Packaged { get; }
-
-    public bool CanRegister => Packaged && !string.IsNullOrWhiteSpace(PackageIdentity) && !PackageIdentity!.EndsWith(".Dev", StringComparison.Ordinal);
-}
