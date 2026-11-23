@@ -452,5 +452,20 @@
   "currency.SAR": "Saudi riyals",
   "currency.AED": "UAE dirhams",
   "currency.EGP": "Egyptian pounds",
-  "stat.zero": "0"
+  "stat.zero": "0",
+  "player.listen": "Listen",
+  "player.video": "Video",
+  "player.audioOnly": "Audio only",
+  "player.sleepTimer": "Sleep timer",
+  "player.sleepTimer.off": "Off",
+  "player.sleepTimer.minutes": "{0} min",
+  "player.sleepTimer.endOfEpisode": "End of episode",
+  "player.queue": "Up next",
+  "player.queue.empty": "Your queue is empty.",
+  "player.queue.clear": "Clear queue",
+  "downloads.title": "Downloads",
+  "downloads.empty": "No downloaded videos yet.",
+  "downloads.wifiOnly": "Download on unmetered networks only",
+  "downloads.remove": "Remove download",
+  "downloads.expired": "License expired. Connect to refresh."
 }
