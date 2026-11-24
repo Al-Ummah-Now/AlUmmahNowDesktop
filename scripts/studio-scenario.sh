@@ -23,4 +23,10 @@ if command -v python3 >/dev/null && python3 -c "import pyatspi" 2>/dev/null; the
 fi
 sleep 2
 import -window root "$out/$name.png"
+# AUN_ATSPI_PRESS: press this control and read the app again ($name.pressed.atspi.txt), after the frame.
+if [ -n "${AUN_ATSPI_PRESS:-}" ]; then
+  python3 scripts/atspi-dump.py alummahnow-studio /dev/null "$AUN_ATSPI_PRESS" || true
+  sleep 1
+  python3 scripts/atspi-dump.py alummahnow-studio "$out/$name.pressed.atspi.txt" || true
+fi
 wait $app

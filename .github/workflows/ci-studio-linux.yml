@@ -53,8 +53,8 @@ jobs:
           run en videos shell edit-en artifacts/studio "" edit
           run ar videos shell bulk-ar artifacts/studio "" bulk
           run en videos shell delete-en artifacts/studio "" delete
-          run ar analytics shell analytics-ar artifacts/studio
-          run en analytics shell analytics-en artifacts/studio
+          AUN_EXIT_AFTER=32 AUN_ATSPI_PRESS="عرض كجدول" run ar analytics shell analytics-ar artifacts/studio
+          AUN_EXIT_AFTER=32 AUN_ATSPI_PRESS="Show as a table" run en analytics shell analytics-en artifacts/studio
           run en timeline "" timeline-en artifacts/studio
           run ar timeline "" timeline-ar artifacts/studio
           run ar encode encode:$PWD/source.mp4 encode-ar artifacts/studio
@@ -76,6 +76,14 @@ jobs:
           # No text field at all on open, on any page (the Videos page has its own search field).
           for n in shell-en shell-ar videos-en videos-ar; do grep -q "fieldFocused=False" artifacts/studio/$n.log; done
           grep -P "^check box\tSeerah" artifacts/studio/videos-en.atspi.txt
+          # The row that opens the table has its name, and says whether it is open, before and after it is pressed.
+          for t in "en:Show as a table" "ar:عرض كجدول"; do
+            f=artifacts/studio/analytics-${t%%:*}; n=${t#*:}
+            grep -P "^toggle button\t$n$" $f.atspi.txt
+            grep -P "^expandable\tcollapsed\t$n$" $f.atspi.txt
+            grep -P "^toggle button\t$n$" $f.pressed.atspi.txt
+            grep -P "^expandable\texpanded\t$n$" $f.pressed.atspi.txt
+          done
           grep -P "^button\tUpload 3 videos$" artifacts/studio/upload-staged-en.atspi.txt
           gst-discoverer-1.0 source.mp4.out.mp4 | tee artifacts/studio/discover.txt
           grep -qi 'h.264' artifacts/studio/discover.txt

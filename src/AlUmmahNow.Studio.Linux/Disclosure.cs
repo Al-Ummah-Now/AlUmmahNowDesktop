@@ -16,7 +16,7 @@ public sealed class Disclosure
         var arrow = Gtk.Image.NewFromIconName(closedIcon);
         // The icon has its own direction, which would turn the arrow once more: it is drawn as named
         arrow.SetDirection(Gtk.TextDirection.Ltr);
-        _label = Gtk.Label.New(title);
+        _label = Gtk.Label.New("");
         var row = Gtk.Box.New(Gtk.Orientation.Horizontal, 6);
         row.Append(arrow);
         row.Append(_label);
@@ -31,7 +31,10 @@ public sealed class Disclosure
             var open = Toggle.GetActive();
             arrow.SetFromIconName(open ? "pan-down-symbolic" : closedIcon);
             reveal.SetRevealChild(open);
+            SayExpanded(open);
         };
+        SetTitle(title);
+        SayExpanded(false);
         Root.Append(Toggle);
         Root.Append(reveal);
     }
@@ -40,5 +43,22 @@ public sealed class Disclosure
 
     private Gtk.ToggleButton Toggle { get; } = Gtk.ToggleButton.New();
 
-    public void SetTitle(string title) => _label.SetText(title);
+    public void SetTitle(string title)
+    {
+        _label.SetText(title);
+        // A button whose child is a box takes no name from a label in it
+        var values = new[] { new GObject.Value(title) };
+        using var handle = GObject.Internal.ValueArray2OwnedHandle.Create(values);
+        Gtk.Internal.Accessible.UpdateProperty(Toggle.Handle.DangerousGetHandle(), 1, new[] { Gtk.AccessibleProperty.Label }, handle);
+        GC.KeepAlive(values);
+    }
+
+    /// <summary>Collapsed or expanded, as a screen reader says it (GTK keeps the state as a number: it may be undefined).</summary>
+    private void SayExpanded(bool open)
+    {
+        var values = new[] { new GObject.Value(open ? 1 : 0) };
+        using var handle = GObject.Internal.ValueArray2OwnedHandle.Create(values);
+        Gtk.Internal.Accessible.UpdateState(Toggle.Handle.DangerousGetHandle(), 1, new[] { Gtk.AccessibleState.Expanded }, handle);
+        GC.KeepAlive(values);
+    }
 }
