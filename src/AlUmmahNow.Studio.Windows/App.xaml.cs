@@ -221,6 +221,7 @@ public sealed partial class App : Application
                 if (scene == "accounts") window.OpenAccountMenu();
                 else if (scene == "channels") window.OpenChannelPicker();
                 else if (scene == "signout") window.AskSignOut();
+                else if (scene == "searchfocus") window.FocusSearch();
                 else if (scene == "addpasskey") _ = window.AddPasskeyAsync();
                 else if (scene == "scheduled") uploads.RunScene(scene);
                 else if (scene == "active") AlUmmahNow.Studio.Demo.DemoEncodeBackend.Seed(encode, Path.GetTempPath());
@@ -243,7 +244,7 @@ public sealed partial class App : Application
                 var pass = job != null ? job.Status == EncodeStatus.Completed
                     : automation == "shell" ? shell.State == ShellState.Ready && shell.ActiveChannel != null
                     : uploadsDone || tabName != "uploads";
-                pass = pass && videos.CardsAreWhole;
+                pass = pass && videos.CardsAreWhole && (scene != "searchfocus" || window.SearchHasFocus);
                 File.WriteAllText(ResultPath, $"AUTOMATION {tabName} page={pages.Current} upload={pages.IsVisible(StudioPages.Uploads)} analytics={pages.IsVisible(StudioPages.Analytics)} bulkSchedule={uploadsVm.BulkScheduleOn} scene={scene} shell={shell.State} channel={shell.ActiveChannel?.Id} accounts={shell.AccountList.Count} uploads={snapshot.Count} uploadsDone={uploadsDone} encode={job?.Status} encoder={job?.UsedEncoder?.Name} error={job?.Error} searchFocused={window.SearchHasFocus} fieldFocused={window.FieldHasFocus} cardsWhole={videos.CardsAreWhole} RESULT {(pass ? "PASS" : "FAIL")}");
                 Exit();
             };

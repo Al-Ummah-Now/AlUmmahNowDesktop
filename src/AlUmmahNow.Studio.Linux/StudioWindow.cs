@@ -205,7 +205,8 @@ public sealed class StudioWindow
         else Window.SetFocus(null);
     }
 
-    private bool FocusSearch() => _searchBox.GetVisible() && _searchText != null && _searchText.GrabFocus();
+    /// <summary>The header search takes the keyboard (Control+K, "/", and a CI scene).</summary>
+    public bool FocusSearch() => _searchBox.GetVisible() && _searchText != null && _searchText.GrabFocus();
 
     public Adw.ApplicationWindow Window { get; }
 
