@@ -44,6 +44,53 @@ public sealed class StudioThemeTests
         Assert.Contains("headerbar.night", css);
     }
 
+    private static double Contrast(uint a, uint b)
+    {
+        static double Channel(uint v) => v / 255.0 <= 0.03928 ? v / 255.0 / 12.92 : Math.Pow(((v / 255.0) + 0.055) / 1.055, 2.4);
+        static double Light(uint c) => (0.2126 * Channel((c >> 16) & 255)) + (0.7152 * Channel((c >> 8) & 255)) + (0.0722 * Channel(c & 255));
+        var (x, y) = (Light(a), Light(b));
+        return (Math.Max(x, y) + 0.05) / (Math.Min(x, y) + 0.05);
+    }
+
+    [Theory]
+    [InlineData("Default")]
+    [InlineData("Light")]
+    public void TextTheStudioDrawsIsReadable(string theme)
+    {
+        var c = StudioTheme.ReadXamlColors(StudioTheme.Fanous("Fanous.Colors.xaml"))[theme];
+        // Edit, dimmed lines, Delete; and the text on gold, at rest, hovered and pressed
+        foreach (var (text, on) in new[] { ("Link", "Surface"), ("TextMuted", "Surface"), ("TextMuted", "Background"), ("ErrorText", "Surface"), ("OnPrimary", "Primary"), ("OnPrimary", "PrimaryHover"), ("OnPrimary", "PrimaryPressed") })
+        {
+            Assert.True(Contrast(c["Fanous" + text + "Color"], c["Fanous" + on + "Color"]) >= 4.5, theme + ": " + text + " on " + on);
+        }
+
+        var h = FawaneesHeader.For(theme != "Light");
+        static uint U(Rgba v) => ((uint)v.R << 16) | ((uint)v.G << 8) | v.B;
+        Assert.True(Contrast(U(h.SearchPlaceholder), U(h.SearchBackground)) >= 4.5, theme + ": search placeholder");
+    }
+
+    /// <summary>A toolkit dims, or answers for, colors of its own unless told otherwise: what made them unreadable in light mode.</summary>
+    [Fact]
+    public void TheToolkitsOwnColorsDoNotWin()
+    {
+        var css = StudioTheme.Studio("glass.css");
+        Assert.Contains(".dim-label { opacity: 1; color: @fanous_text_muted; }", css);
+        Assert.Contains("entry > text > placeholder, entry > placeholder { opacity: 1; color: @fanous_text_muted; }", css);
+        var root = new DirectoryInfo(AppContext.BaseDirectory);
+        while (root != null && !File.Exists(Path.Combine(root.FullName, "AlUmmahNow.sln"))) root = root.Parent;
+        Assert.NotNull(root);
+        string Source(string project, string file) => File.ReadAllText(Path.Combine(root!.FullName, "src", project, file));
+        Assert.Contains("header-search entry > text > placeholder {{ color: {h.SearchPlaceholder.Css}; opacity: 1; }}", Source("AlUmmahNow.Studio.Linux", "StudioStyle.cs"));
+        // WinUI's dictionary is merged into the application's and answers first for a name of its own
+        foreach (var file in Directory.EnumerateFiles(Path.Combine(root!.FullName, "src", "AlUmmahNow.Studio.Windows"), "*.cs"))
+        {
+            Assert.DoesNotMatch("LanternGlass\\.Res\\(\"(?!Studio)", File.ReadAllText(file));
+        }
+
+        Assert.Contains("PlaceholderForeground = new SolidColorBrush(LanternGlass.C(h.SearchPlaceholder))", Source("AlUmmahNow.Studio.Windows", "StudioWindow.cs"));
+        Assert.Contains("app.Resources.MergedDictionaries.Add(controls);", Source("AlUmmahNow.Studio.Windows", "LanternGlass.cs"));
+    }
+
     [Fact]
     public void LanternStringIsAPng()
     {

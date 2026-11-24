@@ -261,6 +261,8 @@ internal sealed class StudioWindow
         var text = new TextBox
         {
             PlaceholderText = label,
+            // The style sets its own, over the field's resources
+            PlaceholderForeground = new SolidColorBrush(LanternGlass.C(h.SearchPlaceholder)),
             FontSize = FawaneesHeader.SearchFontSize,
             VerticalAlignment = VerticalAlignment.Center,
             Padding = new Thickness(FawaneesHeader.SearchTextInset, 0, 8, 0),
@@ -274,7 +276,6 @@ internal sealed class StudioWindow
             text.Resources["TextControlBackground" + state] = clear;
             text.Resources["TextControlBorderBrush" + state] = clear;
             text.Resources["TextControlForeground" + state] = new SolidColorBrush(LanternGlass.C(h.SearchText));
-            text.Resources["TextControlPlaceholderForeground" + state] = new SolidColorBrush(LanternGlass.C(h.SearchPlaceholder));
         }
 
         text.Resources["TextControlBorderThemeThicknessFocused"] = new Thickness(0);

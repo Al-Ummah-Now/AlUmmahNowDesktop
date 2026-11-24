@@ -81,6 +81,26 @@ public class DemoDataTests
     }
 
     [Theory]
+    [InlineData("en", "Test of the new camera")]
+    [InlineData("ar", "تجربة الكاميرا الجديدة")]
+    public async Task DeletedVideosAreInTheDemoOnlyWhenAsked(string language, string queued)
+    {
+        var today = new DateTime(2026, 11, 21, 0, 0, 0, DateTimeKind.Utc);
+        Assert.Empty(await new StudioApiClient(new DemoTransport(language: language, today: today)).ListDeletedAsync("demo-c1"));
+        var transport = new DemoTransport(language: language, today: today, withDeleted: true);
+        var api = new StudioApiClient(transport);
+        var deleted = await api.ListDeletedAsync("demo-c1");
+        Assert.Equal(new[] { true, true, false }, deleted.Select(d => d.CanRestore));
+        Assert.Equal(queued, deleted[^1].Title);
+        Assert.Equal(new DateTime(2026, 11, 17), deleted[0].DeletedAt.UtcDateTime.Date);
+        Assert.Equal(new DateTime(2026, 12, 17), deleted[0].PurgeAfter!.Value.UtcDateTime.Date);
+        // They are not among the channel's videos, and do not change its numbers
+        var videos = await api.ListVideosAsync(new StudioVideoQuery { ChannelId = "demo-c1", Limit = 100 });
+        Assert.DoesNotContain(videos.Items, v => deleted.Any(d => d.Id == v.Id || d.Title == v.Title));
+        Assert.Equal(8, videos.Items.Count);
+    }
+
+    [Theory]
     [InlineData("2026-11-21", 2026, 11, 21)]
     [InlineData(" 2027-01-05 ", 2027, 1, 5)]
     public void DemoTodayReadsTheDay(string value, int y, int m, int d) =>

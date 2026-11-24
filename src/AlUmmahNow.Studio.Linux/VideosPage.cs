@@ -38,6 +38,7 @@ public sealed class VideosPage
     private readonly Gtk.Button _more;
     private readonly Gtk.Spinner _spinner = Gtk.Spinner.New();
     private readonly Disclosure _deletedRow;
+    private readonly Gtk.ScrolledWindow _scroll;
     private readonly Gtk.Box _deleted = Gtk.Box.New(Gtk.Orientation.Vertical, 6);
     private bool _syncingSearch;
     private Gtk.Box? _deletedCard;
@@ -55,7 +56,7 @@ public sealed class VideosPage
         _vm = vm;
         _uploads = uploads;
         _window = window;
-        var scroll = Gtk.ScrolledWindow.New();
+        var scroll = _scroll = Gtk.ScrolledWindow.New();
         var page = Ui.Page(14);
         page.SetMarginStart(24);
         page.SetMarginEnd(24);
@@ -285,7 +286,7 @@ public sealed class VideosPage
         _spinner.SetVisible(_vm.IsLoading);
     }
 
-    /// <summary>CI screenshots: "search", "edit", "bulk" or "delete".</summary>
+    /// <summary>CI screenshots: "search", "edit", "bulk", "delete", "deleted" (the closed row) or "deleted-open".</summary>
     public void RunScene(string scene)
     {
         switch (scene)
@@ -310,6 +311,16 @@ public sealed class VideosPage
                 _vm.SelectAll(true);
                 RenderList();
                 _ = DeleteAsync(_vm.Selected.ToList());
+                break;
+            case "deleted":
+            case "deleted-open":
+                if (scene == "deleted-open") _deletedRow.Open();
+                // To the end of the page, once the row has opened
+                GLib.Functions.TimeoutAdd(0, 1500, () =>
+                {
+                    if (_scroll.GetVadjustment() is { } v) v.SetValue(v.GetUpper());
+                    return false;
+                });
                 break;
         }
     }

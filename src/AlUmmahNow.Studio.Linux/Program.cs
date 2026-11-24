@@ -55,7 +55,7 @@ Func<string, IUploadService> uploadServiceFor;
 if (demo)
 {
     accounts = new DemoAccounts();
-    transport = new DemoTransport(DemoTransport.FeaturesOff(Environment.GetEnvironmentVariable("AUN_DEMO_FEATURES_OFF")), Environment.GetEnvironmentVariable("AUN_DEMO_THUMBS"), localizer.Language);
+    transport = new DemoTransport(DemoTransport.FeaturesOff(Environment.GetEnvironmentVariable("AUN_DEMO_FEATURES_OFF")), Environment.GetEnvironmentVariable("AUN_DEMO_THUMBS"), localizer.Language, withDeleted: scene.StartsWith("deleted", StringComparison.Ordinal));
     uploadServiceFor = account => new SimulatedUploadService(account, TimeSpan.FromMilliseconds(250));
 }
 else
