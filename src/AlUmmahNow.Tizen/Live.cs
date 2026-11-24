@@ -33,7 +33,7 @@ namespace AlUmmahNow.TizenTv
             if (_navigator.Current is App.Navigation.Route.Home && before != string.Join(",", _liveList.All.Select(c => c.Id))) Render();
         }
 
-        /// <summary>Behind another app: nothing is asked for the chat.</summary>
+        /// <summary>Behind another app: nothing is asked for.</summary>
         protected override void OnPause()
         {
             if (_liveWatch != null) _liveWatch.IsHidden = true;
@@ -44,6 +44,12 @@ namespace AlUmmahNow.TizenTv
         {
             if (_liveWatch != null) _liveWatch.IsHidden = false;
             base.OnResume();
+        }
+
+        protected override void OnTerminate()
+        {
+            _liveWatch?.Close(TimeSpan.FromSeconds(2));
+            base.OnTerminate();
         }
 
         private void CloseLive()

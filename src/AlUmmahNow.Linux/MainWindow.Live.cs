@@ -40,6 +40,9 @@ public sealed partial class MainWindow
         _ = vm.RunAsync();
     }
 
+    /// <summary>The app is closing.</summary>
+    public void Close() => _liveWatch?.Close(TimeSpan.FromSeconds(2));
+
     private void CloseLive()
     {
         _liveWatch?.Dispose();

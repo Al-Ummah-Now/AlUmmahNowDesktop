@@ -47,6 +47,7 @@ namespace AlUmmahNow.App.Live
         private string? _opened;
         private bool _isGone;
         private bool _hasBeaten;
+        private bool _isHidden;
         private DateTimeOffset _stateAt = DateTimeOffset.MinValue;
         private DateTimeOffset _chatDue = DateTimeOffset.MinValue;
         private DateTimeOffset _replayDue = DateTimeOffset.MinValue;
@@ -90,8 +91,23 @@ namespace AlUmmahNow.App.Live
         /// <summary>The player's page, once there is something to play.</summary>
         public WatchViewModel? Watch { get; private set; }
 
-        /// <summary>The window is hidden: nothing is asked for the chat.</summary>
-        public bool IsHidden { get; set; }
+        /// <summary>
+        /// The window is hidden: nothing is asked for, and the viewer is counted out, also while the sound plays on. A
+        /// premiere is still kept at its moment.
+        /// </summary>
+        public bool IsHidden
+        {
+            get => _isHidden;
+            set
+            {
+                if (_isHidden == value) return;
+                _isHidden = value;
+                if (value) Leave();
+            }
+        }
+
+        /// <summary>The last word to the server: that the viewer left.</summary>
+        public Task Leaving { get; private set; } = Task.CompletedTask;
 
         public bool IsPremiere => Live?.Kind == LiveKind.Premiere;
         public string Title => Stream?.Title ?? "";
@@ -242,17 +258,33 @@ namespace AlUmmahNow.App.Live
         {
             if (_stop.IsCancellationRequested) return;
             _stop.Cancel();
-            // In a request of its own: the page's are canceled
-            if (_hasBeaten && Mode == LiveMode.Live) _ = LeaveAsync();
+            Leave();
             Watch?.Dispose();
             _player.Dispose();
         }
 
+        /// <summary>The app is closing: the viewer is counted out before it does, as far as the server answers in time.</summary>
+        public void Close(TimeSpan patience)
+        {
+            Dispose();
+            Leaving.Wait(patience);
+        }
+
+        private void Leave()
+        {
+            // Counted again at once on coming back
+            _beatDue = DateTimeOffset.MinValue;
+            if (!_hasBeaten || Mode != LiveMode.Live) return;
+            _hasBeaten = false;
+            Leaving = LeaveAsync();
+        }
+
+        /// <summary>In a request of its own (the page's are canceled), and never on the UI's thread, which may be waiting.</summary>
         private async Task LeaveAsync()
         {
             try
             {
-                await _live.BeatAsync(StreamId, _viewerId, leaving: true);
+                await _live.BeatAsync(StreamId, _viewerId, leaving: true).ConfigureAwait(false);
             }
             catch (CatalogException)
             {
@@ -265,9 +297,10 @@ namespace AlUmmahNow.App.Live
         {
             if (State != LoadState.Content) return;
             UntilStart = Countdown();
+            if (IsHidden) return;
             if (_now() - _stateAt >= StateEvery()) await RefreshStateAsync();
             await RefreshChatAsync();
-            if (Mode == LiveMode.Live && _now() >= _beatDue)
+            if (Mode == LiveMode.Live && !IsHidden && _now() >= _beatDue)
             {
                 _hasBeaten = true;
                 var wait = BeatEvery;
@@ -280,7 +313,8 @@ namespace AlUmmahNow.App.Live
                     wait = PollAfter(ex.RetryAfter) ?? wait;
                 }
 
-                _beatDue = _now() + wait;
+                // Hidden meanwhile: counted out already, and again at once on coming back
+                if (!IsHidden) _beatDue = _now() + wait;
             }
         }
 
@@ -449,7 +483,15 @@ namespace AlUmmahNow.App.Live
             CloseWatch();
             _opened = videoId;
             Watch = NewWatch();
-            await Watch.LoadAsync(videoId, _stop.Token, () => _clock?.Position(_now()) ?? 0);
+            try
+            {
+                await Watch.ShowAsync(video, () => _clock?.Position(_now()) ?? 0, _stop.Token);
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                // Not playing: asked for again
+                CloseWatch();
+            }
         }
 
         private WatchViewModel NewWatch() => new WatchViewModel(_catalog, _player, _session, _localizer);
@@ -493,10 +535,11 @@ namespace AlUmmahNow.App.Live
             foreach (var n in new[] { window, window + 1, window - 1 })
             {
                 if (n < 0 || _replay.ContainsKey(n) || _now() < _replayDue) continue;
-                TimeSpan? refused = null;
-                var list = await ReadWindowAsync(n, wait => refused = wait);
+                TimeSpan? refused = null, said = null;
+                var list = await ReadWindowAsync(n, wait => refused = wait, wait => said = wait);
                 if (list == null) _replayDue = _now() + (refused ?? ChatBackoff);
                 else _replay[n] = list;
+                if (list != null && said != null) _replayDue = _now() + said.Value;
             }
 
             var shown = new List<LiveChatMessage>();
@@ -510,7 +553,7 @@ namespace AlUmmahNow.App.Live
         }
 
         /// <summary>null when it could not be read; asked for again after a while.</summary>
-        private async Task<IReadOnlyList<LiveChatMessage>?> ReadWindowAsync(long n, Action<TimeSpan> refused)
+        private async Task<IReadOnlyList<LiveChatMessage>?> ReadWindowAsync(long n, Action<TimeSpan> refused, Action<TimeSpan> said)
         {
             var from = n * ReplayWindowMs;
             var to = from + ReplayWindowMs;
@@ -520,6 +563,8 @@ namespace AlUmmahNow.App.Live
                 var start = from;
                 var page = await Quiet(() => _live.GetChatReplayAsync(StreamId, start, to, _stop.Token), refused);
                 if (page == null) return null;
+                // Before the next window; the rest of this one is one read in parts
+                if (PollAfter(page.PollAfter) is { } wait) said(wait);
                 foreach (var m in page.Messages.Where(m => m.OffsetMs < to)) all[m.Id] = m;
                 var last = page.Messages.LastOrDefault();
                 if (!page.Truncated || last == null || last.OffsetMs <= from) break;

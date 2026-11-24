@@ -43,7 +43,7 @@ public sealed class FakeLive : ILiveClient
 
     public async Task<IReadOnlyList<LiveStream>> ListAsync(LiveStatus status, LiveEventType? type = null, CancellationToken ct = default)
     {
-        if (Held is { } held && held.Type == type) await held.Gate.Task;
+        if (Held is { } held && held.Type == type) await held.Gate.Task.WaitAsync(ct);
         if (Fails) throw new CatalogException("503");
         Asked = type;
         return Lists.TryGetValue(status, out var list) ? list : Array.Empty<LiveStream>();
@@ -67,14 +67,21 @@ public sealed class FakeLive : ILiveClient
         return Task.FromResult(new LiveChatPage(new[] { new LiveChatMessage { Id = "m" } }, Pinned, pollAfter: ChatPollAfter));
     }
 
-    public Task<LiveChatPage> GetChatReplayAsync(string id, long from, long to, CancellationToken ct = default) =>
-        Task.FromResult(Windows.TryGetValue(from, out var page) ? page : new LiveChatPage(Array.Empty<LiveChatMessage>()));
+    public List<long> WindowReads { get; } = new();
+    public TimeSpan LeaveTakes { get; set; }
 
-    public Task<long?> BeatAsync(string id, string viewerId, bool leaving, CancellationToken ct = default)
+    public Task<LiveChatPage> GetChatReplayAsync(string id, long from, long to, CancellationToken ct = default)
+    {
+        WindowReads.Add(from);
+        return Task.FromResult(Windows.TryGetValue(from, out var page) ? page : new LiveChatPage(Array.Empty<LiveChatMessage>()));
+    }
+
+    public async Task<long?> BeatAsync(string id, string viewerId, bool leaving, CancellationToken ct = default)
     {
         Beats.Add(leaving);
         if (!leaving) Refuse();
-        return Task.FromResult<long?>(5);
+        if (leaving && LeaveTakes > TimeSpan.Zero) await Task.Delay(LeaveTakes, ct).ConfigureAwait(false);
+        return 5;
     }
 
     public Task SetReminderAsync(string id, bool on, CancellationToken ct = default)
@@ -324,6 +331,51 @@ public class LiveTests
     }
 
     [Fact]
+    public async Task Closing_the_app_waits_for_the_leave_to_be_sent_but_not_for_ever()
+    {
+        _live.Current = OnAir();
+        var vm = await Loaded();
+        await vm.TickAsync();
+        _live.LeaveTakes = TimeSpan.FromMilliseconds(100);
+        vm.Close(TimeSpan.FromSeconds(5));
+        Assert.Equal(new[] { false, true }, _live.Beats);
+        Assert.True(vm.Leaving.IsCompleted);
+
+        var stuck = await Loaded();
+        await stuck.TickAsync();
+        _live.LeaveTakes = TimeSpan.FromSeconds(30);
+        stuck.Close(TimeSpan.FromMilliseconds(50));
+        Assert.False(stuck.Leaving.IsCompleted);
+    }
+
+    [Fact]
+    public async Task The_premieres_video_is_read_once_so_a_second_read_cannot_break_it()
+    {
+        _live.Current = Premiere(LiveStatus.Live);
+        _catalog.ReadsLeft = 1;
+        var vm = await Loaded();
+        Assert.Equal(LoadState.Content, vm.Watch!.State);
+        Assert.Single(_player.Opened);
+    }
+
+    [Fact]
+    public async Task The_replay_follows_the_servers_pace()
+    {
+        _live.Current = new LiveState { Status = LiveStatus.Ended, VodUrl = "https://x.test/v.m3u8", ChatReplay = true };
+        _live.Windows[0] = new LiveChatPage(new[] { new LiveChatMessage { Id = "a" } }, pollAfter: TimeSpan.FromSeconds(30));
+        _live.Windows[60_000] = new LiveChatPage(new[] { new LiveChatMessage { Id = "b", OffsetMs = 60_000 } });
+        var vm = await Loaded();
+        await vm.TickAsync();
+        Assert.Equal(new long[] { 0 }, _live.WindowReads);
+        Advance(29);
+        await vm.TickAsync();
+        Assert.Equal(new long[] { 0 }, _live.WindowReads);
+        Advance(1);
+        await vm.TickAsync();
+        Assert.Equal(new long[] { 0, 60_000 }, _live.WindowReads);
+    }
+
+    [Fact]
     public async Task Leaving_is_counted_once()
     {
         _live.Current = OnAir();
@@ -347,13 +399,20 @@ public class LiveTests
         await vm.TickAsync();
         Assert.Equal(1, _live.ChatReads);
         Assert.Single(vm.Messages);
+        // Hidden: nothing is asked for, and the viewer is counted out
+        var beats = _live.Beats.Count;
         vm.IsHidden = true;
-        Advance(10);
+        Assert.Equal(beats + 1, _live.Beats.Count);
+        Assert.True(_live.Beats[^1]);
+        var states = _live.StateReads;
+        Advance(120);
         await vm.TickAsync();
-        Assert.Equal(1, _live.ChatReads);
+        Assert.Equal((states, 1, beats + 1), (_live.StateReads, _live.ChatReads, _live.Beats.Count));
+        // Back: all of it at once
         vm.IsHidden = false;
         await vm.TickAsync();
-        Assert.Equal(2, _live.ChatReads);
+        Assert.Equal((states + 1, 2, beats + 2), (_live.StateReads, _live.ChatReads, _live.Beats.Count));
+        Assert.False(_live.Beats[^1]);
         // Turned off: gone from the page at the next read of the state
         _live.Current = OnAir();
         Advance(60);
@@ -576,9 +635,10 @@ public class LiveTests
         _live.Held = (LiveEventType.Jumuah, gate);
         var late = vm.ChooseAsync(LiveEventType.Jumuah);
         await vm.ChooseAsync(LiveEventType.Halqa);
-        gate.SetResult();
-        await late;
+        // Canceled, not only ignored: it ends though its answer never comes
+        await late.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.Equal(LiveEventType.Halqa, vm.Event);
+        Assert.Equal(LoadState.Content, vm.State);
     }
 
     [Fact]

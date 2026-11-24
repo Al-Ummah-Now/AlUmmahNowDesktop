@@ -92,7 +92,11 @@ public sealed partial class App : Application
         _window = new Window { Title = localizer["app.name"], Content = shell.Root };
         _window.AppWindow.Resize(new global::Windows.Graphics.SizeInt32(1280, 800));
         if (_window.AppWindow.Presenter is OverlappedPresenter presenter) presenter.Maximize();
-        _window.Closed += (_, _) => player.Stop();
+        _window.Closed += (_, _) =>
+        {
+            player.Stop();
+            shell.Close();
+        };
         _window.VisibilityChanged += (_, e) => shell.SetHidden(!e.Visible);
         _window.Activate();
 
