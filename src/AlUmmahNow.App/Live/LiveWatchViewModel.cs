@@ -48,6 +48,8 @@ namespace AlUmmahNow.App.Live
         private bool _isGone;
         private bool _hasBeaten;
         private bool _isHidden;
+        private int _visit;
+        private Task _lastBeat = Task.CompletedTask;
         private DateTimeOffset _stateAt = DateTimeOffset.MinValue;
         private DateTimeOffset _chatDue = DateTimeOffset.MinValue;
         private DateTimeOffset _replayDue = DateTimeOffset.MinValue;
@@ -272,24 +274,50 @@ namespace AlUmmahNow.App.Live
 
         private void Leave()
         {
-            // Counted again at once on coming back
+            // Counted again at once on coming back, whatever was on its way
+            _visit++;
             _beatDue = DateTimeOffset.MinValue;
             if (!_hasBeaten || Mode != LiveMode.Live) return;
             _hasBeaten = false;
             Leaving = LeaveAsync();
         }
 
-        /// <summary>In a request of its own (the page's are canceled), and never on the UI's thread, which may be waiting.</summary>
         private async Task LeaveAsync()
         {
             try
             {
-                await _live.BeatAsync(StreamId, _viewerId, leaving: true).ConfigureAwait(false);
+                await SendBeatAsync(leaving: true).ConfigureAwait(false);
             }
             catch (CatalogException)
             {
                 // Counted out when its time runs out
             }
+        }
+
+        /// <summary>
+        /// One at a time, in the order they were asked for: a beat on its way when the window is hidden must not count the
+        /// viewer in after the leave, nor a leave count out a viewer who came back. So none is canceled (the server may have
+        /// it already), and none waits for the UI's thread, which may be waiting for the last.
+        /// </summary>
+        private Task<long?> SendBeatAsync(bool leaving)
+        {
+            var beat = AfterAsync(_lastBeat, leaving);
+            _lastBeat = beat;
+            return beat;
+        }
+
+        private async Task<long?> AfterAsync(Task previous, bool leaving)
+        {
+            try
+            {
+                await previous.ConfigureAwait(false);
+            }
+            catch (CatalogException)
+            {
+                // Its own caller was told
+            }
+
+            return await _live.BeatAsync(StreamId, _viewerId, leaving).ConfigureAwait(false);
         }
 
         /// <summary>One second: the clock and whatever is due. Every wait begins when the answer is there, however long that took.</summary>
@@ -303,18 +331,18 @@ namespace AlUmmahNow.App.Live
             if (Mode == LiveMode.Live && !IsHidden && _now() >= _beatDue)
             {
                 _hasBeaten = true;
-                var wait = BeatEvery;
+                var (visit, wait) = (_visit, BeatEvery);
                 try
                 {
-                    if (await _live.BeatAsync(StreamId, _viewerId, leaving: false, _stop.Token) is { } count) Viewers = count;
+                    if (await SendBeatAsync(leaving: false) is { } count) Viewers = count;
                 }
                 catch (CatalogException ex)
                 {
                     wait = PollAfter(ex.RetryAfter) ?? wait;
                 }
 
-                // Hidden meanwhile: counted out already, and again at once on coming back
-                if (!IsHidden) _beatDue = _now() + wait;
+                // Hidden meanwhile, and perhaps back: the next one is due at once
+                if (visit == _visit) _beatDue = _now() + wait;
             }
         }
 

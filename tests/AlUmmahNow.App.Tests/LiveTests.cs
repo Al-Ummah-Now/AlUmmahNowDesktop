@@ -70,6 +70,9 @@ public sealed class FakeLive : ILiveClient
     public List<long> WindowReads { get; } = new();
     public TimeSpan LeaveTakes { get; set; }
 
+    /// <summary>Each beat waits for the next of these.</summary>
+    public Queue<TaskCompletionSource> BeatGates { get; } = new();
+
     public Task<LiveChatPage> GetChatReplayAsync(string id, long from, long to, CancellationToken ct = default)
     {
         WindowReads.Add(from);
@@ -80,6 +83,7 @@ public sealed class FakeLive : ILiveClient
     {
         Beats.Add(leaving);
         if (!leaving) Refuse();
+        if (BeatGates.Count > 0) await BeatGates.Dequeue().Task.ConfigureAwait(false);
         if (leaving && LeaveTakes > TimeSpan.Zero) await Task.Delay(LeaveTakes, ct).ConfigureAwait(false);
         return 5;
     }
@@ -346,6 +350,69 @@ public class LiveTests
         _live.LeaveTakes = TimeSpan.FromSeconds(30);
         stuck.Close(TimeSpan.FromMilliseconds(50));
         Assert.False(stuck.Leaving.IsCompleted);
+    }
+
+    /// <summary>What is queued on other threads has run.</summary>
+    private static async Task Until(Func<bool> done)
+    {
+        for (var i = 0; i < 500 && !done(); i++) await Task.Delay(10);
+        Assert.True(done());
+    }
+
+    [Fact]
+    public async Task A_beat_on_its_way_when_the_window_is_hidden_cannot_come_after_the_leave()
+    {
+        _live.Current = OnAir();
+        var vm = await Loaded();
+        var gate = new TaskCompletionSource();
+        _live.BeatGates.Enqueue(gate);
+        var ticking = vm.TickAsync();
+        vm.IsHidden = true;
+        await Task.Delay(50);
+        // The leave is not sent before the beat is answered
+        Assert.Equal(new[] { false }, _live.Beats);
+        gate.SetResult();
+        await ticking;
+        await vm.Leaving;
+        Assert.Equal(new[] { false, true }, _live.Beats);
+        await vm.TickAsync();
+        Assert.Equal(2, _live.Beats.Count);
+    }
+
+    [Fact]
+    public async Task A_leave_on_its_way_when_the_viewer_comes_back_cannot_come_after_the_beat()
+    {
+        _live.Current = OnAir();
+        var vm = await Loaded();
+        await vm.TickAsync();
+        var gate = new TaskCompletionSource();
+        _live.BeatGates.Enqueue(gate);
+        vm.IsHidden = true;
+        await Until(() => _live.Beats.Count == 2);
+        vm.IsHidden = false;
+        var ticking = vm.TickAsync();
+        await Task.Delay(50);
+        Assert.Equal(new[] { false, true }, _live.Beats);
+        gate.SetResult();
+        await ticking;
+        Assert.Equal(new[] { false, true, false }, _live.Beats);
+    }
+
+    [Fact]
+    public async Task Hidden_and_back_while_a_beat_is_on_its_way_ends_counted_in()
+    {
+        _live.Current = OnAir();
+        var vm = await Loaded();
+        var gate = new TaskCompletionSource();
+        _live.BeatGates.Enqueue(gate);
+        var ticking = vm.TickAsync();
+        vm.IsHidden = true;
+        vm.IsHidden = false;
+        gate.SetResult();
+        await ticking;
+        // At once, not in 20 seconds
+        await vm.TickAsync();
+        Assert.Equal(new[] { false, true, false }, _live.Beats);
     }
 
     [Fact]
