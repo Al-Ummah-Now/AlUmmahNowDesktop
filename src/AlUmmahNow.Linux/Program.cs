@@ -77,7 +77,9 @@ app.OnActivate += async (_, _) =>
     _ = mpris.StartAsync();
 
     var player = new GstMediaPlayer();
-    var window = new MainWindow(app, catalog, localizer, navigator, player, session, http, settings, store, auth, live, environment.ShortLinkHost);
+    MainWindow? window = null;
+    app.OnShutdown += (_, _) => window?.Close();
+    window = new MainWindow(app, catalog, localizer, navigator, player, session, http, settings, store, auth, live, environment.ShortLinkHost);
     try
     {
         auth.Restore();

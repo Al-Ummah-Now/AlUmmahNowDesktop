@@ -23,7 +23,7 @@ public sealed partial class Shell
     public LiveListViewModel LiveList { get; }
     public LiveWatchViewModel? LiveWatch => _liveWatch;
 
-    /// <summary>Minimized or hidden: nothing is asked for the chat.</summary>
+    /// <summary>Minimized or hidden: nothing is asked for.</summary>
     public void SetHidden(bool hidden)
     {
         _isHidden = hidden;
@@ -53,6 +53,9 @@ public sealed partial class Shell
         };
         _ = vm.RunAsync();
     }
+
+    /// <summary>The window is closing.</summary>
+    public void Close() => _liveWatch?.Close(TimeSpan.FromSeconds(2));
 
     private void CloseLive()
     {

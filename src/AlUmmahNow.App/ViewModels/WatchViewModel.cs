@@ -108,30 +108,13 @@ namespace AlUmmahNow.App.ViewModels
             if (Quality is { } quality) _player.Open(quality.Url, 0, autoPlay: true);
         }
 
-        /// <param name="start">Where playback begins, asked when it does; null for the beginning.</param>
-        public async Task LoadAsync(string videoId, CancellationToken cancellationToken = default, Func<double>? start = null)
+        public async Task LoadAsync(string videoId, CancellationToken cancellationToken = default)
         {
             State = LoadState.Loading;
             PlaybackFailed = false;
             try
             {
-                var video = await _catalog.GetVideoAsync(videoId, cancellationToken);
-                Video = video;
-                OnPropertyChanged(nameof(Title));
-                OnPropertyChanged(nameof(Description));
-                OnPropertyChanged(nameof(Channel));
-                if (string.IsNullOrEmpty(video.PlayUrl))
-                {
-                    State = LoadState.Empty;
-                    return;
-                }
-
-                await LoadQualitiesAsync(video.PlayUrl!, cancellationToken);
-                await LoadSubtitlesAsync(videoId, cancellationToken);
-
-                State = LoadState.Content;
-                _session.SetMetadata(Title, Channel, video.ThumbnailUrl, video.DurationSeconds ?? 0);
-                _player.Open(Quality!.Url, start?.Invoke() ?? 0, autoPlay: true);
+                await ShowAsync(await _catalog.GetVideoAsync(videoId, cancellationToken), null, cancellationToken);
             }
             catch (CatalogException)
             {
@@ -141,6 +124,28 @@ namespace AlUmmahNow.App.ViewModels
             {
                 State = LoadState.Error;
             }
+        }
+
+        /// <summary>Plays a video that has been read already.</summary>
+        /// <param name="start">Where playback begins, asked when it does; null for the beginning.</param>
+        public async Task ShowAsync(Video video, Func<double>? start, CancellationToken cancellationToken = default)
+        {
+            Video = video;
+            OnPropertyChanged(nameof(Title));
+            OnPropertyChanged(nameof(Description));
+            OnPropertyChanged(nameof(Channel));
+            if (string.IsNullOrEmpty(video.PlayUrl))
+            {
+                State = LoadState.Empty;
+                return;
+            }
+
+            await LoadQualitiesAsync(video.PlayUrl!, cancellationToken);
+            await LoadSubtitlesAsync(video.Id, cancellationToken);
+
+            State = LoadState.Content;
+            _session.SetMetadata(Title, Channel, video.ThumbnailUrl, video.DurationSeconds ?? 0);
+            _player.Open(Quality!.Url, start?.Invoke() ?? 0, autoPlay: true);
         }
 
         /// <summary>Switches rendition, resuming at the current position and play state.</summary>

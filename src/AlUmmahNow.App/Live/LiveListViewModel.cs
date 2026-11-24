@@ -83,6 +83,7 @@ namespace AlUmmahNow.App.Live
         private readonly Navigator _navigator;
         private readonly Func<DateTimeOffset> _now;
         private int _request;
+        private CancellationTokenSource? _loading;
 
         [ObservableProperty] private LoadState _state = LoadState.Loading;
 
@@ -117,9 +118,13 @@ namespace AlUmmahNow.App.Live
         public async Task LoadAsync(CancellationToken cancellationToken = default)
         {
             var request = ++_request;
+            _loading?.Cancel();
+            var loading = _loading = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            cancellationToken = loading.Token;
             try
             {
                 var features = await _live.GetFeaturesAsync(cancellationToken);
+                if (request != _request) return;
                 var chosen = features.Events ? Event : null;
                 var onAir = _live.ListAsync(LiveStatus.Live, chosen, cancellationToken);
                 var scheduled = features.HasComing
@@ -139,6 +144,15 @@ namespace AlUmmahNow.App.Live
             {
                 // What is shown stays, as after a failed refresh
                 if (request == _request && State != LoadState.Content) State = LoadState.Error;
+            }
+            catch (OperationCanceledException) when (request != _request)
+            {
+                // A later choice was made meanwhile
+            }
+            finally
+            {
+                if (ReferenceEquals(_loading, loading)) _loading = null;
+                loading.Dispose();
             }
         }
 

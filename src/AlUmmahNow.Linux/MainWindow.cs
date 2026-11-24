@@ -54,7 +54,7 @@ public sealed partial class MainWindow
         keys.OnKeyPressed += (_, a) => OnKey(a.Keyval);
         _window.AddController(keys);
 
-        // Hidden or behind another workspace: nothing is asked for the chat
+        // Hidden or behind another workspace: nothing is asked for
         _window.OnNotify += (_, e) =>
         {
             if (e.Pspec.GetName() == "suspended" && _liveWatch != null) _liveWatch.IsHidden = _window.IsSuspended();
