@@ -820,7 +820,17 @@ public class LiveTests
         Assert.Equal(new[] { 2 }, started);
         page.After(() => started.Add(0));
         Assert.Equal(new[] { 2, 0 }, started);
-        Assert.Throws<InvalidOperationException>(() => new PageRenderer(() => throw new InvalidOperationException()).Render());
+        // One that fails leaves the next to be built
+        var (attempts, fails) = (0, true);
+        var failing = new PageRenderer(() =>
+        {
+            attempts++;
+            if (fails) throw new InvalidOperationException();
+        });
+        Assert.Throws<InvalidOperationException>(failing.Render);
+        fails = false;
+        failing.Render();
+        Assert.Equal(2, attempts);
     }
 
     /// <summary>A window as the shells have it: emptied, then the header and the page, which opens as it is built.</summary>
@@ -873,6 +883,25 @@ public class LiveTests
         _live.Fails = false;
         await live.Current!.LoadAsync();
         Assert.Equal(new[] { LoadState.Loading, LoadState.Error, LoadState.Loading, LoadState.Content }, built);
+        Assert.Equal(1, deepest());
+        live.Close();
+    }
+
+    [Fact]
+    public async Task A_live_page_is_built_once_for_a_change_that_the_poll_sees()
+    {
+        _live.Current = new LiveState { Status = LiveStatus.Scheduled };
+        var (page, live, _, built, deepest) = Window("s", _ => Model());
+        page.Render();
+        Assert.Equal(2, built.Count);
+        Advance(15);
+        await live.Current!.TickAsync();
+        Assert.Equal(2, built.Count);
+        _live.Current = new LiveState { Status = LiveStatus.Cancelled };
+        Advance(15);
+        await live.Current!.TickAsync();
+        Assert.Equal(LiveMode.Cancelled, live.Current!.Mode);
+        Assert.Equal(3, built.Count);
         Assert.Equal(1, deepest());
         live.Close();
     }

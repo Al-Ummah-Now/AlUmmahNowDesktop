@@ -57,10 +57,64 @@ public class DisplayDigitsTests
         Assert.Equal("٢٥٪", ar.Percent(0.25));
         Assert.Equal("١٢٫٦٩ دولار أمريكي", ar.Money(12.69m, "USD"));
         Assert.Equal("١٢٫٣ م.ب", ar.Bytes(12_900_000));
-        Assert.Equal("⁨٢٠٢٦-١١-١٥⁩", ar.Date(new DateTimeOffset(2026, 11, 15, 12, 0, 0, TimeZoneInfo.Local.GetUtcOffset(new DateTime(2026, 11, 15)))));
         Assert.Equal("⁨١:٠٢:٠٥⁩", ar.Duration(3725));
         Assert.Equal("١٫٥x", ar.Speed(1.5));
         Assert.Equal("١٫٢ ألف مشاهدة", ar.Views(1234));
+    }
+
+    /// <summary>The same text as the web's Intl (medium date, short time) and Android's, in the zone of the device.</summary>
+    [Theory]
+    [InlineData("en", "2026-11-25T04:30:00Z", "Nov 25, 2026", "Nov 25, 2026, 4:30 AM")]
+    [InlineData("en", "2026-03-05T16:05:00Z", "Mar 5, 2026", "Mar 5, 2026, 4:05 PM")]
+    [InlineData("en", "2026-01-01T00:00:00Z", "Jan 1, 2026", "Jan 1, 2026, 12:00 AM")]
+    [InlineData("en", "2026-01-01T12:09:00Z", "Jan 1, 2026", "Jan 1, 2026, 12:09 PM")]
+    [InlineData("ar", "2026-11-25T04:30:00Z", "٢٥\u200F/١١\u200F/٢٠٢٦", "٢٥\u200F/١١\u200F/٢٠٢٦، ٤:٣٠ ص")]
+    [InlineData("ar", "2026-03-05T16:05:00Z", "٠٥\u200F/٠٣\u200F/٢٠٢٦", "٠٥\u200F/٠٣\u200F/٢٠٢٦، ٤:٠٥ م")]
+    [InlineData("ar", "2026-01-01T00:00:00Z", "٠١\u200F/٠١\u200F/٢٠٢٦", "٠١\u200F/٠١\u200F/٢٠٢٦، ١٢:٠٠ ص")]
+    [InlineData("ar", "2026-01-01T12:09:00Z", "٠١\u200F/٠١\u200F/٢٠٢٦", "٠١\u200F/٠١\u200F/٢٠٢٦، ١٢:٠٩ م")]
+    public void Days_and_times_read_as_on_the_web(string language, string at, string day, string dayAndTime)
+    {
+        var value = DateTimeOffset.Parse(at, CultureInfo.InvariantCulture);
+        var l = new Localizer(language, TimeZoneInfo.Utc);
+        Assert.Equal(Localizer.Isolate(day), l.Date(value));
+        Assert.Equal(Localizer.Isolate(dayAndTime), l.DateTime(value));
+    }
+
+    [Fact]
+    public void Days_and_times_are_in_the_time_zone_of_the_device()
+    {
+        var at = new DateTimeOffset(2026, 11, 25, 4, 30, 0, TimeSpan.Zero);
+        var zone = TimeZoneInfo.CreateCustomTimeZone("test", TimeSpan.FromHours(-5), "test", "test");
+        Assert.Equal(Localizer.Isolate("Nov 24, 2026, 11:30 PM"), new Localizer("en", zone).DateTime(at));
+        Assert.Equal(Localizer.Isolate("Nov 24, 2026"), new Localizer("en", zone).Date(at));
+        Assert.Equal(new Localizer("en", TimeZoneInfo.Local).DateTime(at), new Localizer("en").DateTime(at));
+    }
+
+    /// <summary>
+    /// GTK turns a directional icon in a right-to-left page by itself, so one that is chosen by the language is turned
+    /// twice and points the wrong way: it is drawn left to right, as it is named.
+    /// </summary>
+    [Fact]
+    public void An_arrow_that_is_chosen_by_the_language_is_not_turned_again()
+    {
+        var root = new DirectoryInfo(AppContext.BaseDirectory);
+        while (root != null && !File.Exists(Path.Combine(root.FullName, "AlUmmahNow.sln"))) root = root.Parent;
+        Assert.NotNull(root);
+        var arrow = new Regex(@"IsRtl \? ""(go-(next|previous)|pan-(start|end))-symbolic""", RegexOptions.Compiled);
+        var found = 0;
+        foreach (var project in new[] { "AlUmmahNow.Linux", "AlUmmahNow.Studio.Linux" })
+        foreach (var file in Directory.EnumerateFiles(Path.Combine(root!.FullName, "src", project), "*.cs"))
+        {
+            var lines = File.ReadAllLines(file);
+            for (var i = 0; i < lines.Length; i++)
+            {
+                if (!arrow.IsMatch(lines[i])) continue;
+                found++;
+                Assert.True(lines.Skip(i).Take(5).Any(x => x.Contains("SetDirection(Gtk.TextDirection.Ltr)", StringComparison.Ordinal)), file + ":" + (i + 1));
+            }
+        }
+
+        Assert.Equal(2, found);
     }
 
     [Fact]

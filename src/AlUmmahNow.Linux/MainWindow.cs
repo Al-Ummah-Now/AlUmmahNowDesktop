@@ -174,6 +174,8 @@ public sealed partial class MainWindow
         if (_navigator.CanGoBack)
         {
             var back = Gtk.Button.NewFromIconName(_localizer.IsRtl ? "go-next-symbolic" : "go-previous-symbolic");
+            // The icon has its own direction, which would turn the arrow once more: it is drawn as named
+            back.GetChild()?.SetDirection(Gtk.TextDirection.Ltr);
             back.SetTooltipText(_localizer["nav.back"]);
             back.OnClicked += (_, _) => _navigator.Back();
             header.PackStart(back);

@@ -364,7 +364,8 @@ internal sealed class StudioWindow
     {
         var label = new TextBlock { Text = title, VerticalAlignment = VerticalAlignment.Center, FontSize = 14 };
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 14, Padding = new Thickness(4, 0, 4, 0) };
-        row.Children.Add(new SymbolIcon(icon));
+        // The lines of a list begin where its text does; the other icons are the same in both directions
+        row.Children.Add(icon == Symbol.List ? (IconElement)new FontIcon { Glyph = "\uE14C", FontSize = 20, MirroredWhenRightToLeft = true } : new SymbolIcon(icon));
         row.Children.Add(label);
         var item = new ListViewItem { Content = row, Tag = name, MinHeight = 42, Padding = new Thickness(10, 0, 10, 0), CornerRadius = new CornerRadius(8) };
         AutomationProperties.SetAutomationId(item, "Page_" + name);
@@ -740,7 +741,8 @@ internal sealed class StudioWindow
     private Button MenuAction(string text, string glyph, string? id, Action click)
     {
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
-        row.Children.Add(new FontIcon { Glyph = glyph, FontSize = 15, Width = 32 });
+        // Only the arrow out of the door has a direction
+        row.Children.Add(new FontIcon { Glyph = glyph, FontSize = 15, Width = 32, MirroredWhenRightToLeft = glyph == "\uF3B1" });
         row.Children.Add(new TextBlock { Text = text, VerticalAlignment = VerticalAlignment.Center });
         var b = new Button
         {

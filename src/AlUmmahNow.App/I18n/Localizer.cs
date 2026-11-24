@@ -23,10 +23,13 @@ namespace AlUmmahNow.App.I18n
         public static readonly IReadOnlyList<string> SupportedLanguages = new[] { "ar", "en" };
 
         private readonly Dictionary<string, IReadOnlyDictionary<string, string>> _bundles = new();
+        private readonly TimeZoneInfo? _zone;
         private string _language;
 
-        public Localizer(string language = "ar")
+        /// <param name="zone">The time zone of days and times; the device's when null.</param>
+        public Localizer(string language = "ar", TimeZoneInfo? zone = null)
         {
+            _zone = zone;
             foreach (var code in SupportedLanguages) _bundles[code] = Load(code);
             _language = Normalize(language);
         }
@@ -182,13 +185,26 @@ namespace AlUmmahNow.App.I18n
             return Digits(date.Day.ToString(CultureInfo.InvariantCulture)) + " " + month;
         }
 
-        /// <summary>A calendar day in local time: "2026-11-15" / "٢٠٢٦-١١-١٥".</summary>
-        public string Date(DateTimeOffset value) =>
-            Isolate(Digits(value.ToLocalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)));
+        /// <summary>
+        /// A calendar day in local time: "Nov 5, 2026" / «٠٥‏/١١‏/٢٠٢٦» (right-to-left marks before each slash). The web's and
+        /// Android's medium date, written out here so it is the same on every machine.
+        /// </summary>
+        public string Date(DateTimeOffset value) => Isolate(Day(Local(value)));
 
-        /// <summary>A day and time in local time: "2026-11-15 14:30" / "٢٠٢٦-١١-١٥ ١٤:٣٠".</summary>
-        public string DateTime(DateTimeOffset value) =>
-            Isolate(Digits(value.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)));
+        /// <summary>A day and time in local time: "Nov 5, 2026, 2:30 PM" / «٠٥‏/١١‏/٢٠٢٦، ٢:٣٠ م» (medium date, short time).</summary>
+        public string DateTime(DateTimeOffset value)
+        {
+            var at = Local(value);
+            var time = Digits(at.ToString("h:mm", CultureInfo.InvariantCulture));
+            return Isolate(_language == "ar"
+                ? Day(at) + "، " + time + (at.Hour < 12 ? " ص" : " م")
+                : Day(at) + ", " + time + (at.Hour < 12 ? " AM" : " PM"));
+        }
+
+        private DateTimeOffset Local(DateTimeOffset value) => TimeZoneInfo.ConvertTime(value, _zone ?? TimeZoneInfo.Local);
+
+        private string Day(DateTimeOffset at) =>
+            Digits(at.ToString(_language == "ar" ? "dd'\u200F/'MM'\u200F/'yyyy" : "MMM d, yyyy", CultureInfo.InvariantCulture));
 
         private static readonly CultureInfo Arabic = ArabicMonths();
 
