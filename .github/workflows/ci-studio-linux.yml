@@ -172,7 +172,8 @@ jobs:
               scripts/studio-scenario.sh $lang timeline "" "linux-signin-closed-$lang-$theme-1440x900" artifacts/review "" "" 0 > "artifacts/review/linux-signin-$lang-$theme.log" 2>&1 || true
             shot encode active $lang $theme 1440x900
             shot videos deleted $lang $theme 1440x900; shot videos deleted-open $lang $theme 1440x900
-            n=$((n+21))
+            shot videos searchfocus $lang $theme 1440x900
+            n=$((n+22))
           done; done
           for lang in en ar; do shot videos search $lang dark 1440x900; shot videos edit $lang dark 1440x900; shot videos delete $lang dark 1440x900; n=$((n+3)); done
           grep -h AUTOMATION artifacts/review/*.log

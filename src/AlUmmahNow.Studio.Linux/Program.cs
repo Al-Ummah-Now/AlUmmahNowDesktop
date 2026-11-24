@@ -177,6 +177,7 @@ app.OnActivate += (_, _) =>
             if (scene == "accounts") window.OpenAccountMenu();
             else if (scene == "channels") window.OpenChannelPicker();
             else if (scene == "signout") window.AskSignOut();
+            else if (scene == "searchfocus") window.FocusSearch();
             else if (scene == "scheduled") uploads.RunScene(scene);
             else if (scene == "active") AlUmmahNow.Studio.Demo.DemoEncodeBackend.Seed(encode, Path.GetTempPath());
             // The demo's second channel has no videos: the Videos empty state.
@@ -196,6 +197,7 @@ app.OnActivate += (_, _) =>
             var pass = automation.StartsWith("encode:", StringComparison.Ordinal) ? encoded
                 : automation == "shell" ? shell.State == ShellState.Ready && shell.ActiveChannel != null
                 : uploadsDone || tabName != "uploads";
+            pass = pass && (scene != "searchfocus" || window.SearchHasFocus);
             Log.For("automation").Info($"AUTOMATION {tabName} page={pages.Current} upload={pages.IsVisible(StudioPages.Uploads)} analytics={pages.IsVisible(StudioPages.Analytics)} bulkSchedule={uploadsVm.BulkScheduleOn} scene={scene} shell={shell.State} channel={shell.ActiveChannel?.Id} accounts={shell.AccountList.Count} uploads={items.Count} uploadsDone={uploadsDone} encode={automationJob?.Status} encoder={automationJob?.UsedEncoder?.Name} error={automationJob?.Error} everyText={uploads.ScheduleEveryText} searchFocused={window.SearchHasFocus} fieldFocused={window.FieldHasFocus} RESULT {(pass ? "PASS" : "FAIL")}");
             exitCode = pass ? 0 : 3;
             app.Quit();

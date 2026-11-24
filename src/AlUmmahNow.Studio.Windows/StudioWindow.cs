@@ -206,7 +206,8 @@ internal sealed class StudioWindow
 
     private bool Typing() => Window.Content?.XamlRoot is { } r && Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(r) is TextBox or PasswordBox or RichEditBox or AutoSuggestBox;
 
-    private bool FocusSearch() => _search.Visibility == Visibility.Visible && _searchText != null && _searchText.Focus(FocusState.Keyboard);
+    /// <summary>The header search takes the keyboard (Control+K, "/", and a CI scene).</summary>
+    public bool FocusSearch() => _search.Visibility == Visibility.Visible && _searchText != null && _searchText.Focus(FocusState.Keyboard);
 
     /// <summary>The title-bar search was submitted: the Videos page searches for the text.</summary>
     public event EventHandler<string>? SearchRequested;
