@@ -102,7 +102,7 @@ in GitHub → repo **Settings → Secrets and variables → Actions → Secrets*
 4. **First submission by hand** (Partner Center requires it before the API works): push a full release tag, download
    the `msix-AlUmmahNow-Windows` and `msix-AlUmmahNow-Studio-Windows` artifacts from the run, then in each product →
    **Start your submission**: Pricing (Free, markets), Properties (category **Photo & video**; privacy answers from
-   `store/microsoft/privacy.md`), Age ratings (IARC questionnaire, answers in the same file), Packages (upload the
+   `store/microsoft/privacy.md`), Age ratings (IARC questionnaire, answers in `store/microsoft/age-rating.md`, re-checked at every release), Packages (upload the
    MSIX), Store listings en-us and ar-sa (paste from `store/microsoft/<app>/<lang>/`, screenshots from the
    **Store screenshots** workflow),
    Submission options (justify `runFullTrust` with the sentence in `privacy.md`). Submit.

@@ -40,11 +40,7 @@ Admin for Windows is staff-only and never goes to the Store (`docs/ADMIN_WINDOWS
 | Properties | Privacy policy URL | the URL in `MSSTORE_PRIVACY_POLICY_URL` (required because of the answer above) | same |
 | Properties | Category | **Photo & video** | **Photo & video** |
 | Properties | Product declarations: "This product has been tested to meet accessibility guidelines" | leave unticked until a Narrator pass is signed off | same |
-| Age ratings (IARC) | Does the app share the user's location with other users? | No | No |
-| Age ratings (IARC) | Can users interact or exchange content with each other? | No: the Windows viewer only plays videos; it has no comments or messaging | **Yes**: the videos a creator uploads are published to others |
-| Age ratings (IARC) | Does the app share personal information with third parties? | No | No |
-| Age ratings (IARC) | Digital purchases? | No | No |
-| Age ratings (IARC) | Unrestricted internet access (a web browser)? | No: sign-in opens the system browser, the app itself shows only Al Ummah Now content | No |
+| Age ratings (IARC) | Every question | see `store/microsoft/age-rating.md` | same |
 | Submission options | Restricted capability `runFullTrust` justification | "Desktop app built with the Windows App SDK (WinUI 3); runFullTrust is the standard capability for packaged Win32 desktop apps." | same |
 
 ## Samsung Seller Office (TV)
