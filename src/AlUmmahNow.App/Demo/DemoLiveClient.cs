@@ -9,20 +9,27 @@ using AlUmmahNow.CoreBridge;
 namespace AlUmmahNow.App.Demo
 {
     /// <summary>
-    /// Live streams for review frames and the automation scenarios (<c>AUN_DEMO_LIVE=1</c>): no network, never in a normal
-    /// launch. The stream and the recording play the committed fixture (<c>AUN_FIXTURE_MEDIA</c>),
+    /// Live streams for review frames and the automation scenarios (<c>AUN_DEMO_LIVE=1</c>; <c>off</c>: with every Epic 17
+    /// switch off and nothing on air): no network, never in a normal launch. The stream and the recording play the committed fixture (<c>AUN_FIXTURE_MEDIA</c>),
     /// and have its title and channel.
     /// </summary>
     public sealed class DemoLiveClient : ILiveClient
     {
-        public const string LiveId = "demo-live", PremiereId = "demo-premiere", SoonId = "demo-soon", RecordingId = "demo-recording";
+        public const string LiveId = "demo-live", PremiereId = "demo-premiere", SoonId = "demo-soon", RecordingId = "demo-recording",
+            EndedId = "demo-ended", CanceledId = "demo-canceled", PremiereEndedId = "demo-premiere-ended", PremiereCanceledId = "demo-premiere-canceled";
 
         private readonly bool _arabic;
+        private readonly bool _off;
+        private readonly bool _remindFails;
         private readonly string? _media;
         private readonly DateTimeOffset _start = DateTimeOffset.UtcNow;
 
-        public DemoLiveClient(string? mediaFolder, string language)
+        /// <param name="off">Every switch off, and nothing on air.</param>
+        /// <param name="remindFails">A reminder cannot be set.</param>
+        public DemoLiveClient(string? mediaFolder, string language, bool off = false, bool remindFails = false)
         {
+            _off = off;
+            _remindFails = remindFails;
             _arabic = language == "ar";
             _media = string.IsNullOrEmpty(mediaFolder) ? null : new Uri(Path.Combine(Path.GetFullPath(mediaFolder), "watch.mp4")).AbsoluteUri;
         }
@@ -35,28 +42,34 @@ namespace AlUmmahNow.App.Demo
             Title = id switch
             {
                 LiveId => T("Reflections on Surah Al-Kahf, part 1", "تأملات في سورة الكهف، الجزء الأول"),
-                PremiereId => T("Reflections on Surah Al-Kahf, part 2", "تأملات في سورة الكهف، الجزء الثاني"),
-                SoonId => T("Friday sermon", "خطبة الجمعة"),
+                PremiereId or PremiereEndedId or PremiereCanceledId => T("Reflections on Surah Al-Kahf, part 2", "تأملات في سورة الكهف، الجزء الثاني"),
+                SoonId or CanceledId => T("Friday sermon", "خطبة الجمعة"),
                 _ => T("Reflections on Surah Al-Kahf, part 1", "تأملات في سورة الكهف، الجزء الأول"),
             },
             Description = id == LiveId ? T("Weekly. Questions are answered at the end.", "كل أسبوع. تُجاب الأسئلة في الآخر.") : "",
-            Status = id == LiveId ? LiveStatus.Live : id == RecordingId ? LiveStatus.Ended : LiveStatus.Scheduled,
-            Kind = id == PremiereId ? LiveKind.Premiere : LiveKind.Live,
+            Status = id switch
+            {
+                LiveId => LiveStatus.Live,
+                RecordingId or EndedId or PremiereEndedId => LiveStatus.Ended,
+                CanceledId or PremiereCanceledId => LiveStatus.Cancelled,
+                _ => LiveStatus.Scheduled,
+            },
+            Kind = id is PremiereId or PremiereEndedId or PremiereCanceledId ? LiveKind.Premiere : LiveKind.Live,
             EventType = Event(id),
             ChannelName = T("Masjid Live", "المسجد مباشر"),
             ScheduledStart = Start(id),
             Viewers = id == LiveId ? 128 : (long?)null,
         };
 
-        private static LiveEventType? Event(string id) => id == LiveId ? LiveEventType.Halqa : id == SoonId ? LiveEventType.Jumuah : (LiveEventType?)null;
+        private LiveEventType? Event(string id) => _off ? (LiveEventType?)null : id == LiveId ? LiveEventType.Halqa : id == SoonId ? LiveEventType.Jumuah : (LiveEventType?)null;
 
         private DateTimeOffset? Start(string id) => id == PremiereId ? _start.AddMinutes(133) : id == SoonId ? _start.AddHours(9) : (DateTimeOffset?)null;
 
         public Task<LiveFeatures> GetFeaturesAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult(new LiveFeatures { Premieres = true, Reminders = true, Events = true });
+            Task.FromResult(_off ? new LiveFeatures() : new LiveFeatures { Premieres = true, Reminders = true, Events = true });
 
         public Task<IReadOnlyList<LiveStream>> ListAsync(LiveStatus status, LiveEventType? eventType = null, CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<LiveStream>>(new[] { LiveId, PremiereId, SoonId }.Select(Stream)
+            Task.FromResult<IReadOnlyList<LiveStream>>((_off ? Array.Empty<string>() : new[] { LiveId, PremiereId, SoonId }).Select(Stream)
                 .Where(s => s.Status == status && (eventType == null || s.EventType == eventType)).ToList());
 
         public Task<LiveStream> GetStreamAsync(string id, CancellationToken cancellationToken = default) => Task.FromResult(Stream(id));
@@ -73,9 +86,9 @@ namespace AlUmmahNow.App.Demo
                 VodUrl = id == RecordingId ? _media : null,
                 ScheduledStart = stream.ScheduledStart,
                 Viewers = stream.Viewers,
-                ChatEnabled = id != RecordingId,
-                ChatReplay = id == RecordingId,
-                ReminderEnabled = stream.Status == LiveStatus.Scheduled,
+                ChatEnabled = !_off && (stream.Status == LiveStatus.Live || stream.Status == LiveStatus.Scheduled),
+                ChatReplay = !_off && id == RecordingId,
+                ReminderEnabled = !_off && stream.Status == LiveStatus.Scheduled,
             });
         }
 
@@ -89,7 +102,8 @@ namespace AlUmmahNow.App.Demo
 
         public Task<long?> BeatAsync(string id, string viewerId, bool leaving, CancellationToken cancellationToken = default) => Task.FromResult<long?>(128);
 
-        public Task SetReminderAsync(string id, bool on, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task SetReminderAsync(string id, bool on, CancellationToken cancellationToken = default) =>
+            _remindFails ? Task.FromException(new CatalogException("demo: not set")) : Task.CompletedTask;
 
         private IReadOnlyList<LiveChatMessage> Messages => new[]
         {

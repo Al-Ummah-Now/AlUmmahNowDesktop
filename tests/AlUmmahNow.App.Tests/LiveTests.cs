@@ -1,4 +1,5 @@
 using System.Net;
+using AlUmmahNow.App.Demo;
 using AlUmmahNow.App.I18n;
 using AlUmmahNow.App.Live;
 using AlUmmahNow.App.Media;
@@ -56,7 +57,7 @@ public sealed class FakeLive : ILiveClient
     {
         StateReads++;
         Refuse();
-        return Task.FromResult(Current);
+        return StateGate?.Task ?? Task.FromResult(Current);
     }
 
     public Task<LiveChatPage> GetChatAsync(string id, CancellationToken ct = default)
@@ -68,6 +69,9 @@ public sealed class FakeLive : ILiveClient
     }
 
     public List<long> WindowReads { get; } = new();
+
+    /// <summary>The state's answer, whether or not its read was canceled.</summary>
+    public TaskCompletionSource<LiveState>? StateGate { get; set; }
     public TimeSpan LeaveTakes { get; set; }
 
     /// <summary>Each beat waits for the next of these.</summary>
@@ -396,6 +400,94 @@ public class LiveTests
         gate.SetResult();
         await ticking;
         Assert.Equal(new[] { false, true, false }, _live.Beats);
+    }
+
+    [Fact]
+    public async Task A_beat_that_fails_in_any_way_does_not_stop_the_leave()
+    {
+        _live.Current = OnAir();
+        var vm = await Loaded();
+        var gate = new TaskCompletionSource();
+        _live.BeatGates.Enqueue(gate);
+        var ticking = vm.TickAsync();
+        vm.IsHidden = true;
+        gate.SetException(new InvalidOperationException("anything"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => ticking);
+        await vm.Leaving;
+        Assert.Equal(new[] { false, true }, _live.Beats);
+    }
+
+    [Fact]
+    public async Task An_answer_that_comes_as_the_page_closes_sends_no_beat_and_plays_nothing()
+    {
+        _live.Current = OnAir();
+        var vm = await Loaded();
+        await vm.TickAsync();
+        Advance(60);
+        _live.StateGate = new TaskCompletionSource<LiveState>();
+        var ticking = vm.TickAsync();
+        vm.Dispose();
+        _live.StateGate.SetResult(new LiveState { Status = LiveStatus.Ended, VodUrl = "https://x.test/v.m3u8" });
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => ticking);
+        await vm.Leaving;
+        Assert.Equal(new[] { false, true }, _live.Beats);
+        Assert.Single(_player.Opened);
+
+        // As it is loaded, too
+        _live.StateGate = new TaskCompletionSource<LiveState>();
+        var other = Model();
+        var loading = other.LoadAsync();
+        other.Dispose();
+        _live.StateGate.SetResult(OnAir());
+        await loading;
+        Assert.Single(_player.Opened);
+    }
+
+    [Fact]
+    public async Task A_premieres_video_that_comes_as_the_page_closes_sends_no_beat_and_plays_nothing()
+    {
+        _live.Current = new LiveState { Status = LiveStatus.Scheduled, Kind = LiveKind.Premiere, ScheduledStart = _now.AddSeconds(-1) };
+        var vm = await Loaded();
+        _live.Current = Premiere(LiveStatus.Live);
+        _catalog.Gate = new TaskCompletionSource<Video>();
+        Advance(5);
+        var ticking = vm.TickAsync();
+        vm.Dispose();
+        _catalog.Gate.SetResult(FakeCatalog.Ready("v1"));
+        await ticking;
+        Assert.Empty(_live.Beats);
+        Assert.Empty(_player.Opened);
+    }
+
+    [Fact]
+    public async Task A_premieres_video_that_comes_while_the_window_is_hidden_sends_no_beat()
+    {
+        _live.Current = new LiveState { Status = LiveStatus.Scheduled, Kind = LiveKind.Premiere, ScheduledStart = _now.AddSeconds(-1) };
+        var vm = await Loaded();
+        _live.Current = Premiere(LiveStatus.Live);
+        _catalog.Gate = new TaskCompletionSource<Video>();
+        Advance(5);
+        var ticking = vm.TickAsync();
+        vm.IsHidden = true;
+        _catalog.Gate.SetResult(FakeCatalog.Ready("v1"));
+        await ticking;
+        Assert.Empty(_live.Beats);
+        vm.IsHidden = false;
+        await vm.TickAsync();
+        Assert.Equal(new[] { false }, _live.Beats);
+    }
+
+    [Fact]
+    public async Task A_video_that_was_left_while_it_loaded_does_not_play()
+    {
+        var gate = new TaskCompletionSource<Video>();
+        _catalog.Gate = gate;
+        var watch = new WatchViewModel(_catalog, _player, new NullMediaSession(), _localizer);
+        var loading = watch.LoadAsync("v1");
+        watch.Dispose();
+        gate.SetResult(FakeCatalog.Ready("v1"));
+        await loading;
+        Assert.Empty(_player.Opened);
     }
 
     [Fact]
@@ -742,6 +834,57 @@ public class LiveTests
         Assert.Equal(LoadState.Error, first.State);
     }
 
+    // ---- The scenarios of CI
+
+    [Theory]
+    [InlineData(DemoLiveClient.EndedId, LiveMode.Ended, "This live stream has ended.")]
+    [InlineData(DemoLiveClient.CanceledId, LiveMode.Cancelled, "This live stream was canceled.")]
+    [InlineData(DemoLiveClient.PremiereEndedId, LiveMode.Ended, "This premiere has ended. Its video isn’t available.")]
+    [InlineData(DemoLiveClient.PremiereCanceledId, LiveMode.Cancelled, "This premiere was canceled.")]
+    public async Task The_demo_has_the_ends_of_a_stream(string id, LiveMode mode, string headline)
+    {
+        var vm = new LiveWatchViewModel(id, new DemoLiveClient(null, "en"), _catalog, _player, new NullMediaSession(), _localizer);
+        await vm.LoadAsync();
+        Assert.Equal(mode, vm.Mode);
+        Assert.Equal(headline, vm.Notice.Headline);
+        Assert.False(vm.HasChat || vm.CanRemind);
+    }
+
+    [Fact]
+    public async Task The_demo_with_everything_off_offers_nothing()
+    {
+        var demo = new DemoLiveClient("/media", "en", off: true);
+        var list = new LiveListViewModel(demo, _localizer, new Navigator());
+        await list.LoadAsync();
+        Assert.Empty(list.All);
+        Assert.False(list.HasEvents);
+        foreach (var id in new[] { DemoLiveClient.LiveId, DemoLiveClient.SoonId })
+        {
+            var vm = new LiveWatchViewModel(id, demo, _catalog, _player, new NullMediaSession(), _localizer);
+            await vm.LoadAsync();
+            Assert.False(vm.HasChat || vm.CanRemind);
+            Assert.DoesNotContain(vm.Badges, b => !b.IsOnAir);
+        }
+    }
+
+    [Fact]
+    public async Task A_scenario_is_a_page_and_passes_only_when_it_is_as_asked()
+    {
+        Assert.IsType<Route.LiveList>(LiveAutomation.RouteOf("live"));
+        Assert.Equal("x", Assert.IsType<Route.Live>(LiveAutomation.RouteOf("behind:x")).StreamId);
+        Assert.Null(LiveAutomation.RouteOf("home"));
+        var list = new LiveListViewModel(_live, _localizer, new Navigator(), () => _now);
+        var auth = new AuthViewModel(new DemoAuthSession(waits: false));
+        Assert.Null(LiveAutomation.Passed("watch:x", list, null, auth, 5));
+        Assert.False(LiveAutomation.Passed("live", list, null, auth, 0));
+        _live.Current = new LiveState { Status = LiveStatus.Scheduled, ReminderEnabled = true };
+        var vm = await Loaded();
+        Assert.False(LiveAutomation.Passed("remind:s", list, vm, auth, 0));
+        await LiveAutomation.ActAsync("remind:s", () => vm, auth);
+        Assert.True(LiveAutomation.Passed("remind:s", list, vm, auth, 0));
+        Assert.False(LiveAutomation.Passed("behind:s", list, vm, auth, 0));
+    }
+
     // ---- The server
 
     private sealed class Handler : HttpMessageHandler
@@ -751,6 +894,7 @@ public class LiveTests
         public string? Body { get; private set; }
         public (HttpStatusCode Status, string? RetryAfter)? Refusal { get; set; }
         public string? RefusalDate { get; set; }
+        public string? Charset { get; set; }
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
@@ -764,9 +908,10 @@ public class LiveTests
             }
 
             if (request.Content != null) Body = await request.Content.ReadAsStringAsync(ct);
-            return Answers.TryGetValue(request.Method + " " + request.RequestUri!.PathAndQuery, out var answer)
-                ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(answer) }
-                : new HttpResponseMessage(HttpStatusCode.NotFound);
+            if (!Answers.TryGetValue(request.Method + " " + request.RequestUri!.PathAndQuery, out var answer)) return new HttpResponseMessage(HttpStatusCode.NotFound);
+            var response = new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(answer) };
+            if (Charset != null) response.Content.Headers.ContentType!.CharSet = Charset;
+            return response;
         }
     }
 
@@ -871,6 +1016,17 @@ public class LiveTests
         handler.RefusalDate = sent;
         var error = await Assert.ThrowsAsync<CatalogException>(() => client.GetChatAsync("s"));
         Assert.Equal(TimeSpan.FromSeconds(seconds), error.RetryAfter);
+    }
+
+    [Fact]
+    public async Task An_answer_in_an_unknown_charset_is_a_failed_read_like_any_other()
+    {
+        var (client, handler) = Server();
+        handler.Charset = "no-such-charset";
+        handler.Answers["GET /api/live-streams/s/chat"] = """{"result":{"messages":[]}}""";
+        handler.Answers["POST /api/live-streams/s/viewers"] = """{"result":{"viewers":4}}""";
+        await Assert.ThrowsAsync<CatalogException>(() => client.GetChatAsync("s"));
+        await Assert.ThrowsAsync<CatalogException>(() => client.BeatAsync("s", "v", leaving: false));
     }
 
     [Fact]

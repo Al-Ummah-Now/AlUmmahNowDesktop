@@ -171,6 +171,7 @@ namespace AlUmmahNow.App.Live
                 await Task.WhenAll(stream, state);
                 Stream = await stream;
                 var live = await state;
+                _stop.Token.ThrowIfCancellationRequested();
                 _stateWait = PollAfter(live.PollAfter);
                 State = LoadState.Content;
                 await ShowAsync(live);
@@ -312,9 +313,9 @@ namespace AlUmmahNow.App.Live
             {
                 await previous.ConfigureAwait(false);
             }
-            catch (CatalogException)
+            catch (Exception)
             {
-                // Its own caller was told
+                // Its own caller was told; whatever it was, the next one is sent
             }
 
             return await _live.BeatAsync(StreamId, _viewerId, leaving).ConfigureAwait(false);
@@ -328,7 +329,7 @@ namespace AlUmmahNow.App.Live
             if (IsHidden) return;
             if (_now() - _stateAt >= StateEvery()) await RefreshStateAsync();
             await RefreshChatAsync();
-            if (Mode == LiveMode.Live && !IsHidden && _now() >= _beatDue)
+            if (Mode == LiveMode.Live && !IsHidden && !_stop.IsCancellationRequested && _now() >= _beatDue)
             {
                 _hasBeaten = true;
                 var (visit, wait) = (_visit, BeatEvery);
@@ -602,15 +603,19 @@ namespace AlUmmahNow.App.Live
             return all.Values.OrderBy(m => m.OffsetMs).ThenBy(m => m.Id, StringComparer.Ordinal).ToList();
         }
 
+        /// <summary>An answer that comes as the page closes is of no use: what would follow it ends there.</summary>
         /// <param name="refused">The server said when to ask again.</param>
-        private static async Task<T?> Quiet<T>(Func<Task<T>> work, Action<TimeSpan>? refused = null) where T : class
+        private async Task<T?> Quiet<T>(Func<Task<T>> work, Action<TimeSpan>? refused = null) where T : class
         {
             try
             {
-                return await work();
+                var answer = await work();
+                _stop.Token.ThrowIfCancellationRequested();
+                return answer;
             }
             catch (Exception ex) when (ex is CatalogException || ex is AuthRequiredException || ex is System.Text.Json.JsonException)
             {
+                _stop.Token.ThrowIfCancellationRequested();
                 if (PollAfter((ex as CatalogException)?.RetryAfter) is { } wait) refused?.Invoke(wait);
                 return null;
             }

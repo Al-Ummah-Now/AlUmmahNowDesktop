@@ -46,11 +46,14 @@ AlUmmahNow.CoreBridge.ICatalogClient catalog = Environment.GetEnvironmentVariabl
 if (Environment.GetEnvironmentVariable("AUN_FIXTURE_MEDIA") is { Length: > 0 } fixtureMedia) catalog = new AlUmmahNow.App.Demo.FixtureMediaCatalog(catalog, fixtureMedia, settings.Language);
 var localizer = new Localizer(settings.Language);
 var navigator = new Navigator();
-var authSession = new PkceAuthSession(http, environment.AuthIssuer, environment.ViewerClientId, new LibSecretStore("alummahnow"), new ShellBrowserLauncher(), localizer["auth.browser.done"]);
+AlUmmahNow.CoreBridge.IAuthSession authSession = Environment.GetEnvironmentVariable("AUN_DEMO_AUTH") is { Length: > 0 } demoAuth
+    ? new AlUmmahNow.App.Demo.DemoAuthSession(demoAuth == "waiting")
+    : new PkceAuthSession(http, environment.AuthIssuer, environment.ViewerClientId, new LibSecretStore("alummahnow"), new ShellBrowserLauncher(), localizer["auth.browser.done"]);
 var auth = new AuthViewModel(authSession);
 // AUN_DEMO_LIVE=1: fixture streams for review frames and the live scenarios (no network, never in a normal launch).
-AlUmmahNow.CoreBridge.ILiveClient live = Environment.GetEnvironmentVariable("AUN_DEMO_LIVE") == "1"
-    ? new AlUmmahNow.App.Demo.DemoLiveClient(Environment.GetEnvironmentVariable("AUN_FIXTURE_MEDIA"), settings.Language)
+AlUmmahNow.CoreBridge.ILiveClient live = Environment.GetEnvironmentVariable("AUN_DEMO_LIVE") is "1" or "off"
+    ? new AlUmmahNow.App.Demo.DemoLiveClient(Environment.GetEnvironmentVariable("AUN_FIXTURE_MEDIA"), settings.Language,
+        Environment.GetEnvironmentVariable("AUN_DEMO_LIVE") == "off", Environment.GetEnvironmentVariable("AUN_DEMO_REMIND") == "fail")
     : new HttpLiveClient(http, environment.VideosApi, HttpLiveClient.TokenOf(authSession));
 var coreVersion = CoreRuntime.VersionOrNone();
 var app = Adw.Application.New("net.alummahnow.AlUmmahNow", Gio.ApplicationFlags.NonUnique);
@@ -108,8 +111,8 @@ app.OnActivate += async (_, _) =>
         {
             var pass = automation.StartsWith("watch:", StringComparison.Ordinal)
                 ? furthest > 2 && (sawCaption || Environment.GetEnvironmentVariable("AUN_EXPECT_CAPTION") == "0") && window.Watch?.PlaybackFailed == false
-                : automation == "live" ? window.LiveList.State == LoadState.Content && window.LiveList.All.Count > 0
-                : automation.StartsWith("live:", StringComparison.Ordinal) ? window.LiveWatch is { State: LoadState.Content, HasChat: true } l && (l.Watch == null || furthest > 2)
+                : AlUmmahNow.App.Demo.LiveAutomation.Passed(automation, window.LiveList, window.LiveWatch, auth, furthest) is { } asAsked
+                ? asAsked
                 : window.Home.Rails.Count > 0;
             Log.For("automation").Info($"AUTOMATION {automation} core={coreVersion} rails={window.Home.Rails.Count} furthest={furthest:F1} caption={sawCaption} RESULT {(pass ? "PASS" : "FAIL")}");
             exitCode = pass ? 0 : 3;
@@ -120,8 +123,12 @@ app.OnActivate += async (_, _) =>
 
     var started = window.StartAsync();
     if (automation.StartsWith("watch:", StringComparison.Ordinal)) navigator.Push(new Route.Watch(automation.Substring(6)));
-    if (automation == "live") navigator.Push(new Route.LiveList());
-    if (automation.StartsWith("live:", StringComparison.Ordinal)) navigator.Push(new Route.Live(automation.Substring(5)));
+    if (AlUmmahNow.App.Demo.LiveAutomation.RouteOf(automation) is { } route)
+    {
+        navigator.Push(route);
+        _ = AlUmmahNow.App.Demo.LiveAutomation.ActAsync(automation, () => window.LiveWatch, auth);
+    }
+
     await started;
 };
 

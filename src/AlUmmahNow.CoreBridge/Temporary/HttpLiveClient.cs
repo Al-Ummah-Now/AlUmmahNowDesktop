@@ -176,6 +176,11 @@ namespace AlUmmahNow.CoreBridge.Temporary
             {
                 throw new CatalogException("Unreadable answer", ex);
             }
+            catch (InvalidOperationException ex)
+            {
+                // An answer in a charset this computer does not know
+                throw new CatalogException("Unreadable answer", ex);
+            }
             catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
             {
                 throw new CatalogException("Timed out", ex);

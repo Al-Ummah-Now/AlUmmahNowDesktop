@@ -76,12 +76,15 @@ public sealed partial class App : Application
         var localizer = new Localizer(settings.Language);
         var navigator = new Navigator();
         var secureStore = new DpapiSecureStore(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AlUmmahNow", "secure"));
-        var authSession = new PkceAuthSession(http, environment.AuthIssuer, environment.ViewerClientId, secureStore, new ShellBrowserLauncher(), localizer["auth.browser.done"]);
+        IAuthSession authSession = Environment.GetEnvironmentVariable("AUN_DEMO_AUTH") is { Length: > 0 } demoAuth
+            ? new DemoAuthSession(demoAuth == "waiting")
+            : new PkceAuthSession(http, environment.AuthIssuer, environment.ViewerClientId, secureStore, new ShellBrowserLauncher(), localizer["auth.browser.done"]);
         var auth = new AuthViewModel(authSession);
         auth.Restore();
         // AUN_DEMO_LIVE=1: fixture streams for review frames and the live scenarios (no network, never in a normal launch).
-        ILiveClient live = Environment.GetEnvironmentVariable("AUN_DEMO_LIVE") == "1"
-            ? new DemoLiveClient(Environment.GetEnvironmentVariable("AUN_FIXTURE_MEDIA"), settings.Language)
+        ILiveClient live = Environment.GetEnvironmentVariable("AUN_DEMO_LIVE") is "1" or "off"
+            ? new DemoLiveClient(Environment.GetEnvironmentVariable("AUN_FIXTURE_MEDIA"), settings.Language,
+                Environment.GetEnvironmentVariable("AUN_DEMO_LIVE") == "off", Environment.GetEnvironmentVariable("AUN_DEMO_REMIND") == "fail")
             : new HttpLiveClient(http, environment.VideosApi, HttpLiveClient.TokenOf(authSession));
         var coreVersion = CoreRuntime.VersionOrNone();
         var ui = DispatcherQueue.GetForCurrentThread();
@@ -122,8 +125,7 @@ public sealed partial class App : Application
             {
                 var isWatch = automation.StartsWith("watch:", StringComparison.Ordinal);
                 var pass = isWatch ? furthest > 2 && (sawCaption || Environment.GetEnvironmentVariable("AUN_EXPECT_CAPTION") == "0")
-                    : automation == "live" ? shell.LiveList.State == LoadState.Content && shell.LiveList.All.Count > 0
-                    : automation.StartsWith("live:", StringComparison.Ordinal) ? shell.LiveWatch is { State: LoadState.Content, HasChat: true } l && (l.Watch == null || furthest > 2)
+                    : LiveAutomation.Passed(automation, shell.LiveList, shell.LiveWatch, auth, furthest) is { } asAsked ? asAsked
                     : shell.Home.Rails.Count > 0;
                 File.WriteAllText(Environment.GetEnvironmentVariable("AUN_RESULT") ?? "aun-result.txt",
                     $"AUTOMATION {automation} core={coreVersion} rails={shell.Home.Rails.Count} furthest={furthest:F1} caption={sawCaption} failed={shell.Watch?.PlaybackFailed} RESULT {(pass ? "PASS" : "FAIL")}");
@@ -135,8 +137,12 @@ public sealed partial class App : Application
 
         var started = shell.StartAsync();
         if (automation.StartsWith("watch:", StringComparison.Ordinal)) navigator.Push(new Route.Watch(automation.Substring(6)));
-        if (automation == "live") navigator.Push(new Route.LiveList());
-        if (automation.StartsWith("live:", StringComparison.Ordinal)) navigator.Push(new Route.Live(automation.Substring(5)));
+        if (LiveAutomation.RouteOf(automation) is { } route)
+        {
+            navigator.Push(route);
+            _ = LiveAutomation.ActAsync(automation, () => shell.LiveWatch, auth);
+        }
+
         await started;
     }
 }
