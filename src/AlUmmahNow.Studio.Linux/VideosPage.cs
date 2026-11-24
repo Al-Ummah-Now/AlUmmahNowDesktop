@@ -37,7 +37,7 @@ public sealed class VideosPage
     private readonly Gtk.Label _error = Ui.Label("");
     private readonly Gtk.Button _more;
     private readonly Gtk.Spinner _spinner = Gtk.Spinner.New();
-    private readonly Gtk.Expander _deletedExpander = Gtk.Expander.New("");
+    private readonly Disclosure _deletedRow;
     private readonly Gtk.Box _deleted = Gtk.Box.New(Gtk.Orientation.Vertical, 6);
     private bool _syncingSearch;
     private Gtk.Box? _deletedCard;
@@ -183,8 +183,8 @@ public sealed class VideosPage
         _more.SetHalign(Gtk.Align.Center);
         page.Append(_more);
 
-        _deletedExpander.SetChild(_deleted);
-        _deletedCard = Ui.Card(_deletedExpander);
+        _deletedRow = new Disclosure(l, "", _deleted);
+        _deletedCard = Ui.Card(_deletedRow.Root);
         page.Append(_deletedCard);
 
         _vm.PropertyChanged += (_, e) =>
@@ -497,8 +497,7 @@ public sealed class VideosPage
     private void RenderDeleted()
     {
         Ui.Clear(_deleted);
-        _deletedExpander.SetLabel(_l.Format("studio.videos.deletedTitle", _vm.Deleted.Count));
-        _deletedExpander.SetVisible(_vm.Deleted.Count > 0);
+        _deletedRow.SetTitle(_l.Format("studio.videos.deletedTitle", _vm.Deleted.Count));
         _deletedCard?.SetVisible(_vm.Deleted.Count > 0);
         foreach (var d in _vm.Deleted)
         {
