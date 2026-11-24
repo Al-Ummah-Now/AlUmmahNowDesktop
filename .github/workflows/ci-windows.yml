@@ -84,9 +84,9 @@ jobs:
               @("soon", "live:demo-soon", @{}, 12), @("recording", "live:demo-recording", @{}, 12),
               @("ended", "live:demo-ended", @{}, 12), @("canceled", "live:demo-canceled", @{}, 12),
               @("premiere-ended", "live:demo-premiere-ended", @{}, 12), @("premiere-canceled", "live:demo-premiere-canceled", @{}, 12),
-              @("remind-signin", "remind:demo-soon", @{ AUN_DEMO_AUTH = "waiting" }, 12),
-              @("remind-set", "remind:demo-soon", @{ AUN_DEMO_AUTH = "in" }, 12),
-              @("remind-failed", "remind:demo-soon", @{ AUN_DEMO_AUTH = "in"; AUN_DEMO_REMIND = "fail" }, 12),
+              @("remind-signin", "remind-signin:demo-soon", @{ AUN_DEMO_AUTH = "waiting" }, 12),
+              @("remind-set", "remind-set:demo-soon", @{ AUN_DEMO_AUTH = "in" }, 12),
+              @("remind-failed", "remind-failed:demo-soon", @{ AUN_DEMO_AUTH = "in"; AUN_DEMO_REMIND = "fail" }, 12),
               @("home-off", "home", @{ AUN_DEMO_LIVE = "off" }, 12), @("live-off", "live:demo-live", @{ AUN_DEMO_LIVE = "off" }, 12),
               @("soon-off", "live:demo-soon", @{ AUN_DEMO_LIVE = "off" }, 12)
             )

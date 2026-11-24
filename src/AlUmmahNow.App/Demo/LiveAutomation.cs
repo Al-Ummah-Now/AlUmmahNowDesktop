@@ -10,7 +10,8 @@ namespace AlUmmahNow.App.Demo
 {
     /// <summary>
     /// The live scenarios of CI (<c>AUN_AUTOMATION</c>): <c>live</c> is the list, <c>live:ID</c> a page, <c>behind:ID</c> a
-    /// page that is paused, <c>remind:ID</c> one whose reminder is asked for.
+    /// page that is paused, <c>remind-set:ID</c>, <c>remind-failed:ID</c> and <c>remind-signin:ID</c> one whose reminder is
+    /// asked for, and what must come of it.
     /// </summary>
     public static class LiveAutomation
     {
@@ -24,7 +25,7 @@ namespace AlUmmahNow.App.Demo
         {
             await Task.Delay(3_000);
             if (automation.StartsWith("behind:", StringComparison.Ordinal)) page()?.Watch?.TogglePlay();
-            if (automation.StartsWith("remind:", StringComparison.Ordinal) && page() is { } live) await live.ToggleReminderAsync(auth);
+            if (automation.StartsWith("remind-", StringComparison.Ordinal) && page() is { } live) await live.ToggleReminderAsync(auth);
         }
 
         /// <summary>Whether the page is what the scenario asks for; null when it is none of these.</summary>
@@ -34,13 +35,15 @@ namespace AlUmmahNow.App.Demo
             if (IdOf(automation) == null) return null;
             if (page == null || page.State != LoadState.Content) return false;
             if (automation.StartsWith("behind:", StringComparison.Ordinal)) return page.IsBehind;
-            if (automation.StartsWith("remind:", StringComparison.Ordinal)) return page.ReminderSet || page.ReminderFailed || auth.IsBusy;
+            if (automation.StartsWith("remind-set:", StringComparison.Ordinal)) return auth.IsSignedIn && page.ReminderSet && !page.ReminderFailed;
+            if (automation.StartsWith("remind-failed:", StringComparison.Ordinal)) return auth.IsSignedIn && page.ReminderFailed && !page.ReminderSet;
+            if (automation.StartsWith("remind-signin:", StringComparison.Ordinal)) return auth.IsBusy && !page.ReminderSet;
             return page.Watch == null || furthest > 2;
         }
 
         private static string? IdOf(string automation)
         {
-            foreach (var kind in new[] { "live:", "behind:", "remind:" })
+            foreach (var kind in new[] { "live:", "behind:", "remind-set:", "remind-failed:", "remind-signin:" })
             {
                 if (automation.StartsWith(kind, StringComparison.Ordinal)) return automation.Substring(kind.Length);
             }

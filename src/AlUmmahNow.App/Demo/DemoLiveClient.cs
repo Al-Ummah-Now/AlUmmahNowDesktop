@@ -20,6 +20,7 @@ namespace AlUmmahNow.App.Demo
 
         private readonly bool _arabic;
         private readonly bool _off;
+        private readonly HashSet<string> _reminders = new();
         private readonly bool _remindFails;
         private readonly string? _media;
         private readonly DateTimeOffset _start = DateTimeOffset.UtcNow;
@@ -89,6 +90,7 @@ namespace AlUmmahNow.App.Demo
                 ChatEnabled = !_off && (stream.Status == LiveStatus.Live || stream.Status == LiveStatus.Scheduled),
                 ChatReplay = !_off && id == RecordingId,
                 ReminderEnabled = !_off && stream.Status == LiveStatus.Scheduled,
+                ReminderSet = _reminders.Contains(id),
             });
         }
 
@@ -102,8 +104,13 @@ namespace AlUmmahNow.App.Demo
 
         public Task<long?> BeatAsync(string id, string viewerId, bool leaving, CancellationToken cancellationToken = default) => Task.FromResult<long?>(128);
 
-        public Task SetReminderAsync(string id, bool on, CancellationToken cancellationToken = default) =>
-            _remindFails ? Task.FromException(new CatalogException("demo: not set")) : Task.CompletedTask;
+        public Task SetReminderAsync(string id, bool on, CancellationToken cancellationToken = default)
+        {
+            if (_remindFails) return Task.FromException(new CatalogException("demo: not set"));
+            if (on) _reminders.Add(id);
+            else _reminders.Remove(id);
+            return Task.CompletedTask;
+        }
 
         private IReadOnlyList<LiveChatMessage> Messages => new[]
         {

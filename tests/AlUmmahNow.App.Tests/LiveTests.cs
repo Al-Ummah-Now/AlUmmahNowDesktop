@@ -92,11 +92,14 @@ public sealed class FakeLive : ILiveClient
         return 5;
     }
 
+    /// <summary>The reminder's answer, when it is given.</summary>
+    public TaskCompletionSource? ReminderGate { get; set; }
+
     public Task SetReminderAsync(string id, bool on, CancellationToken ct = default)
     {
         if (Fails) throw new CatalogException("503");
         Reminders.Add(on);
-        return Task.CompletedTask;
+        return ReminderGate?.Task ?? Task.CompletedTask;
     }
 }
 
@@ -747,6 +750,53 @@ public class LiveTests
     }
 
     [Fact]
+    public async Task A_state_read_before_the_reminder_was_set_does_not_undo_it()
+    {
+        _live.Current = new LiveState { Status = LiveStatus.Scheduled, ReminderEnabled = true };
+        var vm = await Loaded();
+        var auth = new AuthViewModel(new FakeAuth());
+        // The state is asked for, the reminder is set, and the old answer comes
+        Advance(15);
+        _live.StateGate = new TaskCompletionSource<LiveState>();
+        var ticking = vm.TickAsync();
+        await vm.ToggleReminderAsync(auth);
+        Assert.True(vm.ReminderSet);
+        _live.StateGate.SetResult(new LiveState { Status = LiveStatus.Scheduled, ReminderEnabled = true });
+        await ticking;
+        Assert.True(vm.ReminderSet);
+        // One asked for while it was being set is as old
+        _live.StateGate = null;
+        _live.ReminderGate = new TaskCompletionSource();
+        var clearing = vm.ToggleReminderAsync(auth);
+        Advance(15);
+        _live.StateGate = new TaskCompletionSource<LiveState>();
+        ticking = vm.TickAsync();
+        _live.ReminderGate.SetResult();
+        await clearing;
+        Assert.False(vm.ReminderSet);
+        _live.StateGate.SetResult(new LiveState { Status = LiveStatus.Scheduled, ReminderEnabled = true, ReminderSet = true });
+        await ticking;
+        Assert.False(vm.ReminderSet);
+        // The next one is the server's
+        _live.StateGate = null;
+        _live.Current = new LiveState { Status = LiveStatus.Scheduled, ReminderEnabled = true, ReminderSet = true };
+        Advance(15);
+        await vm.TickAsync();
+        Assert.True(vm.ReminderSet);
+    }
+
+    [Fact]
+    public async Task The_demo_remembers_a_reminder()
+    {
+        var vm = new LiveWatchViewModel(DemoLiveClient.SoonId, new DemoLiveClient(null, "en"), _catalog, _player, new NullMediaSession(), _localizer, () => _now);
+        await vm.LoadAsync();
+        await vm.ToggleReminderAsync(new AuthViewModel(new DemoAuthSession(waits: false)));
+        Advance(15);
+        await vm.TickAsync();
+        Assert.True(vm.ReminderSet);
+    }
+
+    [Fact]
     public async Task A_page_that_cannot_be_read_says_so()
     {
         _live.Fails = true;
@@ -879,10 +929,13 @@ public class LiveTests
         Assert.False(LiveAutomation.Passed("live", list, null, auth, 0));
         _live.Current = new LiveState { Status = LiveStatus.Scheduled, ReminderEnabled = true };
         var vm = await Loaded();
-        Assert.False(LiveAutomation.Passed("remind:s", list, vm, auth, 0));
-        await LiveAutomation.ActAsync("remind:s", () => vm, auth);
-        Assert.True(LiveAutomation.Passed("remind:s", list, vm, auth, 0));
-        Assert.False(LiveAutomation.Passed("behind:s", list, vm, auth, 0));
+        Assert.False(LiveAutomation.Passed("remind-set:s", list, vm, auth, 0));
+        await LiveAutomation.ActAsync("remind-set:s", () => vm, auth);
+        Assert.True(LiveAutomation.Passed("remind-set:s", list, vm, auth, 0));
+        foreach (var other in new[] { "remind-failed:s", "remind-signin:s", "behind:s" }) Assert.False(LiveAutomation.Passed(other, list, vm, auth, 0));
+        _live.Fails = true;
+        await vm.ToggleReminderAsync(auth);
+        Assert.False(LiveAutomation.Passed("remind-set:s", list, vm, auth, 0));
     }
 
     // ---- The server
