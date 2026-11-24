@@ -28,8 +28,12 @@ public sealed class FakeLive : ILiveClient
     /// <summary>Every read is refused with this Retry-After.</summary>
     public TimeSpan? RetryAfter { get; set; }
 
+    /// <summary>What passes while an answer is on its way.</summary>
+    public Action Answering { get; set; } = () => { };
+
     private void Refuse()
     {
+        Answering();
         if (RetryAfter is { } wait) throw new CatalogException("429", retryAfter: wait);
     }
 
@@ -66,7 +70,7 @@ public sealed class FakeLive : ILiveClient
     public Task<long?> BeatAsync(string id, string viewerId, bool leaving, CancellationToken ct = default)
     {
         Beats.Add(leaving);
-        Refuse();
+        if (!leaving) Refuse();
         return Task.FromResult<long?>(5);
     }
 
@@ -265,6 +269,7 @@ public class LiveTests
         _live.Current = Premiere(LiveStatus.Live, video: "nope");
         var vm = await Loaded();
         Assert.Null(vm.Watch);
+        Assert.Equal("Starting now…", vm.Notice.Headline);
         _live.Current = Premiere(LiveStatus.Live);
         Advance(5);
         await vm.TickAsync();
@@ -424,6 +429,56 @@ public class LiveTests
     }
 
     [Fact]
+    public async Task A_wait_begins_when_the_answer_is_there()
+    {
+        _live.Current = OnAir(chat: true);
+        var vm = await Loaded();
+        _live.Answering = () => Advance(8);
+        await vm.TickAsync();
+        Advance(60);
+        // The state, the chat and the beat, 8 seconds each
+        await vm.TickAsync();
+        _live.Answering = () => { };
+        var (states, chats, beats) = (_live.StateReads, _live.ChatReads, _live.Beats.Count);
+        async Task After(double seconds)
+        {
+            Advance(seconds);
+            await vm.TickAsync();
+        }
+
+        // The chat's 10 seconds began 8 before the beat's 20, and the state's 60 8 before that
+        await After(1);
+        Assert.Equal(chats, _live.ChatReads);
+        await After(1);
+        Assert.Equal(chats + 1, _live.ChatReads);
+        await After(17);
+        Assert.Equal(beats, _live.Beats.Count);
+        await After(1);
+        Assert.Equal(beats + 1, _live.Beats.Count);
+        await After(23);
+        Assert.Equal(states, _live.StateReads);
+        await After(1);
+        Assert.Equal(states + 1, _live.StateReads);
+    }
+
+    [Fact]
+    public async Task A_premieres_video_that_could_not_be_read_is_asked_for_again()
+    {
+        _catalog.Broken = true;
+        _live.Current = Premiere(LiveStatus.Ended, video: "nope");
+        var vm = await Loaded();
+        Assert.Equal(LiveMode.Recording, vm.Mode);
+        Assert.Equal(_localizer["state.error"], vm.Notice.Headline);
+        Advance(15);
+        await vm.TickAsync();
+        Assert.Equal(2, _live.StateReads);
+        _catalog.Broken = false;
+        Advance(15);
+        await vm.TickAsync();
+        Assert.Equal(LiveMode.Ended, vm.Mode);
+    }
+
+    [Fact]
     public void What_the_server_says_is_kept_between_5_seconds_and_10_minutes()
     {
         Assert.Null(LiveWatchViewModel.PollAfter(null));
@@ -531,6 +586,7 @@ public class LiveTests
         public List<HttpRequestMessage> Requests { get; } = new();
         public string? Body { get; private set; }
         public (HttpStatusCode Status, string? RetryAfter)? Refusal { get; set; }
+        public string? RefusalDate { get; set; }
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
@@ -539,6 +595,7 @@ public class LiveTests
             {
                 var refused = new HttpResponseMessage(refusal.Status);
                 if (refusal.RetryAfter != null) refused.Headers.TryAddWithoutValidation("Retry-After", refusal.RetryAfter);
+                if (RefusalDate != null) refused.Headers.TryAddWithoutValidation("Date", RefusalDate);
                 return refused;
             }
 
@@ -623,6 +680,8 @@ public class LiveTests
     [Theory]
     [InlineData(429, "30", 30)]
     [InlineData(503, "60", 60)]
+    [InlineData(429, " 30 ", 30)]
+    [InlineData(429, "-1", null)]
     [InlineData(503, null, null)]
     [InlineData(429, "soon", null)]
     [InlineData(429, "99999999999", null)]
@@ -633,6 +692,21 @@ public class LiveTests
         handler.Refusal = ((HttpStatusCode)status, header);
         var error = await Assert.ThrowsAsync<CatalogException>(() => client.GetChatAsync("s"));
         Assert.Equal(seconds, error.RetryAfter is { } wait ? (int)wait.TotalSeconds : null);
+    }
+
+    [Theory]
+    [InlineData(429, "Tue, 24 Nov 2026 12:00:45 GMT", "Tue, 24 Nov 2026 12:00:00 GMT", 45)]
+    [InlineData(503, "Tue, 24 Nov 2026 12:00:45 GMT", "Tue, 24 Nov 2026 12:00:00 GMT", 45)]
+    [InlineData(429, "Tue, 24 Nov 2026 11:00:00 GMT", "Tue, 24 Nov 2026 12:00:00 GMT", 0)]
+    // Without the answer's own date, from the computer's clock (18:00)
+    [InlineData(429, "Tue, 24 Nov 2026 18:00:30 GMT", null, 30)]
+    public async Task A_refusal_may_give_a_date(int status, string at, string? sent, int seconds)
+    {
+        var (client, handler) = Server();
+        handler.Refusal = ((HttpStatusCode)status, at);
+        handler.RefusalDate = sent;
+        var error = await Assert.ThrowsAsync<CatalogException>(() => client.GetChatAsync("s"));
+        Assert.Equal(TimeSpan.FromSeconds(seconds), error.RetryAfter);
     }
 
     [Fact]

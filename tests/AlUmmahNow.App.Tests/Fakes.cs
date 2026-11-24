@@ -17,7 +17,10 @@ public sealed class FakeCatalog : ICatalogClient
     }
 
     public Task<Video> GetVideoAsync(string id, CancellationToken ct = default) =>
-        Videos.FirstOrDefault(v => v.Id == id) is { } v ? Task.FromResult(v) : throw new CatalogException("404");
+        Videos.FirstOrDefault(v => v.Id == id) is { } v ? Task.FromResult(v) : throw new CatalogException("404", isNotFound: !Broken);
+
+    /// <summary>Videos cannot be read, rather than being gone.</summary>
+    public bool Broken { get; set; }
 
     public Task<IReadOnlyList<SubtitleTrack>> GetSubtitleTracksAsync(string id, CancellationToken ct = default) =>
         Task.FromResult<IReadOnlyList<SubtitleTrack>>(Tracks);

@@ -3,7 +3,7 @@ on:
   push:
   workflow_dispatch:
 concurrency:
-  group: ci-windows-${{ github.ref }}
+  group: ci-windows-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 permissions:
   contents: read

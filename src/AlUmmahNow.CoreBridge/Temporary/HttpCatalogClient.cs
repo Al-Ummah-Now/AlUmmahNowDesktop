@@ -78,7 +78,7 @@ namespace AlUmmahNow.CoreBridge.Temporary
                 using var response = await _http.GetAsync(url, cancellationToken).ConfigureAwait(false);
                 if (!response.IsSuccessStatusCode)
                 {
-                    throw new CatalogException("HTTP " + (int)response.StatusCode + " for " + new Uri(url).AbsolutePath);
+                    throw new CatalogException("HTTP " + (int)response.StatusCode + " for " + new Uri(url).AbsolutePath, isNotFound: response.StatusCode == System.Net.HttpStatusCode.NotFound);
                 }
 
                 return await response.Content.ReadAsStringAsync().ConfigureAwait(false);

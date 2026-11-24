@@ -18,6 +18,8 @@ Gst.Functions.Init(ref gstArgs);
 const string Css = """
     .caption-overlay { background-color: rgba(9,48,65,0.82); color: #f7f1e8; padding: 6px 14px; border-radius: 6px; font-size: 20px; }
     scale > trough > slider { background-color: @fanous_primary; }
+    /* The toolkit dims with 55% opacity, under 4.5:1 in light mode: the theme's own second color instead. */
+    .dim-label { opacity: 1; color: @fanous_text_secondary; }
     .aun-badge { border: 1px solid alpha(currentColor, 0.5); border-radius: 999px; padding: 0 10px; font-size: 12px; font-weight: 600; }
     .aun-badge.on-air { background-color: @fanous_primary; color: @fanous_on_primary; border-color: transparent; }
     .aun-pinned { background-color: alpha(currentColor, 0.06); padding: 10px 12px; }

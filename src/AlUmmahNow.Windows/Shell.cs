@@ -165,7 +165,7 @@ public sealed partial class Shell
         var start = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
         if (_navigator.CanGoBack)
         {
-            var back = new Button { Content = new SymbolIcon(Symbol.Back) };
+            var back = new Button { Content = new FontIcon { Glyph = "\uE72B", MirroredWhenRightToLeft = true } };
             ToolTipService.SetToolTip(back, _localizer["nav.back"]);
             AutomationName(back, _localizer["nav.back"]);
             back.Click += (_, _) => _navigator.Back();

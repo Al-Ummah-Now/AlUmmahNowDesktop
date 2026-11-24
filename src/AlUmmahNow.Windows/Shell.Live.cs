@@ -60,7 +60,9 @@ public sealed partial class Shell
         _liveWatch = null;
     }
 
-    private static Brush Themed(string key) => (Brush)Application.Current.Resources[key];
+    // Set on the parts themselves: the app's accent does not reach the framework's own styles (see the slider)
+    private static readonly SolidColorBrush Gold = new(Lantern);
+    private static readonly SolidColorBrush OnGold = new(Night);
 
     private SolidColorBrush CardFill => new(IsDark ? global::Windows.UI.Color.FromArgb(255, 14, 43, 61) : Colors.White);
 
@@ -70,7 +72,7 @@ public sealed partial class Shell
     {
         var heading = new Grid();
         heading.Children.Add(SectionTitle("live.title"));
-        var all = new HyperlinkButton { Content = _localizer["live.seeAll"], HorizontalAlignment = HorizontalAlignment.Right };
+        var all = new Button { Content = _localizer["live.seeAll"], HorizontalAlignment = HorizontalAlignment.Right };
         all.Click += (_, _) => LiveList.OpenList();
         heading.Children.Add(all);
         column.Children.Add(heading);
@@ -161,11 +163,11 @@ public sealed partial class Shell
     private static Border Badge(string text, bool isOnAir)
     {
         var label = new TextBlock { Text = text, FontSize = 12, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold };
-        if (isOnAir) label.Foreground = Themed("TextOnAccentFillColorPrimaryBrush");
+        if (isOnAir) label.Foreground = OnGold;
         var border = new Border { Child = label, Padding = new Thickness(10, 1, 10, 2), CornerRadius = new CornerRadius(10), VerticalAlignment = VerticalAlignment.Center };
         if (isOnAir)
         {
-            border.Background = Themed("AccentFillColorDefaultBrush");
+            border.Background = Gold;
         }
         else
         {
@@ -209,7 +211,7 @@ public sealed partial class Shell
         var text = new StackPanel { Spacing = 10, VerticalAlignment = VerticalAlignment.Center, Padding = new Thickness(24, 0, 24, 0) };
         text.Children.Add(headline);
         text.Children.Add(lines);
-        grid.Children.Add(new Border { Child = text, Background = CardFill, CornerRadius = new CornerRadius(12) });
+        grid.Children.Add(new Border { Child = text, Background = CardFill, BorderBrush = Gold, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(12) });
         Grid.SetRow(heading, 1);
         grid.Children.Add(heading);
 
@@ -238,7 +240,13 @@ public sealed partial class Shell
         row.Children.Add(text);
 
         var actions = new StackPanel { Spacing = 4, MaxWidth = 280 };
-        var back = new Button { Content = _localizer["live.return"], HorizontalAlignment = HorizontalAlignment.Right, Style = (Style)Application.Current.Resources["AccentButtonStyle"] };
+        var back = new Button { Content = _localizer["live.return"], HorizontalAlignment = HorizontalAlignment.Right, Background = Gold, Foreground = OnGold };
+        foreach (var state in new[] { "", "PointerOver", "Pressed" })
+        {
+            back.Resources["ButtonBackground" + state] = Gold;
+            back.Resources["ButtonForeground" + state] = OnGold;
+        }
+
         back.Click += (_, _) => vm.ReturnToLive();
         actions.Children.Add(back);
         var remind = new Button { HorizontalAlignment = HorizontalAlignment.Right };
@@ -268,7 +276,7 @@ public sealed partial class Shell
 
     private FrameworkElement BuildChat(LiveWatchViewModel vm)
     {
-        var panel = new Grid { Width = ChatWidth, Margin = new Thickness(0, 4, 20, 16), Background = CardFill, CornerRadius = new CornerRadius(12) };
+        var panel = new Grid { Width = ChatWidth, Margin = new Thickness(0, 4, 20, 16), Background = CardFill, BorderBrush = Gold, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(12) };
         panel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         panel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         panel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
