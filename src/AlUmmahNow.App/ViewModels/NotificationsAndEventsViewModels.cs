@@ -1,5 +1,7 @@
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -256,7 +258,7 @@ namespace AlUmmahNow.App.ViewModels
         public ObservableCollection<CalendarEvent> Items { get; } = new ObservableCollection<CalendarEvent>();
 
         public string SubtitleFor(CalendarEvent ev) =>
-            _localizer.Join(ev.LocalizedChannelName(_localizer.Language), ev.ScheduledStartAt);
+            _localizer.Join(ev.LocalizedChannelName(_localizer.Language), DateTimeOffset.TryParse(ev.ScheduledStartAt, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var at) ? _localizer.DateTime(at) : null);
 
         public async Task RefreshAsync(CancellationToken cancellationToken = default)
         {

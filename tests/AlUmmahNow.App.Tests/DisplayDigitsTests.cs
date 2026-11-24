@@ -88,6 +88,10 @@ public class DisplayDigitsTests
         Assert.Equal(Localizer.Isolate("Nov 24, 2026, 11:30 PM"), new Localizer("en", zone).DateTime(at));
         Assert.Equal(Localizer.Isolate("Nov 24, 2026"), new Localizer("en", zone).Date(at));
         Assert.Equal(new Localizer("en", TimeZoneInfo.Local).DateTime(at), new Localizer("en").DateTime(at));
+        // The offset of the day itself: summer time and winter time
+        var newYork = new Localizer("en", TimeZoneInfo.FindSystemTimeZoneById("America/New_York"));
+        Assert.Equal(Localizer.Isolate("Jul 1, 2026, 8:00 AM"), newYork.DateTime(new DateTimeOffset(2026, 7, 1, 12, 0, 0, TimeSpan.Zero)));
+        Assert.Equal(Localizer.Isolate("Dec 1, 2026, 7:00 AM"), newYork.DateTime(new DateTimeOffset(2026, 12, 1, 12, 0, 0, TimeSpan.Zero)));
     }
 
     /// <summary>
@@ -108,6 +112,8 @@ public class DisplayDigitsTests
             var lines = File.ReadAllLines(file);
             for (var i = 0; i < lines.Length; i++)
             {
+                // The expander's own arrow is not turned at all
+                Assert.False(lines[i].Contains("Gtk.Expander.New", StringComparison.Ordinal), file + ":" + (i + 1));
                 if (!arrow.IsMatch(lines[i])) continue;
                 found++;
                 Assert.True(lines.Skip(i).Take(5).Any(x => x.Contains("SetDirection(Gtk.TextDirection.Ltr)", StringComparison.Ordinal)), file + ":" + (i + 1));

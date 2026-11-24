@@ -169,7 +169,15 @@ public class NotificationsSharingEventsTests
         await eventsVm.RefreshAsync();
         Assert.True(eventsVm.IsFeatureEnabled);
         Assert.Single(eventsVm.Items);
-        Assert.Contains("المنار", eventsVm.SubtitleFor(eventsVm.Items[0]));
+        var starts = new DateTimeOffset(2026, 11, 28, 19, 0, 0, TimeSpan.Zero);
+        Assert.Equal(localizer.Join("المنار", localizer.DateTime(starts)), eventsVm.SubtitleFor(eventsVm.Items[0]));
+        Assert.DoesNotMatch("[0-9]", eventsVm.SubtitleFor(eventsVm.Items[0]));
+        // Without a time, or with one that cannot be read, the channel alone
+        foreach (var unknown in new[] { null, "soon" })
+        {
+            var ev = new CalendarEvent("s", "c", "Al-Manar", "المنار", null, "T", null, "live", "halqa", "scheduled", unknown, null, "/live/s");
+            Assert.Equal(localizer.Join("المنار"), eventsVm.SubtitleFor(ev));
+        }
 
         await pushRegistrar.RegisterAsync("viewer", "inst_12345678", "https://wns.example/ch", "ar", "0.1.0");
         Assert.Contains("PUT /api/devices/inst_12345678", paths);
