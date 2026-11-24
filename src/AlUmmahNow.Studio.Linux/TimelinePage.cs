@@ -11,7 +11,7 @@ namespace AlUmmahNow.Studio.Linux;
 public sealed class TimelinePage
 {
     private const double TrackHeight = 54;
-    private const double RulerHeight = 24;
+    private const double RulerHeight = TimelineRuler.Height;
     private const double Gap = 10;
     private readonly Localizer _l;
     private readonly TimelineProject _project = new();
@@ -171,7 +171,7 @@ public sealed class TimelinePage
         {
             var x = Math.Round(v.ToX(s)) + 0.5;
             cr.SetSourceRgba(fg.Red, fg.Green, fg.Blue, 0.35);
-            cr.MoveTo(x, RulerHeight - 6);
+            cr.MoveTo(x, RulerHeight - TimelineRuler.Tick);
             cr.LineTo(x, RulerHeight);
             cr.Stroke();
             if (s % 20 != 0) continue;
@@ -242,19 +242,20 @@ public sealed class TimelinePage
             }
         }
 
-        // The playhead: a soft gold glow, the line, and a handle on the ruler.
+        // The playhead, under the labels: a soft gold glow, the line, and a handle on the ruler.
         var px = v.ToX(_playhead);
+        const double head = TimelineRuler.LabelRoom;
         cr.SetSourceRgba(0.957, 0.682, 0.227, 0.25);
-        cr.Rectangle(px - 4, 0, 8, h);
+        cr.Rectangle(px - 4, head, 8, h - head);
         cr.Fill();
         cr.SetSourceRgb(0.957, 0.682, 0.227);
-        cr.Rectangle(px - 1, 0, 2, h);
+        cr.Rectangle(px - 1, head, 2, h - head);
         cr.Fill();
-        cr.MoveTo(px - 7, 0);
-        cr.LineTo(px + 7, 0);
-        cr.LineTo(px + 7, 8);
-        cr.LineTo(px, 14);
-        cr.LineTo(px - 7, 8);
+        cr.MoveTo(px - 7, head);
+        cr.LineTo(px + 7, head);
+        cr.LineTo(px + 7, head + 8);
+        cr.LineTo(px, head + TimelineRuler.HandleHeight);
+        cr.LineTo(px - 7, head + 8);
         cr.ClosePath();
         cr.Fill();
     }

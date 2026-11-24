@@ -276,6 +276,8 @@ internal sealed class StudioWindow
             text.Resources["TextControlBackground" + state] = clear;
             text.Resources["TextControlBorderBrush" + state] = clear;
             text.Resources["TextControlForeground" + state] = new SolidColorBrush(LanternGlass.C(h.SearchText));
+            // Hovered and focused, the template takes these; at rest the property above
+            text.Resources["TextControlPlaceholderForeground" + state] = new SolidColorBrush(LanternGlass.C(h.SearchPlaceholder));
         }
 
         text.Resources["TextControlBorderThemeThicknessFocused"] = new Thickness(0);

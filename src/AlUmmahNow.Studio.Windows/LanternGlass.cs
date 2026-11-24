@@ -37,15 +37,20 @@ internal static class LanternGlass
         Fill(Theme(app, "Dark"), themes["Default"], dark: true);
         Fill(Theme(app, "Light"), themes["Light"], dark: false);
 
-        // Text and check marks on gold. The framework's are white in light mode, 1.9:1 on it. In a dictionary merged after
-        // the framework's own, which answers before the application's theme dictionaries.
+        HighContrast(Theme(app, "HighContrast"));
+
+        // Text and check marks on gold (the framework's are white in light mode, 1.9:1 on it), and links (the accent's
+        // shade, 2.4:1). In a dictionary merged after the framework's own, which answers before the application's theme
+        // dictionaries. High contrast keeps the framework's.
         var controls = new ResourceDictionary();
         foreach (var (theme, source) in new[] { ("Dark", "Default"), ("Light", "Light") })
         {
             var onGold = new SolidColorBrush(themes[source]["FanousOnPrimaryColor"]);
+            var link = new SolidColorBrush(themes[source]["FanousLinkColor"]);
             var d = new ResourceDictionary();
             foreach (var state in new[] { "", "PointerOver", "Pressed" })
             {
+                d["HyperlinkButtonForeground" + state] = link;
                 d["AccentButtonForeground" + state] = onGold;
                 d["CheckBoxCheckGlyphForegroundChecked" + state] = onGold;
                 d["CheckBoxCheckGlyphForegroundIndeterminate" + state] = onGold;
@@ -55,6 +60,19 @@ internal static class LanternGlass
         }
 
         app.Resources.MergedDictionaries.Add(controls);
+    }
+
+    /// <summary>The Studio's own brushes in the system's high-contrast colors: without them its text was not drawn.</summary>
+    private static void HighContrast(ResourceDictionary t)
+    {
+        var system = new global::Windows.UI.ViewManagement.UISettings();
+        SolidColorBrush B(global::Windows.UI.ViewManagement.UIElementType e) => new(system.UIElementColor(e));
+        foreach (var key in new[] { "Muted", "Danger", "SelectedText", "Edge", "EdgeStrong" }) t["Studio" + key + "Brush"] = B(global::Windows.UI.ViewManagement.UIElementType.WindowText);
+        foreach (var key in new[] { "Page", "Sidebar", "Card", "Menu" }) t["Studio" + key + "Brush"] = B(global::Windows.UI.ViewManagement.UIElementType.Window);
+        foreach (var key in new[] { "Sheen", "Selected" }) t["Studio" + key + "Brush"] = new SolidColorBrush(Colors.Transparent);
+        t["StudioLinkBrush"] = B(global::Windows.UI.ViewManagement.UIElementType.Hotlight);
+        t["StudioDangerFillBrush"] = B(global::Windows.UI.ViewManagement.UIElementType.Highlight);
+        t["StudioOnDangerFillBrush"] = B(global::Windows.UI.ViewManagement.UIElementType.HighlightText);
     }
 
     /// <summary>Theme key ("Default", "Light") → colour key → colour, from Fanous.Colors.xaml.</summary>

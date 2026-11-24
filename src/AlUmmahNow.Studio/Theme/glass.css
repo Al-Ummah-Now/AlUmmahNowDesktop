@@ -93,6 +93,15 @@ button.suggested-action {
 button.suggested-action:hover { background-image: linear-gradient(to bottom, @fanous_primary_sheen, @fanous_primary_hover); }
 button.suggested-action label { color: @fanous_on_primary; }
 
+/* A dialog's destructive action: filled, as on Windows. The toolkit's red text on its own tint is under 4.5:1 in dark. */
+dialog button.destructive, dialog button.destructive-action {
+  background-color: @fanous_error_fill;
+  background-image: none;
+  color: @fanous_on_error_fill;
+}
+dialog button.destructive:hover, dialog button.destructive-action:hover { background-color: mix(@fanous_error_fill, black, 0.12); }
+dialog button.destructive:active, dialog button.destructive-action:active { background-color: mix(@fanous_error_fill, black, 0.24); }
+
 /* Progress and switches glow gold. */
 progressbar > trough > progress { background-image: linear-gradient(to right, @fanous_primary_pressed, @fanous_primary_hover); box-shadow: 0 0 8px alpha(#fbc661, 0.7); }
 switch:checked { background-color: @fanous_primary; }
