@@ -61,8 +61,8 @@ public sealed partial class Shell
     }
 
     // Set on the parts themselves: the app's accent does not reach the framework's own styles (see the slider)
-    private static readonly SolidColorBrush Gold = new(Lantern);
-    private static readonly SolidColorBrush OnGold = new(Night);
+    private static SolidColorBrush Gold => new(Lantern);
+    private static SolidColorBrush OnGold => new(Night);
 
     private SolidColorBrush CardFill => new(IsDark ? global::Windows.UI.Color.FromArgb(255, 14, 43, 61) : Colors.White);
 
