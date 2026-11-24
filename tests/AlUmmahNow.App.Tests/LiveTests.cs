@@ -24,6 +24,8 @@ public sealed class FakeLive : ILiveClient
     public bool Fails { get; set; }
     public bool ChatFails { get; set; }
     public TimeSpan? ChatPollAfter { get; set; }
+    public LiveChatMessage? Pinned { get; set; }
+    public (LiveEventType Type, TaskCompletionSource Gate)? Held { get; set; }
 
     /// <summary>Every read is refused with this Retry-After.</summary>
     public TimeSpan? RetryAfter { get; set; }
@@ -39,11 +41,12 @@ public sealed class FakeLive : ILiveClient
 
     public Task<LiveFeatures> GetFeaturesAsync(CancellationToken ct = default) => Task.FromResult(Features);
 
-    public Task<IReadOnlyList<LiveStream>> ListAsync(LiveStatus status, LiveEventType? type = null, CancellationToken ct = default)
+    public async Task<IReadOnlyList<LiveStream>> ListAsync(LiveStatus status, LiveEventType? type = null, CancellationToken ct = default)
     {
+        if (Held is { } held && held.Type == type) await held.Gate.Task;
         if (Fails) throw new CatalogException("503");
         Asked = type;
-        return Task.FromResult(Lists.TryGetValue(status, out var list) ? list : Array.Empty<LiveStream>());
+        return Lists.TryGetValue(status, out var list) ? list : Array.Empty<LiveStream>();
     }
 
     public Task<LiveStream> GetStreamAsync(string id, CancellationToken ct = default) =>
@@ -61,7 +64,7 @@ public sealed class FakeLive : ILiveClient
         ChatReads++;
         Refuse();
         if (ChatFails) throw new CatalogException("503");
-        return Task.FromResult(new LiveChatPage(new[] { new LiveChatMessage { Id = "m" } }, pollAfter: ChatPollAfter));
+        return Task.FromResult(new LiveChatPage(new[] { new LiveChatMessage { Id = "m" } }, Pinned, pollAfter: ChatPollAfter));
     }
 
     public Task<LiveChatPage> GetChatReplayAsync(string id, long from, long to, CancellationToken ct = default) =>
@@ -563,6 +566,40 @@ public class LiveTests
         Assert.Null(vm.Event);
         vm.Open(vm.All[0]);
         Assert.Equal("on", Assert.IsType<Route.Live>(navigator.Current).StreamId);
+    }
+
+    [Fact]
+    public async Task An_earlier_choice_that_answers_late_is_not_shown()
+    {
+        var vm = new LiveListViewModel(_live, _localizer, new Navigator(), () => _now);
+        var gate = new TaskCompletionSource();
+        _live.Held = (LiveEventType.Jumuah, gate);
+        var late = vm.ChooseAsync(LiveEventType.Jumuah);
+        await vm.ChooseAsync(LiveEventType.Halqa);
+        gate.SetResult();
+        await late;
+        Assert.Equal(LiveEventType.Halqa, vm.Event);
+    }
+
+    [Fact]
+    public async Task The_replay_begins_without_what_was_live_and_at_its_own_time()
+    {
+        _live.Current = OnAir(chat: true);
+        _live.Pinned = new LiveChatMessage { Id = "p" };
+        var vm = await Loaded();
+        await vm.TickAsync();
+        Assert.Equal("p", vm.Pinned?.Id);
+        Advance(59);
+        // A live chat that could not be read waits a minute; the replay does not
+        _live.ChatFails = true;
+        await vm.TickAsync();
+        Advance(1);
+        _live.Current = new LiveState { Status = LiveStatus.Ended, VodUrl = "https://x.test/v.m3u8", ChatReplay = true };
+        _live.Windows[0] = new LiveChatPage(new[] { new LiveChatMessage { Id = "a" } });
+        await vm.TickAsync();
+        Assert.Equal(LiveMode.Recording, vm.Mode);
+        Assert.Null(vm.Pinned);
+        Assert.Equal(new[] { "a" }, vm.Messages.Select(m => m.Id));
     }
 
     [Fact]

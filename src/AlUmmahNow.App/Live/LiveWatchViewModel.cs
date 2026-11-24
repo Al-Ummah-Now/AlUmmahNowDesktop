@@ -49,6 +49,7 @@ namespace AlUmmahNow.App.Live
         private bool _hasBeaten;
         private DateTimeOffset _stateAt = DateTimeOffset.MinValue;
         private DateTimeOffset _chatDue = DateTimeOffset.MinValue;
+        private DateTimeOffset _replayDue = DateTimeOffset.MinValue;
         private TimeSpan? _stateWait;
         private DateTimeOffset _beatDue = DateTimeOffset.MinValue;
         private DateTimeOffset? _pausedSince;
@@ -365,7 +366,8 @@ namespace AlUmmahNow.App.Live
             Mode = _isGone && mode == LiveMode.Recording ? LiveMode.Ended : mode;
             Viewers = live.Viewers ?? Viewers;
             ReminderSet = live.ReminderSet;
-            if (!HasChat)
+            // The replay begins empty: what was written and pinned live is not what had been written by its first moment
+            if (!HasChat || (Mode == LiveMode.Recording && before.Mode != LiveMode.Recording))
             {
                 Messages = Array.Empty<LiveChatMessage>();
                 Pinned = null;
@@ -490,10 +492,10 @@ namespace AlUmmahNow.App.Live
             // The one before, so a seek does not open an empty chat, and the next, so it is there in time
             foreach (var n in new[] { window, window + 1, window - 1 })
             {
-                if (n < 0 || _replay.ContainsKey(n) || _now() < _chatDue) continue;
+                if (n < 0 || _replay.ContainsKey(n) || _now() < _replayDue) continue;
                 TimeSpan? refused = null;
                 var list = await ReadWindowAsync(n, wait => refused = wait);
-                if (list == null) _chatDue = _now() + (refused ?? ChatBackoff);
+                if (list == null) _replayDue = _now() + (refused ?? ChatBackoff);
                 else _replay[n] = list;
             }
 
