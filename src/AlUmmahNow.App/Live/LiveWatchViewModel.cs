@@ -123,6 +123,9 @@ namespace AlUmmahNow.App.Live
                 switch (Mode)
                 {
                     case LiveMode.Cancelled: return (T(IsPremiere ? "live.premiere.cancelled" : "live.cancelled"), Array.Empty<string>());
+                    // Not released yet, or not read yet
+                    case LiveMode.Live: return (T("live.premiere.starting"), Array.Empty<string>());
+                    case LiveMode.Recording: return (T("state.error"), Array.Empty<string>());
                     case LiveMode.Ended when IsPremiere: return (T("live.premiere.ended"), Array.Empty<string>());
                     case LiveMode.Ended: return (T("live.ended"), new[] { T("live.recording.preparing") });
                 }
@@ -256,7 +259,7 @@ namespace AlUmmahNow.App.Live
             }
         }
 
-        /// <summary>One second: the clock and whatever is due.</summary>
+        /// <summary>One second: the clock and whatever is due. Every wait begins when the answer is there, however long that took.</summary>
         public async Task TickAsync()
         {
             if (State != LoadState.Content) return;
@@ -265,16 +268,18 @@ namespace AlUmmahNow.App.Live
             await RefreshChatAsync();
             if (Mode == LiveMode.Live && _now() >= _beatDue)
             {
-                _beatDue = _now() + BeatEvery;
                 _hasBeaten = true;
+                var wait = BeatEvery;
                 try
                 {
                     if (await _live.BeatAsync(StreamId, _viewerId, leaving: false, _stop.Token) is { } count) Viewers = count;
                 }
                 catch (CatalogException ex)
                 {
-                    if (PollAfter(ex.RetryAfter) is { } wait) _beatDue = _now() + wait;
+                    wait = PollAfter(ex.RetryAfter) ?? wait;
                 }
+
+                _beatDue = _now() + wait;
             }
         }
 
@@ -337,16 +342,18 @@ namespace AlUmmahNow.App.Live
             // A premiere's time has come: it starts within the minute
             LiveMode.Soon => UntilStart is { } left && left <= TimeSpan.Zero ? DuePoll : SoonPoll,
             LiveMode.Ended when !_isGone => SoonPoll,
+            // A premiere's video that could not be read
+            LiveMode.Recording when IsPremiere && Watch == null => SoonPoll,
             _ => TimeSpan.MaxValue,
         };
 
         private async Task RefreshStateAsync()
         {
+            TimeSpan? refused = null;
+            var live = await Quiet(() => _live.GetStateAsync(StreamId, _stop.Token), wait => refused = wait);
             _stateAt = _now();
-            _stateWait = null;
-            if (await Quiet(() => _live.GetStateAsync(StreamId, _stop.Token), wait => _stateWait = wait) is not { } live) return;
-            _stateWait = PollAfter(live.PollAfter);
-            await ShowAsync(live);
+            _stateWait = live == null ? refused : PollAfter(live.PollAfter);
+            if (live != null) await ShowAsync(live);
         }
 
         private async Task ShowAsync(LiveState live)
@@ -413,7 +420,21 @@ namespace AlUmmahNow.App.Live
         {
             // After the end the same video goes on
             if (_opened == videoId) return;
-            var video = await Quiet(() => _catalog.GetVideoAsync(videoId, _stop.Token));
+            Video? video = null;
+            try
+            {
+                video = await _catalog.GetVideoAsync(videoId, _stop.Token);
+            }
+            catch (CatalogException ex) when (ex.IsNotFound)
+            {
+                // Gone
+            }
+            catch (Exception ex) when (ex is CatalogException || ex is System.Text.Json.JsonException)
+            {
+                // Not an answer: asked for again
+                return;
+            }
+
             if (_stop.IsCancellationRequested) return;
             if (video == null || string.IsNullOrEmpty(video.PlayUrl))
             {

@@ -10,7 +10,8 @@ namespace AlUmmahNow.App.Demo
 {
     /// <summary>
     /// Live streams for review frames and the automation scenarios (<c>AUN_DEMO_LIVE=1</c>): no network, never in a normal
-    /// launch. The stream and the recording play the committed fixture (<c>AUN_FIXTURE_MEDIA</c>).
+    /// launch. The stream and the recording play the committed fixture (<c>AUN_FIXTURE_MEDIA</c>),
+    /// and have its title and channel.
     /// </summary>
     public sealed class DemoLiveClient : ILiveClient
     {
@@ -33,16 +34,16 @@ namespace AlUmmahNow.App.Demo
             Id = id,
             Title = id switch
             {
-                LiveId => T("Questions after Maghrib", "أسئلة بعد المغرب"),
-                PremiereId => T("Tafsir of Surah Al-Kahf", "تفسير سورة الكهف"),
+                LiveId => T("Reflections on Surah Al-Kahf, part 1", "تأملات في سورة الكهف، الجزء الأول"),
+                PremiereId => T("Reflections on Surah Al-Kahf, part 2", "تأملات في سورة الكهف، الجزء الثاني"),
                 SoonId => T("Friday sermon", "خطبة الجمعة"),
-                _ => T("Questions after Maghrib, last week", "أسئلة بعد المغرب، الأسبوع الماضي"),
+                _ => T("Reflections on Surah Al-Kahf, part 1", "تأملات في سورة الكهف، الجزء الأول"),
             },
             Description = id == LiveId ? T("Weekly. Questions are answered at the end.", "كل أسبوع. تُجاب الأسئلة في الآخر.") : "",
             Status = id == LiveId ? LiveStatus.Live : id == RecordingId ? LiveStatus.Ended : LiveStatus.Scheduled,
             Kind = id == PremiereId ? LiveKind.Premiere : LiveKind.Live,
             EventType = Event(id),
-            ChannelName = T("Noor Learning", "نور للتعلّم"),
+            ChannelName = T("Masjid Live", "المسجد مباشر"),
             ScheduledStart = Start(id),
             Viewers = id == LiveId ? 128 : (long?)null,
         };
@@ -80,7 +81,7 @@ namespace AlUmmahNow.App.Demo
 
         public Task<LiveChatPage> GetChatAsync(string id, CancellationToken cancellationToken = default) =>
             Task.FromResult(id == LiveId
-                ? new LiveChatPage(Messages, new LiveChatMessage { Id = "0", AuthorName = T("Noor Learning", "نور للتعلّم"), Text = T("Please keep to today’s subject.", "نرجو الالتزام بموضوع اليوم.") })
+                ? new LiveChatPage(Messages, new LiveChatMessage { Id = "0", AuthorName = T("Masjid Live", "المسجد مباشر"), Text = T("Please keep to today’s subject.", "نرجو الالتزام بموضوع اليوم.") })
                 : new LiveChatPage(Array.Empty<LiveChatMessage>()));
 
         public Task<LiveChatPage> GetChatReplayAsync(string id, long fromMs, long toMs, CancellationToken cancellationToken = default) =>
@@ -93,7 +94,7 @@ namespace AlUmmahNow.App.Demo
         private IReadOnlyList<LiveChatMessage> Messages => new[]
         {
             Message("1", 0, T("Yusuf Rahman", "يوسف الرحمن"), T("Assalamu alaikum from Toronto.", "السلام عليكم من تورنتو.")),
-            Message("2", 600, T("Noor Learning", "نور للتعلّم"), T("Wa alaikum assalam. Welcome, everyone.", "وعليكم السلام ورحمة الله. أهلًا بكم جميعًا."), LiveChatRole.Owner),
+            Message("2", 600, T("Masjid Live", "المسجد مباشر"), T("Wa alaikum assalam. Welcome, everyone.", "وعليكم السلام ورحمة الله. أهلًا بكم جميعًا."), LiveChatRole.Owner),
             Message("3", 1_200, T("Khadija Haddad", "خديجة حداد"), T("Is there a recording after?", "هل يبقى التسجيل بعد ذلك؟")),
             Message("4", 1_800, T("Omar Farooq", "عمر الفاروق"), T("Yes, it stays on the channel with the chat beside it.", "نعم، يبقى في القناة ومعه المحادثة."), LiveChatRole.Moderator),
             Message("5", 2_400, T("Bilal Ahmed", "بلال أحمد"), T("The sound is clear now, jazakum Allahu khayran.", "الصوت واضح الآن، جزاكم الله خيرًا.")),

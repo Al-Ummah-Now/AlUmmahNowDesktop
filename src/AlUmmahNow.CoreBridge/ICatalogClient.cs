@@ -17,10 +17,16 @@ namespace AlUmmahNow.CoreBridge
 
     public sealed class CatalogException : System.Exception
     {
-        public CatalogException(string message, System.Exception? inner = null, System.TimeSpan? retryAfter = null) : base(message, inner) =>
+        public CatalogException(string message, System.Exception? inner = null, System.TimeSpan? retryAfter = null, bool isNotFound = false) : base(message, inner)
+        {
             RetryAfter = retryAfter;
+            IsNotFound = isNotFound;
+        }
 
         /// <summary>When the server says to ask again (<c>Retry-After</c> on a 429 or 503).</summary>
         public System.TimeSpan? RetryAfter { get; }
+
+        /// <summary>The server answered that there is no such thing, rather than failing to answer.</summary>
+        public bool IsNotFound { get; }
     }
 }

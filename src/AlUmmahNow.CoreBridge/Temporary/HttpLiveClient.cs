@@ -182,8 +182,15 @@ namespace AlUmmahNow.CoreBridge.Temporary
             }
         }
 
-        private static TimeSpan? RetryAfter(HttpResponseMessage response) =>
-            (int)response.StatusCode == 429 || response.StatusCode == HttpStatusCode.ServiceUnavailable ? response.Headers.RetryAfter?.Delta : null;
+        /// <summary>Seconds, or a date: from the answer's own Date, so a computer's clock that is wrong does not matter.</summary>
+        private TimeSpan? RetryAfter(HttpResponseMessage response)
+        {
+            if ((int)response.StatusCode != 429 && response.StatusCode != HttpStatusCode.ServiceUnavailable) return null;
+            var said = response.Headers.RetryAfter;
+            if (said?.Date is not { } at) return said?.Delta;
+            var wait = at - (response.Headers.Date ?? _now());
+            return wait < TimeSpan.Zero ? TimeSpan.Zero : wait;
+        }
 
         /// <summary>A whole answer is never lost to a bad value here: what is not a number is as if it were absent.</summary>
         private static TimeSpan? PollAfter(JsonElement e) =>
