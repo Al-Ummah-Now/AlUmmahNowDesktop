@@ -101,9 +101,9 @@ jobs:
             canceled|live:demo-canceled||10
             premiere-ended|live:demo-premiere-ended||10
             premiere-canceled|live:demo-premiere-canceled||10
-            remind-signin|remind:demo-soon|AUN_DEMO_AUTH=waiting|10
-            remind-set|remind:demo-soon|AUN_DEMO_AUTH=in|10
-            remind-failed|remind:demo-soon|AUN_DEMO_AUTH=in AUN_DEMO_REMIND=fail|10
+            remind-signin|remind-signin:demo-soon|AUN_DEMO_AUTH=waiting|10
+            remind-set|remind-set:demo-soon|AUN_DEMO_AUTH=in|10
+            remind-failed|remind-failed:demo-soon|AUN_DEMO_AUTH=in AUN_DEMO_REMIND=fail|10
             home-off|home|AUN_DEMO_LIVE=off|10
             live-off|live:demo-live|AUN_DEMO_LIVE=off|10
             soon-off|live:demo-soon|AUN_DEMO_LIVE=off|10"

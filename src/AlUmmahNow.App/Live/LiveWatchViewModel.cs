@@ -49,6 +49,7 @@ namespace AlUmmahNow.App.Live
         private bool _hasBeaten;
         private bool _isHidden;
         private int _visit;
+        private int _reminderChange;
         private Task _lastBeat = Task.CompletedTask;
         private DateTimeOffset _stateAt = DateTimeOffset.MinValue;
         private DateTimeOffset _chatDue = DateTimeOffset.MinValue;
@@ -166,6 +167,7 @@ namespace AlUmmahNow.App.Live
             LayoutChanged?.Invoke(this, EventArgs.Empty);
             try
             {
+                var change = _reminderChange;
                 var stream = _live.GetStreamAsync(StreamId, _stop.Token);
                 var state = _live.GetStateAsync(StreamId, _stop.Token);
                 await Task.WhenAll(stream, state);
@@ -174,7 +176,7 @@ namespace AlUmmahNow.App.Live
                 _stop.Token.ThrowIfCancellationRequested();
                 _stateWait = PollAfter(live.PollAfter);
                 State = LoadState.Content;
-                await ShowAsync(live);
+                await ShowAsync(live, change);
             }
             catch (Exception ex) when (ex is CatalogException || ex is AuthRequiredException)
             {
@@ -245,6 +247,8 @@ namespace AlUmmahNow.App.Live
             try
             {
                 await _live.SetReminderAsync(StreamId, on, _stop.Token);
+                // A state asked for before this, or while it was being set, is old in this
+                _reminderChange++;
                 ReminderSet = on;
             }
             catch (Exception ex) when (ex is CatalogException || ex is AuthRequiredException)
@@ -414,13 +418,15 @@ namespace AlUmmahNow.App.Live
         private async Task RefreshStateAsync()
         {
             TimeSpan? refused = null;
+            var change = _reminderChange;
             var live = await Quiet(() => _live.GetStateAsync(StreamId, _stop.Token), wait => refused = wait);
             _stateAt = _now();
             _stateWait = live == null ? refused : PollAfter(live.PollAfter);
-            if (live != null) await ShowAsync(live);
+            if (live != null) await ShowAsync(live, change);
         }
 
-        private async Task ShowAsync(LiveState live)
+        /// <param name="change">The reminder's changes when the state was asked for; of a later one it knows nothing.</param>
+        private async Task ShowAsync(LiveState live, int change)
         {
             _stateAt = _now();
             var before = (Mode, HasChat, Watch, CanRemind, Live?.EventType);
@@ -428,7 +434,7 @@ namespace AlUmmahNow.App.Live
             var mode = ModeOf(live);
             Mode = _isGone && mode == LiveMode.Recording ? LiveMode.Ended : mode;
             Viewers = live.Viewers ?? Viewers;
-            ReminderSet = live.ReminderSet;
+            if (change == _reminderChange) ReminderSet = live.ReminderSet;
             // The replay begins empty: what was written and pinned live is not what had been written by its first moment
             if (!HasChat || (Mode == LiveMode.Recording && before.Mode != LiveMode.Recording))
             {
