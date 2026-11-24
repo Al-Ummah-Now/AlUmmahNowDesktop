@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Globalization;
 using AlUmmahNow.App.I18n;
+using AlUmmahNow.App.Live;
 using AlUmmahNow.App.Navigation;
 using AlUmmahNow.App.Services;
 using AlUmmahNow.App.ViewModels;
@@ -16,7 +17,7 @@ using Windows.System;
 namespace AlUmmahNow.Windows;
 
 /// <summary>Renders the current route. Views are rebuilt on navigation and language change.</summary>
-public sealed class Shell
+public sealed partial class Shell
 {
     private static readonly global::Windows.UI.Color Lantern = global::Windows.UI.Color.FromArgb(255, 255, 160, 55);
     private static readonly global::Windows.UI.Color Night = global::Windows.UI.Color.FromArgb(255, 9, 48, 65);
@@ -35,8 +36,11 @@ public sealed class Shell
     private string? _watchId;
     private Action? _unbind;
 
-    public Shell(ICatalogClient catalog, Localizer localizer, Navigator navigator, WindowsMediaPlayer player, SmtcSession session, AppSettings settings, SettingsStore store, AuthViewModel auth)
+    public Shell(ICatalogClient catalog, Localizer localizer, Navigator navigator, WindowsMediaPlayer player, SmtcSession session, AppSettings settings, SettingsStore store, AuthViewModel auth, ILiveClient live, string shortLinkHost)
     {
+        _live = live;
+        _shortLinkHost = shortLinkHost;
+        LiveList = new LiveListViewModel(live, localizer, navigator);
         _auth = auth;
         auth.PropertyChanged += (_, _) => Render();
         _catalog = catalog;
@@ -47,28 +51,32 @@ public sealed class Shell
         _settings = settings;
         _store = store;
         Home = new HomeViewModel(catalog, localizer, navigator);
-        navigator.Changed += (_, _) => Render();
+        navigator.Changed += (_, _) =>
+        {
+            Render();
+            if (navigator.Current is not Route.Watch && navigator.Current is not Route.Live) _ = RefreshLiveAsync();
+        };
         localizer.LanguageChanged += (_, _) => Render();
-        AddKey(VirtualKey.Space, () => _watch?.TogglePlay());
+        AddKey(VirtualKey.Space, () => Watch?.TogglePlay());
         AddKey(VirtualKey.Left, () => Skip(!_localizer.IsRtl));
         AddKey(VirtualKey.Right, () => Skip(_localizer.IsRtl));
     }
 
     public FrameworkElement Root => _root;
     public HomeViewModel Home { get; }
-    public WatchViewModel? Watch => _watch;
+    public WatchViewModel? Watch => _watch ?? _liveWatch?.Watch;
 
     public async Task StartAsync()
     {
         Render();
-        await Home.LoadAsync();
+        await Task.WhenAll(Home.LoadAsync(), LiveList.LoadAsync());
         Render();
     }
 
     private void Skip(bool back)
     {
-        if (back) _watch?.SkipBack();
-        else _watch?.SkipForward();
+        if (back) Watch?.SkipBack();
+        else Watch?.SkipForward();
     }
 
     private void AddKey(VirtualKey key, Action action)
@@ -100,16 +108,25 @@ public sealed class Shell
         Grid.SetRow(header, 0);
         _root.Children.Add(header);
 
+        if (_navigator.Current is not Route.Live) CloseLive();
+        if (_navigator.Current is not Route.Watch) CloseWatch();
         FrameworkElement content;
-        if (_navigator.Current is Route.Watch route)
+        switch (_navigator.Current)
         {
-            EnsureWatch(route.VideoId);
-            content = BuildWatch(_watch!);
-        }
-        else
-        {
-            CloseWatch();
-            content = BuildHome();
+            case Route.Watch route:
+                EnsureWatch(route.VideoId);
+                content = BuildWatch(_watch!);
+                break;
+            case Route.Live route:
+                EnsureLive(route.StreamId);
+                content = BuildLive(_liveWatch!);
+                break;
+            case Route.LiveList:
+                content = BuildLiveList();
+                break;
+            default:
+                content = BuildHome();
+                break;
         }
 
         Grid.SetRow(content, 1);
@@ -202,16 +219,18 @@ public sealed class Shell
     private static void AutomationName(DependencyObject element, string name) =>
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(element, name);
 
-    private FrameworkElement Message(string key, bool retry)
+    private FrameworkElement Message(string key, bool retry) => Message(key, retry ? () => Home.LoadAsync() : null);
+
+    private FrameworkElement Message(string key, Func<Task>? retry)
     {
         var panel = new StackPanel { Spacing = 12, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
         panel.Children.Add(new TextBlock { Text = _localizer[key], TextAlignment = TextAlignment.Center });
-        if (retry)
+        if (retry != null)
         {
             var button = new Button { Content = _localizer["action.retry"], HorizontalAlignment = HorizontalAlignment.Center };
             button.Click += async (_, _) =>
             {
-                await Home.LoadAsync();
+                await retry();
                 Render();
             };
             panel.Children.Add(button);
@@ -230,6 +249,7 @@ public sealed class Shell
         }
 
         var column = new StackPanel { Spacing = 20, Padding = new Thickness(20, 8, 20, 24) };
+        if (LiveList.All.Count > 0) AppendLiveRail(column);
         foreach (var rail in Home.Rails)
         {
             column.Children.Add(new TextBlock { Text = rail.Title, FontSize = 20, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
@@ -274,7 +294,8 @@ public sealed class Shell
         return button;
     }
 
-    private FrameworkElement BuildWatch(WatchViewModel vm)
+    /// <param name="heading">What stands under the video in place of the title and the channel.</param>
+    private FrameworkElement BuildWatch(WatchViewModel vm, FrameworkElement? heading = null)
     {
         if (vm.State == LoadState.Loading) return Message("state.loading", false);
         if (vm.State != LoadState.Content) return Message(vm.State == LoadState.Error ? "state.error" : "state.empty", false);
@@ -303,12 +324,20 @@ public sealed class Shell
         surface.Children.Add(captionBox);
         grid.Children.Add(surface);
 
-        var title = new TextBlock { Text = vm.Title, FontSize = 22, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap };
-        Grid.SetRow(title, 1);
-        grid.Children.Add(title);
-        var channel = new TextBlock { Text = vm.Channel, Opacity = 0.7 };
-        Grid.SetRow(channel, 2);
-        grid.Children.Add(channel);
+        if (heading != null)
+        {
+            Grid.SetRow(heading, 1);
+            grid.Children.Add(heading);
+        }
+        else
+        {
+            var title = new TextBlock { Text = vm.Title, FontSize = 22, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap };
+            Grid.SetRow(title, 1);
+            grid.Children.Add(title);
+            var channel = new TextBlock { Text = vm.Channel, Opacity = 0.7 };
+            Grid.SetRow(channel, 2);
+            grid.Children.Add(channel);
+        }
 
         var controls = new Grid { ColumnSpacing = 8 };
         controls.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -341,8 +370,11 @@ public sealed class Shell
         var options = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
         var time = new TextBlock { VerticalAlignment = VerticalAlignment.Center };
         options.Children.Add(time);
-        options.Children.Add(Selector("player.speed", WatchViewModel.Speeds.Select(s => _localizer.Speed(s)).ToList(),
-            WatchViewModel.Speeds.ToList().IndexOf(vm.Speed), i => vm.SelectSpeed(WatchViewModel.Speeds[i])));
+        var speeds = WatchViewModel.Speeds.ToList();
+        var speed = Selector("player.speed", speeds.Select(s => _localizer.Speed(s)).ToList(), speeds.IndexOf(vm.Speed), i => vm.SelectSpeed(speeds[i]));
+        options.Children.Add(speed);
+        // A live stream has no place to go to and no speed to choose
+        foreach (var part in new FrameworkElement[] { back, forward, slider, time, speed }) part.Visibility = vm.IsLive ? Visibility.Collapsed : Visibility.Visible;
         options.Children.Add(Selector("player.quality", vm.Qualities.Select((q, i) => i == 0 ? _localizer["player.quality.auto"] : q.Label).ToList(),
             vm.Qualities.IndexOf(vm.Quality!), i => vm.SelectQuality(vm.Qualities[i])));
         var tracks = vm.SubtitleTracks.ToList();
@@ -365,6 +397,7 @@ public sealed class Shell
             time.Text = _localizer.Duration(vm.Position) + " / " + _localizer.Duration(vm.Duration);
             ((FontIcon)play.Content).Glyph = vm.IsPlaying ? "" : "";
             AutomationName(play, _localizer[vm.IsPlaying ? "player.pause" : "player.play"]);
+            if (speeds.IndexOf(vm.Speed) is var at && at >= 0 && speed.SelectedIndex != at) speed.SelectedIndex = at;
             syncing = true;
             if (vm.Duration > 0) slider.Maximum = vm.Duration;
             slider.Value = vm.Position;
@@ -372,7 +405,7 @@ public sealed class Shell
         }
 
         vm.PropertyChanged += Sync;
-        _unbind = () => vm.PropertyChanged -= Sync;
+        _unbind += () => vm.PropertyChanged -= Sync;
         Sync(null, new PropertyChangedEventArgs(null));
         return grid;
     }
@@ -386,7 +419,7 @@ public sealed class Shell
         return button;
     }
 
-    private FrameworkElement Selector(string key, IReadOnlyList<string> items, int selected, Action<int> onChange)
+    private ComboBox Selector(string key, IReadOnlyList<string> items, int selected, Action<int> onChange)
     {
         var box = new ComboBox { MinWidth = 90 };
         foreach (var item in items) box.Items.Add(item);

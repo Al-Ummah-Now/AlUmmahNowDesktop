@@ -1,4 +1,5 @@
 using AlUmmahNow.App.I18n;
+using AlUmmahNow.App.Live;
 using AlUmmahNow.App.Media;
 using AlUmmahNow.App.Navigation;
 using AlUmmahNow.App.Services;
@@ -8,7 +9,7 @@ using AlUmmahNow.CoreBridge;
 namespace AlUmmahNow.Linux;
 
 /// <summary>Renders the current route. Views are rebuilt on navigation and language change.</summary>
-public sealed class MainWindow
+public sealed partial class MainWindow
 {
     private const uint KeySpace = 0x20, KeyLeft = 0xff51, KeyRight = 0xff53;
 
@@ -27,9 +28,12 @@ public sealed class MainWindow
     private string? _watchId;
     private Action? _unbindWatch;
 
-    public MainWindow(Adw.Application app, ICatalogClient catalog, Localizer localizer, Navigator navigator, GstMediaPlayer player, IMediaSession session, HttpClient http, AppSettings settings, SettingsStore store, AuthViewModel auth)
+    public MainWindow(Adw.Application app, ICatalogClient catalog, Localizer localizer, Navigator navigator, GstMediaPlayer player, IMediaSession session, HttpClient http, AppSettings settings, SettingsStore store, AuthViewModel auth, ILiveClient live, string shortLinkHost)
     {
         _auth = auth;
+        _live = live;
+        _shortLinkHost = shortLinkHost;
+        _liveList = new LiveListViewModel(live, localizer, navigator);
         _catalog = catalog;
         _localizer = localizer;
         _navigator = navigator;
@@ -50,32 +54,42 @@ public sealed class MainWindow
         keys.OnKeyPressed += (_, a) => OnKey(a.Keyval);
         _window.AddController(keys);
 
-        navigator.Changed += (_, _) => Render();
+        // Hidden or behind another workspace: nothing is asked for the chat
+        _window.OnNotify += (_, e) =>
+        {
+            if (e.Pspec.GetName() == "suspended" && _liveWatch != null) _liveWatch.IsHidden = _window.IsSuspended();
+        };
+
+        navigator.Changed += (_, _) =>
+        {
+            Render();
+            if (navigator.Current is not Route.Watch && navigator.Current is not Route.Live) _ = RefreshLiveAsync();
+        };
         localizer.LanguageChanged += (_, _) => Render();
         auth.PropertyChanged += (_, _) => Render();
     }
 
     public HomeViewModel Home => _home;
-    public WatchViewModel? Watch => _watch;
+    public WatchViewModel? Watch => _watch ?? _liveWatch?.Watch;
 
     public async Task StartAsync()
     {
         ApplyTheme();
         Render();
         _window.Present();
-        await _home.LoadAsync();
+        await Task.WhenAll(_home.LoadAsync(), _liveList.LoadAsync());
         Render();
     }
 
     private bool OnKey(uint key)
     {
-        if (_watch == null) return false;
+        if (Watch is not { } watch) return false;
         // Left and right follow the mirrored seek direction in RTL.
         var forward = _localizer.IsRtl ? KeyLeft : KeyRight;
         var back = _localizer.IsRtl ? KeyRight : KeyLeft;
-        if (key == KeySpace) _watch.TogglePlay();
-        else if (key == forward) _watch.SkipForward();
-        else if (key == back) _watch.SkipBack();
+        if (key == KeySpace) watch.TogglePlay();
+        else if (key == forward) watch.SkipForward();
+        else if (key == back) watch.SkipBack();
         else return false;
         return true;
     }
@@ -102,15 +116,24 @@ public sealed class MainWindow
 
         _unbindWatch?.Invoke();
         _unbindWatch = null;
-        if (_navigator.Current is Route.Watch route)
+        if (_navigator.Current is not Route.Live) CloseLive();
+        if (_navigator.Current is not Route.Watch) CloseWatch();
+        switch (_navigator.Current)
         {
-            EnsureWatch(route.VideoId);
-            root.Append(BuildWatch(_watch!));
-        }
-        else
-        {
-            CloseWatch();
-            root.Append(BuildHome());
+            case Route.Watch route:
+                EnsureWatch(route.VideoId);
+                root.Append(BuildWatch(_watch!));
+                break;
+            case Route.Live route:
+                EnsureLive(route.StreamId);
+                root.Append(BuildLive(_liveWatch!));
+                break;
+            case Route.LiveList:
+                root.Append(BuildLiveList());
+                break;
+            default:
+                root.Append(BuildHome());
+                break;
         }
 
         _window.SetContent(root);
@@ -196,20 +219,22 @@ public sealed class MainWindow
         return button;
     }
 
-    private Gtk.Widget StateMessage(string key, bool retry)
+    private Gtk.Widget StateMessage(string key, bool retry) => StateMessage(key, retry ? () => _home.LoadAsync() : null);
+
+    private Gtk.Widget StateMessage(string key, Func<Task>? retry)
     {
         var box = Gtk.Box.New(Gtk.Orientation.Vertical, 12);
         box.SetValign(Gtk.Align.Center);
         box.SetHalign(Gtk.Align.Center);
         box.SetVexpand(true);
         box.Append(Gtk.Label.New(_localizer[key]));
-        if (retry)
+        if (retry != null)
         {
             var button = Gtk.Button.NewWithLabel(_localizer["action.retry"]);
             button.AddCssClass("suggested-action");
             button.OnClicked += async (_, _) =>
             {
-                await _home.LoadAsync();
+                await retry();
                 Render();
             };
             box.Append(button);
@@ -233,6 +258,7 @@ public sealed class MainWindow
         column.SetMarginStart(20);
         column.SetMarginEnd(20);
 
+        if (_liveList.All.Count > 0) AppendLiveRail(column);
         foreach (var rail in _home.Rails)
         {
             var title = Gtk.Label.New(rail.Title);
@@ -351,7 +377,8 @@ public sealed class MainWindow
         }
     }
 
-    private Gtk.Widget BuildWatch(WatchViewModel vm)
+    /// <param name="heading">What stands under the video in place of the title and the channel.</param>
+    private Gtk.Widget BuildWatch(WatchViewModel vm, Gtk.Widget? heading = null)
     {
         if (vm.State == LoadState.Loading) return StateMessage("state.loading", false);
         if (vm.State != LoadState.Content) return StateMessage(vm.State == LoadState.Error ? "state.error" : "state.empty", false);
@@ -379,16 +406,23 @@ public sealed class MainWindow
         overlay.AddOverlay(caption);
         column.Append(overlay);
 
-        var title = Gtk.Label.New(vm.Title);
-        title.SetHalign(Gtk.Align.Start);
-        title.SetWrap(true);
-        title.AddCssClass("title-2");
-        column.Append(title);
+        if (heading != null)
+        {
+            column.Append(heading);
+        }
+        else
+        {
+            var title = Gtk.Label.New(vm.Title);
+            title.SetHalign(Gtk.Align.Start);
+            title.SetWrap(true);
+            title.AddCssClass("title-2");
+            column.Append(title);
 
-        var channel = Gtk.Label.New(vm.Channel);
-        channel.SetHalign(Gtk.Align.Start);
-        channel.AddCssClass("dim-label");
-        column.Append(channel);
+            var channel = Gtk.Label.New(vm.Channel);
+            channel.SetHalign(Gtk.Align.Start);
+            channel.AddCssClass("dim-label");
+            column.Append(channel);
+        }
 
         var seek = Gtk.Scale.NewWithRange(Gtk.Orientation.Horizontal, 0, Math.Max(1, vm.Duration), 1);
         seek.SetDrawValue(false);
@@ -427,8 +461,12 @@ public sealed class MainWindow
         controls.Append(seek);
         controls.Append(time);
 
-        controls.Append(BuildSelector("player.speed", WatchViewModel.Speeds.Select(s => _localizer.Speed(s)).ToArray(),
-            WatchViewModel.Speeds.ToList().IndexOf(vm.Speed), i => vm.SelectSpeed(WatchViewModel.Speeds[i])));
+        var speeds = WatchViewModel.Speeds.ToList();
+        var speed = BuildSelector("player.speed", WatchViewModel.Speeds.Select(s => _localizer.Speed(s)).ToArray(),
+            speeds.IndexOf(vm.Speed), i => vm.SelectSpeed(speeds[i]));
+        controls.Append(speed);
+        // A live stream has no place to go to and no speed to choose
+        foreach (var w in new Gtk.Widget[] { back10, forward10, seek, time, speed }) w.SetVisible(!vm.IsLive);
 
         var qualityLabels = vm.Qualities.Select((q, i) => i == 0 ? _localizer["player.quality.auto"] : q.Label).ToArray();
         controls.Append(BuildSelector("player.quality", qualityLabels, vm.Qualities.IndexOf(vm.Quality!), i => vm.SelectQuality(vm.Qualities[i])));
@@ -447,6 +485,7 @@ public sealed class MainWindow
             time.SetText(_localizer.Duration(vm.Position) + " / " + _localizer.Duration(vm.Duration));
             play.SetIconName(vm.IsPlaying ? "media-playback-pause-symbolic" : "media-playback-start-symbolic");
             play.GetChild()?.SetDirection(Gtk.TextDirection.Ltr);
+            if (speeds.IndexOf(vm.Speed) is var at && at >= 0 && (int)speed.GetSelected() != at) speed.SetSelected((uint)at);
             syncing = true;
             if (vm.Duration > 0) seek.SetRange(0, vm.Duration);
             seek.SetValue(vm.Position);
@@ -454,12 +493,12 @@ public sealed class MainWindow
         }
 
         vm.PropertyChanged += Sync;
-        _unbindWatch = () => vm.PropertyChanged -= Sync;
+        _unbindWatch += () => vm.PropertyChanged -= Sync;
         Sync(null, new System.ComponentModel.PropertyChangedEventArgs(null));
         return column;
     }
 
-    private Gtk.Widget BuildSelector(string labelKey, string[] items, int selected, Action<int> onChange)
+    private Gtk.DropDown BuildSelector(string labelKey, string[] items, int selected, Action<int> onChange)
     {
         var dropdown = Gtk.DropDown.NewFromStrings(items);
         dropdown.SetTooltipText(_localizer[labelKey]);

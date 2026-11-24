@@ -79,16 +79,21 @@ public sealed partial class App : Application
         var authSession = new PkceAuthSession(http, environment.AuthIssuer, environment.ViewerClientId, secureStore, new ShellBrowserLauncher(), localizer["auth.browser.done"]);
         var auth = new AuthViewModel(authSession);
         auth.Restore();
+        // AUN_DEMO_LIVE=1: fixture streams for review frames and the live scenarios (no network, never in a normal launch).
+        ILiveClient live = Environment.GetEnvironmentVariable("AUN_DEMO_LIVE") == "1"
+            ? new DemoLiveClient(Environment.GetEnvironmentVariable("AUN_FIXTURE_MEDIA"), settings.Language)
+            : new HttpLiveClient(http, environment.VideosApi, HttpLiveClient.TokenOf(authSession));
         var coreVersion = CoreRuntime.VersionOrNone();
         var ui = DispatcherQueue.GetForCurrentThread();
         var player = new WindowsMediaPlayer(ui);
         var session = new SmtcSession(player.Player, ui);
-        var shell = new Shell(catalog, localizer, navigator, player, session, settings, store, auth);
+        var shell = new Shell(catalog, localizer, navigator, player, session, settings, store, auth, live, environment.ShortLinkHost);
 
         _window = new Window { Title = localizer["app.name"], Content = shell.Root };
         _window.AppWindow.Resize(new global::Windows.Graphics.SizeInt32(1280, 800));
         if (_window.AppWindow.Presenter is OverlappedPresenter presenter) presenter.Maximize();
         _window.Closed += (_, _) => player.Stop();
+        _window.VisibilityChanged += (_, e) => shell.SetHidden(!e.Visible);
         _window.Activate();
 
         var furthest = 0d;
@@ -112,7 +117,10 @@ public sealed partial class App : Application
             end.Tick += (_, _) =>
             {
                 var isWatch = automation.StartsWith("watch:", StringComparison.Ordinal);
-                var pass = isWatch ? furthest > 2 && (sawCaption || Environment.GetEnvironmentVariable("AUN_EXPECT_CAPTION") == "0") : shell.Home.Rails.Count > 0;
+                var pass = isWatch ? furthest > 2 && (sawCaption || Environment.GetEnvironmentVariable("AUN_EXPECT_CAPTION") == "0")
+                    : automation == "live" ? shell.LiveList.State == LoadState.Content && shell.LiveList.All.Count > 0
+                    : automation.StartsWith("live:", StringComparison.Ordinal) ? shell.LiveWatch is { State: LoadState.Content, HasChat: true } l && (l.Watch == null || furthest > 2)
+                    : shell.Home.Rails.Count > 0;
                 File.WriteAllText(Environment.GetEnvironmentVariable("AUN_RESULT") ?? "aun-result.txt",
                     $"AUTOMATION {automation} core={coreVersion} rails={shell.Home.Rails.Count} furthest={furthest:F1} caption={sawCaption} failed={shell.Watch?.PlaybackFailed} RESULT {(pass ? "PASS" : "FAIL")}");
                 player.Stop();
@@ -123,6 +131,8 @@ public sealed partial class App : Application
 
         var started = shell.StartAsync();
         if (automation.StartsWith("watch:", StringComparison.Ordinal)) navigator.Push(new Route.Watch(automation.Substring(6)));
+        if (automation == "live") navigator.Push(new Route.LiveList());
+        if (automation.StartsWith("live:", StringComparison.Ordinal)) navigator.Push(new Route.Live(automation.Substring(5)));
         await started;
     }
 }

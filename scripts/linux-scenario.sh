@@ -2,13 +2,13 @@
 # Runs one viewer scenario under Xvfb and captures a screenshot.
 # Usage: linux-scenario.sh <lang> <theme> <automation> <name> <output-dir>
 lang=$1 theme=$2 automation=$3 name=$4 out=$5
-export AUN_LANG=$lang AUN_THEME=$theme AUN_AUTOMATION=$automation AUN_EXIT_AFTER=24
+export AUN_LANG=$lang AUN_THEME=$theme AUN_AUTOMATION=$automation AUN_EXIT_AFTER=${AUN_EXIT_AFTER:-24}
 export XDG_CONFIG_HOME=$(mktemp -d)
 openbox &
 sleep 2
 dotnet src/AlUmmahNow.Linux/bin/Release/net9.0/alummahnow.dll &
 app=$!
-sleep 18
+sleep "${AUN_SHOT_AFTER:-18}"
 import -window root "$out/$name.png"
 if [[ $automation == watch:* ]]; then
   # Exercise MPRIS as a desktop shell would.

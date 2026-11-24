@@ -159,6 +159,9 @@ namespace AlUmmahNow.App.I18n
             return (scale + form, Decimal(tenths / 10.0));
         }
 
+        /// <summary>The message for <paramref name="key"/> in the form the count takes (<c>.one</c>, <c>.few</c>, …).</summary>
+        public string Plural(string key, long count) => Format(key + "." + PluralCategory(count), count);
+
         /// <summary>The CLDR plural category of a whole number in the active language.</summary>
         private string PluralCategory(long n)
         {
