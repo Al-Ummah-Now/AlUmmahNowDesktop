@@ -61,6 +61,8 @@ public sealed class AnalyticsPage
         // falls back to a right-pointing one on Arabic pages. Closed, the arrow points along the reading direction.
         var closedIcon = l.IsRtl ? "pan-start-symbolic" : "pan-end-symbolic";
         var arrow = Gtk.Image.NewFromIconName(closedIcon);
+        // The icon has its own direction, which would turn the arrow once more: it is drawn as named
+        arrow.SetDirection(Gtk.TextDirection.Ltr);
         var toggleRow = Gtk.Box.New(Gtk.Orientation.Horizontal, 6);
         toggleRow.Append(arrow);
         toggleRow.Append(Gtk.Label.New(l["studio.analytics.table"]));
