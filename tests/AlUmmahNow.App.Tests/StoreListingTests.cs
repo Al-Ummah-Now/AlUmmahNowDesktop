@@ -116,6 +116,54 @@ public class StoreListingTests
         Assert.All(cited, path => Assert.True(File.Exists(Path.Combine(Root, path)), $"privacy.md cites missing file {path}"));
     }
 
+    // Said of an app, these claim it is made for children (owner decision E20-D1: 13 and over).
+    private static readonly Regex ForChildrenEnglish = new(@"\bfor\s+(kids|children)\b", RegexOptions.IgnoreCase);
+    private static readonly Regex ForChildrenArabic = new(@"(?<![\u0621-\u064A])[وف]?لل?(أطفال|اطفال|صغار)");
+
+    [Theory]
+    [MemberData(nameof(Listings))]
+    public void ListingsDoNotClaimToBeForChildren(string app, string lang)
+    {
+        foreach (var file in Files)
+        {
+            var text = Read(app, lang, file);
+            Assert.DoesNotMatch(ForChildrenEnglish, text);
+            Assert.DoesNotMatch(ForChildrenArabic, text);
+        }
+    }
+
+    [Theory]
+    [InlineData("Videos for kids", true)]
+    [InlineData("FOR  CHILDREN", true)]
+    [InlineData("children's hospital news", false)]
+    [InlineData("مرئيات للأطفال", true)]
+    [InlineData("وللأطفال", true)]
+    [InlineData("أخبار الأطفال", false)]
+    public void ForChildrenWords(string text, bool found) =>
+        Assert.Equal(found, ForChildrenEnglish.IsMatch(text) || ForChildrenArabic.IsMatch(text));
+
+    private static readonly string[] AgeQuestions =
+    {
+        "IARC category", "Users interact or exchange content", "Shares the user's location", "Shares personal information with third parties", "Digital purchases",
+        "Unrestricted internet access", "Violence", "Graphic violence", "Sexual content", "Language",
+        "Controlled substances", "Gambling", "Directed at children under 13",
+    };
+
+    [Fact]
+    public void AgeRatingAnswersAreCompleteAndCiteFilesThatExist()
+    {
+        var text = File.ReadAllText(Path.Combine(Store, "age-rating.md"));
+        var rows = text.Split('\n').Where(l => l.StartsWith("| ", StringComparison.Ordinal))
+            .Select(l => l.Trim().Trim('|').Split('|').Select(c => c.Trim()).ToArray())
+            .Where(c => c.Length == 4 && c[0] != "Question").ToDictionary(c => c[0]);
+        Assert.Equal(AgeQuestions.OrderBy(q => q), rows.Keys.OrderBy(q => q));
+        Assert.All(rows.Values, c => Assert.All(c, cell => Assert.NotEqual("", cell)));
+        Assert.Equal("No", rows["Directed at children under 13"][1]);
+        Assert.Equal("No", rows["Directed at children under 13"][2]);
+        foreach (var cited in rows.Values.SelectMany(c => Regex.Matches(c[3], "`([^`]+)`").Select(m => m.Groups[1].Value)).Distinct())
+            Assert.True(File.Exists(Path.Combine(Root, cited)), $"age-rating.md cites missing file {cited}");
+    }
+
     [Fact]
     public void ManifestsDeclareTheListingLanguages()
     {
