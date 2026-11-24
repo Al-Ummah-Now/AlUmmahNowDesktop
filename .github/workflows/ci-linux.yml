@@ -10,7 +10,7 @@ permissions:
 jobs:
   linux:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -70,6 +70,44 @@ jobs:
           done
           test "$(cat artifacts/review/*.log | grep -c 'RESULT PASS')" = 4
           cp artifacts/linux/watch-*.png artifacts/review/
+      - name: Live scenarios (fixture streams; every page in both languages and modes when run by hand)
+        env:
+          AUN_DEMO_TODAY: "2026-11-21"
+          AUN_DEMO: "1"
+          AUN_DEMO_LIVE: "1"
+          AUN_EXIT_AFTER: "15"
+          AUN_SHOT_AFTER: "10"
+          GDK_BACKEND: x11
+          GSK_RENDERER: cairo
+          LIBGL_ALWAYS_SOFTWARE: "1"
+          ALL: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          mkdir -p artifacts/live
+          export AUN_DEMO_THUMBS=$PWD/tests/fixtures/viewer-thumbs AUN_FIXTURE_MEDIA=$PWD/tests/fixtures/watch
+          run() {
+            dbus-run-session -- xvfb-run -a -s "-screen 0 1280x800x24" scripts/linux-scenario.sh "$1" "$2" "$3" "$4" artifacts/live 2>&1 | tee artifacts/live/$4.log || true
+          }
+          count=0
+          if [ "$ALL" = true ]; then
+            for lang in en ar; do for theme in dark light; do
+              for page in home:home list:live live:live:demo-live premiere:live:demo-premiere soon:live:demo-soon recording:live:demo-recording; do
+                run $lang $theme "${page#*:}" "${page%%:*}-$lang-$theme"
+                count=$((count + 1))
+              done
+            done; done
+          else
+            run ar light live list-ar-light
+            run ar dark live:demo-live live-ar-dark
+            run en light live:demo-premiere premiere-en-light
+            run en dark live:demo-recording recording-en-dark
+            count=4
+          fi
+          test "$(cat artifacts/live/*.log | grep -c 'RESULT PASS')" = $count
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-live
+          path: artifacts/live
       - uses: actions/upload-artifact@v4
         if: always()
         with:

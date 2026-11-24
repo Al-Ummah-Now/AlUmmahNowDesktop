@@ -3,7 +3,9 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
 using System.Threading;
+using System.Threading.Tasks;
 using AlUmmahNow.App.I18n;
+using AlUmmahNow.App.Live;
 using AlUmmahNow.App.Media;
 using AlUmmahNow.App.Navigation;
 using AlUmmahNow.App.Services;
@@ -15,7 +17,7 @@ using Tizen.NUI.BaseComponents;
 namespace AlUmmahNow.TizenTv
 {
     /// <summary>10-foot viewer: absolute layout at 1920x1080, mirrored by hand for RTL, D-pad driven.</summary>
-    public sealed class TvApp : NUIApplication
+    public sealed partial class TvApp : NUIApplication
     {
         private const int ScreenWidth = 1920, Margin = 96, CardWidth = 400, CardHeight = 225, CardGap = 32, RowHeight = 400, TopInset = 120;
 
@@ -48,12 +50,18 @@ namespace AlUmmahNow.TizenTv
             _localizer = new Localizer("ar");
             _navigator = new Navigator();
             _home = new HomeViewModel(_catalog, _localizer, _navigator);
+            _live = new HttpLiveClient(http, AppEnvironment.BuildDefault.VideosApi, ct => Task.FromResult<string?>(null));
+            _liveList = new LiveListViewModel(_live, _localizer, _navigator);
             _player = new TizenMediaPlayer(SynchronizationContext.Current!, window);
-            _navigator.Changed += (s, e) => Render();
+            _navigator.Changed += (s, e) =>
+            {
+                Render();
+                if (_navigator.Current is Route.Home) _ = RefreshLiveAsync();
+            };
             _localizer.LanguageChanged += (s, e) => Render();
 
             Render();
-            await _home.LoadAsync();
+            await Task.WhenAll(_home.LoadAsync(), _liveList.LoadAsync());
             Render();
         }
 
@@ -87,7 +95,9 @@ namespace AlUmmahNow.TizenTv
             _root = new View { Size2D = new Size2D(ScreenWidth, 1080) };
             Window.Instance.Add(_root);
 
+            if (!(_navigator.Current is Route.Live)) CloseLive();
             if (_navigator.Current is Route.Watch route) RenderWatch(route.VideoId);
+            else if (_navigator.Current is Route.Live live) RenderLive(live.StreamId);
             else RenderHome();
         }
 
@@ -103,17 +113,28 @@ namespace AlUmmahNow.TizenTv
                 return;
             }
 
-            _grid = new TvFocusGrid(_home.Rails.Select(r => r.Items.Count).ToList());
-            _rows = new View { Position2D = new Position2D(0, TopInset), Size2D = new Size2D(ScreenWidth, RowHeight * _home.Rails.Count) };
-            _root.Add(_rows);
-            for (var r = 0; r < _home.Rails.Count; r++)
+            // The live row first, while there is something on air or coming
+            _rowItems = new List<(string Title, List<(string Title, string? Image, Action Open)> Items)>();
+            if (_liveList.All.Count > 0)
             {
-                var rail = _home.Rails[r];
-                _rows.Add(Label(rail.Title, 30, Margin, r * RowHeight, 900));
+                _rowItems.Add((_localizer["live.title"], _liveList.All.Select(s => (LiveTitle(s), s.ThumbnailUrl, (Action)(() => _liveList.Open(s)))).ToList()));
+            }
+
+            foreach (var rail in _home.Rails)
+            {
+                _rowItems.Add((rail.Title, rail.Items.Select(v => (v.Title, v.ThumbnailUrl, (Action)(() => _home.Open(v)))).ToList()));
+            }
+
+            _grid = new TvFocusGrid(_rowItems.Select(r => r.Items.Count).ToList());
+            _rows = new View { Position2D = new Position2D(0, TopInset), Size2D = new Size2D(ScreenWidth, RowHeight * _rowItems.Count) };
+            _root.Add(_rows);
+            for (var r = 0; r < _rowItems.Count; r++)
+            {
+                _rows.Add(Label(_rowItems[r].Title, 30, Margin, r * RowHeight, 900));
                 var cards = new List<View>();
-                for (var c = 0; c < rail.Items.Count; c++)
+                for (var c = 0; c < _rowItems[r].Items.Count; c++)
                 {
-                    var card = BuildCard(rail.Items[c]);
+                    var card = BuildCard(_rowItems[r].Items[c].Title, _rowItems[r].Items[c].Image);
                     card.Position2D = new Position2D(Mirror(Margin + (c * (CardWidth + CardGap)), CardWidth), (r * RowHeight) + 70);
                     _rows.Add(card);
                     cards.Add(card);
@@ -125,13 +146,13 @@ namespace AlUmmahNow.TizenTv
             UpdateFocus();
         }
 
-        private View BuildCard(VideoCardViewModel card)
+        private View BuildCard(string title, string? thumbnailUrl)
         {
             var view = new View { Size2D = new Size2D(CardWidth, CardHeight + 100) };
             var image = new ImageView { Size2D = new Size2D(CardWidth, CardHeight) };
-            if (card.ThumbnailUrl != null) image.ResourceUrl = card.ThumbnailUrl;
+            if (thumbnailUrl != null) image.ResourceUrl = thumbnailUrl;
             view.Add(image);
-            view.Add(new TextLabel(card.Title)
+            view.Add(new TextLabel(title)
             {
                 PointSize = 20,
                 TextColor = Text,
@@ -175,6 +196,11 @@ namespace AlUmmahNow.TizenTv
                 _ = _watch.LoadAsync(id);
             }
 
+            AddTimedText();
+        }
+
+        private void AddTimedText()
+        {
             _caption = new TextLabel("")
             {
                 PointSize = 34,
@@ -184,7 +210,7 @@ namespace AlUmmahNow.TizenTv
                 Size2D = new Size2D(ScreenWidth - 200, 180),
                 Position2D = new Position2D(100, 800),
             };
-            _root.Add(_caption);
+            _root!.Add(_caption);
             _time = Label("", 26, Margin, 1000, 600);
             _root.Add(_time);
             SyncWatch();
@@ -192,9 +218,10 @@ namespace AlUmmahNow.TizenTv
 
         private void SyncWatch()
         {
-            if (_watch == null || _caption == null || _time == null) return;
-            _caption.Text = _watch.Caption;
-            _time.Text = _localizer.Duration(_watch.Position) + " / " + _localizer.Duration(_watch.Duration);
+            var watch = _watch ?? _liveWatch?.Watch;
+            if (watch == null || _caption == null || _time == null) return;
+            _caption.Text = watch.Caption;
+            _time.Text = watch.IsLive ? "" : _localizer.Duration(watch.Position) + " / " + _localizer.Duration(watch.Duration);
         }
 
         private void CloseWatch()
@@ -207,6 +234,12 @@ namespace AlUmmahNow.TizenTv
         {
             if (e.Key.State != Key.StateType.Down) return;
             var name = e.Key.KeyPressedName;
+            if (_liveWatch != null)
+            {
+                OnLiveKey(_liveWatch, name);
+                return;
+            }
+
             if (_watch != null)
             {
                 switch (name)
@@ -235,7 +268,7 @@ namespace AlUmmahNow.TizenTv
             if (_grid == null) return;
             if (name == "Return")
             {
-                _home.Open(_home.Rails[_grid.Row].Items[_grid.Column]);
+                _rowItems[_grid.Row].Items[_grid.Column].Open();
                 return;
             }
 

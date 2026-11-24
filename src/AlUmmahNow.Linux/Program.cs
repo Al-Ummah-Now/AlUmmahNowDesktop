@@ -18,6 +18,9 @@ Gst.Functions.Init(ref gstArgs);
 const string Css = """
     .caption-overlay { background-color: rgba(9,48,65,0.82); color: #f7f1e8; padding: 6px 14px; border-radius: 6px; font-size: 20px; }
     scale > trough > slider { background-color: @fanous_primary; }
+    .aun-badge { border: 1px solid alpha(currentColor, 0.5); border-radius: 999px; padding: 0 10px; font-size: 12px; font-weight: 600; }
+    .aun-badge.on-air { background-color: @fanous_primary; color: @fanous_on_primary; border-color: transparent; }
+    .aun-pinned { background-color: alpha(currentColor, 0.06); padding: 10px 12px; }
     """;
 
 var environment = AppEnvironment.Resolve(Environment.GetEnvironmentVariable("AUN_ENV"), AppEnvironment.BuildDefault);
@@ -43,6 +46,10 @@ var localizer = new Localizer(settings.Language);
 var navigator = new Navigator();
 var authSession = new PkceAuthSession(http, environment.AuthIssuer, environment.ViewerClientId, new LibSecretStore("alummahnow"), new ShellBrowserLauncher(), localizer["auth.browser.done"]);
 var auth = new AuthViewModel(authSession);
+// AUN_DEMO_LIVE=1: fixture streams for review frames and the live scenarios (no network, never in a normal launch).
+AlUmmahNow.CoreBridge.ILiveClient live = Environment.GetEnvironmentVariable("AUN_DEMO_LIVE") == "1"
+    ? new AlUmmahNow.App.Demo.DemoLiveClient(Environment.GetEnvironmentVariable("AUN_FIXTURE_MEDIA"), settings.Language)
+    : new HttpLiveClient(http, environment.VideosApi, HttpLiveClient.TokenOf(authSession));
 var coreVersion = CoreRuntime.VersionOrNone();
 var app = Adw.Application.New("net.alummahnow.AlUmmahNow", Gio.ApplicationFlags.NonUnique);
 var exitCode = 0;
@@ -68,7 +75,7 @@ app.OnActivate += async (_, _) =>
     _ = mpris.StartAsync();
 
     var player = new GstMediaPlayer();
-    var window = new MainWindow(app, catalog, localizer, navigator, player, session, http, settings, store, auth);
+    var window = new MainWindow(app, catalog, localizer, navigator, player, session, http, settings, store, auth, live, environment.ShortLinkHost);
     try
     {
         auth.Restore();
@@ -97,6 +104,8 @@ app.OnActivate += async (_, _) =>
         {
             var pass = automation.StartsWith("watch:", StringComparison.Ordinal)
                 ? furthest > 2 && (sawCaption || Environment.GetEnvironmentVariable("AUN_EXPECT_CAPTION") == "0") && window.Watch?.PlaybackFailed == false
+                : automation == "live" ? window.LiveList.State == LoadState.Content && window.LiveList.All.Count > 0
+                : automation.StartsWith("live:", StringComparison.Ordinal) ? window.LiveWatch is { State: LoadState.Content, HasChat: true } l && (l.Watch == null || furthest > 2)
                 : window.Home.Rails.Count > 0;
             Log.For("automation").Info($"AUTOMATION {automation} core={coreVersion} rails={window.Home.Rails.Count} furthest={furthest:F1} caption={sawCaption} RESULT {(pass ? "PASS" : "FAIL")}");
             exitCode = pass ? 0 : 3;
@@ -107,6 +116,8 @@ app.OnActivate += async (_, _) =>
 
     var started = window.StartAsync();
     if (automation.StartsWith("watch:", StringComparison.Ordinal)) navigator.Push(new Route.Watch(automation.Substring(6)));
+    if (automation == "live") navigator.Push(new Route.LiveList());
+    if (automation.StartsWith("live:", StringComparison.Ordinal)) navigator.Push(new Route.Live(automation.Substring(5)));
     await started;
 };
 

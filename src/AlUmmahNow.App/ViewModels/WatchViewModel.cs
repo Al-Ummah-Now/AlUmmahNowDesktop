@@ -76,7 +76,40 @@ namespace AlUmmahNow.App.ViewModels
             return ShortLinks.Video(Video.Id, shortLinkHost, startSeconds: secs, lang: lang);
         }
 
-        public async Task LoadAsync(string videoId, CancellationToken cancellationToken = default)
+        /// <summary>A live stream: nothing to seek in, and no speed to choose.</summary>
+        public bool IsLive { get; private set; }
+
+        /// <summary>Plays an address that is not a video of the catalog: a live stream, or its recording.</summary>
+        public void LoadStream(string url, string title, string channel, string? thumbnailUrl, bool isLive)
+        {
+            IsLive = isLive;
+            if (isLive)
+            {
+                Speed = 1;
+                _player.Rate = 1;
+            }
+
+            Video = new Video { Title = new LocalizedText(title), ChannelName = channel, ThumbnailUrl = thumbnailUrl, PlayUrl = url };
+            OnPropertyChanged(nameof(Title));
+            OnPropertyChanged(nameof(Channel));
+            Qualities.Clear();
+            var auto = new QualityOption(_localizer["player.quality.auto"], url);
+            Qualities.Add(auto);
+            Quality = auto;
+            PlaybackFailed = false;
+            State = LoadState.Content;
+            _session.SetMetadata(title, channel, thumbnailUrl, 0);
+            _player.Open(url, 0, autoPlay: true);
+        }
+
+        /// <summary>Opens a live stream again, at its newest moment.</summary>
+        public void Reopen()
+        {
+            if (Quality is { } quality) _player.Open(quality.Url, 0, autoPlay: true);
+        }
+
+        /// <param name="start">Where playback begins, asked when it does; null for the beginning.</param>
+        public async Task LoadAsync(string videoId, CancellationToken cancellationToken = default, Func<double>? start = null)
         {
             State = LoadState.Loading;
             PlaybackFailed = false;
@@ -98,7 +131,7 @@ namespace AlUmmahNow.App.ViewModels
 
                 State = LoadState.Content;
                 _session.SetMetadata(Title, Channel, video.ThumbnailUrl, video.DurationSeconds ?? 0);
-                _player.Open(Quality!.Url, 0, autoPlay: true);
+                _player.Open(Quality!.Url, start?.Invoke() ?? 0, autoPlay: true);
             }
             catch (CatalogException)
             {
@@ -122,6 +155,7 @@ namespace AlUmmahNow.App.ViewModels
 
         public void SelectSpeed(double speed)
         {
+            if (IsLive) return;
             Speed = speed;
             _player.Rate = speed;
         }
@@ -161,6 +195,7 @@ namespace AlUmmahNow.App.ViewModels
 
         public void Seek(double position)
         {
+            if (IsLive) return;
             var max = _player.Duration > 0 ? _player.Duration : double.MaxValue;
             _player.Seek(Math.Max(0, Math.Min(position, max)));
         }

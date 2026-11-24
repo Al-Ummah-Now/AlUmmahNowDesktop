@@ -170,6 +170,7 @@ public class DisplayDigitsTests
         ["src/AlUmmahNow.CoreBridge/Studio/StudioServices.cs"] = "ISO dates on the wire",
         ["src/AlUmmahNow.CoreBridge/ShortLinks.cs"] = "short-link URL query values on the wire",
         ["src/AlUmmahNow.CoreBridge/Temporary/HttpCatalogClient.cs"] = "API query values",
+        ["src/AlUmmahNow.CoreBridge/Temporary/HttpLiveClient.cs"] = "API query values",
         ["src/AlUmmahNow.CoreBridge/Temporary/HttpNotificationsAndEventsClient.cs"] = "API query values",
         ["src/AlUmmahNow.Linux/MprisSession.cs"] = "D-Bus introspection XML",
         ["src/AlUmmahNow.Linux/Program.cs"] = "automation log line",

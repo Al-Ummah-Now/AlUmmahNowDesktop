@@ -57,6 +57,10 @@ namespace AlUmmahNow.App.ViewModels
                     return _localizer.Format("notifications.msg.newVideo", channel, video);
                 case "liveStarted" when !string.IsNullOrEmpty(channel) && !string.IsNullOrEmpty(stream.Length > 0 ? stream : video):
                     return _localizer.Format("notifications.msg.liveStarted", channel, stream.Length > 0 ? stream : video);
+                case "liveSoon" when !string.IsNullOrEmpty(channel) && !string.IsNullOrEmpty(stream):
+                    return _localizer.Format("notifications.msg.liveSoon", channel, stream);
+                case "premiereCancelled" when !string.IsNullOrEmpty(stream):
+                    return _localizer.Format("notifications.msg.premiereCancelled", stream);
                 case "commentReply" when !string.IsNullOrEmpty(Param("actorName")):
                     return _localizer.Format("notifications.msg.commentReply", Param("actorName"));
                 case "newComment" when !string.IsNullOrEmpty(video):

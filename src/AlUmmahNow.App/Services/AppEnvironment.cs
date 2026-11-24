@@ -41,6 +41,9 @@ namespace AlUmmahNow.App.Services
 #endif
 
         public string Name { get; }
+
+        /// <summary>The short-link host whose links open this environment's site.</summary>
+        public string ShortLinkHost => Name == "prod" ? CoreBridge.ShortLinks.ProdHost : CoreBridge.ShortLinks.QaHost;
         public Uri VideosApi { get; }
         public Uri AuthIssuer { get; }
 
