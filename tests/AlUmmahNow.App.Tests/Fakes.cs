@@ -17,10 +17,13 @@ public sealed class FakeCatalog : ICatalogClient
     }
 
     public Task<Video> GetVideoAsync(string id, CancellationToken ct = default) =>
-        ReadsLeft-- <= 0 ? throw new CatalogException("503") : Videos.FirstOrDefault(v => v.Id == id) is { } v ? Task.FromResult(v) : throw new CatalogException("404", isNotFound: !Broken);
+        Gate != null ? Gate.Task : ReadsLeft-- <= 0 ? throw new CatalogException("503") : Videos.FirstOrDefault(v => v.Id == id) is { } v ? Task.FromResult(v) : throw new CatalogException("404", isNotFound: !Broken);
 
     /// <summary>Videos cannot be read, rather than being gone.</summary>
     public bool Broken { get; set; }
+
+    /// <summary>The video's answer, when it is given.</summary>
+    public TaskCompletionSource<Video>? Gate { get; set; }
 
     /// <summary>Videos can be read this many more times.</summary>
     public int ReadsLeft { get; set; } = int.MaxValue;

@@ -10,7 +10,7 @@ permissions:
 jobs:
   windows:
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -77,15 +77,33 @@ jobs:
           $env:AUN_FIXTURE_MEDIA = (Resolve-Path tests/fixtures/watch).Path
           $runs = @()
           if ($env:ALL -eq "true") {
-            $pages = [ordered]@{ home = "home"; list = "live"; live = "live:demo-live"; premiere = "live:demo-premiere"; soon = "live:demo-soon"; recording = "live:demo-recording" }
-            foreach ($lang in "en","ar") { foreach ($theme in "dark","light") { foreach ($page in $pages.Keys) { $runs += ,@($lang, $theme, $pages[$page], "$page-$lang-$theme") } } }
+            # page, automation, what the demo is set to, seconds to the shot (a pause counts as behind after 10)
+            $pages = @(
+              @("home", "home", @{}, 12), @("list", "live", @{}, 12), @("live", "live:demo-live", @{}, 12),
+              @("behind", "behind:demo-live", @{}, 18), @("premiere", "live:demo-premiere", @{}, 12),
+              @("soon", "live:demo-soon", @{}, 12), @("recording", "live:demo-recording", @{}, 12),
+              @("ended", "live:demo-ended", @{}, 12), @("canceled", "live:demo-canceled", @{}, 12),
+              @("premiere-ended", "live:demo-premiere-ended", @{}, 12), @("premiere-canceled", "live:demo-premiere-canceled", @{}, 12),
+              @("remind-signin", "remind:demo-soon", @{ AUN_DEMO_AUTH = "waiting" }, 12),
+              @("remind-set", "remind:demo-soon", @{ AUN_DEMO_AUTH = "in" }, 12),
+              @("remind-failed", "remind:demo-soon", @{ AUN_DEMO_AUTH = "in"; AUN_DEMO_REMIND = "fail" }, 12),
+              @("home-off", "home", @{ AUN_DEMO_LIVE = "off" }, 12), @("live-off", "live:demo-live", @{ AUN_DEMO_LIVE = "off" }, 12),
+              @("soon-off", "live:demo-soon", @{ AUN_DEMO_LIVE = "off" }, 12)
+            )
+            foreach ($lang in "en","ar") { foreach ($theme in "dark","light") { foreach ($p in $pages) { $runs += ,@($lang, $theme, $p[1], "$($p[0])-$lang-$theme", $p[2], $p[3]) } } }
           } else {
             $runs += ,@("ar", "light", "live", "list-ar-light")
             $runs += ,@("ar", "dark", "live:demo-live", "live-ar-dark")
             $runs += ,@("en", "light", "live:demo-premiere", "premiere-en-light")
             $runs += ,@("en", "dark", "live:demo-recording", "recording-en-dark")
           }
-          foreach ($r in $runs) { ./scripts/windows-scenario.ps1 $exe $r[0] $r[1] $r[2] $r[3] $out 12 17 }
+          foreach ($r in $runs) {
+            $set = if ($r.Count -gt 4) { $r[4] } else { @{} }
+            $shot = if ($r.Count -gt 5) { $r[5] } else { 12 }
+            $env:AUN_DEMO_LIVE = "1"; $env:AUN_DEMO_AUTH = ""; $env:AUN_DEMO_REMIND = ""
+            foreach ($k in $set.Keys) { Set-Item "env:$k" $set[$k] }
+            ./scripts/windows-scenario.ps1 $exe $r[0] $r[1] $r[2] $r[3] $out $shot ($shot + 5)
+          }
           foreach ($r in $runs) { if (-not (Select-String -Quiet "RESULT PASS" "$out/$($r[3]).txt")) { throw "live $($r[3]) failed" } }
       - uses: actions/upload-artifact@v4
         if: always()

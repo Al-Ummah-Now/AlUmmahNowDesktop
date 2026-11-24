@@ -35,6 +35,7 @@ namespace AlUmmahNow.App.ViewModels
         private readonly Localizer _localizer;
         private IReadOnlyList<Cue> _cues = Array.Empty<Cue>();
         private int _subtitleRequest;
+        private bool _isDisposed;
 
         [ObservableProperty] private LoadState _state = LoadState.Loading;
         [ObservableProperty] private Video? _video;
@@ -142,6 +143,8 @@ namespace AlUmmahNow.App.ViewModels
 
             await LoadQualitiesAsync(video.PlayUrl!, cancellationToken);
             await LoadSubtitlesAsync(video.Id, cancellationToken);
+            // Left while it loaded: the player is another page's
+            if (_isDisposed) return;
 
             State = LoadState.Content;
             _session.SetMetadata(Title, Channel, video.ThumbnailUrl, video.DurationSeconds ?? 0);
@@ -207,6 +210,7 @@ namespace AlUmmahNow.App.ViewModels
 
         public void Dispose()
         {
+            _isDisposed = true;
             _player.StateChanged -= OnPlayerState;
             _player.PositionChanged -= OnPlayerPosition;
             _session.Command -= OnSessionCommand;

@@ -10,7 +10,7 @@ permissions:
 jobs:
   linux:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -89,11 +89,32 @@ jobs:
           }
           count=0
           if [ "$ALL" = true ]; then
+            # page|automation|what the demo is set to|seconds to the shot (a pause counts as behind after 10)
+            pages="home|home||10
+            list|live||10
+            live|live:demo-live||10
+            behind|behind:demo-live||17
+            premiere|live:demo-premiere||10
+            soon|live:demo-soon||10
+            recording|live:demo-recording||10
+            ended|live:demo-ended||10
+            canceled|live:demo-canceled||10
+            premiere-ended|live:demo-premiere-ended||10
+            premiere-canceled|live:demo-premiere-canceled||10
+            remind-signin|remind:demo-soon|AUN_DEMO_AUTH=waiting|10
+            remind-set|remind:demo-soon|AUN_DEMO_AUTH=in|10
+            remind-failed|remind:demo-soon|AUN_DEMO_AUTH=in AUN_DEMO_REMIND=fail|10
+            home-off|home|AUN_DEMO_LIVE=off|10
+            live-off|live:demo-live|AUN_DEMO_LIVE=off|10
+            soon-off|live:demo-soon|AUN_DEMO_LIVE=off|10"
             for lang in en ar; do for theme in dark light; do
-              for page in home:home list:live live:live:demo-live premiere:live:demo-premiere soon:live:demo-soon recording:live:demo-recording; do
-                run $lang $theme "${page#*:}" "${page%%:*}-$lang-$theme"
+              while IFS='|' read -r page automation extra shot; do
+                page=${page// /}
+                ( for e in $extra; do export "$e"; done
+                  export AUN_SHOT_AFTER=$shot AUN_EXIT_AFTER=$((shot + 5))
+                  run $lang $theme "$automation" "$page-$lang-$theme" < /dev/null )
                 count=$((count + 1))
-              done
+              done <<< "$pages"
             done; done
           else
             run ar light live list-ar-light

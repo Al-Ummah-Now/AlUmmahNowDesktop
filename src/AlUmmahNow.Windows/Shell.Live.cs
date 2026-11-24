@@ -242,7 +242,7 @@ public sealed partial class Shell
         if (vm.Description.Length > 0) text.Children.Add(new TextBlock { Text = vm.Description, TextWrapping = TextWrapping.Wrap });
         row.Children.Add(text);
 
-        var actions = new StackPanel { Spacing = 4, MaxWidth = 280 };
+        var actions = new StackPanel { Spacing = 4, MaxWidth = 240 };
         var back = new Button { Content = _localizer["live.return"], HorizontalAlignment = HorizontalAlignment.Right, Background = Gold, Foreground = OnGold };
         foreach (var state in new[] { "", "PointerOver", "Pressed" })
         {
