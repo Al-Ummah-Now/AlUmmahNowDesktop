@@ -37,7 +37,7 @@ internal static class LanternGlass
         Fill(Theme(app, "Dark"), themes["Default"], dark: true);
         Fill(Theme(app, "Light"), themes["Light"], dark: false);
 
-        HighContrast(Theme(app, "HighContrast"));
+        FollowHighContrast(app, app.RequestedTheme == ApplicationTheme.Dark);
 
         // Text and check marks on gold (the framework's are white in light mode, 1.9:1 on it), and links (the accent's
         // shade, 2.4:1). In a dictionary merged after the framework's own, which answers before the application's theme
@@ -62,17 +62,92 @@ internal static class LanternGlass
         app.Resources.MergedDictionaries.Add(controls);
     }
 
-    /// <summary>The Studio's own brushes in the system's high-contrast colors: without them its text was not drawn.</summary>
-    private static void HighContrast(ResourceDictionary t)
+    /// <summary>
+    /// The Studio's own brushes follow high contrast, also as it is turned on or off, or its colors change, while Studio
+    /// runs. There is one brush for a name, in the app's theme and in high contrast, and it is painted anew: what is on
+    /// screen has it already. Without it their names did not exist there, and their text was not drawn.
+    /// </summary>
+    private static void FollowHighContrast(Application app, bool dark)
     {
-        var system = new global::Windows.UI.ViewManagement.UISettings();
-        SolidColorBrush B(global::Windows.UI.ViewManagement.UIElementType e) => new(system.UIElementColor(e));
-        foreach (var key in new[] { "Muted", "Danger", "SelectedText", "Edge", "EdgeStrong" }) t["Studio" + key + "Brush"] = B(global::Windows.UI.ViewManagement.UIElementType.WindowText);
-        foreach (var key in new[] { "Page", "Sidebar", "Card", "Menu" }) t["Studio" + key + "Brush"] = B(global::Windows.UI.ViewManagement.UIElementType.Window);
-        foreach (var key in new[] { "Sheen", "Selected" }) t["Studio" + key + "Brush"] = new SolidColorBrush(Colors.Transparent);
-        t["StudioLinkBrush"] = B(global::Windows.UI.ViewManagement.UIElementType.Hotlight);
-        t["StudioDangerFillBrush"] = B(global::Windows.UI.ViewManagement.UIElementType.Highlight);
-        t["StudioOnDangerFillBrush"] = B(global::Windows.UI.ViewManagement.UIElementType.HighlightText);
+        var theme = Theme(app, dark ? "Dark" : "Light");
+        var high = Theme(app, "HighContrast");
+        var repaint = new List<Action<bool>>();
+        foreach (var (key, role) in HighContrast.Roles)
+        {
+            high[key] = theme[key];
+            repaint.Add(Painter((Brush)theme[key], role));
+        }
+
+        var ui = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
+        void Paint()
+        {
+            IsHighContrast = Accessibility.HighContrast;
+            foreach (var paint in repaint) paint(IsHighContrast);
+        }
+
+        Paint();
+        Settings.ColorValuesChanged += (_, _) => ui.TryEnqueue(Paint);
+    }
+
+    /// <summary>High contrast is on, and the Studio's brushes are in its colors.</summary>
+    public static bool IsHighContrast { get; private set; }
+
+    /// <summary>Brushes that were asked for and are not there (CI's scenarios ask).</summary>
+    public static int Missing { get; private set; }
+
+    /// <summary>Whether the Studio's text and cards are the system's colors, or no high contrast is on.</summary>
+    public static bool IsPainted =>
+        !IsHighContrast || (Res("StudioLinkBrush") is SolidColorBrush link && link.Color == SystemColor(HighContrastRole.Link)
+            && Res("StudioCardBrush") is AcrylicBrush card && card.FallbackColor == SystemColor(HighContrastRole.Window));
+
+    private static readonly global::Windows.UI.ViewManagement.UISettings Settings = new();
+    private static readonly global::Windows.UI.ViewManagement.AccessibilitySettings Accessibility = new();
+
+    private static Color SystemColor(HighContrastRole role) => role switch
+    {
+        HighContrastRole.Window => Settings.UIElementColor(global::Windows.UI.ViewManagement.UIElementType.Window),
+        HighContrastRole.Link => Settings.UIElementColor(global::Windows.UI.ViewManagement.UIElementType.Hotlight),
+        HighContrastRole.Highlight => Settings.UIElementColor(global::Windows.UI.ViewManagement.UIElementType.Highlight),
+        HighContrastRole.HighlightText => Settings.UIElementColor(global::Windows.UI.ViewManagement.UIElementType.HighlightText),
+        HighContrastRole.None => Colors.Transparent,
+        _ => Settings.UIElementColor(global::Windows.UI.ViewManagement.UIElementType.WindowText),
+    };
+
+    /// <summary>Paints one brush in the system's color, or again as the theme has it.</summary>
+    private static Action<bool> Painter(Brush brush, HighContrastRole role)
+    {
+        switch (brush)
+        {
+            case SolidColorBrush solid:
+            {
+                var color = solid.Color;
+                return high => solid.Color = high ? SystemColor(role) : color;
+            }
+
+            case AcrylicBrush acrylic:
+            {
+                var (tint, opacity, luminosity, fallback) = (acrylic.TintColor, acrylic.TintOpacity, acrylic.TintLuminosityOpacity, acrylic.FallbackColor);
+                return high =>
+                {
+                    acrylic.TintColor = high ? SystemColor(role) : tint;
+                    acrylic.TintOpacity = high ? 1 : opacity;
+                    acrylic.TintLuminosityOpacity = high ? 1 : luminosity;
+                    acrylic.FallbackColor = high ? SystemColor(role) : fallback;
+                };
+            }
+
+            case GradientBrush gradient:
+            {
+                var colors = gradient.GradientStops.Select(s => s.Color).ToList();
+                return high =>
+                {
+                    for (var i = 0; i < colors.Count; i++) gradient.GradientStops[i].Color = high ? SystemColor(role) : colors[i];
+                };
+            }
+
+            default:
+                throw new InvalidOperationException("no painter for " + brush.GetType().Name);
+        }
     }
 
     /// <summary>Theme key ("Default", "Light") → colour key → colour, from Fanous.Colors.xaml.</summary>
@@ -250,6 +325,7 @@ internal static class LanternGlass
         }
         catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException || ex is KeyNotFoundException || ex is InvalidCastException)
         {
+            Missing++;
             return new SolidColorBrush(Colors.Transparent);
         }
     }

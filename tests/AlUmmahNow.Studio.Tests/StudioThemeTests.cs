@@ -95,19 +95,25 @@ public sealed class StudioThemeTests
         Assert.Contains("dialog button.destructive, dialog button.destructive-action {\n  background-color: @fanous_error_fill;", css.Replace("\r\n", "\n"));
     }
 
-    /// <summary>A Studio brush that high contrast does not have is transparent there: its text is not drawn.</summary>
+    /// <summary>A Studio brush that high contrast does not have is transparent there, or keeps the theme's color.</summary>
     [Fact]
-    public void EveryStudioBrushIsInHighContrast()
+    public void EveryStudioBrushHasARoleInHighContrast()
     {
         var root = new DirectoryInfo(AppContext.BaseDirectory);
         while (root != null && !File.Exists(Path.Combine(root.FullName, "AlUmmahNow.sln"))) root = root.Parent;
         Assert.NotNull(root);
         var glass = File.ReadAllText(Path.Combine(root!.FullName, "src", "AlUmmahNow.Studio.Windows", "LanternGlass.cs"));
-        var names = System.Text.RegularExpressions.Regex.Matches(glass, "t\\[\"Studio(\\w+)Brush\"\\] = (?!B\\(global|new SolidColorBrush)").Select(m => m.Groups[1].Value).Distinct().ToList();
-        Assert.True(names.Count > 10, string.Join(",", names));
-        var start = glass.IndexOf("void HighContrast(", StringComparison.Ordinal);
-        var high = glass.Substring(start, glass.IndexOf("    }", start, StringComparison.Ordinal) - start);
-        foreach (var name in names) Assert.True(high.Contains("\"" + name + "\"", StringComparison.Ordinal) || high.Contains("Studio" + name + "Brush", StringComparison.Ordinal), name);
+        var names = System.Text.RegularExpressions.Regex.Matches(glass, "t\\[\"(Studio\\w+Brush)\"\\] = ").Select(m => m.Groups[1].Value).Distinct().OrderBy(n => n, StringComparer.Ordinal);
+        Assert.Equal(names, HighContrast.Roles.Keys.OrderBy(n => n, StringComparer.Ordinal));
+        // Applied, at the start and as the system's colors change
+        Assert.Contains("FollowHighContrast(app, app.RequestedTheme == ApplicationTheme.Dark);", glass);
+        Assert.Contains("        Paint();\n        Settings.ColorValuesChanged += (_, _) => ui.TryEnqueue(Paint);", glass.Replace("\r\n", "\n"));
+        // Text is never the color of what it is on
+        foreach (var (on, text) in new[] { ("StudioCardBrush", "StudioMutedBrush"), ("StudioCardBrush", "StudioLinkBrush"), ("StudioMenuBrush", "StudioDangerBrush"), ("StudioDangerFillBrush", "StudioOnDangerFillBrush"), ("StudioSidebarBrush", "StudioSelectedTextBrush") })
+        {
+            Assert.NotEqual(HighContrast.Roles[on], HighContrast.Roles[text]);
+            Assert.NotEqual(HighContrastRole.None, HighContrast.Roles[text]);
+        }
     }
 
     [Fact]

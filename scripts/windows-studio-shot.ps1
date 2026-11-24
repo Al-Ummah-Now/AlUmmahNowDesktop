@@ -12,7 +12,7 @@ Add-Type -Namespace AunShot -Name Win -MemberDefinition @"
 [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
 "@
 $env:AUN_LANG = $Lang; $env:AUN_TAB = $Tab; $env:AUN_AUTOMATION = $(if ($Demo -eq "1") { "shell" } else { "" }); $env:AUN_DEMO = $Demo; $env:AUN_STORE_SHOT = "1"
-$env:AUN_THEME = $Theme; $env:AUN_WINDOW_SIZE = $Size; $env:AUN_SCENE = $Scene; $env:AUN_EXIT_AFTER = "30"
+$env:AUN_THEME = $Theme; $env:AUN_WINDOW_SIZE = $Size; $env:AUN_SCENE = $Scene; $env:AUN_EXIT_AFTER = $(if ($Scene -eq "highcontrastswitch") { "48" } else { "30" })
 $env:AUN_RESULT = Join-Path $Out "$Name.txt"
 $p = Start-Process -FilePath $Exe -PassThru
 Start-Sleep -Seconds 8
@@ -28,9 +28,12 @@ $r = New-Object AunShot.Win+RECT
 if ($Scene -eq "searchhover") {
   [AunShot.Win]::DwmGetWindowAttribute($h, 9, [ref]$r, 16) | Out-Null
   $cx = [int](($r.Left + $r.Right) / 2)
-  [AunShot.Win]::SetCursorPos($cx - 20, $r.Top + 60) | Out-Null; Start-Sleep -Milliseconds 300
-  [AunShot.Win]::SetCursorPos($cx - 20, $r.Top + 24) | Out-Null
+  if (-not [AunShot.Win]::SetCursorPos($cx - 20, $r.Top + 60)) { throw "the pointer cannot be moved" }
+  Start-Sleep -Milliseconds 300
+  if (-not [AunShot.Win]::SetCursorPos($cx - 20, $r.Top + 24)) { throw "the pointer cannot be moved" }
 }
+# Scene "highcontrastswitch": turned on while Studio runs.
+if ($Scene -eq "highcontrastswitch") { & "$PSScriptRoot/high-contrast.ps1" on | Tee-Object (Join-Path $Out "high-contrast.txt") }
 Start-Sleep -Seconds 2
 [AunShot.Win]::DwmGetWindowAttribute($h, 9, [ref]$r, 16) | Out-Null           # DWMWA_EXTENDED_FRAME_BOUNDS
 # Without the frame's one-pixel border: it is translucent, and the desktop showed through it.
@@ -41,7 +44,8 @@ $g = [System.Drawing.Graphics]::FromImage($bmp)
 $g.CopyFromScreen($r.Left, $r.Top, 0, 0, (New-Object System.Drawing.Size $w, $hgt))
 $bmp.Save((Join-Path $Out "$Name.png"), [System.Drawing.Imaging.ImageFormat]::Png)
 $g.Dispose(); $bmp.Dispose()
-if ($Scene -eq "searchhover") { [AunShot.Win]::SetCursorPos($r.Right + 200, $r.Bottom - 60) | Out-Null }
 if (-not $p.WaitForExit(40000)) { $p.Kill(); "EXIT HANG" | Add-Content "$env:AUN_RESULT.hang.txt" }
 if (Test-Path "$env:AUN_RESULT.crash.txt") { Get-Content "$env:AUN_RESULT.crash.txt" }
 if (Test-Path $env:AUN_RESULT) { Get-Content $env:AUN_RESULT } else { "NO RESULT FILE" }
+# The pointer stays until Studio has said whether it is over the search.
+if ($Scene -eq "searchhover") { [AunShot.Win]::SetCursorPos($r.Right + 200, $r.Bottom - 60) | Out-Null }

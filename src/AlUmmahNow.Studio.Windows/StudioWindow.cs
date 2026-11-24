@@ -192,6 +192,9 @@ internal sealed class StudioWindow
     /// <summary>CI: whether the header search has keyboard focus (it must not when the window opens).</summary>
     public bool SearchHasFocus => _searchText?.XamlRoot is { } r && ReferenceEquals(Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(r), _searchText);
 
+    /// <summary>CI: whether the pointer is over the header search.</summary>
+    public bool SearchIsHovered { get; private set; }
+
     /// <summary>Moves focus off the header search when the window (or the signed-in Studio) first appears.</summary>
     /// <summary>CI: whether any text field has keyboard focus (none may when the window opens).</summary>
     public bool FieldHasFocus => Typing();
@@ -286,6 +289,8 @@ internal sealed class StudioWindow
         AutomationProperties.SetAutomationId(text, "TitleSearch");
         AutomationProperties.SetAcceleratorKey(text, "Control+K");
         _searchText = text;
+        text.PointerEntered += (_, _) => SearchIsHovered = true;
+        text.PointerExited += (_, _) => SearchIsHovered = false;
         text.KeyDown += (_, e) =>
         {
             if (e.Key != global::Windows.System.VirtualKey.Enter) return;
