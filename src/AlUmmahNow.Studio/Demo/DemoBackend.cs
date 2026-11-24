@@ -81,7 +81,8 @@ public sealed class DemoTransport : IApiTransport
     /// The day every demo date counts from: upload days, the analytics window and the processing video's day. Defaults to
     /// <see cref="DemoClock.Today"/> (<c>AUN_DEMO_TODAY</c> when CI pins it, else the real day).
     /// </param>
-    public DemoTransport(IEnumerable<string>? featuresOff = null, string? thumbnailFolder = null, string language = "ar", DateTime? today = null)
+    /// <param name="withDeleted">Review frames: the channel has deleted videos, two to restore and one queued for good.</param>
+    public DemoTransport(IEnumerable<string>? featuresOff = null, string? thumbnailFolder = null, string language = "ar", DateTime? today = null, bool withDeleted = false)
     {
         _today = (today ?? DemoClock.Today).Date;
         _off = new HashSet<string>(featuresOff ?? Array.Empty<string>(), StringComparer.Ordinal);
@@ -129,6 +130,18 @@ public sealed class DemoTransport : IApiTransport
             ["thumbnailUrl"] = Thumbnail(i),
             ["dateCreated"] = v.Created,
         }).ToList();
+        if (!withDeleted) return;
+        var deleted = new[]
+        {
+            (En: "Ramadan Q&A, first evening", Ar: "أسئلة رمضان، الليلة الأولى", Days: 4, Status: "deleted"),
+            (En: "Arabic grammar, part 2 (old sound)", Ar: "النحو العربي، الجزء الثاني (صوت قديم)", Days: 19, Status: "deleted"),
+            (En: "Test of the new camera", Ar: "تجربة الكاميرا الجديدة", Days: 29, Status: "queued"),
+        };
+        foreach (var (d, i) in deleted.Select((d, i) => (d, i)))
+        {
+            var video = new Dictionary<string, object?>(_videos[0]) { ["id"] = "demo-d" + (i + 1), ["title"] = language == "ar" ? d.Ar : d.En };
+            _deleted.Add((video, new DateTimeOffset(DateTime.SpecifyKind(_today, DateTimeKind.Utc)).AddDays(-d.Days).AddHours(12), d.Status));
+        }
     }
 
     public Task<string> SendAsync(ApiRequest request, CancellationToken cancellationToken = default)

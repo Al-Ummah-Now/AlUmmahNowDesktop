@@ -124,6 +124,15 @@ public class DisplayDigitsTests
     }
 
     [Fact]
+    public void A_line_of_wrapped_parts_never_begins_with_the_separator()
+    {
+        Assert.Equal("\u2068a.webm\u2069\u00A0· \u206813.95 MB\u2069", new Localizer("en").JoinWrapped("a.webm", null, "", "13.95 MB"));
+        Assert.Equal("\u2068أ\u2069، \u2068ب\u2069", new Localizer("ar").JoinWrapped("أ", "ب"));
+        // The same parts as Join, the space before the separator apart
+        Assert.Equal(new Localizer("en").Join("a", "b", "c"), new Localizer("en").JoinWrapped("a", "b", "c").Replace('\u00A0', ' '));
+    }
+
+    [Fact]
     public void English_is_unchanged()
     {
         var en = new Localizer("en");

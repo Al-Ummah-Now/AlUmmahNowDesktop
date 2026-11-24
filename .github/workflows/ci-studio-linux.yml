@@ -55,6 +55,8 @@ jobs:
           run en videos shell delete-en artifacts/studio "" delete
           AUN_EXIT_AFTER=32 AUN_ATSPI_PRESS="عرض كجدول" run ar analytics shell analytics-ar artifacts/studio
           AUN_EXIT_AFTER=32 AUN_ATSPI_PRESS="Show as a table" run en analytics shell analytics-en artifacts/studio
+          AUN_EXIT_AFTER=32 AUN_ATSPI_PRESS="المحذوفة مؤخرًا (٣)" run ar videos shell deleted-ar artifacts/studio "" deleted
+          AUN_EXIT_AFTER=32 AUN_ATSPI_PRESS="Recently deleted (3)" run en videos shell deleted-en artifacts/studio "" deleted
           run en timeline "" timeline-en artifacts/studio
           run ar timeline "" timeline-ar artifacts/studio
           run ar encode encode:$PWD/source.mp4 encode-ar artifacts/studio
@@ -63,7 +65,7 @@ jobs:
           AUN_DEMO_FEATURES_OFF=upload,analytics,bulkSchedule run en uploads shell features-off-en artifacts/studio
           AUN_DEMO_FEATURES_OFF=upload,analytics,bulkSchedule run ar uploads shell features-off-ar artifacts/studio
           grep -h AUTOMATION artifacts/studio/*.log
-          test "$(cat artifacts/studio/*.log | grep -c 'RESULT PASS')" = 23
+          test "$(cat artifacts/studio/*.log | grep -c 'RESULT PASS')" = 25
           grep -q "page=uploads upload=True analytics=True bulkSchedule=True" artifacts/studio/shell-en.log
           grep -q "page=videos upload=False analytics=False bulkSchedule=False" artifacts/studio/features-off-en.log
           grep -q "page=videos upload=False analytics=False bulkSchedule=False" artifacts/studio/features-off-ar.log
@@ -76,13 +78,14 @@ jobs:
           # No text field at all on open, on any page (the Videos page has its own search field).
           for n in shell-en shell-ar videos-en videos-ar; do grep -q "fieldFocused=False" artifacts/studio/$n.log; done
           grep -P "^check box\tSeerah" artifacts/studio/videos-en.atspi.txt
-          # The row that opens the table has its name, and says whether it is open, before and after it is pressed.
-          for t in "en:Show as a table" "ar:عرض كجدول"; do
-            f=artifacts/studio/analytics-${t%%:*}; n=${t#*:}
-            grep -P "^toggle button\t$n$" $f.atspi.txt
-            grep -P "^expandable\tcollapsed\t$n$" $f.atspi.txt
-            grep -P "^toggle button\t$n$" $f.pressed.atspi.txt
-            grep -P "^expandable\texpanded\t$n$" $f.pressed.atspi.txt
+          # The rows that open the table and the deleted videos have their names, and say whether they are open, before
+          # and after they are pressed.
+          for t in "analytics-en:Show as a table" "analytics-ar:عرض كجدول" "deleted-en:Recently deleted (3)" "deleted-ar:المحذوفة مؤخرًا (٣)"; do
+            f=artifacts/studio/${t%%:*}; n=${t#*:}
+            grep -P "^toggle button\t\Q$n\E$" $f.atspi.txt
+            grep -P "^expandable\tcollapsed\t\Q$n\E$" $f.atspi.txt
+            grep -P "^toggle button\t\Q$n\E$" $f.pressed.atspi.txt
+            grep -P "^expandable\texpanded\t\Q$n\E$" $f.pressed.atspi.txt
           done
           grep -P "^button\tUpload 3 videos$" artifacts/studio/upload-staged-en.atspi.txt
           gst-discoverer-1.0 source.mp4.out.mp4 | tee artifacts/studio/discover.txt
@@ -168,7 +171,8 @@ jobs:
             AUN_WINDOW_SIZE=1440x900 AUN_THEME=$theme dbus-run-session -- xvfb-run -a -s "-screen 0 1440x900x24" \
               scripts/studio-scenario.sh $lang timeline "" "linux-signin-closed-$lang-$theme-1440x900" artifacts/review "" "" 0 > "artifacts/review/linux-signin-$lang-$theme.log" 2>&1 || true
             shot encode active $lang $theme 1440x900
-            n=$((n+19))
+            shot videos deleted $lang $theme 1440x900; shot videos deleted-open $lang $theme 1440x900
+            n=$((n+21))
           done; done
           for lang in en ar; do shot videos search $lang dark 1440x900; shot videos edit $lang dark 1440x900; shot videos delete $lang dark 1440x900; n=$((n+3)); done
           grep -h AUTOMATION artifacts/review/*.log

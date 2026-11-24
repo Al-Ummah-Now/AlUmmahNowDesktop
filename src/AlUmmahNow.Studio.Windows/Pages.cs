@@ -175,7 +175,7 @@ internal sealed class TimelinePage
         var hint = new TextBlock { Text = l["studio.timeline.hint"], VerticalAlignment = VerticalAlignment.Center, Foreground = LanternGlass.Res("StudioMutedBrush"), Margin = new Thickness(8, 0, 0, 0) };
         Grid.SetColumn(hint, 2);
         tools.Children.Add(hint);
-        _time.Foreground = LanternGlass.Res("AccentTextFillColorPrimaryBrush");
+        _time.Foreground = LanternGlass.Res("StudioLinkBrush");
         Grid.SetColumn(_time, 3);
         tools.Children.Add(_time);
 

@@ -36,6 +36,25 @@ internal static class LanternGlass
         // Fanous names its dark dictionary "Default" (the brand is dark-first); WinUI asks for "Dark".
         Fill(Theme(app, "Dark"), themes["Default"], dark: true);
         Fill(Theme(app, "Light"), themes["Light"], dark: false);
+
+        // Text and check marks on gold. The framework's are white in light mode, 1.9:1 on it. In a dictionary merged after
+        // the framework's own, which answers before the application's theme dictionaries.
+        var controls = new ResourceDictionary();
+        foreach (var (theme, source) in new[] { ("Dark", "Default"), ("Light", "Light") })
+        {
+            var onGold = new SolidColorBrush(themes[source]["FanousOnPrimaryColor"]);
+            var d = new ResourceDictionary();
+            foreach (var state in new[] { "", "PointerOver", "Pressed" })
+            {
+                d["AccentButtonForeground" + state] = onGold;
+                d["CheckBoxCheckGlyphForegroundChecked" + state] = onGold;
+                d["CheckBoxCheckGlyphForegroundIndeterminate" + state] = onGold;
+            }
+
+            controls.ThemeDictionaries[theme] = d;
+        }
+
+        app.Resources.MergedDictionaries.Add(controls);
     }
 
     /// <summary>Theme key ("Default", "Light") → colour key → colour, from Fanous.Colors.xaml.</summary>
@@ -134,6 +153,8 @@ internal static class LanternGlass
         };
         t["StudioSelectedTextBrush"] = B(dark ? Color.FromArgb(0xFF, 0xFF, 0xC4, 0x6B) : Color.FromArgb(0xFF, 0x6B, 0x3B, 0x00));
         t["StudioMutedBrush"] = B(muted);
+        // The app's own name: under the framework's the merged WinUI dictionary answers first, with the accent's shade
+        t["StudioLinkBrush"] = B(link);
         t["StudioDangerBrush"] = B(C("ErrorText"));
         t["StudioDangerFillBrush"] = B(C("ErrorFill"));
         t["StudioOnDangerFillBrush"] = B(C("OnErrorFill"));

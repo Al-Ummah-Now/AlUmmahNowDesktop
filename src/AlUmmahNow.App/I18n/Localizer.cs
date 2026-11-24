@@ -306,6 +306,10 @@ namespace AlUmmahNow.App.I18n
 
         public string Join(params string?[] parts) => Join((IEnumerable<string?>)parts);
 
+        /// <summary>The same for text that may take more than one line: a line never begins with the separator.</summary>
+        public string JoinWrapped(params string?[] parts) =>
+            string.Join(_language == "ar" ? Separator : "\u00A0\u00B7 ", parts.Where(p => !string.IsNullOrEmpty(p)).Select(p => Isolate(p!)));
+
         /// <summary>Wraps text in Unicode first-strong isolates so embedded runs cannot reorder neighbours.</summary>
         public static string Isolate(string text) => "\u2068" + text + "\u2069";
 

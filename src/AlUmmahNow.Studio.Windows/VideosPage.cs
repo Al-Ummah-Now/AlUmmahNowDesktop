@@ -44,6 +44,8 @@ internal sealed class VideosPage
     private readonly Expander _deletedExpander = new() { HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch };
     private readonly StackPanel _deleted = new() { Spacing = 6 };
     private readonly CheckBox _all;
+    private readonly ComboBox _filter;
+    private readonly List<(FrameworkElement Card, FrameworkElement Footer)> _cards = new();
     private FrameworkElement? _deletedCard;
     private readonly MenuFlyout _playlistMenu = new();
 
@@ -90,7 +92,7 @@ internal sealed class VideosPage
             }
         };
         var filters = new[] { StudioVisibilityFilter.All, StudioVisibilityFilter.Public, StudioVisibilityFilter.Private };
-        var filter = new ComboBox { Header = l["studio.videos.filter"], ItemsSource = filters.Select(f => l["studio.videos.filter." + f.ToString().ToLowerInvariant()]).ToList(), SelectedIndex = 0, MinWidth = 160 };
+        var filter = _filter = new ComboBox { Header = l["studio.videos.filter"], ItemsSource = filters.Select(f => l["studio.videos.filter." + f.ToString().ToLowerInvariant()]).ToList(), SelectedIndex = 0, MinWidth = 160 };
         filter.SelectionChanged += (_, _) => _vm.Visibility = filters[Math.Max(0, filter.SelectedIndex)];
         var top = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
         _search.VerticalAlignment = VerticalAlignment.Bottom;
@@ -243,6 +245,15 @@ internal sealed class VideosPage
                 RenderList();
                 _ = DeleteAsync(_vm.Selected.ToList());
                 break;
+            case "private":
+                // Its first card has one line of details and its second two, at some widths
+                _filter.SelectedIndex = 2;
+                break;
+            case "deleted":
+            case "deleted-open":
+                _deletedExpander.IsExpanded = scene == "deleted-open";
+                _deletedCard?.StartBringIntoView();
+                break;
         }
     }
 
@@ -253,8 +264,31 @@ internal sealed class VideosPage
         _selectionLabel.Text = _l.Format("studio.videos.selected", n);
     }
 
+    /// <summary>No card cuts its Edit and Delete (CI's scenarios ask): the grid gives every card one height.</summary>
+    public bool CardsAreWhole => _cards.Where(c => c.Card.IsLoaded && c.Card.ActualHeight > 0).All(c =>
+        c.Footer.TransformToVisual(c.Card).TransformPoint(new global::Windows.Foundation.Point(0, c.Footer.ActualHeight)).Y <= c.Card.ActualHeight + 0.5);
+
+    /// <summary>
+    /// Text in the room of two lines, whether it takes one or two, so every card has one height, which is what the grid
+    /// gives them, and a row's buttons are on one line. The room is two lines of both scripts, unseen: it grows with the
+    /// system's text size.
+    /// </summary>
+    private static Grid InTwoLines(TextBlock text)
+    {
+        text.TextWrapping = TextWrapping.Wrap;
+        text.MaxLines = 2;
+        text.TextTrimming = TextTrimming.CharacterEllipsis;
+        var room = new TextBlock { Text = "Aغ\nAغ", FontSize = text.FontSize, FontWeight = text.FontWeight, Opacity = 0, IsHitTestVisible = false };
+        AutomationProperties.SetAccessibilityView(room, Microsoft.UI.Xaml.Automation.Peers.AccessibilityView.Raw);
+        var grid = new Grid();
+        grid.Children.Add(room);
+        grid.Children.Add(text);
+        return grid;
+    }
+
     private void RenderList()
     {
+        _cards.Clear();
         _list.ItemsSource = _vm.Items.Select(Card).ToList();
 
         RenderEmpty();
@@ -307,25 +341,23 @@ internal sealed class VideosPage
         {
             IsChecked = _vm.IsSelected(v.Id),
             MinWidth = 0,
-            Content = new TextBlock { Text = title, TextWrapping = TextWrapping.Wrap, MaxLines = 2, TextTrimming = TextTrimming.CharacterEllipsis, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Height = 40 },
+            Content = InTwoLines(new TextBlock { Text = title, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold }),
         };
         AutomationProperties.SetName(check, _l.Format("studio.videos.select", title));
         var meta = new TextBlock
         {
-            Text = _l.Join(_l.Views(v.Views), v.CreatedAt is { } at ? _l.Date(at) : null, v.Category is { } c ? _l["studio.category." + c] : null),
+            // Wraps to a second line rather than cutting the category ("Islamic hist…").
+            Text = _l.JoinWrapped(_l.Views(v.Views), v.CreatedAt is { } at ? _l.Date(at) : null, v.Category is { } c ? _l["studio.category." + c] : null),
             Foreground = LanternGlass.Res("StudioMutedBrush"),
             FontSize = 12.5,
-            // Wraps to a second line rather than cutting the category ("Islamic hist…").
-            TextWrapping = TextWrapping.WrapWholeWords,
-            MaxLines = 2,
-            TextTrimming = TextTrimming.CharacterEllipsis,
-            Margin = new Thickness(28, 0, 0, 0),
         };
+        var metaRoom = InTwoLines(meta);
+        metaRoom.Margin = new Thickness(28, 0, 0, 0);
         var body = new StackPanel { Spacing = 2, Padding = new Thickness(12, 10, 12, 0) };
         body.Children.Add(check);
-        body.Children.Add(meta);
+        body.Children.Add(metaRoom);
 
-        var edit = new Button { Content = _l["studio.videos.edit"], Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0), Foreground = LanternGlass.Res("AccentTextFillColorPrimaryBrush") };
+        var edit = new Button { Content = _l["studio.videos.edit"], Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0), Foreground = LanternGlass.Res("StudioLinkBrush") };
         AutomationProperties.SetName(edit, _l.Format("studio.videos.editOne", title));
         edit.Click += async (_, _) => await EditAsync(v);
         var delete = new Button { Content = _l["studio.videos.delete"], Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new Thickness(0), Foreground = LanternGlass.Res("StudioDangerBrush") };
@@ -352,6 +384,7 @@ internal sealed class VideosPage
             CornerRadius = new CornerRadius(14),
             Child = grid,
         };
+        _cards.Add((card, footer));
         check.Click += (_, _) =>
         {
             _vm.SetSelected(v.Id, check.IsChecked == true);

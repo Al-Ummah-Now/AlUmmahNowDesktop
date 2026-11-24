@@ -43,6 +43,8 @@ public sealed class Disclosure
 
     private Gtk.ToggleButton Toggle { get; } = Gtk.ToggleButton.New();
 
+    public void Open() => Toggle.SetActive(true);
+
     public void SetTitle(string title)
     {
         _label.SetText(title);

@@ -24,6 +24,8 @@ $h = $p.MainWindowHandle
 Start-Sleep -Seconds 12
 $r = New-Object AunShot.Win+RECT
 [AunShot.Win]::DwmGetWindowAttribute($h, 9, [ref]$r, 16) | Out-Null           # DWMWA_EXTENDED_FRAME_BOUNDS
+# Without the frame's one-pixel border: it is translucent, and the desktop showed through it.
+$r.Left += 1; $r.Top += 1; $r.Right -= 1; $r.Bottom -= 1
 $w = $r.Right - $r.Left; $hgt = $r.Bottom - $r.Top
 $bmp = New-Object System.Drawing.Bitmap $w, $hgt
 $g = [System.Drawing.Graphics]::FromImage($bmp)

@@ -9,6 +9,10 @@ headerbar.night .app-icon { border-radius: 5px; }
 /* The page: the registry's page material, a solid colour (as the web's Fawanees page). */
 .studio-content { background-color: @fanous_background; background-image: none; }
 
+/* The toolkit dims with 55% opacity, under 4.5:1 in light mode: the registry's muted text instead. */
+.dim-label { opacity: 1; color: @fanous_text_muted; }
+entry > text > placeholder, entry > placeholder { opacity: 1; color: @fanous_text_muted; }
+
 /* Sidebar: a solid tinted pane with a gold-tinted edge on its inline end. */
 .studio-sidebar { background-color: mix(@fanous_background, @fanous_surface, 0.45); }
 .studio-sidebar:dir(ltr) { box-shadow: inset -1px 0 alpha(@fanous_primary_edge, 0.28); }

@@ -124,7 +124,7 @@ headerbar.night .header-search entry {{
   padding: 0 8px 0 {inset}px;
 }}
 headerbar.night .header-search entry:dir(rtl) {{ padding: 0 {inset}px 0 8px; }}
-headerbar.night .header-search entry > text > placeholder {{ color: {h.SearchPlaceholder.Css}; }}
+headerbar.night .header-search entry > text > placeholder {{ color: {h.SearchPlaceholder.Css}; opacity: 1; }}
 headerbar.night .header-search button {{
   min-width: {button}px;
   min-height: {h40}px;
