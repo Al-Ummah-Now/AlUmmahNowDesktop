@@ -32,6 +32,7 @@ public sealed partial class Shell
     private readonly SettingsStore _store;
     private readonly AuthViewModel _auth;
     private readonly Grid _root = new();
+    private readonly PageRenderer _page;
     private WatchViewModel? _watch;
     private string? _watchId;
     private Action? _unbind;
@@ -41,6 +42,8 @@ public sealed partial class Shell
         _live = live;
         _shortLinkHost = shortLinkHost;
         LiveList = new LiveListViewModel(live, localizer, navigator);
+        _page = new PageRenderer(Build);
+        _livePage = new LivePage(_page, id => new LiveWatchViewModel(id, live, catalog, player, session, localizer) { IsHidden = _isHidden });
         _auth = auth;
         auth.PropertyChanged += (_, _) => Render();
         _catalog = catalog;
@@ -64,7 +67,7 @@ public sealed partial class Shell
 
     public FrameworkElement Root => _root;
     public HomeViewModel Home { get; }
-    public WatchViewModel? Watch => _watch ?? _liveWatch?.Watch;
+    public WatchViewModel? Watch => _watch ?? LiveWatch?.Watch;
 
     public async Task StartAsync()
     {
@@ -92,7 +95,12 @@ public sealed partial class Shell
 
     private bool IsDark => _settings.Theme != ThemePreference.Light;
 
-    private void Render()
+    /// <summary>The header and one page: what the window must hold (CI's scenarios ask).</summary>
+    public bool IsBuiltOnce => _root.Children.Count == 2;
+
+    private void Render() => _page.Render();
+
+    private void Build()
     {
         _unbind?.Invoke();
         _unbind = null;
@@ -108,7 +116,7 @@ public sealed partial class Shell
         Grid.SetRow(header, 0);
         _root.Children.Add(header);
 
-        if (_navigator.Current is not Route.Live) CloseLive();
+        if (_navigator.Current is not Route.Live) _livePage.Close();
         if (_navigator.Current is not Route.Watch) CloseWatch();
         FrameworkElement content;
         switch (_navigator.Current)
@@ -118,8 +126,7 @@ public sealed partial class Shell
                 content = BuildWatch(_watch!);
                 break;
             case Route.Live route:
-                EnsureLive(route.StreamId);
-                content = BuildLive(_liveWatch!);
+                content = BuildLive(_livePage.Open(route.StreamId));
                 break;
             case Route.LiveList:
                 content = BuildLiveList();
@@ -138,8 +145,11 @@ public sealed partial class Shell
         if (_watch != null && _watchId == id) return;
         CloseWatch();
         _watchId = id;
-        _watch = new WatchViewModel(_catalog, _player, _session, _localizer);
-        _ = LoadWatchAsync(_watch, id);
+        var vm = _watch = new WatchViewModel(_catalog, _player, _session, _localizer);
+        _page.After(() =>
+        {
+            if (ReferenceEquals(vm, _watch)) _ = LoadWatchAsync(vm, id);
+        });
     }
 
     private async Task LoadWatchAsync(WatchViewModel vm, string id)

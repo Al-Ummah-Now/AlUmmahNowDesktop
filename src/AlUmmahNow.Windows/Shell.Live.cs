@@ -18,16 +18,16 @@ public sealed partial class Shell
 
     private readonly ILiveClient _live;
     private readonly string _shortLinkHost;
-    private LiveWatchViewModel? _liveWatch;
+    private readonly LivePage _livePage;
 
     public LiveListViewModel LiveList { get; }
-    public LiveWatchViewModel? LiveWatch => _liveWatch;
+    public LiveWatchViewModel? LiveWatch => _livePage.Current;
 
     /// <summary>Minimized or hidden: nothing is asked for.</summary>
     public void SetHidden(bool hidden)
     {
         _isHidden = hidden;
-        if (_liveWatch != null) _liveWatch.IsHidden = hidden;
+        if (LiveWatch != null) LiveWatch.IsHidden = hidden;
     }
 
     private bool _isHidden;
@@ -39,29 +39,11 @@ public sealed partial class Shell
         var state = LiveList.State;
         await LiveList.LoadAsync();
         // Built again only for what is new, so a page being read stays where it is
-        if (_liveWatch == null && _watch == null && (before != Shown() || state != LiveList.State)) Render();
-    }
-
-    private void EnsureLive(string id)
-    {
-        if (_liveWatch?.StreamId == id) return;
-        CloseLive();
-        var vm = _liveWatch = new LiveWatchViewModel(id, _live, _catalog, _player, _session, _localizer) { IsHidden = _isHidden };
-        vm.LayoutChanged += (_, _) =>
-        {
-            if (ReferenceEquals(vm, _liveWatch)) Render();
-        };
-        _ = vm.RunAsync();
+        if (LiveWatch == null && _watch == null && (before != Shown() || state != LiveList.State)) Render();
     }
 
     /// <summary>The window is closing.</summary>
-    public void Close() => _liveWatch?.Close(TimeSpan.FromSeconds(2));
-
-    private void CloseLive()
-    {
-        _liveWatch?.Dispose();
-        _liveWatch = null;
-    }
+    public void Close() => LiveWatch?.Close(TimeSpan.FromSeconds(2));
 
     // Set on the parts themselves: the app's accent does not reach the framework's own styles (see the slider)
     private static SolidColorBrush Gold => new(Lantern);
