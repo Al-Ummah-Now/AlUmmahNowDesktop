@@ -178,6 +178,59 @@ public class NotificationsSharingEventsTests
         Assert.True(new PushConfig("AlUmmahNow.Viewer", packaged: true).CanRegister);
     }
 
+    [Fact]
+    public async Task NotificationsViewModel_survives_features_failure_and_rolls_back_failed_quiet_save()
+    {
+        var step = 0;
+        using var http = new HttpClient(new StatusStubHandler((_) =>
+        {
+            step++;
+            return step switch
+            {
+                // 1) OpenInboxAsync: features call fails with 503, but inbox list + markSeen still succeed
+                1 => (HttpStatusCode.ServiceUnavailable, """{"error":{"code":"service_unavailable"}}"""),
+                2 => (HttpStatusCode.OK, """{"result":{"items":[{"id":"n1","category":"subscribers","notificationType":"subscription","notificationKey":"newSubscriber","params":{},"readAt":null,"createdAt":1795450000000}],"unreadCount":1,"unseenCount":1,"menuOpen":"seen"}}"""),
+                3 => (HttpStatusCode.OK, """{"result":{"unreadCount":1,"unseenCount":0,"menuOpen":"seen"}}"""),
+                // 2) OpenInboxAsync with quietHours ON, followed by failed SetDailyQuietAsync(false) -> rolls back to true
+                4 => (HttpStatusCode.OK, """{"version":1,"features":{"quietHours":true}}"""),
+                5 => (HttpStatusCode.OK, """{"result":{"items":[],"unreadCount":0,"unseenCount":0,"menuOpen":"seen"}}"""),
+                6 => (HttpStatusCode.OK, """{"result":{"quietHours":{"enabled":true,"timezone":"UTC","startMinute":1320,"endMinute":360,"prayerQuietEnabled":false,"prayerWindows":[]}}}"""),
+                7 => (HttpStatusCode.InternalServerError, """{"error":{"code":"internal_error"}}"""),
+                _ => throw new InvalidOperationException("Unexpected call " + step),
+            };
+        }));
+        var client = new HttpNotificationsClient(http, new Uri("https://videos.api.qa.alummahnow.net"), _ => Task.FromResult<string?>("tok"));
+        var vm = new NotificationsViewModel(client, new Localizer("en"));
+
+        await vm.OpenInboxAsync();
+        Assert.Equal(LoadState.Content, vm.State);
+        Assert.Single(vm.Items);
+        Assert.False(vm.IsQuietHoursEnabled);
+
+        await vm.OpenInboxAsync();
+        Assert.True(vm.IsQuietHoursEnabled);
+        Assert.True(vm.QuietHours.Enabled);
+        Assert.Equal(360, vm.QuietHours.EndMinute);
+
+        await vm.SetDailyQuietAsync(false);
+        Assert.True(vm.QuietHours.Enabled);
+    }
+
+    private sealed class StatusStubHandler : HttpMessageHandler
+    {
+        private readonly Func<HttpRequestMessage, (HttpStatusCode Status, string Body)> _respond;
+        public StatusStubHandler(Func<HttpRequestMessage, (HttpStatusCode, string)> respond) => _respond = respond;
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var (status, body) = _respond(request);
+            return Task.FromResult(new HttpResponseMessage(status)
+            {
+                Content = new StringContent(body, Encoding.UTF8, "application/json"),
+            });
+        }
+    }
+
     private sealed class StubHandler : HttpMessageHandler
     {
         private readonly Func<HttpRequestMessage, string> _respond;

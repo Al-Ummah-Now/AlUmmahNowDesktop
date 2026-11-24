@@ -121,17 +121,39 @@ namespace AlUmmahNow.App.ViewModels
             State = LoadState.Loading;
             try
             {
-                var features = await _client.GetViewerFeaturesAsync(cancellationToken);
-                IsQuietHoursEnabled = features.IsOn(UserFeatures.QuietHours);
+                try
+                {
+                    var features = await _client.GetViewerFeaturesAsync(cancellationToken);
+                    IsQuietHoursEnabled = features.IsOn(UserFeatures.QuietHours);
+                }
+                catch (CatalogException)
+                {
+                    IsQuietHoursEnabled = false;
+                }
+
                 var page = await _client.ListAsync(20, cancellationToken);
                 Items.Clear();
                 foreach (var item in page.Items) Items.Add(item);
                 Badge = page.Items.Count > 0
                     ? await _client.MarkSeenAsync(page.Items.Select(i => i.Id).ToArray(), cancellationToken)
                     : page.Badge;
-                QuietHours = IsQuietHoursEnabled
-                    ? await _client.GetQuietHoursAsync(cancellationToken)
-                    : new NotificationQuietHours();
+                if (IsQuietHoursEnabled)
+                {
+                    try
+                    {
+                        QuietHours = await _client.GetQuietHoursAsync(cancellationToken);
+                    }
+                    catch (CatalogException)
+                    {
+                        IsQuietHoursEnabled = false;
+                        QuietHours = new NotificationQuietHours();
+                    }
+                }
+                else
+                {
+                    QuietHours = new NotificationQuietHours();
+                }
+
                 RaiseComputed();
                 State = Items.Count == 0 ? LoadState.Empty : LoadState.Content;
             }
@@ -184,6 +206,7 @@ namespace AlUmmahNow.App.ViewModels
 
         private async Task SaveQuietAsync(NotificationQuietHours next, CancellationToken cancellationToken)
         {
+            var previous = QuietHours;
             QuietHours = next;
             OnPropertyChanged(nameof(QuietWindowLabel));
             OnPropertyChanged(nameof(IsPrayerQuietVisible));
@@ -195,6 +218,9 @@ namespace AlUmmahNow.App.ViewModels
             }
             catch (CatalogException)
             {
+                QuietHours = previous;
+                OnPropertyChanged(nameof(QuietWindowLabel));
+                OnPropertyChanged(nameof(IsPrayerQuietVisible));
             }
         }
 
