@@ -59,7 +59,7 @@ public sealed class StudioThemeTests
     {
         var c = StudioTheme.ReadXamlColors(StudioTheme.Fanous("Fanous.Colors.xaml"))[theme];
         // Edit, dimmed lines, Delete; and the text on gold, at rest, hovered and pressed
-        foreach (var (text, on) in new[] { ("Link", "Surface"), ("TextMuted", "Surface"), ("TextMuted", "Background"), ("ErrorText", "Surface"), ("OnPrimary", "Primary"), ("OnPrimary", "PrimaryHover"), ("OnPrimary", "PrimaryPressed") })
+        foreach (var (text, on) in new[] { ("Link", "Surface"), ("TextMuted", "Surface"), ("TextMuted", "Background"), ("ErrorText", "Surface"), ("OnPrimary", "Primary"), ("OnPrimary", "PrimaryHover"), ("OnPrimary", "PrimaryPressed"), ("OnErrorFill", "ErrorFill") })
         {
             Assert.True(Contrast(c["Fanous" + text + "Color"], c["Fanous" + on + "Color"]) >= 4.5, theme + ": " + text + " on " + on);
         }
@@ -88,7 +88,26 @@ public sealed class StudioThemeTests
         }
 
         Assert.Contains("PlaceholderForeground = new SolidColorBrush(LanternGlass.C(h.SearchPlaceholder))", Source("AlUmmahNow.Studio.Windows", "StudioWindow.cs"));
-        Assert.Contains("app.Resources.MergedDictionaries.Add(controls);", Source("AlUmmahNow.Studio.Windows", "LanternGlass.cs"));
+        Assert.Contains("TextControlPlaceholderForeground\" + state] = new SolidColorBrush(LanternGlass.C(h.SearchPlaceholder))", Source("AlUmmahNow.Studio.Windows", "StudioWindow.cs"));
+        var glass = Source("AlUmmahNow.Studio.Windows", "LanternGlass.cs");
+        Assert.Contains("app.Resources.MergedDictionaries.Add(controls);", glass);
+        Assert.Contains("d[\"HyperlinkButtonForeground\" + state] = link;", glass);
+        Assert.Contains("dialog button.destructive, dialog button.destructive-action {\n  background-color: @fanous_error_fill;", css.Replace("\r\n", "\n"));
+    }
+
+    /// <summary>A Studio brush that high contrast does not have is transparent there: its text is not drawn.</summary>
+    [Fact]
+    public void EveryStudioBrushIsInHighContrast()
+    {
+        var root = new DirectoryInfo(AppContext.BaseDirectory);
+        while (root != null && !File.Exists(Path.Combine(root.FullName, "AlUmmahNow.sln"))) root = root.Parent;
+        Assert.NotNull(root);
+        var glass = File.ReadAllText(Path.Combine(root!.FullName, "src", "AlUmmahNow.Studio.Windows", "LanternGlass.cs"));
+        var names = System.Text.RegularExpressions.Regex.Matches(glass, "t\\[\"Studio(\\w+)Brush\"\\] = (?!B\\(global|new SolidColorBrush)").Select(m => m.Groups[1].Value).Distinct().ToList();
+        Assert.True(names.Count > 10, string.Join(",", names));
+        var start = glass.IndexOf("void HighContrast(", StringComparison.Ordinal);
+        var high = glass.Substring(start, glass.IndexOf("    }", start, StringComparison.Ordinal) - start);
+        foreach (var name in names) Assert.True(high.Contains("\"" + name + "\"", StringComparison.Ordinal) || high.Contains("Studio" + name + "Brush", StringComparison.Ordinal), name);
     }
 
     [Fact]

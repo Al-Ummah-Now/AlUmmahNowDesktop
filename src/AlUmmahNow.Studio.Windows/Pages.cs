@@ -123,7 +123,7 @@ internal static class Tile
 internal sealed class TimelinePage
 {
     private const double TrackHeight = 54;
-    private const double RulerHeight = 24;
+    private const double RulerHeight = TimelineRuler.Height;
     private const double Gap = 10;
     private readonly Localizer _l;
     private readonly TimelineProject _project = new();
@@ -253,7 +253,7 @@ internal sealed class TimelinePage
         for (var s = 0; s <= _project.Duration; s += 10)
         {
             var x = viewport.ToX(s);
-            _canvas.Children.Add(new Line { X1 = x, X2 = x, Y1 = RulerHeight - 6, Y2 = RulerHeight, Stroke = muted, StrokeThickness = 1 });
+            _canvas.Children.Add(new Line { X1 = x, X2 = x, Y1 = RulerHeight - TimelineRuler.Tick, Y2 = RulerHeight, Stroke = muted, StrokeThickness = 1 });
             if (s % 20 != 0) continue;
             var label = new TextBlock { Text = _l.Duration(s), FontSize = 11, Foreground = muted };
             label.Measure(new global::Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
@@ -298,15 +298,18 @@ internal sealed class TimelinePage
             }
         }
 
-        // The playhead: a soft gold glow, the line, and a handle on the ruler.
+        // The playhead, under the labels: a soft gold glow, the line, and a handle on the ruler.
         var px = viewport.ToX(_playhead);
-        var glow = new Rectangle { Width = 8, Height = _canvas.Height, Fill = new SolidColorBrush(global::Windows.UI.Color.FromArgb(0x40, 0xF4, 0xAE, 0x3A)) };
+        const double under = TimelineRuler.LabelRoom;
+        var glow = new Rectangle { Width = 8, Height = _canvas.Height - under, Fill = new SolidColorBrush(global::Windows.UI.Color.FromArgb(0x40, 0xF4, 0xAE, 0x3A)) };
         Canvas.SetLeft(glow, px - 4);
+        Canvas.SetTop(glow, under);
         _canvas.Children.Add(glow);
-        var head = new Rectangle { Width = 2, Height = _canvas.Height, Fill = new SolidColorBrush(LanternGlass.Gold) };
+        var head = new Rectangle { Width = 2, Height = _canvas.Height - under, Fill = new SolidColorBrush(LanternGlass.Gold) };
         Canvas.SetLeft(head, px - 1);
+        Canvas.SetTop(head, under);
         _canvas.Children.Add(head);
-        var handle = new Polygon { Fill = new SolidColorBrush(LanternGlass.Gold), Points = { new global::Windows.Foundation.Point(px - 7, 0), new global::Windows.Foundation.Point(px + 7, 0), new global::Windows.Foundation.Point(px + 7, 8), new global::Windows.Foundation.Point(px, 14), new global::Windows.Foundation.Point(px - 7, 8) } };
+        var handle = new Polygon { Fill = new SolidColorBrush(LanternGlass.Gold), Points = { new global::Windows.Foundation.Point(px - 7, under), new global::Windows.Foundation.Point(px + 7, under), new global::Windows.Foundation.Point(px + 7, under + 8), new global::Windows.Foundation.Point(px, under + TimelineRuler.HandleHeight), new global::Windows.Foundation.Point(px - 7, under + 8) } };
         _canvas.Children.Add(handle);
     }
 
