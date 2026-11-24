@@ -127,8 +127,9 @@ public sealed partial class App : Application
                 var pass = isWatch ? furthest > 2 && (sawCaption || Environment.GetEnvironmentVariable("AUN_EXPECT_CAPTION") == "0")
                     : LiveAutomation.Passed(automation, shell.LiveList, shell.LiveWatch, auth, furthest) is { } asAsked ? asAsked
                     : shell.Home.Rails.Count > 0;
+                pass = pass && shell.IsBuiltOnce;
                 File.WriteAllText(Environment.GetEnvironmentVariable("AUN_RESULT") ?? "aun-result.txt",
-                    $"AUTOMATION {automation} core={coreVersion} rails={shell.Home.Rails.Count} furthest={furthest:F1} caption={sawCaption} failed={shell.Watch?.PlaybackFailed} RESULT {(pass ? "PASS" : "FAIL")}");
+                    $"AUTOMATION {automation} core={coreVersion} rails={shell.Home.Rails.Count} furthest={furthest:F1} caption={sawCaption} failed={shell.Watch?.PlaybackFailed} once={shell.IsBuiltOnce} RESULT {(pass ? "PASS" : "FAIL")}");
                 player.Stop();
                 Exit();
             };

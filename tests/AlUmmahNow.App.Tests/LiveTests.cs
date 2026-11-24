@@ -797,6 +797,111 @@ public class LiveTests
     }
 
     [Fact]
+    public void A_page_is_never_built_inside_itself()
+    {
+        var (builds, depth, deepest) = (0, 0, 0);
+        var started = new List<int>();
+        PageRenderer page = null!;
+        page = new PageRenderer(() =>
+        {
+            deepest = Math.Max(deepest, ++depth);
+            if (++builds == 1)
+            {
+                page.After(() => started.Add(builds));
+                page.Render();
+                page.Render();
+            }
+
+            depth--;
+        });
+        page.Render();
+        // Asked for twice while it was built: built once more, and then what it starts
+        Assert.Equal((2, 1), (builds, deepest));
+        Assert.Equal(new[] { 2 }, started);
+        page.After(() => started.Add(0));
+        Assert.Equal(new[] { 2, 0 }, started);
+        Assert.Throws<InvalidOperationException>(() => new PageRenderer(() => throw new InvalidOperationException()).Render());
+    }
+
+    /// <summary>A window as the shells have it: emptied, then the header and the page, which opens as it is built.</summary>
+    private static (PageRenderer Page, LivePage Live, List<string> Window, List<LoadState> Built, Func<int> Deepest) Window(string id, Func<string, LiveWatchViewModel> create)
+    {
+        var window = new List<string>();
+        var built = new List<LoadState>();
+        var (depth, deepest) = (0, 0);
+        LivePage live = null!;
+        var page = new PageRenderer(() =>
+        {
+            deepest = Math.Max(deepest, ++depth);
+            window.Clear();
+            window.Add("header");
+            var state = live.Open(id).State;
+            built.Add(state);
+            window.Add("page");
+            depth--;
+        });
+        live = new LivePage(page, create);
+        return (page, live, window, built, () => deepest);
+    }
+
+    [Theory]
+    [InlineData(DemoLiveClient.LiveId)]
+    [InlineData(DemoLiveClient.SoonId)]
+    [InlineData(DemoLiveClient.RecordingId)]
+    [InlineData("demo-premiere")]
+    [InlineData("demo-ended")]
+    [InlineData("demo-canceled")]
+    public void A_live_page_is_built_once_for_each_of_its_states(string id)
+    {
+        // The demo answers at once, while the page is being built
+        var demo = new DemoLiveClient("/media", "en");
+        var (page, live, window, built, deepest) = Window(id, i => new LiveWatchViewModel(i, demo, _catalog, _player, new NullMediaSession(), _localizer));
+        page.Render();
+        Assert.Equal(new[] { "header", "page" }, window);
+        Assert.Equal(new[] { LoadState.Loading, LoadState.Content }, built);
+        Assert.Equal(1, deepest());
+        live.Close();
+        Assert.Null(live.Current);
+    }
+
+    [Fact]
+    public async Task A_live_page_that_is_tried_again_is_built_once_for_each_of_its_states()
+    {
+        _live.Fails = true;
+        var (page, live, _, built, deepest) = Window("s", _ => Model());
+        page.Render();
+        _live.Fails = false;
+        await live.Current!.LoadAsync();
+        Assert.Equal(new[] { LoadState.Loading, LoadState.Error, LoadState.Loading, LoadState.Content }, built);
+        Assert.Equal(1, deepest());
+        live.Close();
+    }
+
+    [Fact]
+    public void A_live_page_that_was_replaced_before_it_was_there_does_not_run()
+    {
+        LivePage live = null!;
+        var models = new List<LiveWatchViewModel>();
+        var id = "a";
+        var page = new PageRenderer(() =>
+        {
+            live.Open(id);
+            if (id == "b") return;
+            live.Open(id = "b");
+        });
+        live = new LivePage(page, i =>
+        {
+            models.Add(new LiveWatchViewModel(i, _live, _catalog, _player, new NullMediaSession(), _localizer, () => _now));
+            return models[^1];
+        });
+        page.Render();
+        Assert.Equal(new[] { "a", "b" }, models.Select(m => m.StreamId));
+        Assert.Equal(new[] { LoadState.Loading, LoadState.Content }, models.Select(m => m.State));
+        Assert.Equal(1, _live.StateReads);
+        live.Close();
+    }
+
+    [Fact]
     public async Task A_page_that_cannot_be_read_says_so()
     {
         _live.Fails = true;
@@ -936,6 +1041,20 @@ public class LiveTests
         _live.Fails = true;
         await vm.ToggleReminderAsync(auth);
         Assert.False(LiveAutomation.Passed("remind-set:s", list, vm, auth, 0));
+        _live.Fails = false;
+        vm = await Loaded();
+        _live.Fails = true;
+        Assert.False(LiveAutomation.Passed("remind-failed:s", list, vm, auth, 0));
+        await vm.ToggleReminderAsync(auth);
+        Assert.True(LiveAutomation.Passed("remind-failed:s", list, vm, auth, 0));
+        Assert.False(LiveAutomation.Passed("remind-signin:s", list, vm, auth, 0));
+        _live.Fails = false;
+        vm = await Loaded();
+        auth = new AuthViewModel(new DemoAuthSession(waits: true));
+        Assert.False(LiveAutomation.Passed("remind-signin:s", list, vm, auth, 0));
+        _ = vm.ToggleReminderAsync(auth);
+        Assert.True(LiveAutomation.Passed("remind-signin:s", list, vm, auth, 0));
+        foreach (var other in new[] { "remind-set:s", "remind-failed:s" }) Assert.False(LiveAutomation.Passed(other, list, vm, auth, 0));
     }
 
     // ---- The server

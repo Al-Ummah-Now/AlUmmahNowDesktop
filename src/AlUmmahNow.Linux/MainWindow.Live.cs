@@ -13,10 +13,10 @@ public sealed partial class MainWindow
     private readonly ILiveClient _live;
     private readonly string _shortLinkHost;
     private readonly LiveListViewModel _liveList;
-    private LiveWatchViewModel? _liveWatch;
+    private readonly LivePage _livePage;
 
     public LiveListViewModel LiveList => _liveList;
-    public LiveWatchViewModel? LiveWatch => _liveWatch;
+    public LiveWatchViewModel? LiveWatch => _livePage.Current;
 
     private async Task RefreshLiveAsync()
     {
@@ -25,29 +25,11 @@ public sealed partial class MainWindow
         var state = _liveList.State;
         await _liveList.LoadAsync();
         // Built again only for what is new, so a page being read stays where it is
-        if (_liveWatch == null && _watch == null && (before != Shown() || state != _liveList.State)) Render();
-    }
-
-    private void EnsureLive(string id)
-    {
-        if (_liveWatch?.StreamId == id) return;
-        CloseLive();
-        var vm = _liveWatch = new LiveWatchViewModel(id, _live, _catalog, _player, _session, _localizer);
-        vm.LayoutChanged += (_, _) =>
-        {
-            if (ReferenceEquals(vm, _liveWatch)) Render();
-        };
-        _ = vm.RunAsync();
+        if (LiveWatch == null && _watch == null && (before != Shown() || state != _liveList.State)) Render();
     }
 
     /// <summary>The app is closing.</summary>
-    public void Close() => _liveWatch?.Close(TimeSpan.FromSeconds(2));
-
-    private void CloseLive()
-    {
-        _liveWatch?.Dispose();
-        _liveWatch = null;
-    }
+    public void Close() => LiveWatch?.Close(TimeSpan.FromSeconds(2));
 
     // ---- Home's row and the list
 

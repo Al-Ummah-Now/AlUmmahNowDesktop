@@ -19,7 +19,8 @@ namespace AlUmmahNow.TizenTv
 
         private HttpLiveClient _live = null!;
         private LiveListViewModel _liveList = null!;
-        private LiveWatchViewModel? _liveWatch;
+        private LivePage? _livePage;
+        private LiveWatchViewModel? LiveWatch => _livePage?.Current;
         private Action? _unbindLive;
         private List<(string Title, List<(string Title, string? Image, Action Open)> Items)> _rowItems = new List<(string, List<(string, string?, Action)>)>();
 
@@ -36,19 +37,19 @@ namespace AlUmmahNow.TizenTv
         /// <summary>Behind another app: nothing is asked for.</summary>
         protected override void OnPause()
         {
-            if (_liveWatch != null) _liveWatch.IsHidden = true;
+            if (LiveWatch != null) LiveWatch.IsHidden = true;
             base.OnPause();
         }
 
         protected override void OnResume()
         {
-            if (_liveWatch != null) _liveWatch.IsHidden = false;
+            if (LiveWatch != null) LiveWatch.IsHidden = false;
             base.OnResume();
         }
 
         protected override void OnTerminate()
         {
-            _liveWatch?.Close(TimeSpan.FromSeconds(2));
+            LiveWatch?.Close(TimeSpan.FromSeconds(2));
             base.OnTerminate();
         }
 
@@ -56,8 +57,7 @@ namespace AlUmmahNow.TizenTv
         {
             _unbindLive?.Invoke();
             _unbindLive = null;
-            _liveWatch?.Dispose();
-            _liveWatch = null;
+            _livePage?.Close();
         }
 
         private void RenderLive(string id)
@@ -65,17 +65,7 @@ namespace AlUmmahNow.TizenTv
             CloseWatch();
             _unbindLive?.Invoke();
             _unbindLive = null;
-            if (_liveWatch == null)
-            {
-                var created = _liveWatch = new LiveWatchViewModel(id, _live, _catalog, _player, new App.Media.NullMediaSession(), _localizer);
-                created.LayoutChanged += (s, e) =>
-                {
-                    if (ReferenceEquals(created, _liveWatch)) Render();
-                };
-                _ = created.RunAsync();
-            }
-
-            var vm = _liveWatch;
+            var vm = _livePage!.Open(id);
             _root!.BackgroundColor = vm.Watch == null ? Night : Color.Transparent;
             if (vm.State != LoadState.Content)
             {

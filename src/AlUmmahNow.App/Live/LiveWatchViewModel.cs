@@ -163,8 +163,12 @@ namespace AlUmmahNow.App.Live
 
         public async Task LoadAsync()
         {
-            State = LoadState.Loading;
-            LayoutChanged?.Invoke(this, EventArgs.Empty);
+            if (State != LoadState.Loading)
+            {
+                State = LoadState.Loading;
+                LayoutChanged?.Invoke(this, EventArgs.Empty);
+            }
+
             try
             {
                 var change = _reminderChange;
@@ -422,11 +426,12 @@ namespace AlUmmahNow.App.Live
             var live = await Quiet(() => _live.GetStateAsync(StreamId, _stop.Token), wait => refused = wait);
             _stateAt = _now();
             _stateWait = live == null ? refused : PollAfter(live.PollAfter);
-            if (live != null) await ShowAsync(live, change);
+            if (live != null && await ShowAsync(live, change)) LayoutChanged?.Invoke(this, EventArgs.Empty);
         }
 
         /// <param name="change">The reminder's changes when the state was asked for; of a later one it knows nothing.</param>
-        private async Task ShowAsync(LiveState live, int change)
+        /// <returns>Whether the page is another one now.</returns>
+        private async Task<bool> ShowAsync(LiveState live, int change)
         {
             _stateAt = _now();
             var before = (Mode, HasChat, Watch, CanRemind, Live?.EventType);
@@ -445,7 +450,7 @@ namespace AlUmmahNow.App.Live
             _clock = IsPremiere && Mode == LiveMode.Live && live.StartedAt is { } startedAt ? new PremiereClock(startedAt, live.ClockOffset, live.DurationSeconds) : null;
             UntilStart = Countdown();
             await OpenAsync(live);
-            if (!before.Equals((Mode, HasChat, Watch, CanRemind, Live?.EventType))) LayoutChanged?.Invoke(this, EventArgs.Empty);
+            return !before.Equals((Mode, HasChat, Watch, CanRemind, Live?.EventType));
         }
 
         public static LiveMode ModeOf(LiveState live)

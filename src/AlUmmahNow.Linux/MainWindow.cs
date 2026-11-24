@@ -24,6 +24,7 @@ public sealed partial class MainWindow
     private readonly AppSettings _settings;
     private readonly SettingsStore _store;
     private readonly AuthViewModel _auth;
+    private readonly PageRenderer _page;
     private WatchViewModel? _watch;
     private string? _watchId;
     private Action? _unbindWatch;
@@ -34,6 +35,8 @@ public sealed partial class MainWindow
         _live = live;
         _shortLinkHost = shortLinkHost;
         _liveList = new LiveListViewModel(live, localizer, navigator);
+        _page = new PageRenderer(Build);
+        _livePage = new LivePage(_page, id => new LiveWatchViewModel(id, live, catalog, player, session, localizer));
         _catalog = catalog;
         _localizer = localizer;
         _navigator = navigator;
@@ -57,7 +60,7 @@ public sealed partial class MainWindow
         // Hidden or behind another workspace: nothing is asked for
         _window.OnNotify += (_, e) =>
         {
-            if (e.Pspec.GetName() == "suspended" && _liveWatch != null) _liveWatch.IsHidden = _window.IsSuspended();
+            if (e.Pspec.GetName() == "suspended" && LiveWatch != null) LiveWatch.IsHidden = _window.IsSuspended();
         };
 
         navigator.Changed += (_, _) =>
@@ -70,7 +73,7 @@ public sealed partial class MainWindow
     }
 
     public HomeViewModel Home => _home;
-    public WatchViewModel? Watch => _watch ?? _liveWatch?.Watch;
+    public WatchViewModel? Watch => _watch ?? LiveWatch?.Watch;
 
     public async Task StartAsync()
     {
@@ -104,7 +107,9 @@ public sealed partial class MainWindow
         });
     }
 
-    private void Render()
+    private void Render() => _page.Render();
+
+    private void Build()
     {
         var direction = _localizer.IsRtl ? Gtk.TextDirection.Rtl : Gtk.TextDirection.Ltr;
         Gtk.Widget.SetDefaultDirection(direction);
@@ -116,7 +121,7 @@ public sealed partial class MainWindow
 
         _unbindWatch?.Invoke();
         _unbindWatch = null;
-        if (_navigator.Current is not Route.Live) CloseLive();
+        if (_navigator.Current is not Route.Live) _livePage.Close();
         if (_navigator.Current is not Route.Watch) CloseWatch();
         switch (_navigator.Current)
         {
@@ -125,8 +130,7 @@ public sealed partial class MainWindow
                 root.Append(BuildWatch(_watch!));
                 break;
             case Route.Live route:
-                EnsureLive(route.StreamId);
-                root.Append(BuildLive(_liveWatch!));
+                root.Append(BuildLive(_livePage.Open(route.StreamId)));
                 break;
             case Route.LiveList:
                 root.Append(BuildLiveList());
@@ -144,8 +148,11 @@ public sealed partial class MainWindow
         if (_watch != null && _watchId == id) return;
         CloseWatch();
         _watchId = id;
-        _watch = new WatchViewModel(_catalog, _player, _session, _localizer);
-        _ = LoadWatchAsync(_watch, id);
+        var vm = _watch = new WatchViewModel(_catalog, _player, _session, _localizer);
+        _page.After(() =>
+        {
+            if (ReferenceEquals(vm, _watch)) _ = LoadWatchAsync(vm, id);
+        });
     }
 
     private async Task LoadWatchAsync(WatchViewModel vm, string id)

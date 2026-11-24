@@ -30,6 +30,7 @@ namespace AlUmmahNow.TizenTv
         private HomeViewModel _home = null!;
         private TizenMediaPlayer _player = null!;
         private HttpCatalogClient _catalog = null!;
+        private PageRenderer _page = null!;
         private WatchViewModel? _watch;
         private TvFocusGrid? _grid;
         private View? _root;
@@ -53,6 +54,8 @@ namespace AlUmmahNow.TizenTv
             _live = new HttpLiveClient(http, AppEnvironment.BuildDefault.VideosApi, ct => Task.FromResult<string?>(null));
             _liveList = new LiveListViewModel(_live, _localizer, _navigator);
             _player = new TizenMediaPlayer(SynchronizationContext.Current!, window);
+            _page = new PageRenderer(Build);
+            _livePage = new LivePage(_page, id => new LiveWatchViewModel(id, _live, _catalog, _player, new NullMediaSession(), _localizer));
             _navigator.Changed += (s, e) =>
             {
                 Render();
@@ -80,7 +83,9 @@ namespace AlUmmahNow.TizenTv
 
         private int Mirror(int x, int width) => _localizer.IsRtl ? ScreenWidth - x - width : x;
 
-        private void Render()
+        private void Render() => _page.Render();
+
+        private void Build()
         {
             if (_root != null)
             {
@@ -191,9 +196,12 @@ namespace AlUmmahNow.TizenTv
             _root!.BackgroundColor = Color.Transparent;
             if (_watch == null)
             {
-                _watch = new WatchViewModel(_catalog, _player, new NullMediaSession(), _localizer);
-                _watch.PropertyChanged += (s, e) => SyncWatch();
-                _ = _watch.LoadAsync(id);
+                var vm = _watch = new WatchViewModel(_catalog, _player, new NullMediaSession(), _localizer);
+                vm.PropertyChanged += (s, e) => SyncWatch();
+                _page.After(() =>
+                {
+                    if (ReferenceEquals(vm, _watch)) _ = vm.LoadAsync(id);
+                });
             }
 
             AddTimedText();
@@ -218,7 +226,7 @@ namespace AlUmmahNow.TizenTv
 
         private void SyncWatch()
         {
-            var watch = _watch ?? _liveWatch?.Watch;
+            var watch = _watch ?? LiveWatch?.Watch;
             if (watch == null || _caption == null || _time == null) return;
             _caption.Text = watch.Caption;
             _time.Text = watch.IsLive ? "" : _localizer.Duration(watch.Position) + " / " + _localizer.Duration(watch.Duration);
@@ -234,9 +242,9 @@ namespace AlUmmahNow.TizenTv
         {
             if (e.Key.State != Key.StateType.Down) return;
             var name = e.Key.KeyPressedName;
-            if (_liveWatch != null)
+            if (LiveWatch != null)
             {
-                OnLiveKey(_liveWatch, name);
+                OnLiveKey(LiveWatch, name);
                 return;
             }
 
