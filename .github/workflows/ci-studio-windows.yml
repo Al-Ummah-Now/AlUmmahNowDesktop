@@ -154,8 +154,7 @@ jobs:
             if (-not (Select-String -Quiet "RESULT PASS" "$out/$name.txt")) { $failed += $name }
           } }
           # High contrast, last, and off again. First turned on while Studio runs, then before it starts; each passes only
-          # when Studio itself is in it and its brushes are the system's colors. A runner that cannot do it says so, and
-          # has no frames of it.
+          # when Studio itself is in it and its brushes are the system's colors. The runner can do it: not on is a failure.
           $name = "windows-videos-highcontrastswitch-en-dark-1440x900"
           ./scripts/windows-studio-shot.ps1 $exe en dark 1440x900 highcontrastswitch $name $out videos
           if (Select-String -Quiet "on=True" "$out/high-contrast.txt") {
@@ -165,10 +164,7 @@ jobs:
               ./scripts/windows-studio-shot.ps1 $exe $lang dark 1440x900 highcontrast $name $out $tab
               if (-not (Select-String -Quiet "RESULT PASS" "$out/$name.txt")) { $failed += $name }
             } }
-          } else {
-            Write-Host "::warning::No high-contrast frames: this runner did not turn it on ($(Get-Content $out/high-contrast.txt))"
-            Remove-Item "$out/$name.png"
-          }
+          } else { $failed += "high contrast was not turned on: $(Get-Content $out/high-contrast.txt)" }
           ./scripts/high-contrast.ps1 off
           if ($failed.Count -gt 0) { throw "shots failed: $failed" }
       - uses: actions/upload-artifact@v4

@@ -318,12 +318,21 @@ public sealed class VideosPage
                 // To the end of the page, once the row has opened
                 GLib.Functions.TimeoutAdd(0, 1500, () =>
                 {
-                    if (_scroll.GetVadjustment() is { } v) v.SetValue(v.GetUpper());
+                    if (_scroll.GetVadjustment() is { } v)
+                    {
+                        v.SetValue(v.GetUpper());
+                        // Kept: the scenario may press the row afterwards, and the page grows
+                        DeletedIsShown = _deletedCard?.GetVisible() == true && v.GetValue() + v.GetPageSize() >= v.GetUpper() - 1 && (v.GetUpper() <= v.GetPageSize() || v.GetValue() > 0);
+                    }
+
                     return false;
                 });
                 break;
         }
     }
+
+    /// <summary>CI: the page was scrolled to its end, where the deleted videos are.</summary>
+    public bool DeletedIsShown { get; private set; }
 
     private void RenderSelection()
     {
