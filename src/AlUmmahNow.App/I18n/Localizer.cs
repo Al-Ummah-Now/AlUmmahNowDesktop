@@ -201,8 +201,33 @@ namespace AlUmmahNow.App.I18n
         private string ShortTime(int hour, int minute)
         {
             var time = Digits(((hour + 11) % 12 + 1).ToString(CultureInfo.InvariantCulture) + ":" + minute.ToString("00", CultureInfo.InvariantCulture));
-            return time + (_language == "ar" ? (hour < 12 ? " ص" : " م") : (hour < 12 ? " AM" : " PM"));
+            return time + " " + DayHalf(hour >= 12);
         }
+
+        /// <summary>"AM", "PM" / «ص», «م».</summary>
+        public string DayHalf(bool afternoon) => _language == "ar" ? (afternoon ? "م" : "ص") : (afternoon ? "PM" : "AM");
+
+        /// <summary>The minutes of a time: "05" / «٠٥».</summary>
+        public string Minute(int minute) => Digits(minute.ToString("00", CultureInfo.InvariantCulture));
+
+        /// <summary>A month of a calendar: "November 2026" / «نوفمبر ٢٠٢٦».</summary>
+        public string MonthYear(DateTime month) =>
+            month.ToString("MMMM", _language == "ar" ? Arabic : CultureInfo.InvariantCulture) + " " + Digits(month.Year.ToString(CultureInfo.InvariantCulture));
+
+        /// <summary>A day of a calendar: "7" / «٧».</summary>
+        public string DayOfMonth(DateTime day) => Digits(day.Day.ToString(CultureInfo.InvariantCulture));
+
+        /// <summary>A day for screen readers: "Saturday, November 7, 2026" / «السبت، ٧ نوفمبر ٢٠٢٦».</summary>
+        public string LongDay(DateTime day) => _language == "ar"
+            ? Weekday(day.DayOfWeek) + "، " + DayOfMonth(day) + " " + MonthYear(day)
+            : Weekday(day.DayOfWeek) + ", " + day.ToString("MMMM", CultureInfo.InvariantCulture) + " " + DayOfMonth(day) + ", " + Digits(day.Year.ToString(CultureInfo.InvariantCulture));
+
+        public string Weekday(DayOfWeek day) => _language == "ar"
+            ? new[] { "الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت" }[(int)day]
+            : day.ToString();
+
+        /// <summary>The head of a calendar's column: "Sat" / «س».</summary>
+        public string WeekdayLetter(DayOfWeek day) => _language == "ar" ? "حنثرخجس".Substring((int)day, 1) : day.ToString().Substring(0, 3);
 
         private DateTimeOffset Local(DateTimeOffset value) => TimeZoneInfo.ConvertTime(value, _zone ?? TimeZoneInfo.Local);
 
