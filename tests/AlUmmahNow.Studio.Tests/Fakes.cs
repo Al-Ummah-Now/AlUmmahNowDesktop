@@ -13,10 +13,14 @@ public sealed class FakeTransport : IApiTransport
     public Func<string, string?, IReadOnlyList<Suggestion>>? Suggestions;
     public int SuggestCalls;
 
-    public Task<string> SendAsync(ApiRequest request, CancellationToken cancellationToken = default)
+    /// <summary>Answers come only when this has completed.</summary>
+    public Task? Waits;
+
+    public async Task<string> SendAsync(ApiRequest request, CancellationToken cancellationToken = default)
     {
         lock (Sent) Sent.Add(request);
-        return Responses.TryGetValue(request.OperationId, out var f) ? Task.FromResult(f(request)) : Task.FromResult("{}");
+        if (Waits is { } waits) await waits;
+        return Responses.TryGetValue(request.OperationId, out var f) ? f(request) : "{}";
     }
 
     public Task<IReadOnlyList<Suggestion>> SuggestAsync(string text, string? channelId, int limit, CancellationToken cancellationToken = default)

@@ -30,6 +30,8 @@ internal static class AppStart
             SynchronizationContext.SetSynchronizationContext(new DispatcherQueueSynchronizationContext(DispatcherQueue.GetForCurrentThread()));
             create();
         });
+        // However the loop came to return: the work stops before the process ends
+        WindowsEnd.WaitForEnd();
     }
 
 #if !AUN_STORE

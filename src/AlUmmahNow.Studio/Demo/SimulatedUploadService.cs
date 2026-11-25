@@ -51,6 +51,8 @@ public sealed class SimulatedUploadService : IUploadService
         Changed?.Invoke(this, id);
     }
 
+    public async Task StopAsync(CancellationToken cancellationToken = default) => await _timer.DisposeAsync().ConfigureAwait(false);
+
     public void Dispose() => _timer.Dispose();
 
     private void Set(string id, Action<Item> change)

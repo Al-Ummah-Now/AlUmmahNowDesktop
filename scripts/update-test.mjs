@@ -6,7 +6,9 @@
  *
  *   update-test.mjs --app viewer|studio --exe <installed exe> --package <N+1 nupkg> --from <N> --to <N+1>
  *                   --packages <Velopack's package folder> --package-name <its file name there>
- *                   [--case ok|restart|tampered|bad-signature|foreign-host|planted|swapped|yanked|working|twice|older]
+ *                   [--case ok|restart|tampered|bad-signature|foreign-host|planted|swapped|yanked|working|uploading|watching|twice|older|session|restart-fails]
+ *
+ * Wherever the update is installed, the app's work has stopped before the updater was started.
  *
  * `ok` (as it closes) and `restart` (Restart now) must end on N+1. Every other case must stay on N through a second start:
  *  - tampered, bad-signature, foreign-host: the download is refused and the reason reported;
@@ -16,12 +18,15 @@
  *  - working (Studio): the update is ready while an encode runs: Restart now does nothing, and closing installs nothing;
  *  - older: the manifest of a newer release was checked, its package was refused and the app ended; started again, it is
  *    offered N+1, which is older than what it knows of: what it knew was kept;
+ *  - uploading (Studio), watching (viewer, with --media): the same with uploads, and with a live stream that plays;
+ *  - session: Windows ends the session: the work is stopped, and no updater is started;
+ *  - restart-fails: Restart now, and the updater does not start: the app starts again by itself, as N;
  *  - twice: the app is open a second time, through a junction: closing the one installs nothing and leaves the other running.
  */
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, symlinkSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, symlinkSync, truncateSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -104,6 +109,14 @@ const server = createServer((req, res) => {
 	res.end();
 });
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
+const watched = join(dir, 'watched');
+if (kase === 'uploading') {
+	mkdirSync(watched);
+	for (const name of ['friday-khutbah.mp4', 'seerah-part-4.mp4']) {
+		writeFileSync(join(watched, name), '');
+		truncateSync(join(watched, name), 400_000_000);
+	}
+}
 const env = {
 	...process.env,
 	// The demo catalog and accounts: the app itself asks nothing of a server
@@ -114,6 +127,9 @@ const env = {
 	AUN_UPDATE_TEST_LOG: log,
 	AUN_UPDATE_TEST_STATE: state,
 	...(kase === 'yanked' ? { AUN_UPDATE_TEST_RECHECK: '1' } : {}),
+	...(kase === 'restart-fails' ? { AUN_UPDATE_TEST_NO_UPDATER: '1' } : {}),
+	...(kase === 'uploading' ? { AUN_WATCH_DIR: watched, AUN_TAB: 'uploads', AUN_UPDATE_TEST_CHECK_MS: '15000' } : {}),
+	...(kase === 'watching' ? { AUN_DEMO_LIVE: '1', AUN_FIXTURE_MEDIA: a.media, AUN_AUTOMATION: 'live:demo-live', AUN_UPDATE_TEST_CHECK_MS: '20000' } : {}),
 	// Studio's demo queue: one encode done, one running (after 5 s)
 	...(kase === 'working' ? { AUN_SCENE: 'active', AUN_UPDATE_TEST_CHECK_MS: '15000' } : {}),
 };
@@ -165,13 +181,30 @@ async function unchanged() {
 	if (started() !== `started ${a.from} self=true`) fail('the version changed');
 }
 
+/** The end's own steps, in order: the work stops before anything else is done */
+const ending = () => lines().filter((l) => l.startsWith('end ')).map((l) => l.slice(4));
+function ended(...steps) {
+	if (ending().join(', ') !== steps.join(', ')) fail(`the end was: ${ending().join(', ')}; expected ${steps.join(', ')}`);
+}
+/** What this test started ends with it, also what the app itself started */
+function endAll() {
+	for (const l of lines().filter((l) => l.startsWith('pid '))) {
+		try {
+			process.kill(Number(l.slice(4)));
+		} catch {
+			// It has ended
+		}
+	}
+}
+
 const first = start();
 await until('the app starts', 60_000, () => lines().some((l) => l.startsWith('started ')));
-if (lines()[0] !== `started ${a.from} self=true`) fail(`the installed app is not a self-updating ${a.from}`);
+if (lines().find((l) => l.startsWith('started ')) !== `started ${a.from} self=true`) fail(`the installed app is not a self-updating ${a.from}`);
 const staged = () => until('the update is staged', 180_000, () => lines().some(ready));
 if (kase === 'ok') {
 	await staged();
 	await closes(first);
+	ended('ending Asked', 'stopped', 'handed over');
 	// Velopack's updater runs after the exit; starting again before it's done would race it
 	await sleep(25_000);
 	const before = lines().length;
@@ -187,6 +220,7 @@ if (kase === 'ok') {
 	await staged();
 	if (person(first, 'press') !== "pressed 'Restart now'") fail('Restart now was not pressed');
 	await ends(first);
+	ended('ending Asked', 'stopped', 'handed over');
 	// The updater itself starts the new version
 	await until('the new version starts', 90_000, () => lines().some((l) => l === `started ${a.to} self=true`));
 	if (reported) fail('a good update was reported as failed');
@@ -225,12 +259,30 @@ if (kase === 'ok') {
 	second.kill();
 	await exited(second);
 	await unchanged();
-} else if (kase === 'working') {
+} else if (['working', 'uploading', 'watching'].includes(kase)) {
 	await staged();
-	if (!lines().some((l) => l === `Available Ready ${a.to} busy`)) fail('the encode is not seen as work');
+	if (!lines().some((l) => l === `Available Ready ${a.to} busy`)) fail('the work is not seen');
 	if (person(first, 'press') !== "'Restart now' cannot be pressed") fail('Restart now was offered');
 	// The app closes with the work unfinished
 	await closes(first);
+	ended('ending Asked', 'stopped');
+	await unchanged();
+} else if (kase === 'session') {
+	await staged();
+	person(first, 'logout');
+	await until('the work stops', 15_000, () => ending().includes('stopped'));
+	// What Windows does after it
+	first.kill();
+	await exited(first);
+	ended('ending Session', 'stopped');
+	await unchanged();
+} else if (kase === 'restart-fails') {
+	await staged();
+	if (person(first, 'press') !== "pressed 'Restart now'") fail('Restart now was not pressed');
+	await ends(first);
+	ended('ending Asked', 'stopped', 'starting again');
+	await until('the app starts again by itself', 60_000, () => lines().filter((l) => l === `started ${a.from} self=true`).length === 2);
+	endAll();
 	await unchanged();
 } else if (kase === 'twice') {
 	await staged();
@@ -260,6 +312,7 @@ if (kase === 'ok') {
 	if (kase === 'foreign-host' && calls.some((c) => c.startsWith('/downloads.example.com'))) fail('asked the foreign host');
 	await unchanged();
 }
+endAll();
 if (!existsSync(state)) fail('the state was not kept');
 console.log(`update test (${a.app}, ${kase}) passed:\n${lines().join('\n')}`);
 server.close();

@@ -15,6 +15,7 @@ internal static class UpdateTestWatch
 
     public static void Start(UpdateService service)
     {
+        Log("pid " + Environment.ProcessId);
         Log($"started {service.InstalledVersion} self={(service.CanInstall ? "true" : "false")}");
         var last = "";
         service.PropertyChanged += (_, _) =>
@@ -46,6 +47,7 @@ internal static class UpdateTestWatch
         Log("rechecked " + service.View.Stage);
     }
 
-    private static void Log(string line) => File.AppendAllText(Hook("AUN_UPDATE_TEST_LOG"), line + "\n");
+    /// <summary>The app's end logs here too.</summary>
+    public static void Log(string line) => File.AppendAllText(Hook("AUN_UPDATE_TEST_LOG"), line + "\n");
 }
 #endif

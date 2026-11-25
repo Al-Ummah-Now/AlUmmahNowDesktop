@@ -104,8 +104,8 @@ public sealed partial class App : Application
         var updateScene = UpdateScene.FromEnvironment(localizer, UpdateInstall.Msix, IsBusy);
         var updateStore = new UpdateStore(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AlUmmahNow", "updates.json"));
         var updates = updateScene?.Service ?? WindowsInstall.Service("viewer", environment.VideosApi, version, "AlUmmahNowWindows/" + version,
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AlUmmahNow"), updateStore, Environment.GetEnvironmentVariable("AUN_DEMO") == "1", IsBusy, () => _window?.Close());
-        var shell = shown = new Shell(catalog, localizer, navigator, player, session, settings, store, auth, live, environment.ShortLinkHost, updates, () => _window?.Close());
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AlUmmahNow"), updateStore, Environment.GetEnvironmentVariable("AUN_DEMO") == "1", IsBusy, WindowsEnd.Close);
+        var shell = shown = new Shell(catalog, localizer, navigator, player, session, settings, store, auth, live, environment.ShortLinkHost, updates, WindowsEnd.Close);
         var closing = new CancellationTokenSource();
 
         _window = new Window { Title = localizer["app.name"], Content = shell.Root };
@@ -123,16 +123,13 @@ public sealed partial class App : Application
         Title();
         _window.AppWindow.Resize(new global::Windows.Graphics.SizeInt32(1280, 800));
         if (_window.AppWindow.Presenter is OverlappedPresenter presenter) presenter.Maximize();
-        _window.Closed += (_, _) =>
+        var leaving = Task.CompletedTask;
+        WindowsEnd.Attach(_window, updates, () =>
         {
-            // The one end of the app: its work stops, then an update may be installed
-            updates.OnExit(() =>
-            {
-                closing.Cancel();
-                player.Stop();
-                shell.Close();
-            });
-        };
+            closing.Cancel();
+            player.Stop();
+            leaving = shell.LeaveLive();
+        }, stop => Task.WhenAny(leaving, Task.Delay(TimeSpan.FromSeconds(2), stop)));
         _window.VisibilityChanged += (_, e) => shell.SetHidden(!e.Visible);
         _window.Activate();
 

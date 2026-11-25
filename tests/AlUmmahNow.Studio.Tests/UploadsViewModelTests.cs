@@ -54,6 +54,15 @@ public sealed class UploadsViewModelTests : IDisposable
         public void Retry(string id) { }
         public Task CancelAsync(string id) => Task.CompletedTask;
         public void Remove(string id) => Items.Remove(id);
+        public Task? Stops;
+        public int Stopped;
+
+        public async Task StopAsync(CancellationToken cancellationToken = default)
+        {
+            Stopped++;
+            if (Stops != null) await Stops.WaitAsync(cancellationToken);
+        }
+
         public void Dispose() => Disposed = true;
     }
 
@@ -101,36 +110,89 @@ public sealed class UploadsViewModelTests : IDisposable
         Assert.Null(vm.FinishStepFor("up1"));
     }
 
-    /// <summary>What an update must not interrupt: as the queue says now, not as it was at the last tick.</summary>
-    [Fact]
-    public async Task WorkingIsAsTheQueueSaysNowAndWhileDetailsAreSent()
+    private async Task<(UploadsViewModel Vm, FakeUploads Service)> WithUploadAsync()
     {
         var (_, vm) = await CreateAsync();
-        Assert.False(vm.IsWorking);
         vm.Defaults.PlaylistIds = new List<string> { "p1" };
         vm.AddFiles(new[] { Video("a.mp4") });
         vm.Start();
-        var service = _services.Single();
+        return (vm, _services.Single());
+    }
+
+    private string SavedSteps => File.ReadAllText(Directory.GetFiles(_dir, "finish-*.json").Single());
+
+    /// <summary>What an update must not interrupt: as the queue says now, not as it was at the last tick.</summary>
+    [Fact]
+    public async Task WorkingIsAsTheQueueSaysNow()
+    {
+        var (vm, service) = await WithUploadAsync();
         Assert.True(vm.IsWorking);
         // Done, and nothing has ticked since: the list itself says so
         service.Finish("up1", "v1");
+        Assert.Equal(1, vm.ActiveCount);
         Assert.False(vm.IsWorking);
-        var whileSent = false;
-        _t.Responses["post_PlaylistVideosBulkAdd"] = _ =>
-        {
-            whileSent = vm.IsWorking;
-            return FakeTransport.Json(new { data = new { } });
-        };
+    }
+
+    [Fact]
+    public async Task DetailsBeingSentAreWork()
+    {
+        var (vm, service) = await WithUploadAsync();
+        var answer = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _t.Waits = answer.Task;
+        service.Finish("up1", "v1");
         vm.Tick();
-        for (var i = 0; i < 100 && vm.FinishStepFor("up1") != null; i++) await Task.Delay(10);
-        Assert.Single(_t.Calls("post_PlaylistVideosBulkAdd"));
-        Assert.True(whileSent);
-        for (var i = 0; i < 100 && vm.IsWorking; i++) await Task.Delay(10);
+        Assert.True(vm.IsWorking);
+        answer.SetResult();
+        await vm.WhenDetailsSentAsync();
         Assert.False(vm.IsWorking);
-        // Closed: its queue is closed, and it works no more
+    }
+
+    [Fact]
+    public async Task StoppingWaitsForDetailsSavesWhatIsLeftAndClosesTheQueue()
+    {
+        var (vm, service) = await WithUploadAsync();
+        var answer = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _t.Waits = answer.Task;
+        service.Finish("up1", "v1");
+        vm.Tick();
+        var stopping = vm.StopAsync();
+        Assert.False(stopping.IsCompleted);
+        Assert.Equal(0, service.Stopped);
+        answer.SetResult();
+        await stopping;
+        // Sent, so not again at the next start
+        Assert.DoesNotContain("up1", SavedSteps);
+        Assert.Equal(1, service.Stopped);
+        Assert.False(vm.IsWorking);
+        // Nothing begins after it
+        vm.AddFiles(new[] { Video("b.mp4") });
+        Assert.Equal(0, vm.Start());
+        vm.Tick();
+        Assert.Single(service.Specs);
+        // Closing it again is nothing
         vm.Dispose();
-        Assert.True(service.Disposed);
-        Assert.False(vm.IsWorking);
+        Assert.False(service.Disposed);
+    }
+
+    [Fact]
+    public async Task DetailsThatAreNotSentInTimeAreKeptAndTheQueueIsClosedAllTheSame()
+    {
+        var (vm, service) = await WithUploadAsync();
+        _t.Waits = new TaskCompletionSource().Task;
+        service.Finish("up1", "v1");
+        vm.Tick();
+        await Assert.ThrowsAsync<TimeoutException>(() => vm.StopAsync(detailsLimit: TimeSpan.FromMilliseconds(50)));
+        Assert.Contains("up1", SavedSteps);
+        Assert.Equal(1, service.Stopped);
+    }
+
+    [Fact]
+    public async Task AQueueThatDoesNotLetGoFailsTheStop()
+    {
+        var (vm, service) = await WithUploadAsync();
+        service.Stops = new TaskCompletionSource().Task;
+        using var late = new CancellationTokenSource(50);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => vm.StopAsync(late.Token));
     }
 
     [Fact]

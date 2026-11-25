@@ -114,6 +114,9 @@ namespace AlUmmahNow.App.Updates
         /// <summary>How often running work is looked at while the screen waits for it.</summary>
         public static readonly TimeSpan BusyPoll = TimeSpan.FromSeconds(2);
 
+        /// <summary>How long the app's end waits for a refusal to be told.</summary>
+        public static readonly TimeSpan ReportLimit = TimeSpan.FromSeconds(2);
+
         public const int MaxText = 1_500;
         public const int MaxDismissed = 10;
 
@@ -127,7 +130,9 @@ namespace AlUmmahNow.App.Updates
         private readonly IUpdateDelivery _delivery;
         private readonly ISelfUpdate? _self;
         private readonly Action? _close;
-        private bool _restarts;
+        private bool _isEnding;
+        private bool _mayInstall;
+        private bool _isHandedOver;
         private readonly Func<DateTimeOffset> _now;
         private readonly Func<TimeSpan, CancellationToken, Task> _delay;
         private UpdateAnswer _answer = UpdateAnswer.Off;
@@ -145,7 +150,6 @@ namespace AlUmmahNow.App.Updates
         private string? _tag;
         private UpdateStep _step;
         private double _progress;
-        private bool _isApplied;
 
         /// <param name="isBusy">An upload, an encode or a live session is running: the screen waits for it.</param>
         /// <param name="wasEnabled">Review frames: the switch was on in an earlier run.</param>
@@ -346,7 +350,8 @@ namespace AlUmmahNow.App.Updates
         /// </summary>
         private async Task LookAgainAsync()
         {
-            if (_self == null) return;
+            // The end has its own last look
+            if (_self == null || _isEnding) return;
             if (_answer.Tag != _tag && !IsStaging)
             {
                 _tag = _answer.Tag;
@@ -488,18 +493,20 @@ namespace AlUmmahNow.App.Updates
 
         private void Drop()
         {
+            // The end looks at it once more itself; what it looks at is not taken away under it
+            if (_isEnding) return;
             _ready = null;
             _step = UpdateStep.None;
             _self?.Discard();
         }
 
         /// <summary>
-        /// The button when it is ready: closes the app, unless work is running. The window's end is the only one that installs
-        /// (<see cref="OnExit"/>); this one also starts the app again.
+        /// The button when it is ready: ends the app, unless work is running. The app's end is the only one that installs
+        /// (<see cref="BeginEnd"/>, <see cref="HandOver"/>); this one also starts the app again.
         /// </summary>
         private async Task RestartAsync()
         {
-            if (_isApplied) return;
+            if (_isEnding) return;
             if (MayNotRestart)
             {
                 Show();
@@ -508,9 +515,10 @@ namespace AlUmmahNow.App.Updates
 
             // Pressed: what goes wrong from here on is told
             _isAsked = true;
-            if (await IsStillGoodAsync())
+            // Looked at again after it: work, or another copy, may have begun meanwhile
+            if (await IsStillGoodAsync() && !MayNotRestart)
             {
-                _restarts = true;
+                IsRestartAsked = true;
                 _close?.Invoke();
             }
             else
@@ -519,39 +527,47 @@ namespace AlUmmahNow.App.Updates
             }
         }
 
+        /// <summary>Restart now was pressed: an end without an updater starts the app again.</summary>
+        public bool IsRestartAsked { get; private set; }
+
+        /// <summary>The app is to start again after its end, for another reason than an update.</summary>
+        public void AskRestart() => IsRestartAsked = true;
+
         /// <summary>
-        /// The app's window has closed: the work stops first, and only then is what is ready checked once more and handed to the
-        /// updater, which waits for the app to end. Not when work was running as it closed: an upload is resumed by the same
-        /// version, and the next start gets the update again.
+        /// The app's end begins, before any work stops (stopped work no longer says that it was running): an update is installed
+        /// only if it is ready and no work runs. Nothing else is done with updates after it.
         /// </summary>
-        /// <param name="stopWork">Stops the app's work; nothing is handed over when that fails.</param>
-        public void OnExit(Action? stopWork = null)
+        public void BeginEnd()
         {
-            if (_isApplied) return;
-            _isApplied = true;
+            if (_isEnding) return;
+            _mayInstall = _self != null && _ready != null && !MayNotRestart;
+            _isEnding = true;
+        }
+
+        /// <summary>
+        /// The work has stopped: what is ready is checked once more and handed to the updater, which waits for the app to end.
+        /// On any thread. Whether it was.
+        /// </summary>
+        public bool HandOver()
+        {
+            if (!_mayInstall || _isHandedOver || _ready is not { } ready) return false;
             try
             {
-                // Before it is stopped: stopped work no longer says that it was running
-                bool mayInstall;
-                try
-                {
-                    mayInstall = _self != null && _ready != null && !MayNotRestart;
-                }
-                finally
-                {
-                    stopWork?.Invoke();
-                }
-
-                if (!mayInstall) return;
                 _self!.VerifyStaged();
-                _self.ApplyOnExit(_restarts);
             }
-#pragma warning disable CA1031 // The app closes all the same.
-            catch (Exception ex)
-#pragma warning restore CA1031
+            catch (UpdateRefusedException ex)
             {
-                Logger.Warn("the update was not installed", ex);
+                Logger.Warn("the update was refused as the app ended: " + ex.Reason);
+                // The server is told, but the end does not wait long for it
+                _self!.ReportAsync(ready.Tag, ex.Reason).Wait(ReportLimit);
+                return false;
             }
+
+            // A second copy may have been started while the work stopped: the updater would end that one
+            if (_self.IsOpenElsewhere) return false;
+            _self.ApplyOnExit(IsRestartAsked);
+            _isHandedOver = true;
+            return true;
         }
 
         private async Task WaitForWorkAsync()

@@ -28,6 +28,10 @@ public sealed class FinishStep
 public sealed partial class UploadsViewModel : ObservableObject, IDisposable
 {
     public const int MaxFinishAttempts = 5;
+
+    /// <summary>How long the app's end waits for details that are being sent.</summary>
+    public static readonly TimeSpan DetailsLimit = TimeSpan.FromSeconds(4);
+
     private static readonly Logger Logger = Log.For("upload");
 
     private readonly StudioShellViewModel _shell;
@@ -38,7 +42,8 @@ public sealed partial class UploadsViewModel : ObservableObject, IDisposable
     private readonly HashSet<string> _finishing = new();
     private Dictionary<string, FinishStep> _steps = new();
     private IUploadService? _service;
-    private int _sending;
+    private readonly List<Task> _details = new();
+    private volatile bool _isStopping;
     private int _dirty = 1;
     private FolderWatch? _watch;
 
@@ -91,7 +96,13 @@ public sealed partial class UploadsViewModel : ObservableObject, IDisposable
     {
         get
         {
-            if (Volatile.Read(ref _sending) > 0) return true;
+            // Stopped, it works no more
+            if (_isStopping) return false;
+            lock (_finishing)
+            {
+                if (_details.Count > 0) return true;
+            }
+
             try
             {
                 return _service?.List().Any(i => i.IsActive) == true;
@@ -141,7 +152,7 @@ public sealed partial class UploadsViewModel : ObservableObject, IDisposable
     {
         var service = _service;
         var channel = _shell.ActiveChannel;
-        if (service == null || channel == null || Staged.Count == 0) return 0;
+        if (_isStopping || service == null || channel == null || Staged.Count == 0) return 0;
         ErrorKey = null;
         var queued = 0;
         foreach (var plan in Staged)
@@ -266,6 +277,7 @@ public sealed partial class UploadsViewModel : ObservableObject, IDisposable
     /// <summary>Applies queue changes, scans the watched folder and finishes completed uploads.</summary>
     public void Tick()
     {
+        if (_isStopping) return;
         ScanWatchFolder();
         if (Interlocked.Exchange(ref _dirty, 0) == 0 || _service == null) return;
         IReadOnlyList<UploadSnapshot> list;
@@ -285,26 +297,72 @@ public sealed partial class UploadsViewModel : ObservableObject, IDisposable
         {
             bool start;
             lock (_finishing) start = _finishing.Add(done.Id);
-            if (start) _ = FinishAsync(done.Id, done.VideoId!);
+            if (start) Send(done.Id, done.VideoId!);
         }
+    }
+
+    /// <summary>The details of finished uploads that are being sent now.</summary>
+    public Task WhenDetailsSentAsync()
+    {
+        lock (_finishing) return Task.WhenAll(_details);
+    }
+
+    /// <summary>
+    /// The app ends: nothing new begins, the details that are being sent are waited for (<see cref="DetailsLimit"/>), what is
+    /// left of them is saved, and the queue is stopped until its store is free.
+    /// </summary>
+    /// <exception cref="TimeoutException">Details were still being sent: they are sent again at the next start.</exception>
+    public async Task StopAsync(CancellationToken cancellationToken = default, TimeSpan? detailsLimit = null)
+    {
+        _isStopping = true;
+        var details = WhenDetailsSentAsync();
+        var areSent = await Task.WhenAny(details, Task.Delay(detailsLimit ?? DetailsLimit, cancellationToken)).ConfigureAwait(false) == details;
+        SaveSteps(_service?.AccountId, _steps);
+        if (_service is { } service) await service.StopAsync(cancellationToken).ConfigureAwait(false);
+        _service = null;
+        if (!areSent) throw new TimeoutException("the details of an upload were still being sent");
     }
 
     public void Dispose()
     {
+        _isStopping = true;
         _service?.Dispose();
         _service = null;
     }
 
+    private void Send(string uploadId, string videoId)
+    {
+        var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        lock (_finishing) _details.Add(done.Task);
+        _ = SendAsync();
+
+        async Task SendAsync()
+        {
+            try
+            {
+                await FinishAsync(uploadId, videoId);
+            }
+            finally
+            {
+                // Out of the list before who waits for it goes on
+                lock (_finishing) _details.Remove(done.Task);
+                done.SetResult();
+            }
+        }
+    }
+
     private async Task FinishAsync(string uploadId, string videoId)
     {
-        var step = _steps[uploadId];
-        Interlocked.Increment(ref _sending);
+        // Of the account it began with, also when another one is chosen, or the app ends, meanwhile
+        var steps = _steps;
+        var account = _service?.AccountId;
+        var step = steps[uploadId];
         try
         {
             if (step.Language != null) await _api.UpdateVideoAsync(step.ChannelId, videoId, new VideoChanges { Language = step.Language });
             foreach (var playlist in step.PlaylistIds) await _api.AddToPlaylistAsync(step.ChannelId, playlist, new[] { videoId });
             if (step.PublishAt is { } at) await _api.ScheduleAsync(step.ChannelId, videoId, at, step.TimeZone);
-            _steps.Remove(uploadId);
+            steps.Remove(uploadId);
             Logger.Info("finished an upload's details");
         }
         catch (AuthRequiredException)
@@ -315,7 +373,7 @@ public sealed partial class UploadsViewModel : ObservableObject, IDisposable
         {
             // Scheduling or another detail is off for this person (404 feature_off / 402): drop it quietly, no retry.
             Logger.Info("an upload detail is off: " + ex.Message);
-            _steps.Remove(uploadId);
+            steps.Remove(uploadId);
             _ = _shell.RefreshFeaturesAsync(force: true);
         }
         catch (StudioApiException ex)
@@ -327,9 +385,8 @@ public sealed partial class UploadsViewModel : ObservableObject, IDisposable
         }
         finally
         {
-            Interlocked.Decrement(ref _sending);
-            SaveSteps();
-            if (_steps.TryGetValue(uploadId, out var left) && left.Attempts < MaxFinishAttempts)
+            SaveSteps(account, steps);
+            if (steps.TryGetValue(uploadId, out var left) && left.Attempts < MaxFinishAttempts)
             {
                 // Try again on a later tick.
                 _ = Task.Delay(TimeSpan.FromSeconds(Math.Min(60, 5 * left.Attempts))).ContinueWith(_ =>
@@ -377,6 +434,7 @@ public sealed partial class UploadsViewModel : ObservableObject, IDisposable
 
     private void SwitchAccount()
     {
+        if (_isStopping) return;
         var account = _shell.ActiveAccount;
         if (_service?.AccountId == account?.UserId) return;
         _service?.Dispose();
@@ -416,15 +474,17 @@ public sealed partial class UploadsViewModel : ObservableObject, IDisposable
         }
     }
 
-    private void SaveSteps()
+    private void SaveSteps() => SaveSteps(_service?.AccountId, _steps);
+
+    private void SaveSteps(string? account, Dictionary<string, FinishStep> steps)
     {
-        if (_service == null) return;
+        if (account == null) return;
         try
         {
             Directory.CreateDirectory(_stateDir);
-            var path = StepsPath(_service.AccountId);
+            var path = StepsPath(account);
             var temp = path + ".tmp";
-            File.WriteAllText(temp, JsonSerializer.Serialize(_steps));
+            File.WriteAllText(temp, JsonSerializer.Serialize(steps));
             File.Move(temp, path, overwrite: true);
         }
         catch (IOException ex)
