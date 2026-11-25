@@ -137,9 +137,9 @@ public sealed partial class App : Application
                 var (accents, wrong) = ViewerTheme.Check(shell.Root, shell.IsDark);
                 if (accents == 0 && (isWatch || automation.StartsWith("behind:", StringComparison.Ordinal))) wrong = "nothing found";
                 var title = titleBar.PreferredTheme;
-                pass = pass && shell.IsBuiltOnce && wrong.Length == 0 && title == (shell.IsDark ? TitleBarTheme.Dark : TitleBarTheme.Light);
+                pass = pass && shell.IsBuiltOnce && shell.LiveTitlesAreWhole && wrong.Length == 0 && title == (shell.IsDark ? TitleBarTheme.Dark : TitleBarTheme.Light);
                 File.WriteAllText(Environment.GetEnvironmentVariable("AUN_RESULT") ?? "aun-result.txt",
-                    $"AUTOMATION {automation} core={coreVersion} rails={shell.Home.Rails.Count} furthest={furthest:F1} caption={sawCaption} failed={shell.Watch?.PlaybackFailed} once={shell.IsBuiltOnce} accents={accents} notGold='{wrong}' titleBar={title} RESULT {(pass ? "PASS" : "FAIL")}");
+                    $"AUTOMATION {automation} core={coreVersion} rails={shell.Home.Rails.Count} furthest={furthest:F1} caption={sawCaption} failed={shell.Watch?.PlaybackFailed} once={shell.IsBuiltOnce} accents={accents} notGold='{wrong}' titleBar={title} titlesWhole={shell.LiveTitlesAreWhole} RESULT {(pass ? "PASS" : "FAIL")}");
                 player.Stop();
                 Exit();
             };

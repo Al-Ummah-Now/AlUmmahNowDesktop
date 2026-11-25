@@ -124,7 +124,7 @@ public sealed partial class Shell
         thumb.Children.Add(new FontIcon { Glyph = "", FontSize = 32, Opacity = 0.7 });
         if (card.ThumbnailUrl != null) thumb.Children.Add(new Image { Stretch = Stretch.UniformToFill, Source = new BitmapImage(new Uri(card.ThumbnailUrl)) });
         panel.Children.Add(thumb);
-        panel.Children.Add(new TextBlock { Text = card.Title, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis });
+        panel.Children.Add(LiveTitle(card.Title));
         panel.Children.Add(Badges(card.Badges));
         foreach (var text in new[] { card.Channel, card.Stats })
         {
@@ -136,6 +136,27 @@ public sealed partial class Shell
         button.Click += (_, _) => LiveList.Open(card);
         return button;
     }
+
+    /// <summary>
+    /// A title in the room of two lines, whether it takes one or two, so that what is under it is in line with the other
+    /// cards. The room is two lines of both scripts, unseen: it grows with the system's text size.
+    /// </summary>
+    private FrameworkElement LiveTitle(string text)
+    {
+        var title = new TextBlock { Text = text, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextWrapping = TextWrapping.WrapWholeWords, MaxLines = 2, TextTrimming = TextTrimming.WordEllipsis };
+        var room = new TextBlock { Text = "Aغ\nAغ", FontWeight = title.FontWeight, Opacity = 0, IsHitTestVisible = false };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAccessibilityView(room, Microsoft.UI.Xaml.Automation.Peers.AccessibilityView.Raw);
+        var both = new Grid();
+        both.Children.Add(room);
+        both.Children.Add(title);
+        _liveTitles.Add(title);
+        return both;
+    }
+
+    private readonly List<TextBlock> _liveTitles = new();
+
+    /// <summary>No title of a live card is cut (CI's scenarios ask; the demo's fit).</summary>
+    public bool LiveTitlesAreWhole => _liveTitles.Where(t => t.IsLoaded).All(t => !t.IsTextTrimmed);
 
     private FrameworkElement Badges(IReadOnlyList<LiveBadge> badges)
     {

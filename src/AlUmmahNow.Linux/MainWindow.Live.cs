@@ -1,3 +1,4 @@
+using AlUmmahNow.App.I18n;
 using AlUmmahNow.App.Live;
 using AlUmmahNow.App.ViewModels;
 using AlUmmahNow.CoreBridge;
@@ -142,13 +143,7 @@ public sealed partial class MainWindow
         KeepAspect(thumb, 16, 9, 200);
         box.Append(thumb);
 
-        var title = Gtk.Label.New(card.Title);
-        title.SetHalign(Gtk.Align.Start);
-        title.SetSizeRequest(-1, TitleLine);
-        title.SetEllipsize(Pango.EllipsizeMode.End);
-        title.SetMaxWidthChars(30);
-        title.AddCssClass("heading");
-        box.Append(title);
+        box.Append(LiveTitle(card.Title, thumb));
         box.Append(Badges(card.Badges));
         foreach (var text in new[] { card.Channel, card.Stats })
         {
@@ -168,6 +163,47 @@ public sealed partial class MainWindow
         button.OnClicked += (_, _) => _liveList.Open(card);
         return button;
     }
+
+    /// <summary>
+    /// A title in the room of two lines, whether it takes one or two, so that what is under it is in line with the other
+    /// cards. One that is longer is cut between words: the toolkit's own ellipsis cuts inside one.
+    /// </summary>
+    private Gtk.Label LiveTitle(string text, Gtk.Widget card)
+    {
+        var title = Gtk.Label.New(text);
+        title.SetXalign(0);
+        title.SetYalign(0);
+        title.SetWrap(true);
+        title.SetWrapMode(Pango.WrapMode.Word);
+        title.SetLines(2);
+        title.SetEllipsize(Pango.EllipsizeMode.End);
+        title.SetMaxWidthChars(30);
+        title.SetSizeRequest(-1, 2 * TitleTextLine);
+        title.AddCssClass("heading");
+        _liveTitles.Add((title, text));
+        var last = -1;
+        title.AddTickCallback((_, _) =>
+        {
+            var width = card.GetWidth();
+            if (width <= 0 || width == last) return true;
+            last = width;
+            title.SetText(TextFit.InWords(text, t =>
+            {
+                var layout = title.CreatePangoLayout(t);
+                layout.SetWidth(width * Pango.Constants.SCALE);
+                layout.SetWrap(Pango.WrapMode.Word);
+                return layout.GetLineCount() <= 2;
+            }));
+            title.SetTooltipText(title.GetText() == text ? null : text);
+            return true;
+        });
+        return title;
+    }
+
+    private readonly List<(Gtk.Label Label, string Text)> _liveTitles = new();
+
+    /// <summary>No title of a live card is cut (CI's scenarios ask; the demo's fit).</summary>
+    public bool LiveTitlesAreWhole => _liveTitles.All(t => t.Label.GetText() == t.Text && !t.Label.GetLayout().IsEllipsized());
 
     private static Gtk.Widget Badges(IReadOnlyList<LiveBadge> badges)
     {
