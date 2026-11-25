@@ -28,6 +28,7 @@ review. Partner Center has no form to import; fill the questions below by hand (
 | Studio | Titles, descriptions, tags, category, language, playlists, schedules, delete and restore actions | when the person edits their videos | `src/AlUmmahNow.CoreBridge/Studio/StudioApiClient.cs` |
 | Studio | Passkey (WebAuthn) responses to the Auth server | only when adding or using a passkey | `src/AlUmmahNow.CoreBridge/Passkeys/NativePasskeyClient.cs` |
 | Studio | Reads the channel's analytics (nothing is sent beyond the request) | Analytics page | `src/AlUmmahNow.Studio/Analytics/AnalyticsViewModel.cs` |
+| Viewer and Studio (Windows, Linux), not the Microsoft Store copy | Which app, system, processor, version and release channel is running, to check for a new version. No account, no device or install id. | about 30 s after launch, every few hours, and on "Check now" | `src/AlUmmahNow.CoreBridge.Native/CoreUpdateChecker.cs` |
 | TV (Tizen) | Public catalogue requests only; no sign-in | always | `src/AlUmmahNow.Tizen/Program.cs` |
 
 Admin for Windows is staff-only and never goes to the Store (`docs/ADMIN_WINDOWS.md`).

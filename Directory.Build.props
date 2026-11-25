@@ -9,5 +9,7 @@
     <Product>Al Ummah Now</Product>
     <!-- Tagged release builds pass AunProd=true so they default to production. -->
     <DefineConstants Condition="'$(AunProd)' == 'true'">$(DefineConstants);AUN_PROD</DefineConstants>
+    <!-- The release workflow alone passes AunProd, true or false: any other build checks for no new version. -->
+    <DefineConstants Condition="'$(AunProd)' != ''">$(DefineConstants);AUN_RELEASE</DefineConstants>
   </PropertyGroup>
 </Project>

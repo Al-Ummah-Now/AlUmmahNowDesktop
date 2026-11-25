@@ -8,6 +8,7 @@
     <PackageReference Include="AlUmmahNow.Core" />
     <PackageReference Include="System.Security.Cryptography.ProtectedData" />
     <ProjectReference Include="..\AlUmmahNow.CoreBridge\AlUmmahNow.CoreBridge.csproj" />
+    <EmbeddedResource Include="UpdateKeys\update-keys.json*" LogicalName="%(Filename)%(Extension)" />
     <InternalsVisibleTo Include="AlUmmahNow.CoreBridge.Native.Tests" />
   </ItemGroup>
 </Project>

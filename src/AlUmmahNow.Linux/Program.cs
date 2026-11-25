@@ -2,7 +2,9 @@ using AlUmmahNow.CoreBridge.Logging;
 using AlUmmahNow.App.I18n;
 using AlUmmahNow.App.Media;
 using AlUmmahNow.App.Navigation;
+using AlUmmahNow.App.Demo;
 using AlUmmahNow.App.Services;
+using AlUmmahNow.App.Updates;
 using AlUmmahNow.App.ViewModels;
 using AlUmmahNow.CoreBridge.Native;
 using AlUmmahNow.CoreBridge.Temporary;
@@ -60,6 +62,14 @@ AlUmmahNow.CoreBridge.ILiveClient live = Environment.GetEnvironmentVariable("AUN
         Environment.GetEnvironmentVariable("AUN_DEMO_LIVE") == "off", Environment.GetEnvironmentVariable("AUN_DEMO_REMIND") == "fail")
     : new HttpLiveClient(http, environment.VideosApi, HttpLiveClient.TokenOf(authSession));
 var coreVersion = CoreRuntime.VersionOrNone();
+// The check for a new version: none in a demo, or in a build that is no release.
+var isDemo = Environment.GetEnvironmentVariable("AUN_DEMO") == "1";
+var updateInstall = isDemo ? UpdateInstall.Development : UpdateInstalls.OnLinux(UpdateInstalls.IsReleaseBuild, File.Exists("/.flatpak-info"), AppContext.BaseDirectory, UpdateApp.Viewer);
+MainWindow? viewer = null;
+bool IsBusy() => viewer?.IsLivePlaying == true;
+var updateScene = UpdateScene.FromEnvironment(localizer, UpdateInstall.Flatpak, IsBusy);
+var version = UpdateText.VersionOf(typeof(MainWindow).Assembly);
+var updateStore = new UpdateStore(Path.Combine(configHome, "alummahnow", "updates.json"));
 var app = Adw.Application.New("net.alummahnow.AlUmmahNow", Gio.ApplicationFlags.NonUnique);
 var exitCode = 0;
 
@@ -86,7 +96,13 @@ app.OnActivate += async (_, _) =>
     var player = new GstMediaPlayer();
     MainWindow? window = null;
     app.OnShutdown += (_, _) => window?.Close();
-    window = new MainWindow(app, catalog, localizer, navigator, player, session, http, settings, store, auth, live, environment.ShortLinkHost);
+    var updates = updateScene?.Service ?? new UpdateService(
+        new CoreUpdateChecker(environment.VideosApi, "viewer", "linux", version, "AlUmmahNowLinux/" + version, updateStore.Load().Core),
+        updateStore, updateInstall, version, IsBusy, new DownloadPageDelivery(new ShellBrowserLauncher()));
+    var closing = new CancellationTokenSource();
+    app.OnShutdown += (_, _) => closing.Cancel();
+    window = new MainWindow(app, catalog, localizer, navigator, player, session, http, settings, store, auth, live, environment.ShortLinkHost, updates);
+    viewer = window;
     try
     {
         auth.Restore();
@@ -119,6 +135,9 @@ app.OnActivate += async (_, _) =>
                 ? asAsked
                 : window.Home.Rails.Count > 0;
             pass = pass && window.LiveTitlesAreWhole;
+            var updateWrong = updateScene?.Wrong(window.Updates);
+            pass = pass && updateWrong == null;
+            if (updateScene != null) Log.For("automation").Info($"UPDATE {updateScene.Name} {updateWrong ?? "ok"}");
             Log.For("automation").Info($"AUTOMATION {automation} core={coreVersion} rails={window.Home.Rails.Count} furthest={furthest:F1} caption={sawCaption} titlesWhole={window.LiveTitlesAreWhole} RESULT {(pass ? "PASS" : "FAIL")}");
             exitCode = pass ? 0 : 3;
             app.Quit();
@@ -127,6 +146,17 @@ app.OnActivate += async (_, _) =>
     }
 
     var started = window.StartAsync();
+    _ = updates.RunAsync(closing.Token);
+    if (updateScene != null)
+    {
+        GLib.Functions.TimeoutAdd(0, 6000, () =>
+        {
+            if (updateScene.IsInSettings && updates.IsSectionVisible) navigator.Push(new Route.Settings());
+            _ = updateScene.ActAsync(window.Updates);
+            return false;
+        });
+    }
+
     if (automation.StartsWith("watch:", StringComparison.Ordinal)) navigator.Push(new Route.Watch(automation.Substring(6)));
     if (AlUmmahNow.App.Demo.LiveAutomation.RouteOf(automation) is { } route)
     {

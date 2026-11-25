@@ -4,6 +4,7 @@ using AlUmmahNow.CoreBridge.Logging;
 using AlUmmahNow.CoreBridge.Passkeys;
 using AlUmmahNow.CoreBridge.Studio;
 using AlUmmahNow.Studio.Shell;
+using AlUmmahNow.Updates.Views;
 using Microsoft.UI;
 using Microsoft.UI.Input;
 using Microsoft.UI.Windowing;
@@ -51,6 +52,9 @@ internal sealed class StudioWindow
     private StudioPages? _studioPages;
     private bool _syncingPages;
     private bool _rail;
+    private readonly StackPanel _notices = new();
+    private readonly Grid _root;
+    private UpdateViews? _updates;
     // The web Fawanees header's colours for the app's theme (Light or Dark), from the registry's web tokens.
     private readonly FawaneesHeader _header = FawaneesHeader.For(Application.Current.RequestedTheme == ApplicationTheme.Dark);
 
@@ -124,7 +128,7 @@ internal sealed class StudioWindow
         Grid.SetColumn(main, 1);
         _studio.Children.Add(main);
 
-        var root = new Grid { FlowDirection = _direction, Background = LanternGlass.Res("StudioPageBrush") };
+        var root = _root = new Grid { FlowDirection = _direction, Background = LanternGlass.Res("StudioPageBrush") };
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
@@ -132,9 +136,11 @@ internal sealed class StudioWindow
         if (!string.IsNullOrEmpty(banner))
         {
             var info = new InfoBar { IsOpen = true, IsClosable = false, Severity = InfoBarSeverity.Informational, Message = banner };
-            Grid.SetRow(info, 1);
-            root.Children.Add(info);
+            _notices.Children.Add(info);
         }
+
+        Grid.SetRow(_notices, 1);
+        root.Children.Add(_notices);
 
         Grid.SetRow(_body, 2);
         root.Children.Add(_body);
@@ -188,6 +194,27 @@ internal sealed class StudioWindow
     }
 
     public Window Window { get; }
+
+    /// <summary>The update bar under the header, and the screen of an unsupported version in place of everything under it.</summary>
+    public void UseUpdates(UpdateViews updates)
+    {
+        _updates = updates;
+        _notices.Children.Insert(0, updates.Bar);
+        Grid.SetRow(updates.Forced, 1);
+        Grid.SetRowSpan(updates.Forced, 2);
+        _root.Children.Add(updates.Forced);
+        updates.ForcedChanged += ApplyForced;
+        ApplyForced();
+    }
+
+    private void ApplyForced()
+    {
+        if (_updates is not { } updates) return;
+        _identityFlyout.Hide();
+        _notices.Visibility = _body.Visibility = updates.IsForced ? Visibility.Collapsed : Visibility.Visible;
+        Render();
+        if (updates.IsForced) updates.FocusForced();
+    }
 
     /// <summary>CI: whether the header search has keyboard focus (it must not when the window opens).</summary>
     public bool SearchHasFocus => _searchText?.XamlRoot is { } r && ReferenceEquals(Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(r), _searchText);
@@ -467,7 +494,7 @@ internal sealed class StudioWindow
             ShellState.NeedsReauth => Status(_l["studio.shell.reauthTitle"], _l.Format("studio.shell.reauthBody", Localizer.Isolate(_shell.ActiveAccountName ?? "")), SignInActions()),
             _ => _studio,
         });
-        _search.Visibility = _shell.State == ShellState.Ready ? Visibility.Visible : Visibility.Collapsed;
+        _search.Visibility = _shell.State == ShellState.Ready && _updates?.IsForced != true ? Visibility.Visible : Visibility.Collapsed;
         if (_shell.State == ShellState.Ready && !_readySettled)
         {
             // The signed-in Studio replaces the sign-in state: settle once its controls exist.

@@ -137,6 +137,19 @@ Not needed for the Store (the Store signs the package). Needed so a downloaded M
   `net.alummahnow.*` ids. The Flatpak bundle in each release is for direct install only.
 - **Snap**, **winget**: not planned. winget would need the signed MSI first.
 
+## How the apps learn of a release
+
+Wiki epic AUN-APP-UPDATES. The viewer and Studio on Windows and Linux ask `GET /api/v1/app-config` (through Core) about
+30 s after launch, every `checkHours`, and on Settings → Updates → Check now. They tell of a new version in a bar, or in a
+screen when theirs is below the minimum an admin set. The screen waits for a running upload, encode or watched live stream.
+
+- They download and install nothing. The only link is compiled in (`UpdateInstalls.DownloadPage`: this repo's releases
+  page) and opens in the browser; nothing in an answer can change it.
+- They carry the repo's root public key and the root-signed key list (`src/AlUmmahNow.CoreBridge.Native/UpdateKeys`,
+  signed byte for byte, see `.gitattributes`), so they tell only of releases the server has verified (`signed`).
+- Only builds of `release.yml` check (it alone passes `AunProd`). The Microsoft Store copy does not: the Store updates it.
+- All of it is behind the server's `appUpdates` switch. Off: no bar, no screen, no Updates section.
+
 ## Keep it true
 
 When a feature changes what the apps send (analytics, crash reports, push, comments, new uploads), update

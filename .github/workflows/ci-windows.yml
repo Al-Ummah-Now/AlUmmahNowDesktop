@@ -136,3 +136,63 @@ jobs:
         with:
           name: windows-msix
           path: artifacts/msix
+
+  # The update bar, the screen of an unsupported version and Settings → Updates, in both languages and modes.
+  updates:
+    runs-on: windows-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Fetch AlUmmahNow.Core
+        shell: bash
+        run: ./scripts/fetch-core.sh
+      - name: Enable Media Foundation (optional feature on Windows Server)
+        continue-on-error: true
+        run: |
+          Install-WindowsFeature Server-Media-Foundation | Format-List
+      - name: Build unpackaged app
+        run: dotnet build src/AlUmmahNow.Windows -c Release -p:Platform=x64
+      - name: Update scenes
+        env:
+          AUN_DEMO_TODAY: "2026-11-21"
+          AUN_DEMO: "1"
+          AUN_DEMO_LIVE: "1"
+        shell: pwsh
+        run: |
+          ./scripts/set-resolution.ps1 1920 1080
+          $exe = Resolve-Path "src/AlUmmahNow.Windows/bin/x64/Release/net9.0-windows10.0.22621.0/win-x64/AlUmmahNow.exe"
+          $out = (New-Item -ItemType Directory -Force artifacts/updates).FullName
+          $env:AUN_DEMO_THUMBS = (Resolve-Path tests/fixtures/viewer-thumbs).Path
+          $env:AUN_FIXTURE_MEDIA = (Resolve-Path tests/fixtures/watch).Path
+          $failed = @()
+          foreach ($scene in "bar","notes","dismissed","forced","waiting","required","settings","uptodate","offline","off") { foreach ($lang in "en","ar") { foreach ($theme in "dark","light") {
+            $name = "windows-viewer-update-$scene-$lang-$theme"
+            $env:AUN_DEMO_UPDATE = $scene
+            # It waits for a stream that is on air and playing
+            if ($scene -eq "waiting") { ./scripts/windows-scenario.ps1 $exe $lang $theme "live:demo-live" $name $out 19 23 } else { ./scripts/windows-scenario.ps1 $exe $lang $theme home $name $out 13 17 }
+            if (-not (Select-String -Quiet "update=${scene}:ok.*RESULT PASS" "$out/$name.txt")) { $failed += $name }
+          } } }
+          # High contrast, and off again: the bar and the screen are the system's colors.
+          $contrast = ./scripts/high-contrast.ps1 on
+          if ("$contrast" -notmatch "on=True") { $failed += "high contrast was not turned on: $contrast" }
+          foreach ($scene in "bar","forced","settings") { foreach ($lang in "en","ar") {
+            $name = "windows-viewer-update-$scene-$lang-highcontrast"
+            $env:AUN_DEMO_UPDATE = $scene
+            ./scripts/windows-scenario.ps1 $exe $lang dark home $name $out 13 17
+            if (-not (Select-String -Quiet "update=${scene}:ok.*RESULT PASS" "$out/$name.txt")) { $failed += $name }
+          } }
+          ./scripts/high-contrast.ps1 off
+          # A scene whose window is not as it must be fails.
+          $wrong = (New-Item -ItemType Directory -Force artifacts/updates-wrong).FullName
+          $env:AUN_DEMO_UPDATE = "forced"; $env:AUN_DEMO_UPDATE_ANSWER = "bar"
+          ./scripts/windows-scenario.ps1 $exe en dark home wrong $wrong 13 17
+          if (-not (Select-String -Quiet "RESULT FAIL" "$wrong/wrong.txt")) { $failed += "a wrong scene passed" }
+          if ($failed.Count -gt 0) { throw "failed: $failed" }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-updates
+          path: artifacts/updates

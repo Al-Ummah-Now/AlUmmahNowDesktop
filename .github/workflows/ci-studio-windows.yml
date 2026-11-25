@@ -190,3 +190,70 @@ jobs:
         with:
           name: studio-windows
           path: artifacts/studio
+
+  # The update bar, the screen of an unsupported version and Settings → Updates, in both languages and modes.
+  updates:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Fetch AlUmmahNow.Core
+        shell: bash
+        run: ./scripts/fetch-core.sh
+      - name: Build Studio
+        run: dotnet build src/AlUmmahNow.Studio.Windows -c Release -p:Platform=x64
+      - name: Update scenes
+        env:
+          AUN_DEMO_TODAY: "2026-11-21"
+        shell: pwsh
+        run: |
+          ./scripts/set-resolution.ps1 1920 1080
+          $exe = (Resolve-Path "src/AlUmmahNow.Studio.Windows/bin/x64/Release/net9.0-windows10.0.22621.0/win-x64/AlUmmahNowStudio.exe").Path
+          $out = (New-Item -ItemType Directory -Force artifacts/updates).FullName
+          $watch = (New-Item -ItemType Directory -Force watched).FullName
+          foreach ($n in "friday-khutbah.mp4","seerah-part-4.mov") { $f = [IO.File]::Create("$watch/$n"); $f.SetLength(90000000); $f.Close() }
+          $failed = @()
+          function Shot($scene, $lang, $theme, $size, $mode = "") {
+            $name = "windows-studio-update-$scene-$lang-$theme-$size"
+            if ($mode) { $name += "-$mode" }
+            $env:AUN_DEMO_UPDATE = $scene
+            $env:AUN_WATCH_DIR = $(if ($scene -eq "waiting") { $watch } else { "" })
+            $tab = $(if ($scene -eq "waiting") { "uploads" } else { "videos" })
+            ./scripts/windows-studio-shot.ps1 $exe $lang $theme $size $mode $name $out $tab | Out-Host
+            if (-not (Select-String -Quiet "update=${scene}:ok.*RESULT PASS" "$out/$name.txt")) { $script:failed += $name }
+          }
+          foreach ($scene in "bar","notes","dismissed","forced","waiting","required","settings","uptodate","offline","off") { foreach ($lang in "en","ar") { foreach ($theme in "dark","light") { Shot $scene $lang $theme "1440x900" } } }
+          # The smallest window: nothing of the bar or the screen is cut.
+          foreach ($scene in "bar","forced") { foreach ($lang in "en","ar") { Shot $scene $lang "dark" "1024x700" } }
+          # Screen readers: the bar's controls have names; behind the screen of an unsupported version nothing is left to reach.
+          $read = (New-Item -ItemType Directory -Force artifacts/updates-read).FullName
+          $env:AUN_WATCH_DIR = ""
+          foreach ($scene in "bar","forced","required") { $env:AUN_DEMO_UPDATE = $scene; ./scripts/windows-studio-scenario.ps1 $exe en videos shell "read-$scene" $read }
+          function Has($file, $text) { Select-String -Quiet -SimpleMatch $text "$read/$file.uia.txt" }
+          if (-not (Has "read-bar" "`tUpdateDownload`tDownload")) { $failed += "Download is not exposed" }
+          if (-not (Has "read-bar" "`tUpdateClose`tClose for this version")) { $failed += "the bar's close has no name" }
+          if (-not (Has "read-bar" "`tPage_settings`t")) { $failed += "the page list is not there under the bar" }
+          if (-not (Has "read-forced" "`tUpdateForcedDownload`tDownload")) { $failed += "the screen's Download is not exposed" }
+          if (-not (Has "read-forced" "`tUpdateQuit`tQuit")) { $failed += "Quit is not exposed" }
+          foreach ($behind in "`tPage_", "`tTitleSearch`t", "`tIdentityMenu`t") { if (Has "read-forced" $behind) { $failed += "reachable behind the screen: $behind" } }
+          if (Has "read-required" "`tUpdateClose`t") { $failed += "a bar that stays can be closed" }
+          # High contrast, and off again: the bar, the screen and the section are the system's colors.
+          $contrast = ./scripts/high-contrast.ps1 on
+          if ("$contrast" -notmatch "on=True") { $failed += "high contrast was not turned on: $contrast" }
+          foreach ($scene in "bar","notes","forced","settings") { foreach ($lang in "en","ar") { Shot $scene $lang "dark" "1440x900" "highcontrast" } }
+          ./scripts/high-contrast.ps1 off
+          # A scene whose window is not as it must be fails.
+          $env:AUN_DEMO_UPDATE = "forced"; $env:AUN_DEMO_UPDATE_ANSWER = "bar"
+          ./scripts/windows-studio-scenario.ps1 $exe en videos shell wrong $read
+          if (-not (Select-String -Quiet "RESULT FAIL" "$read/wrong.txt")) { $failed += "a wrong scene passed" }
+          if ($failed.Count -gt 0) { throw "failed: $failed" }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: studio-windows-updates
+          path: |
+            artifacts/updates
+            artifacts/updates-read

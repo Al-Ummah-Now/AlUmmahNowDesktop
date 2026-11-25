@@ -69,6 +69,15 @@ public sealed class EncodeQueue
 
     public event EventHandler? Changed;
 
+    /// <summary>A job is running, or the next one is about to.</summary>
+    public bool IsBusy
+    {
+        get
+        {
+            lock (_gate) return _pumping;
+        }
+    }
+
     public List<EncodeJob> Jobs { get; } = new();
 
     public EncodeJob Add(EncodeRequest request)

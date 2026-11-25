@@ -15,5 +15,7 @@
     <ProjectReference Include="..\AlUmmahNow.CoreBridge\AlUmmahNow.CoreBridge.csproj" />
     <ProjectReference Include="..\AlUmmahNow.CoreBridge.Native\AlUmmahNow.CoreBridge.Native.csproj" />
     <ProjectReference Include="..\AlUmmahNow.Platform.Linux\AlUmmahNow.Platform.Linux.csproj" />
+    <!-- The update views of both Linux apps -->
+    <Compile Include="..\Shared\Gtk\*.cs" Link="Updates\%(Filename)%(Extension)" />
   </ItemGroup>
 </Project>

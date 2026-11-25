@@ -1,6 +1,8 @@
 using Path = System.IO.Path;
 using AlUmmahNow.App.I18n;
+using AlUmmahNow.App.Demo;
 using AlUmmahNow.App.Services;
+using AlUmmahNow.App.Updates;
 using AlUmmahNow.CoreBridge;
 using AlUmmahNow.CoreBridge.Logging;
 using AlUmmahNow.CoreBridge.Native;
@@ -14,6 +16,7 @@ using AlUmmahNow.Studio.Shell;
 using AlUmmahNow.Studio.Upload;
 using AlUmmahNow.Studio.Videos;
 using AlUmmahNow.Studio.Analytics;
+using AlUmmahNow.Updates.Views;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -27,6 +30,7 @@ public sealed partial class App : Application
     private UploadsViewModel? _uploads;
     private DispatcherQueueTimer? _sceneTimer;
     private DispatcherQueueTimer? _endTimer;
+    private DispatcherQueueTimer? _updateTimer;
     private StudioWindow? _window;
 
     public App()
@@ -81,11 +85,13 @@ public sealed partial class App : Application
         Log.AddSink(new FileLogSink(Path.Combine(dataRoot, "logs", "studio.log")));
         Log.AddSink(new DebugLogSink());
         var log = Log.For("app");
-        var version = typeof(App).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+        var version = UpdateText.VersionOf(typeof(App).Assembly);
         log.Info($"Al Ummah Now Studio {version} for Windows, environment {environment.Name}, core {CoreRuntime.VersionOrNone()}");
 
         var settingsStore = new SettingsStore(Path.Combine(dataRoot, "settings.json"));
         var settings = settingsStore.Load();
+        // A forced theme is the one Settings shows as chosen.
+        if (Environment.GetEnvironmentVariable("AUN_THEME") is "dark" or "light") settings.Theme = RequestedTheme == ApplicationTheme.Light ? ThemePreference.Light : ThemePreference.Dark;
         // The saved language (Settings), Arabic by default; CI and screenshots force one with AUN_LANG.
         var localizer = new Localizer(Environment.GetEnvironmentVariable("AUN_LANG") is { Length: > 0 } l ? l : settings.Language);
         var userAgent = "AlUmmahNowStudioWindows/" + version;
@@ -180,7 +186,16 @@ public sealed partial class App : Application
         window.AddPage(StudioPages.Analytics, localizer["studio.tab.analytics"], Symbol.Calculator, analytics.Root);
         window.AddPage(StudioPages.Encode, localizer["studio.tab.encode"], Symbol.Video, encodePage.Root);
         window.AddPage(StudioPages.Timeline, localizer["studio.tab.timeline"], Symbol.Edit, timeline.Root);
-        var settingsPage = new SettingsPage(localizer, settings, settingsStore, shell, uploadsVm, PickFolderAsync, window.SignOut, window.AddPasskeyAsync, version);
+        // The check for a new version: none in a demo, or in a build that is no release.
+        bool IsBusy() => uploadsVm.ActiveCount > 0 || encode.IsBusy;
+        var updateScene = UpdateScene.FromEnvironment(localizer, UpdateInstall.Installer, IsBusy);
+        var updateStore = new UpdateStore(Path.Combine(dataRoot, "updates.json"));
+        var updates = updateScene?.Service ?? new UpdateService(
+            new CoreUpdateChecker(environment.VideosApi, "studio", "windows", version, userAgent, updateStore.Load().Core),
+            updateStore, demo ? UpdateInstall.Development : WindowsInstall.Detect(), version, IsBusy, new DownloadPageDelivery(new ShellBrowserLauncher()));
+        var updateViews = new UpdateViews(updates, new UpdateText(localizer, UpdateApp.Studio, updates), UpdateText.Icon(UpdateApp.Studio), Exit);
+        window.UseUpdates(updateViews);
+        var settingsPage = new SettingsPage(localizer, settings, settingsStore, shell, uploadsVm, PickFolderAsync, window.SignOut, window.AddPasskeyAsync, updates.InstalledVersion, updateViews);
         window.AddPage(StudioPages.Settings, localizer["studio.tab.settings"], Symbol.Setting, settingsPage.Root);
         window.UsePages(pages);
         window.SearchRequested += (_, q) => videos.SearchFor(q);
@@ -190,7 +205,13 @@ public sealed partial class App : Application
         {
             if (e.WindowActivationState != WindowActivationState.Deactivated) _ = shell.RefreshFeaturesAsync();
         };
-        window.Window.Closed += (_, _) => uploadsVm.Dispose();
+        var closing = new CancellationTokenSource();
+        _ = updates.RunAsync(closing.Token);
+        window.Window.Closed += (_, _) =>
+        {
+            closing.Cancel();
+            uploadsVm.Dispose();
+        };
 
         _refresh = ui.CreateTimer();
         _refresh.Interval = TimeSpan.FromMilliseconds(300);
@@ -210,6 +231,20 @@ public sealed partial class App : Application
         {
             var source = automation.Substring(7);
             job = encode.Add(new EncodeRequest(source, source + ".out.mp4", EncodePreset.Lecture));
+        }
+
+        if (updateScene != null)
+        {
+            _updateTimer = ui.CreateTimer();
+            _updateTimer.Interval = TimeSpan.FromSeconds(6);
+            _updateTimer.IsRepeating = false;
+            _updateTimer.Tick += (_, _) =>
+            {
+                if (updateScene.IsInSettings) window.ShowPage(StudioPages.Settings);
+                // The page's controls are there a moment later
+                ui.TryEnqueue(DispatcherQueuePriority.Low, () => _ = updateScene.ActAsync(updateViews));
+            };
+            _updateTimer.Start();
         }
 
         if (scene.Length > 0)
@@ -256,10 +291,14 @@ public sealed partial class App : Application
                     && (scene != "cardhover" || analytics.PickedIsHovered)
                     && (scene != "avatar" || look.AvatarPictures >= 3)
                     && look.Mirrored == 0 && look.Unreadable == 0
-                    && (automation != "shell" || look.Avatars > 0) && (demo || look.Pictures > 0)
+                    && (automation != "shell" || updateViews.IsForced || look.Avatars > 0) && (demo || look.Pictures > 0)
                     && (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("AUN_DEMO_THUMBS")) || pages.Current is not (StudioPages.Videos or StudioPages.Analytics) || look.Pictures > 0)
                     && (!scene.StartsWith("highcontrast", StringComparison.Ordinal) || LanternGlass.IsHighContrast);
-                File.WriteAllText(ResultPath, $"AUTOMATION {tabName} page={pages.Current} upload={pages.IsVisible(StudioPages.Uploads)} analytics={pages.IsVisible(StudioPages.Analytics)} bulkSchedule={uploadsVm.BulkScheduleOn} scene={scene} shell={shell.State} channel={shell.ActiveChannel?.Id} accounts={shell.AccountList.Count} uploads={snapshot.Count} uploadsDone={uploadsDone} encode={job?.Status} encoder={job?.UsedEncoder?.Name} error={job?.Error} searchFocused={window.SearchHasFocus} fieldFocused={window.FieldHasFocus} cardsWhole={videos.CardsAreWhole} searchHovered={window.SearchIsHovered} pickedReadable={analytics.PickedIsReadable} pickedHovered={analytics.PickedIsHovered} chartSeen={analytics.ChartIsSeen} cutOff='{cutOff}' pictures={look.Pictures} mirrored={look.Mirrored} avatars={look.Avatars} avatarPictures={look.AvatarPictures} unreadableInitials={look.Unreadable} highContrast={LanternGlass.IsHighContrast} painted={LanternGlass.IsPainted} missing={LanternGlass.Missing} unreadableDialogs={LanternGlass.UnreadableDialogs} checkedDialogs={LanternGlass.CheckedDialogs} deletedShown={videos.DeletedIsShown} RESULT {(pass ? "PASS" : "FAIL")}");
+                var updateWrong = updateScene?.Wrong(updateViews);
+                if (updateWrong == null && updateScene != null && !updateViews.IsPainted) updateWrong = "not the system's colors";
+                pass = pass && updateWrong == null;
+                var updateLine = updateScene == null ? "" : $" update={updateScene.Name}:{updateWrong ?? "ok"}";
+                File.WriteAllText(ResultPath, $"AUTOMATION {tabName} page={pages.Current} upload={pages.IsVisible(StudioPages.Uploads)} analytics={pages.IsVisible(StudioPages.Analytics)} bulkSchedule={uploadsVm.BulkScheduleOn} scene={scene}{updateLine} shell={shell.State} channel={shell.ActiveChannel?.Id} accounts={shell.AccountList.Count} uploads={snapshot.Count} uploadsDone={uploadsDone} encode={job?.Status} encoder={job?.UsedEncoder?.Name} error={job?.Error} searchFocused={window.SearchHasFocus} fieldFocused={window.FieldHasFocus} cardsWhole={videos.CardsAreWhole} searchHovered={window.SearchIsHovered} pickedReadable={analytics.PickedIsReadable} pickedHovered={analytics.PickedIsHovered} chartSeen={analytics.ChartIsSeen} cutOff='{cutOff}' pictures={look.Pictures} mirrored={look.Mirrored} avatars={look.Avatars} avatarPictures={look.AvatarPictures} unreadableInitials={look.Unreadable} highContrast={LanternGlass.IsHighContrast} painted={LanternGlass.IsPainted} missing={LanternGlass.Missing} unreadableDialogs={LanternGlass.UnreadableDialogs} checkedDialogs={LanternGlass.CheckedDialogs} deletedShown={videos.DeletedIsShown} RESULT {(pass ? "PASS" : "FAIL")}");
                 Exit();
             };
             _endTimer.Start();
