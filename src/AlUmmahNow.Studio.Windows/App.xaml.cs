@@ -276,8 +276,16 @@ public sealed partial class App : Application
             _endTimer = ui.CreateTimer();
             _endTimer.Interval = TimeSpan.FromSeconds(exitAfter);
             _endTimer.IsRepeating = false;
+            var told = AlUmmahNow.App.Demo.AutomationEnd.FromEnvironment();
             _endTimer.Tick += (_, _) =>
             {
+                if (told.Waits())
+                {
+                    _endTimer.Interval = TimeSpan.FromMilliseconds(500);
+                    _endTimer.Start();
+                    return;
+                }
+
                 var snapshot = uploadsVm.Items;
                 var uploadsDone = snapshot.Count > 0 && snapshot.All(i => i.Phase == UploadPhase.Done);
                 var pass = job != null ? job.Status == EncodeStatus.Completed

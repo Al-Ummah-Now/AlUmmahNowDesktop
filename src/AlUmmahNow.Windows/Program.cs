@@ -152,8 +152,16 @@ public sealed partial class App : Application
             var end = _endTimer = ui.CreateTimer();
             end.Interval = TimeSpan.FromSeconds(exitAfter);
             end.IsRepeating = false;
+            var told = AutomationEnd.FromEnvironment();
             end.Tick += (_, _) =>
             {
+                if (told.Waits())
+                {
+                    end.Interval = TimeSpan.FromMilliseconds(500);
+                    end.Start();
+                    return;
+                }
+
                 var isWatch = automation.StartsWith("watch:", StringComparison.Ordinal);
                 var pass = isWatch ? furthest > 2 && (sawCaption || Environment.GetEnvironmentVariable("AUN_EXPECT_CAPTION") == "0")
                     : LiveAutomation.Passed(automation, shell.LiveList, shell.LiveWatch, auth, furthest) is { } asAsked ? asAsked
