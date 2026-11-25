@@ -16,6 +16,8 @@ namespace AlUmmahNow.App.Navigation
         /// <summary>Everything on air and coming.</summary>
         public sealed class LiveList : Route { }
 
+        public sealed class Settings : Route { }
+
         public sealed class Live : Route
         {
             public Live(string streamId) => StreamId = streamId;

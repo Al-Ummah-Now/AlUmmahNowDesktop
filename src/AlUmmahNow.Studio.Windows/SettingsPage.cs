@@ -4,6 +4,7 @@ using AlUmmahNow.App.Services;
 using AlUmmahNow.CoreBridge.Studio;
 using AlUmmahNow.Studio.Shell;
 using AlUmmahNow.Studio.Upload;
+using AlUmmahNow.Updates.Views;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
@@ -28,7 +29,7 @@ internal sealed class SettingsPage
     private readonly Func<StudioAccount, Task> _signOut;
 
     public SettingsPage(Localizer l, AppSettings settings, SettingsStore store, StudioShellViewModel shell, UploadsViewModel uploads,
-        Func<Task<string?>> chooseFolder, Func<StudioAccount, Task> signOut, Func<Task> addPasskey, string version)
+        Func<Task<string?>> chooseFolder, Func<StudioAccount, Task> signOut, Func<Task> addPasskey, string version, UpdateViews updates)
     {
         _l = l;
         _shell = shell;
@@ -71,6 +72,10 @@ internal sealed class SettingsPage
         about.Children.Add(new TextBlock { Text = l["studio.name"] });
         about.Children.Add(new TextBlock { Text = l.Format("studio.settings.version", l.Version(version)), Foreground = LanternGlass.Res("StudioMutedBrush") });
         left.Children.Add(LanternGlass.Card(about));
+        // Only while the server's switch is on
+        var updatesCard = LanternGlass.Card(updates.SectionBody, updates.SectionActions);
+        left.Children.Add(updatesCard);
+        updates.UseSection(updatesCard);
 
         var accountsBody = new StackPanel { Spacing = 8 };
         accountsBody.Children.Add(Heading(l[IdentityMenu.AccountsHeadingKey]));

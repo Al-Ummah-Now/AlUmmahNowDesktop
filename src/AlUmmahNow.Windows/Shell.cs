@@ -4,8 +4,10 @@ using AlUmmahNow.App.I18n;
 using AlUmmahNow.App.Live;
 using AlUmmahNow.App.Navigation;
 using AlUmmahNow.App.Services;
+using AlUmmahNow.App.Updates;
 using AlUmmahNow.App.ViewModels;
 using AlUmmahNow.CoreBridge;
+using AlUmmahNow.Updates.Views;
 using Microsoft.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -35,9 +37,14 @@ public sealed partial class Shell
     private WatchViewModel? _watch;
     private string? _watchId;
     private Action? _unbind;
+    private readonly UpdateService _updates;
+    private readonly Action _quit;
+    private bool _hasSettings;
 
-    public Shell(ICatalogClient catalog, Localizer localizer, Navigator navigator, WindowsMediaPlayer player, SmtcSession session, AppSettings settings, SettingsStore store, AuthViewModel auth, ILiveClient live, string shortLinkHost)
+    public Shell(ICatalogClient catalog, Localizer localizer, Navigator navigator, WindowsMediaPlayer player, SmtcSession session, AppSettings settings, SettingsStore store, AuthViewModel auth, ILiveClient live, string shortLinkHost, UpdateService updates, Action quit)
     {
+        _updates = updates;
+        _quit = quit;
         _live = live;
         _shortLinkHost = shortLinkHost;
         LiveList = new LiveListViewModel(live, localizer, navigator);
@@ -59,10 +66,23 @@ public sealed partial class Shell
             if (navigator.Current is not Route.Watch && navigator.Current is not Route.Live) _ = RefreshLiveAsync();
         };
         localizer.LanguageChanged += (_, _) => Render();
+        updates.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName != nameof(UpdateService.IsSectionVisible) || updates.IsSectionVisible == _hasSettings) return;
+            // The page is gone with the section: the settings have nothing else
+            if (!updates.IsSectionVisible && navigator.Current is Route.Settings) navigator.Back();
+            else Render();
+        };
         AddKey(VirtualKey.Space, () => Watch?.TogglePlay());
         AddKey(VirtualKey.Left, () => Watch?.SkipByArrow(right: false));
         AddKey(VirtualKey.Right, () => Watch?.SkipByArrow(right: true));
     }
+
+    /// <summary>The update bar, screen and section of the page that is there.</summary>
+    internal UpdateViews Updates { get; private set; } = null!;
+
+    /// <summary>A stream that is on air is being watched: nothing takes it away.</summary>
+    public bool IsLivePlaying => LiveWatch is { Mode: LiveMode.Live, Watch.IsPlaying: true };
 
     public Panel Root => _root;
     public HomeViewModel Home { get; }
@@ -106,9 +126,24 @@ public sealed partial class Shell
         _root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         _root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
 
-        var header = BuildHeader();
+        Updates?.Dispose();
+        Updates = new UpdateViews(_updates, new UpdateText(_localizer, UpdateApp.Viewer, _updates), UpdateText.Icon(UpdateApp.Viewer), _quit);
+        Updates.ForcedChanged += Render;
+        _hasSettings = _updates.IsSectionVisible;
+        var header = new StackPanel();
+        header.Children.Add(BuildHeader());
+        header.Children.Add(Updates.Bar);
         Grid.SetRow(header, 0);
         _root.Children.Add(header);
+        if (Updates.IsForced)
+        {
+            _livePage.Close();
+            CloseWatch();
+            Grid.SetRow(Updates.Forced, 1);
+            _root.Children.Add(Updates.Forced);
+            Updates.FocusForced();
+            return;
+        }
 
         if (_navigator.Current is not Route.Live) _livePage.Close();
         if (_navigator.Current is not Route.Watch) CloseWatch();
@@ -124,6 +159,9 @@ public sealed partial class Shell
                 break;
             case Route.LiveList:
                 content = BuildLiveList();
+                break;
+            case Route.Settings:
+                content = BuildSettings();
                 break;
             default:
                 content = BuildHome();
@@ -167,7 +205,7 @@ public sealed partial class Shell
         bar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
         var start = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
-        if (_navigator.CanGoBack)
+        if (_navigator.CanGoBack && !Updates.IsForced)
         {
             var back = new Button { Content = new FontIcon { Glyph = "\uE72B", MirroredWhenRightToLeft = true } };
             ToolTipService.SetToolTip(back, _localizer["nav.back"]);
@@ -180,7 +218,16 @@ public sealed partial class Shell
         bar.Children.Add(start);
 
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        actions.Children.Add(BuildAccount());
+        if (!Updates.IsForced) actions.Children.Add(BuildAccount());
+        if (_hasSettings && !Updates.IsForced && _navigator.Current is not Route.Settings)
+        {
+            var settings = new Button { Content = new FontIcon { Glyph = "\uE713", FontSize = 16 } };
+            ToolTipService.SetToolTip(settings, _localizer["updates.settings"]);
+            AutomationName(settings, _localizer["updates.settings"]);
+            settings.Click += (_, _) => _navigator.Push(new Route.Settings());
+            actions.Children.Add(settings);
+        }
+
         var theme = new Button { Content = _localizer[IsDark ? "settings.theme.light" : "settings.theme.dark"] };
         AutomationName(theme, _localizer["settings.theme"]);
         theme.Click += (_, _) =>
@@ -241,6 +288,22 @@ public sealed partial class Shell
         }
 
         return panel;
+    }
+
+    /// <summary>Settings: the updates. Theme and language are in the header.</summary>
+    private FrameworkElement BuildSettings()
+    {
+        var title = new TextBlock { Text = _localizer["updates.settings"], FontSize = 26, FontWeight = Microsoft.UI.Text.FontWeights.Bold };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetHeadingLevel(title, Microsoft.UI.Xaml.Automation.Peers.AutomationHeadingLevel.Level1);
+        var body = new StackPanel { Spacing = 14 };
+        body.Children.Add(Updates.SectionBody);
+        body.Children.Add(Updates.SectionActions);
+        var card = Updates.Card(body);
+        Updates.UseSection(card);
+        var column = new StackPanel { Spacing = 18, Padding = new Thickness(24, 18, 24, 24) };
+        column.Children.Add(title);
+        column.Children.Add(card);
+        return new ScrollViewer { Content = column };
     }
 
     private FrameworkElement BuildHome()

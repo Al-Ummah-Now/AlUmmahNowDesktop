@@ -13,6 +13,10 @@
     <!-- The native registry: its GTK stylesheets (FanousThemes.cs, also from the registry, compiles in). -->
     <EmbeddedResource Include="Theme\fanous\native\*.css" LogicalName="fanous/native-%(Filename)%(Extension)" />
   </ItemGroup>
+  <ItemGroup Condition="'$(TargetFramework)' == 'net9.0'">
+    <!-- The apps' icons, for the screen of an unsupported version. -->
+    <EmbeddedResource Include="..\..\packaging\icons\hicolor\128x128\apps\net.alummahnow.*.png" LogicalName="icons/%(Filename).png" />
+  </ItemGroup>
   <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
     <PackageReference Include="System.Text.Json" />
   </ItemGroup>

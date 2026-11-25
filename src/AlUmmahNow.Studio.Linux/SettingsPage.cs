@@ -4,6 +4,7 @@ using AlUmmahNow.App.Services;
 using AlUmmahNow.CoreBridge.Studio;
 using AlUmmahNow.Studio.Shell;
 using AlUmmahNow.Studio.Upload;
+using AlUmmahNow.Updates.Views;
 
 namespace AlUmmahNow.Studio.Linux;
 
@@ -23,7 +24,7 @@ public sealed class SettingsPage
     private readonly Adw.Banner _restart;
 
     public SettingsPage(Localizer l, AppSettings settings, SettingsStore store, StudioShellViewModel shell, UploadsViewModel uploads,
-        Func<Task<string?>> chooseFolder, Func<StudioAccount, Task> signOut, string version)
+        Func<Task<string?>> chooseFolder, Func<StudioAccount, Task> signOut, string version, UpdateViews updates)
     {
         _l = l;
         _shell = shell;
@@ -97,6 +98,11 @@ public sealed class SettingsPage
             store.Save(settings);
         }));
         right.Append(Ui.Card(watchBody, watchActions));
+
+        // Only while the server's switch is on
+        var updatesCard = Ui.Card(updates.SectionBody, updates.SectionActions);
+        right.Append(updatesCard);
+        updates.UseSection(updatesCard);
 
         Root = Gtk.ScrolledWindow.New();
         Root.SetPolicy(Gtk.PolicyType.Never, Gtk.PolicyType.Automatic);

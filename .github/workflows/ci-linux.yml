@@ -170,3 +170,59 @@ jobs:
         with:
           name: flatpak-bundle
           path: artifacts/AlUmmahNow-unsigned.flatpak
+
+  # The update bar, the screen of an unsupported version and Settings → Updates, in both languages and modes.
+  # Without an accessibility bus, as some systems are: an announcement must not end the app.
+  updates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Fetch AlUmmahNow.Core
+        shell: bash
+        run: ./scripts/fetch-core.sh
+      - name: Install GTK, libadwaita, GStreamer
+        uses: ./.github/actions/apt-install
+        with:
+          packages: >-
+            libgtk-4-1 libadwaita-1-0 xvfb imagemagick openbox dbus-x11 libglib2.0-bin
+            gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad
+            gstreamer1.0-libav gstreamer1.0-gtk4 fonts-noto-core libgl1-mesa-dri adwaita-icon-theme libsecret-1-0
+      - run: dotnet build src/AlUmmahNow.Linux -c Release
+      - name: Update scenes
+        env:
+          AUN_DEMO_TODAY: "2026-11-21"
+          AUN_DEMO: "1"
+          AUN_DEMO_LIVE: "1"
+          AUN_SHOT_AFTER: "11"
+          AUN_EXIT_AFTER: "14"
+          GDK_BACKEND: x11
+          GSK_RENDERER: cairo
+          LIBGL_ALWAYS_SOFTWARE: "1"
+          TZ: UTC
+        run: |
+          mkdir -p artifacts/updates
+          export AUN_DEMO_THUMBS=$PWD/tests/fixtures/viewer-thumbs AUN_FIXTURE_MEDIA=$PWD/tests/fixtures/watch
+          run() { dbus-run-session -- xvfb-run -a -s "-screen 0 1280x800x24" scripts/linux-scenario.sh "$1" "$2" "${4:-home}" "$3" artifacts/updates > artifacts/updates/$3.log 2>&1 || true; }
+          count=0
+          for scene in bar notes dismissed forced waiting required settings uptodate offline off; do for lang in en ar; do for theme in dark light; do
+            # It waits for a stream that is on air and playing
+            if [ $scene = waiting ]; then AUN_SHOT_AFTER=17 AUN_EXIT_AFTER=21 AUN_DEMO_UPDATE=$scene run $lang $theme "linux-viewer-update-$scene-$lang-$theme" live:demo-live
+            else AUN_DEMO_UPDATE=$scene run $lang $theme "linux-viewer-update-$scene-$lang-$theme"; fi
+            count=$((count + 1))
+          done; done; done
+          grep -h -E 'AUTOMATION|UPDATE' artifacts/updates/*.log
+          test "$(cat artifacts/updates/*.log | grep -c 'RESULT PASS')" = $count
+          test "$(cat artifacts/updates/*.log | grep -cE 'UPDATE [a-z]+ ok$')" = $count
+          # A scene whose window is not as it must be fails.
+          mkdir -p artifacts/updates-wrong
+          AUN_DEMO_UPDATE=forced AUN_DEMO_UPDATE_ANSWER=bar dbus-run-session -- xvfb-run -a -s "-screen 0 1280x800x24" scripts/linux-scenario.sh en dark home wrong artifacts/updates-wrong > artifacts/updates-wrong/wrong.log 2>&1 || true
+          grep -q 'RESULT FAIL' artifacts/updates-wrong/wrong.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-updates
+          path: artifacts/updates

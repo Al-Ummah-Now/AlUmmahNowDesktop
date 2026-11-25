@@ -2,6 +2,7 @@ using AlUmmahNow.App.I18n;
 using AlUmmahNow.CoreBridge.Logging;
 using AlUmmahNow.CoreBridge.Studio;
 using AlUmmahNow.Studio.Shell;
+using AlUmmahNow.Updates.Views;
 
 namespace AlUmmahNow.Studio.Linux;
 
@@ -44,6 +45,9 @@ public sealed class StudioWindow
     private bool _syncingPages;
     private bool _rail;
     private Gtk.Label? _appName;
+    private readonly Gtk.Box _root = Gtk.Box.New(Gtk.Orientation.Vertical, 0);
+    private readonly Gtk.Box _columns = Gtk.Box.New(Gtk.Orientation.Horizontal, 0);
+    private UpdateViews? _updates;
 
     public StudioWindow(Adw.Application app, Localizer l, StudioShellViewModel shell, string? banner)
     {
@@ -153,14 +157,12 @@ public sealed class StudioWindow
         content.SetContent(page);
         content.SetHexpand(true);
 
-        var columns = Gtk.Box.New(Gtk.Orientation.Horizontal, 0);
-        columns.SetVexpand(true);
-        columns.Append(_sidebar);
-        columns.Append(content);
-        var root = Gtk.Box.New(Gtk.Orientation.Vertical, 0);
-        root.Append(header);
-        root.Append(columns);
-        Window.SetContent(root);
+        _columns.SetVexpand(true);
+        _columns.Append(_sidebar);
+        _columns.Append(content);
+        _root.Append(header);
+        _root.Append(_columns);
+        Window.SetContent(_root);
 
         Window.OnNotify += (_, e) =>
         {
@@ -185,6 +187,25 @@ public sealed class StudioWindow
 
         _shell.PropertyChanged += (_, _) => Render();
         Render();
+    }
+
+    /// <summary>The update bar under the header, and the screen of an unsupported version in place of everything under it.</summary>
+    public void UseUpdates(UpdateViews updates)
+    {
+        _updates = updates;
+        _root.InsertChildAfter(updates.Bar, _root.GetFirstChild());
+        _root.Append(updates.Forced);
+        updates.ForcedChanged += ApplyForced;
+        ApplyForced();
+    }
+
+    private void ApplyForced()
+    {
+        if (_updates is not { } updates) return;
+        _identityPopover.Popdown();
+        _columns.SetVisible(!updates.IsForced);
+        Render();
+        if (updates.IsForced) updates.FocusForced();
     }
 
     /// <summary>CI: whether the header search has keyboard focus (it must not when the window opens).</summary>
@@ -423,7 +444,7 @@ public sealed class StudioWindow
         });
         var ready = state == ShellState.Ready;
         _sidebar.SetVisible(ready);
-        _searchBox.SetVisible(ready);
+        _searchBox.SetVisible(ready && _updates?.IsForced != true);
         if (ready && !_readySettled)
         {
             // The signed-in Studio replaces the sign-in state: settle once its widgets exist.

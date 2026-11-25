@@ -1,5 +1,7 @@
 using AlUmmahNow.App.I18n;
+using AlUmmahNow.App.Demo;
 using AlUmmahNow.App.Services;
+using AlUmmahNow.App.Updates;
 using AlUmmahNow.CoreBridge;
 using AlUmmahNow.CoreBridge.Logging;
 using AlUmmahNow.CoreBridge.Native;
@@ -13,6 +15,7 @@ using AlUmmahNow.Studio.Shell;
 using AlUmmahNow.Studio.Upload;
 using AlUmmahNow.Studio.Videos;
 using AlUmmahNow.Studio.Analytics;
+using AlUmmahNow.Updates.Views;
 
 // Settings and logs follow the XDG base directories.
 string XdgDir(string variable, string fallback)
@@ -40,11 +43,13 @@ var exitAfter = int.TryParse(Environment.GetEnvironmentVariable("AUN_EXIT_AFTER"
 var demo = Environment.GetEnvironmentVariable("AUN_DEMO") == "1";
 
 var environment = AppEnvironment.Resolve(Environment.GetEnvironmentVariable("AUN_ENV"), AppEnvironment.BuildDefault);
-var version = typeof(StudioWindow).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+var version = UpdateText.VersionOf(typeof(StudioWindow).Assembly);
 log.Info($"Al Ummah Now Studio {version} for Linux, environment {environment.Name}, core {CoreRuntime.VersionOrNone()}");
 
 var settingsStore = new SettingsStore(Path.Combine(configDir, "settings.json"));
 var settings = settingsStore.Load();
+// A forced theme is the one Settings shows as chosen.
+if (Environment.GetEnvironmentVariable("AUN_THEME") is "dark" or "light") settings.Theme = Environment.GetEnvironmentVariable("AUN_THEME") == "light" ? ThemePreference.Light : ThemePreference.Dark;
 // The saved language (Settings), Arabic by default; CI and screenshots force one with AUN_LANG.
 var localizer = new Localizer(Environment.GetEnvironmentVariable("AUN_LANG") is { Length: > 0 } lang ? lang : settings.Language);
 
@@ -71,6 +76,9 @@ var api = new StudioApiClient(transport);
 var encode = demo && scene == "active"
     ? new EncodeQueue(new AlUmmahNow.Studio.Demo.DemoEncodeBackend("vaapih264enc"), AlUmmahNow.Studio.Demo.DemoEncodeBackend.Clock())
     : new EncodeQueue(new GStreamerEncodeBackend());
+
+// The check for a new version: none in a demo, or in a build that is no release.
+var updateInstall = demo ? UpdateInstall.Development : UpdateInstalls.OnLinux(UpdateInstalls.IsReleaseBuild, File.Exists("/.flatpak-info"), AppContext.BaseDirectory, UpdateApp.Studio);
 
 var app = Adw.Application.New("net.alummahnow.Studio", Gio.ApplicationFlags.NonUnique);
 var exitCode = 0;
@@ -140,7 +148,15 @@ app.OnActivate += (_, _) =>
         }
     }
 
-    var settingsPage = new SettingsPage(localizer, settings, settingsStore, shell, uploadsVm, ChooseFolderAsync, window.SignOut, version);
+    bool IsBusy() => uploadsVm.ActiveCount > 0 || encode.IsBusy;
+    var updateScene = UpdateScene.FromEnvironment(localizer, UpdateInstall.Deb, IsBusy);
+    var updateStore = new UpdateStore(Path.Combine(stateDir, "updates.json"));
+    var updates = updateScene?.Service ?? new UpdateService(
+        new CoreUpdateChecker(environment.VideosApi, "studio", "linux", version, userAgent, updateStore.Load().Core),
+        updateStore, updateInstall, version, IsBusy, new DownloadPageDelivery(new ShellBrowserLauncher()));
+    var updateViews = new UpdateViews(updates, new UpdateText(localizer, UpdateApp.Studio, updates), window.Window, UpdateText.Icon(UpdateApp.Studio), app.Quit);
+    window.UseUpdates(updateViews);
+    var settingsPage = new SettingsPage(localizer, settings, settingsStore, shell, uploadsVm, ChooseFolderAsync, window.SignOut, updates.InstalledVersion, updateViews);
     window.AddPage(StudioPages.Settings, localizer["studio.tab.settings"], "emblem-system-symbolic", settingsPage.Root);
     window.UsePages(pages);
     window.SearchRequested += (_, q) => videos.SearchFor(q);
@@ -157,7 +173,13 @@ app.OnActivate += (_, _) =>
         encodePage.Tick();
         return true;
     });
-    app.OnShutdown += (_, _) => uploadsVm.Dispose();
+    var closing = new CancellationTokenSource();
+    _ = updates.RunAsync(closing.Token);
+    app.OnShutdown += (_, _) =>
+    {
+        closing.Cancel();
+        uploadsVm.Dispose();
+    };
 
     _ = shell.InitializeAsync();
     // CI screenshots: stage a folder on the Upload page.
@@ -168,6 +190,16 @@ app.OnActivate += (_, _) =>
     {
         var source = automation.Substring(7);
         automationJob = encode.Add(new EncodeRequest(source, source + ".out.mp4", EncodePreset.Lecture));
+    }
+
+    if (updateScene != null)
+    {
+        GLib.Functions.TimeoutAdd(0, 6000, () =>
+        {
+            if (updateScene.IsInSettings) window.ShowPage(StudioPages.Settings);
+            _ = updateScene.ActAsync(updateViews);
+            return false;
+        });
     }
 
     if (scene.Length > 0)
@@ -197,7 +229,11 @@ app.OnActivate += (_, _) =>
             var pass = automation.StartsWith("encode:", StringComparison.Ordinal) ? encoded
                 : automation == "shell" ? shell.State == ShellState.Ready && shell.ActiveChannel != null
                 : uploadsDone || tabName != "uploads";
-            pass = pass && window.RailIsCentered && (scene != "searchfocus" || window.SearchHasFocus) && (!scene.StartsWith("deleted", StringComparison.Ordinal) || videos.DeletedIsShown);
+            // The screen of an unsupported version is in place of the sidebar
+            pass = pass && (updateViews.IsForced || window.RailIsCentered) && (scene != "searchfocus" || window.SearchHasFocus) && (!scene.StartsWith("deleted", StringComparison.Ordinal) || videos.DeletedIsShown);
+            var updateWrong = updateScene?.Wrong(updateViews);
+            pass = pass && updateWrong == null;
+            if (updateScene != null) Log.For("automation").Info($"UPDATE {updateScene.Name} {updateWrong ?? "ok"}");
             Log.For("automation").Info($"AUTOMATION {tabName} page={pages.Current} upload={pages.IsVisible(StudioPages.Uploads)} analytics={pages.IsVisible(StudioPages.Analytics)} bulkSchedule={uploadsVm.BulkScheduleOn} scene={scene} shell={shell.State} channel={shell.ActiveChannel?.Id} accounts={shell.AccountList.Count} uploads={items.Count} uploadsDone={uploadsDone} encode={automationJob?.Status} encoder={automationJob?.UsedEncoder?.Name} error={automationJob?.Error} everyText={uploads.ScheduleEveryText} searchFocused={window.SearchHasFocus} fieldFocused={window.FieldHasFocus} rail={window.IsRail} railCentered={window.RailIsCentered} RESULT {(pass ? "PASS" : "FAIL")}");
             exitCode = pass ? 0 : 3;
             app.Quit();

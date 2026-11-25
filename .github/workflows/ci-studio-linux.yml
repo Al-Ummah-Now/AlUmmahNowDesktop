@@ -199,3 +199,68 @@ jobs:
         with:
           name: studio-linux-review
           path: artifacts/review/*.png
+
+  # The update bar, the screen of an unsupported version and Settings → Updates, in both languages and modes.
+  updates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Fetch AlUmmahNow.Core
+        shell: bash
+        run: ./scripts/fetch-core.sh
+      - name: Install GTK, libadwaita, GStreamer
+        uses: ./.github/actions/apt-install
+        with:
+          packages: libgtk-4-1 libadwaita-1-0 xvfb imagemagick openbox xdotool gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good libsecret-1-0 fonts-noto-core python3-pyatspi at-spi2-core dbus-x11 libgl1-mesa-dri adwaita-icon-theme
+      - run: dotnet build src/AlUmmahNow.Studio.Linux -c Release
+      - name: Update scenes
+        env:
+          AUN_DEMO_TODAY: "2026-11-21"
+          AUN_STORE_SHOT: "1"
+          GDK_BACKEND: x11
+          GSK_RENDERER: cairo
+          LIBGL_ALWAYS_SOFTWARE: "1"
+          TZ: UTC
+        run: |
+          mkdir -p artifacts/updates watched
+          truncate -s 90000000 watched/friday-khutbah.mp4 watched/seerah-part-4.mov
+          export AUN_DEMO_THUMBS=$PWD/tests/fixtures/studio-thumbs AUN_WATCH_DIR=$PWD/watched
+          run() { # <scene> <lang> <theme> <WIDTHxHEIGHT> <folder>
+            local tab=videos watch="" name="linux-studio-update-$1-$2-$3-$4"
+            if [ "$1" = waiting ]; then tab=uploads; watch=$PWD/watched; fi
+            AUN_DEMO_UPDATE=$1 AUN_WINDOW_SIZE=$4 AUN_THEME=$3 dbus-run-session -- xvfb-run -a -s "-screen 0 ${4}x24" \
+              scripts/studio-scenario.sh $2 $tab shell "$name" $5 "$watch" > "$5/$name.log" 2>&1 || true
+          }
+          count=0
+          for scene in bar notes dismissed forced waiting required settings uptodate offline off; do for lang in en ar; do for theme in dark light; do
+            run $scene $lang $theme 1440x900 artifacts/updates
+            count=$((count + 1))
+          done; done; done
+          # The smallest window: nothing of the bar or the screen is cut.
+          for scene in bar forced; do for lang in en ar; do run $scene $lang dark 1024x700 artifacts/updates; count=$((count + 1)); done; done
+          grep -h -E 'AUTOMATION|UPDATE' artifacts/updates/*.log
+          test "$(cat artifacts/updates/*.log | grep -c 'RESULT PASS')" = $count
+          test "$(cat artifacts/updates/*.log | grep -cE 'UPDATE [a-z]+ ok$')" = $count
+          # Screen readers: the bar's controls have names; behind the screen of an unsupported version nothing is left to reach.
+          a=artifacts/updates/linux-studio-update
+          grep -P "^button\tDownload$" $a-bar-en-dark-1440x900.atspi.txt
+          grep -P "^button\tClose for this version$" $a-bar-en-dark-1440x900.atspi.txt
+          grep -P "^button\tإغلاق لهذا الإصدار$" $a-bar-ar-dark-1440x900.atspi.txt
+          grep -P "^button\tDownload$" $a-forced-en-dark-1440x900.atspi.txt
+          grep -P "^button\tQuit$" $a-forced-en-dark-1440x900.atspi.txt
+          grep -P "\tSettings$" $a-bar-en-dark-1440x900.atspi.txt
+          ! grep -P "\tSettings$" $a-forced-en-dark-1440x900.atspi.txt
+          ! grep -P "Close for this version" $a-required-en-dark-1440x900.atspi.txt
+          # A scene whose window is not as it must be fails.
+          mkdir -p artifacts/updates-wrong
+          AUN_DEMO_UPDATE_ANSWER=bar run forced en dark 1440x900 artifacts/updates-wrong
+          grep -q 'RESULT FAIL' artifacts/updates-wrong/*.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: studio-linux-updates
+          path: artifacts/updates

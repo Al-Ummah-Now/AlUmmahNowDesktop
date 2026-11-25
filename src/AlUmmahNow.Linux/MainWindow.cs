@@ -3,8 +3,10 @@ using AlUmmahNow.App.Live;
 using AlUmmahNow.App.Media;
 using AlUmmahNow.App.Navigation;
 using AlUmmahNow.App.Services;
+using AlUmmahNow.App.Updates;
 using AlUmmahNow.App.ViewModels;
 using AlUmmahNow.CoreBridge;
+using AlUmmahNow.Updates.Views;
 
 namespace AlUmmahNow.Linux;
 
@@ -28,9 +30,12 @@ public sealed partial class MainWindow
     private WatchViewModel? _watch;
     private string? _watchId;
     private Action? _unbindWatch;
+    private readonly UpdateService _updates;
+    private bool _hasSettings;
 
-    public MainWindow(Adw.Application app, ICatalogClient catalog, Localizer localizer, Navigator navigator, GstMediaPlayer player, IMediaSession session, HttpClient http, AppSettings settings, SettingsStore store, AuthViewModel auth, ILiveClient live, string shortLinkHost)
+    public MainWindow(Adw.Application app, ICatalogClient catalog, Localizer localizer, Navigator navigator, GstMediaPlayer player, IMediaSession session, HttpClient http, AppSettings settings, SettingsStore store, AuthViewModel auth, ILiveClient live, string shortLinkHost, UpdateService updates)
     {
+        _updates = updates;
         _auth = auth;
         _live = live;
         _shortLinkHost = shortLinkHost;
@@ -70,7 +75,20 @@ public sealed partial class MainWindow
         };
         localizer.LanguageChanged += (_, _) => Render();
         auth.PropertyChanged += (_, _) => Render();
+        updates.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName != nameof(UpdateService.IsSectionVisible) || updates.IsSectionVisible == _hasSettings) return;
+            // The page is gone with the section: the settings have nothing else
+            if (!updates.IsSectionVisible && navigator.Current is Route.Settings) navigator.Back();
+            else Render();
+        };
     }
+
+    /// <summary>The update bar, screen and section of the page that is there.</summary>
+    public UpdateViews Updates { get; private set; } = null!;
+
+    /// <summary>A stream that is on air is being watched: nothing takes it away.</summary>
+    public bool IsLivePlaying => LiveWatch is { Mode: LiveMode.Live, Watch.IsPlaying: true };
 
     public HomeViewModel Home => _home;
     public WatchViewModel? Watch => _watch ?? LiveWatch?.Watch;
@@ -113,11 +131,26 @@ public sealed partial class MainWindow
         _window.SetTitle(_localizer["app.name"]);
 
         _liveTitles.Clear();
+        Updates?.Dispose();
+        Updates = new UpdateViews(_updates, new UpdateText(_localizer, UpdateApp.Viewer, _updates), _window, UpdateText.Icon(UpdateApp.Viewer), () => _window.GetApplication()?.Quit());
+        Updates.ForcedChanged += Render;
+        _hasSettings = _updates.IsSectionVisible;
+
         var root = Gtk.Box.New(Gtk.Orientation.Vertical, 0);
         root.Append(BuildHeader());
-
         _unbindWatch?.Invoke();
         _unbindWatch = null;
+        if (Updates.IsForced)
+        {
+            _livePage.Close();
+            CloseWatch();
+            root.Append(Updates.Forced);
+            _window.SetContent(root);
+            Updates.FocusForced();
+            return;
+        }
+
+        root.Append(Updates.Bar);
         if (_navigator.Current is not Route.Live) _livePage.Close();
         if (_navigator.Current is not Route.Watch) CloseWatch();
         switch (_navigator.Current)
@@ -131,6 +164,9 @@ public sealed partial class MainWindow
                 break;
             case Route.LiveList:
                 root.Append(BuildLiveList());
+                break;
+            case Route.Settings:
+                root.Append(BuildSettings());
                 break;
             default:
                 root.Append(BuildHome());
@@ -168,7 +204,7 @@ public sealed partial class MainWindow
     private Gtk.Widget BuildHeader()
     {
         var header = Adw.HeaderBar.New();
-        if (_navigator.CanGoBack)
+        if (_navigator.CanGoBack && !Updates.IsForced)
         {
             var back = Gtk.Button.NewFromIconName(_localizer.IsRtl ? "go-next-symbolic" : "go-previous-symbolic");
             // The icon has its own direction, which would turn the arrow once more: it is drawn as named
@@ -188,7 +224,14 @@ public sealed partial class MainWindow
         };
         header.PackEnd(language);
 
-        header.PackEnd(BuildAccount());
+        if (!Updates.IsForced) header.PackEnd(BuildAccount());
+        if (_hasSettings && !Updates.IsForced && _navigator.Current is not Route.Settings)
+        {
+            var settings = Gtk.Button.NewFromIconName("emblem-system-symbolic");
+            settings.SetTooltipText(_localizer["updates.settings"]);
+            settings.OnClicked += (_, _) => _navigator.Push(new Route.Settings());
+            header.PackEnd(settings);
+        }
 
         var dark = _settings.Theme != ThemePreference.Light;
         var theme = Gtk.Button.NewFromIconName(dark ? "weather-clear-symbolic" : "weather-clear-night-symbolic");
@@ -247,6 +290,32 @@ public sealed partial class MainWindow
         }
 
         return box;
+    }
+
+    /// <summary>Settings: the updates. Theme and language are in the header.</summary>
+    private Gtk.Widget BuildSettings()
+    {
+        var column = Gtk.Box.New(Gtk.Orientation.Vertical, 18);
+        column.SetMarginStart(24);
+        column.SetMarginEnd(24);
+        column.SetMarginTop(18);
+        column.SetMarginBottom(24);
+        var title = Gtk.Label.New(_localizer["updates.settings"]);
+        title.SetHalign(Gtk.Align.Start);
+        title.AddCssClass("title-1");
+        column.Append(title);
+        var card = Gtk.Box.New(Gtk.Orientation.Vertical, 14);
+        card.AddCssClass("update-card");
+        card.AddCssClass("update-settings");
+        Updates.SectionActions.SetHalign(Gtk.Align.Start);
+        card.Append(Updates.SectionBody);
+        card.Append(Updates.SectionActions);
+        column.Append(card);
+        Updates.UseSection(card);
+        var page = Gtk.ScrolledWindow.New();
+        page.SetVexpand(true);
+        page.SetChild(column);
+        return page;
     }
 
     private Gtk.Widget BuildHome()

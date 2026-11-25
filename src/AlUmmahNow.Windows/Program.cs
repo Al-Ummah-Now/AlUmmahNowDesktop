@@ -2,10 +2,12 @@ using AlUmmahNow.App.Demo;
 using AlUmmahNow.App.I18n;
 using AlUmmahNow.App.Navigation;
 using AlUmmahNow.App.Services;
+using AlUmmahNow.App.Updates;
 using AlUmmahNow.App.ViewModels;
 using AlUmmahNow.CoreBridge;
 using AlUmmahNow.CoreBridge.Native;
 using AlUmmahNow.CoreBridge.Temporary;
+using AlUmmahNow.Updates.Views;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
@@ -19,6 +21,7 @@ public sealed partial class App : Application
     // Held in fields: a DispatcherQueueTimer referenced only locally can be garbage collected.
     private DispatcherQueueTimer? _sampleTimer;
     private DispatcherQueueTimer? _endTimer;
+    private DispatcherQueueTimer? _updateTimer;
 
     public App()
     {
@@ -92,7 +95,18 @@ public sealed partial class App : Application
         var ui = DispatcherQueue.GetForCurrentThread();
         var player = new WindowsMediaPlayer(ui);
         var session = new SmtcSession(player.Player, ui);
-        var shell = new Shell(catalog, localizer, navigator, player, session, settings, store, auth, live, environment.ShortLinkHost);
+        // The check for a new version: none in a demo, or in a build that is no release.
+        var version = UpdateText.VersionOf(typeof(App).Assembly);
+        Shell? shown = null;
+        bool IsBusy() => shown?.IsLivePlaying == true;
+        var updateScene = UpdateScene.FromEnvironment(localizer, UpdateInstall.Msix, IsBusy);
+        var updateStore = new UpdateStore(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AlUmmahNow", "updates.json"));
+        var updates = updateScene?.Service ?? new UpdateService(
+            new CoreUpdateChecker(environment.VideosApi, "viewer", "windows", version, "AlUmmahNowWindows/" + version, updateStore.Load().Core),
+            updateStore, Environment.GetEnvironmentVariable("AUN_DEMO") == "1" ? UpdateInstall.Development : WindowsInstall.Detect(), version,
+            IsBusy, new DownloadPageDelivery(new ShellBrowserLauncher()));
+        var shell = shown = new Shell(catalog, localizer, navigator, player, session, settings, store, auth, live, environment.ShortLinkHost, updates, Exit);
+        var closing = new CancellationTokenSource();
 
         _window = new Window { Title = localizer["app.name"], Content = shell.Root };
         // The title bar follows the viewer's theme, not Windows'
@@ -104,6 +118,7 @@ public sealed partial class App : Application
         if (_window.AppWindow.Presenter is OverlappedPresenter presenter) presenter.Maximize();
         _window.Closed += (_, _) =>
         {
+            closing.Cancel();
             player.Stop();
             shell.Close();
         };
@@ -134,12 +149,15 @@ public sealed partial class App : Application
                 var pass = isWatch ? furthest > 2 && (sawCaption || Environment.GetEnvironmentVariable("AUN_EXPECT_CAPTION") == "0")
                     : LiveAutomation.Passed(automation, shell.LiveList, shell.LiveWatch, auth, furthest) is { } asAsked ? asAsked
                     : shell.Home.Rails.Count > 0;
+                var updateWrong = updateScene?.Wrong(shell.Updates);
+                if (updateWrong == null && updateScene != null && !shell.Updates.IsPainted) updateWrong = "not the system's colors";
+                var updateLine = updateScene == null ? "" : $" update={updateScene.Name}:{updateWrong ?? "ok"}";
                 var (accents, wrong) = ViewerTheme.Check(shell.Root, shell.IsDark);
                 if (accents == 0 && (isWatch || automation.StartsWith("behind:", StringComparison.Ordinal))) wrong = "nothing found";
                 var title = titleBar.PreferredTheme;
-                pass = pass && shell.IsBuiltOnce && shell.LiveTitlesAreWhole && wrong.Length == 0 && title == (shell.IsDark ? TitleBarTheme.Dark : TitleBarTheme.Light);
+                pass = pass && updateWrong == null && shell.IsBuiltOnce && shell.LiveTitlesAreWhole && wrong.Length == 0 && title == (shell.IsDark ? TitleBarTheme.Dark : TitleBarTheme.Light);
                 File.WriteAllText(Environment.GetEnvironmentVariable("AUN_RESULT") ?? "aun-result.txt",
-                    $"AUTOMATION {automation} core={coreVersion} rails={shell.Home.Rails.Count} furthest={furthest:F1} caption={sawCaption} failed={shell.Watch?.PlaybackFailed} once={shell.IsBuiltOnce} accents={accents} notGold='{wrong}' titleBar={title} titlesWhole={shell.LiveTitlesAreWhole} RESULT {(pass ? "PASS" : "FAIL")}");
+                    $"AUTOMATION {automation} core={coreVersion} rails={shell.Home.Rails.Count} furthest={furthest:F1} caption={sawCaption} failed={shell.Watch?.PlaybackFailed} once={shell.IsBuiltOnce}{updateLine} accents={accents} notGold='{wrong}' titleBar={title} titlesWhole={shell.LiveTitlesAreWhole} RESULT {(pass ? "PASS" : "FAIL")}");
                 player.Stop();
                 Exit();
             };
@@ -147,6 +165,21 @@ public sealed partial class App : Application
         }
 
         var started = shell.StartAsync();
+        _ = updates.RunAsync(closing.Token);
+        if (updateScene != null)
+        {
+            var act = _updateTimer = ui.CreateTimer();
+            act.Interval = TimeSpan.FromSeconds(6);
+            act.IsRepeating = false;
+            act.Tick += (_, _) =>
+            {
+                if (updateScene.IsInSettings && updates.IsSectionVisible) navigator.Push(new Route.Settings());
+                // The page's controls are there a moment later
+                ui.TryEnqueue(DispatcherQueuePriority.Low, () => _ = updateScene.ActAsync(shell.Updates));
+            };
+            act.Start();
+        }
+
         if (automation.StartsWith("watch:", StringComparison.Ordinal)) navigator.Push(new Route.Watch(automation.Substring(6)));
         if (LiveAutomation.RouteOf(automation) is { } route)
         {

@@ -1,0 +1,2 @@
+# Signed byte for byte: never with other line ends
+src/AlUmmahNow.CoreBridge.Native/UpdateKeys/* -text
