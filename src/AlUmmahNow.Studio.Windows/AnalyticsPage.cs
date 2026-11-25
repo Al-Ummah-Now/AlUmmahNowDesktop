@@ -20,6 +20,7 @@ internal sealed class AnalyticsPage
     private readonly StackPanel _table = new();
     private readonly StackPanel _top = new() { Spacing = 4 };
     private readonly TextBlock _status = new() { Opacity = 0.8 };
+    private Button? _picked;
 
     public AnalyticsPage(Localizer l, AnalyticsViewModel vm)
     {
@@ -60,6 +61,13 @@ internal sealed class AnalyticsPage
     }
 
     public StackPanel Root { get; }
+
+    /// <summary>The pointer is over the picked card (CI's scenario "cardhover" asks).</summary>
+    public bool PickedIsHovered { get; private set; }
+
+    /// <summary>The text of the picked card can be read on what is drawn behind it; null with no card on screen (CI's scenarios ask).</summary>
+    public bool? PickedIsReadable => _picked is not { IsLoaded: true, ActualHeight: > 0 } card ? null
+        : LanternGlass.Presenter(card) is { } drawn && ((StackPanel)card.Content).Children.OfType<TextBlock>().All(t => LanternGlass.IsReadable(t.Foreground, drawn.Background));
 
     private static TextBlock Heading(string text)
     {
@@ -138,13 +146,23 @@ internal sealed class AnalyticsPage
     {
         var content = new StackPanel { Spacing = 2 };
         content.Children.Add(new TextBlock { Text = label, FontSize = 12.5, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = LanternGlass.Res("StudioMutedBrush") });
-        content.Children.Add(new TextBlock { Text = value, FontSize = 28, FontWeight = Microsoft.UI.Text.FontWeights.Bold });
+        content.Children.Add(new TextBlock { Text = value, FontSize = 28, FontWeight = Microsoft.UI.Text.FontWeights.Bold, Foreground = LanternGlass.Res("StudioTextBrush") });
         var on = metric != null && _vm.Metric == metric;
         FrameworkElement inner;
         if (metric != null)
         {
-            var b = new Button { Content = content, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Left, Padding = new Thickness(16, 12, 16, 12), CornerRadius = new CornerRadius(14), Background = on ? LanternGlass.Res("StudioSelectedBrush") : LanternGlass.Res("StudioCardBrush"), BorderBrush = on ? new SolidColorBrush(LanternGlass.Gold) : LanternGlass.Res("StudioEdgeBrush"), BorderThickness = new Thickness(on ? 2 : 1) };
+            var b = new Button { Content = content, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Left, Padding = new Thickness(16, 12, 16, 12), CornerRadius = new CornerRadius(14), Background = LanternGlass.Res(on ? "StudioPickedCardBrush" : "StudioCardBrush"), BorderBrush = LanternGlass.Res(on ? "StudioPickedEdgeBrush" : "StudioEdgeBrush"), BorderThickness = new Thickness(on ? 2 : 1) };
+            // Under the pointer the card stays as it is, with a stronger edge (the framework's fill lets the glow through)
+            foreach (var state in new[] { "PointerOver", "Pressed" })
+            {
+                b.Resources["ButtonBackground" + state] = b.Background;
+                b.Resources["ButtonBorderBrush" + state] = LanternGlass.Res(on ? "StudioPickedEdgeBrush" : "StudioEdgeStrongBrush");
+            }
+
             b.Click += (_, _) => _vm.Metric = metric;
+            b.PointerEntered += (_, _) => PickedIsHovered = on;
+            b.PointerExited += (_, _) => PickedIsHovered = false;
+            if (on) _picked = b;
             AutomationProperties.SetName(b, _l.Format("studio.analytics.readout", _l["studio.analytics.metric"], label) + ", " + value);
             inner = b;
         }

@@ -178,11 +178,11 @@ namespace AlUmmahNow.App.I18n
             return "other";
         }
 
-        /// <summary>A day for chart labels: "11 Nov" / "١١ نوفمبر".</summary>
+        /// <summary>A day for chart labels, as on the web: "Nov 11" / «١١ نوفمبر».</summary>
         public string ShortDate(DateTime date)
         {
-            var month = date.ToString("MMM", _language == "ar" ? Arabic : CultureInfo.InvariantCulture);
-            return Digits(date.Day.ToString(CultureInfo.InvariantCulture)) + " " + month;
+            var day = Digits(date.Day.ToString(CultureInfo.InvariantCulture));
+            return _language == "ar" ? day + " " + date.ToString("MMM", Arabic) : date.ToString("MMM", CultureInfo.InvariantCulture) + " " + day;
         }
 
         /// <summary>

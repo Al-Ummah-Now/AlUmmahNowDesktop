@@ -46,7 +46,7 @@ button.identity:hover { border-color: alpha(@fanous_primary_edge, 0.55); }
   color: #09151e;
 }
 .studio-avatar.person {
-  background-image: radial-gradient(circle at 30% 25%, #cfe3ea, #5b8fa5 60%, #184456);
+  background-image: radial-gradient(circle at 30% 25%, #3e758c, #2f6379 60%, #184456);
   color: white;
 }
 .identity-heading { font-size: 0.85em; font-weight: 700; color: @fanous_text_muted; margin: 6px 10px 2px; }

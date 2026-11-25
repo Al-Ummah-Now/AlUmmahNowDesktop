@@ -44,6 +44,15 @@ if ($Scene -eq "searchhover") {
     Start-Sleep -Milliseconds 150
   }
 }
+# Scene "cardhover": the pointer over the picked card of Analytics, the first one after the sidebar.
+if ($Scene -eq "cardhover") {
+  [AunShot.Win]::DwmGetWindowAttribute($h, 9, [ref]$r, 16) | Out-Null
+  $cx = if ($Lang -eq "ar") { $r.Right - 420 } else { $r.Left + 420 }
+  foreach ($d in 200, 60, 4, 0) {
+    if (-not [AunShot.Win]::MoveTo($cx, $r.Top + 275 + $d)) { throw "the pointer cannot be moved" }
+    Start-Sleep -Milliseconds 150
+  }
+}
 # Scene "highcontrastswitch": turned on while Studio runs.
 if ($Scene -eq "highcontrastswitch") { & "$PSScriptRoot/high-contrast.ps1" on | Tee-Object (Join-Path $Out "high-contrast.txt") }
 Start-Sleep -Seconds 2
@@ -59,4 +68,4 @@ $g.Dispose(); $bmp.Dispose()
 if (-not $p.WaitForExit(40000)) { $p.Kill(); "EXIT HANG" | Add-Content "$env:AUN_RESULT.hang.txt" }
 & "$PSScriptRoot/windows-result.ps1" $env:AUN_RESULT
 # The pointer stays until Studio has said whether it is over the search.
-if ($Scene -eq "searchhover") { [AunShot.Win]::MoveTo($r.Right + 200, $r.Bottom - 60) | Out-Null }
+if ($Scene -in "searchhover", "cardhover") { [AunShot.Win]::MoveTo($r.Right + 200, $r.Bottom - 60) | Out-Null }
