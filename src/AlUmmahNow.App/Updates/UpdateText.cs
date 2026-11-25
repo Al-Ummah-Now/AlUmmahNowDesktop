@@ -36,7 +36,7 @@ namespace AlUmmahNow.App.Updates
         public string Step(UpdateView v) => v.Step switch
         {
             UpdateStep.Downloading => _l.Format("updates.downloading", _l.Percent(v.Progress)),
-            UpdateStep.Ready => _l[v.IsBusy ? _app == UpdateApp.Studio ? "updates.readyBusy.studio" : "updates.readyBusy.viewer" : v.Stage == UpdateStage.Forced ? "updates.readyForced" : "updates.ready"],
+            UpdateStep.Ready => _l[v.IsOpenElsewhere ? "updates.readyOther" : v.IsBusy ? _app == UpdateApp.Studio ? "updates.readyBusy.studio" : "updates.readyBusy.viewer" : v.Stage == UpdateStage.Forced ? "updates.readyForced" : "updates.ready"],
             UpdateStep.Failed => _l["updates.notDownloaded"],
             _ => "",
         };

@@ -17,10 +17,13 @@ the run stays green. The MSIX identity version is the tag's `X.Y.Z` plus `.0` (`
 | `windows` → MSIX | MSIX of the viewer and Studio, artifact `msix-AlUmmahNow-Windows` / `msix-AlUmmahNow-Studio-Windows` (unsigned; this is the file the Store takes) | always built; uses the Partner Center identity when `WINDOWS_PUBLISHER` + `WINDOWS_VIEWER_PACKAGE_NAME` / `WINDOWS_STUDIO_PACKAGE_NAME` are set, a placeholder identity otherwise |
 | `windows` → signed MSIX | `AlUmmahNow-Windows-<v>-x64.msix` / `AlUmmahNow-Studio-Windows-<v>-x64.msix` signed with your certificate (publisher = the certificate's subject) into the GitHub release | `WINDOWS_CERT_PFX_BASE64`, `WINDOWS_CERT_PASSWORD` |
 | `msstore` | per app: uploads the MSIX to a **draft** Partner Center submission and writes the listing (`store/microsoft/<app>/<lang>/`) into it; submits for certification only when `MSSTORE_COMMIT=true` | full release tag + `MSSTORE_TENANT_ID`, `MSSTORE_SELLER_ID`, `MSSTORE_CLIENT_ID`, `MSSTORE_CLIENT_SECRET` + `MSSTORE_VIEWER_PRODUCT_ID` / `MSSTORE_STUDIO_PRODUCT_ID` + the identity values above |
+| `windows` → setup | per-user setup (`-x64-Setup-unsigned.exe`) and its update package (`-x64-update.nupkg`), made by Velopack and installed, started and removed on the runner | — |
 | `linux` | `.deb` and Flatpak bundle into the GitHub release | — |
 | `tizen` | TPK signed with the Tizen SDK's test certificate (`-unsigned.tpk`, for developer TVs) into the GitHub release | — |
 | `tizen` → Samsung-signed TPK | `AlUmmahNow-Tizen-<v>.tpk` signed with your Samsung author + distributor certificates | `TIZEN_AUTHOR_P12_BASE64`, `TIZEN_AUTHOR_PASSWORD`, `TIZEN_DISTRIBUTOR_P12_BASE64`, `TIZEN_DISTRIBUTOR_PASSWORD` |
-| `release` | draft GitHub release (pre-release for `-preview` tags) with everything above and `SHA256SUMS.txt` | — |
+| `manifest` | `app-release.json`: every app file with its size and SHA-256. Dry runs sign and check it with a key made in the job | — |
+| `sign` | signs `app-release.json`; the only job with the key, for a tag whose commit is on `main`; checks the signature against the key list in the apps | secret `UPDATE_SIGNING_KEY` in the environment `update-signing`. Without it the tag **fails** and nothing is released |
+| `release` | draft GitHub release (pre-release for `-preview` tags) with everything above, the signed manifest (each file is checked against it) and `SHA256SUMS.txt` | — |
 
 Pull requests that touch packaging and manual runs are dry runs: every package is built and the listing files are
 checked, nothing is released or uploaded.
@@ -143,8 +146,19 @@ Wiki epic AUN-APP-UPDATES. The viewer and Studio on Windows and Linux ask `GET /
 30 s after launch, every `checkHours`, and on Settings → Updates → Check now. They tell of a new version in a bar, or in a
 screen when theirs is below the minimum an admin set. The screen waits for a running upload, encode or watched live stream.
 
-- They download and install nothing. The only link is compiled in (`UpdateInstalls.DownloadPage`: this repo's releases
-  page) and opens in the browser; nothing in an answer can change it.
+- The MSI, the zip, a downloaded MSIX and Linux install nothing. The only link is compiled in
+  (`UpdateInstalls.DownloadPage`: this repo's releases page) and opens in the browser; nothing in an answer can change it.
+- A copy of the per-user setup on Windows installs updates itself. It downloads the manifest of the tag the server names
+  (the address is made from the tag, never taken from an answer), has Core check its signature, hosts and version, checks
+  the package's SHA-256, and stages it in a folder only this user can write. Everything is checked again right before it is
+  installed: as the app closes, or on Restart now. Never while an upload, an encode or a watched live stream runs, and never
+  while the app is open a second time (Velopack's updater ends every process of the folder). A refused update installs
+  nothing and is reported (`update-failure`). `src/AlUmmahNow.CoreBridge.Native/SelfUpdate`,
+  `src/Shared/WinUI/VelopackInstaller.cs`; an MSIX does not even carry the updater (`release.yml` checks).
+- Settings → Updates has "Install updates automatically": the person's choice, else the admins' `updates.autoInstallDefault`.
+- **Update test** (`update-test.yml`) installs a real setup on a Windows runner and takes it from N to N+1 both ways, and
+  through everything that must not be installed, against a local server with keys made for the run.
+- `packaging/release-notes/{en,ar}.txt` are the notes the apps show: write them for each release.
 - They carry the repo's root public key and the root-signed key list (`src/AlUmmahNow.CoreBridge.Native/UpdateKeys`,
   signed byte for byte, see `.gitattributes`), so they tell only of releases the server has verified (`signed`).
 - Only builds of `release.yml` check (it alone passes `AunProd`). The Microsoft Store copy does not: the Store updates it.

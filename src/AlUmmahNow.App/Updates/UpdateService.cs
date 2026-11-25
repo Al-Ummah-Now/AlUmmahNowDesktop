@@ -48,13 +48,14 @@ namespace AlUmmahNow.App.Updates
     {
         public static readonly UpdateView None = new UpdateView(UpdateStage.Hidden, UpdateAnswer.Off);
 
-        internal UpdateView(UpdateStage stage, UpdateAnswer answer, bool installs = false, UpdateStep step = UpdateStep.None, double progress = 0, bool isBusy = false)
+        internal UpdateView(UpdateStage stage, UpdateAnswer answer, bool installs = false, UpdateStep step = UpdateStep.None, double progress = 0, bool isBusy = false, bool isOpenElsewhere = false)
         {
             Stage = stage;
             Installs = installs;
             Step = step;
             Progress = progress;
-            IsBusy = isBusy;
+            IsBusy = isBusy || isOpenElsewhere;
+            IsOpenElsewhere = isOpenElsewhere;
             Version = UpdateService.CleanVersion(answer.Version);
             MinimumVersion = UpdateService.CleanVersion(answer.MinimumVersion);
             NotesEn = UpdateService.CleanText(answer.NotesEn);
@@ -81,6 +82,9 @@ namespace AlUmmahNow.App.Updates
 
         /// <summary>Work is running that a restart would interrupt.</summary>
         public bool IsBusy { get; }
+
+        /// <summary>The app is open a second time: the updater would end that one too.</summary>
+        public bool IsOpenElsewhere { get; }
 
         /// <summary>The button does something now.</summary>
         public bool CanBegin => Step != UpdateStep.Downloading && !(Step == UpdateStep.Ready && IsBusy);
@@ -322,7 +326,11 @@ namespace AlUmmahNow.App.Updates
 
         private bool Installs => _self != null && _answer.CanInstall && _answer.Tag != null && IsNew(_answer);
 
-        private UpdateView ViewOf(UpdateStage stage) => new UpdateView(stage, _answer, Installs, Installs ? _step : UpdateStep.None, _progress, Installs && _step == UpdateStep.Ready && _isBusy());
+        private UpdateView ViewOf(UpdateStage stage) => new UpdateView(stage, _answer, Installs, Installs ? _step : UpdateStep.None, _progress, IsReady && _isBusy(), IsReady && _self!.IsOpenElsewhere);
+
+        private bool IsReady => Installs && _step == UpdateStep.Ready;
+
+        private bool MayNotRestart => _isBusy() || _self!.IsOpenElsewhere;
 
         /// <summary>The screen waits for work, or Restart now does.</summary>
         private bool IsWorkAwaited => View.Stage == UpdateStage.Waiting || View.Stage != UpdateStage.Hidden && View.Step == UpdateStep.Ready;
@@ -466,7 +474,13 @@ namespace AlUmmahNow.App.Updates
         /// <summary>The button when it is ready: restarts into the new version, unless work is running.</summary>
         private async Task RestartAsync()
         {
-            if (_isApplied || _isBusy()) return;
+            if (_isApplied) return;
+            if (MayNotRestart)
+            {
+                Show();
+                return;
+            }
+
             // Pressed: what goes wrong from here on is told
             _isAsked = true;
             if (await IsStillGoodAsync())
@@ -501,7 +515,7 @@ namespace AlUmmahNow.App.Updates
             _isApplied = true;
             try
             {
-                if (_isBusy()) return;
+                if (MayNotRestart) return;
                 _self.VerifyStaged();
                 _self.ApplyOnExit();
             }
@@ -521,7 +535,7 @@ namespace AlUmmahNow.App.Updates
                 while (IsWorkAwaited)
                 {
                     await _delay(BusyPoll, _stop);
-                    if (View.Stage == UpdateStage.Waiting ? !_isBusy() : IsWorkAwaited && View.IsBusy != _isBusy()) Show();
+                    if (View.Stage == UpdateStage.Waiting ? !_isBusy() : IsWorkAwaited && View.IsBusy != MayNotRestart) Show();
                 }
             }
             catch (OperationCanceledException)

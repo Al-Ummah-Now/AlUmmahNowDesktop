@@ -191,10 +191,8 @@ public sealed partial class App : Application
         bool IsBusy() => uploadsVm.ActiveCount > 0 || encode.IsBusy;
         var updateScene = UpdateScene.FromEnvironment(localizer, UpdateInstall.Installer, IsBusy);
         var updateStore = new UpdateStore(Path.Combine(dataRoot, "updates.json"));
-        var updates = updateScene?.Service ?? new UpdateService(
-            new CoreUpdateChecker(environment.VideosApi, "studio", "windows", version, userAgent, updateStore.Load().Core),
-            updateStore, demo ? UpdateInstall.Development : WindowsInstall.Detect(), version, IsBusy, new DownloadPageDelivery(new ShellBrowserLauncher()));
-        var updateViews = new UpdateViews(updates, new UpdateText(localizer, UpdateApp.Studio, updates), UpdateText.Icon(UpdateApp.Studio), Exit);
+        var updates = updateScene?.Service ?? WindowsInstall.Service("studio", environment.VideosApi, version, userAgent, dataRoot, updateStore, demo, IsBusy, () => window.Window.Close());
+        var updateViews = new UpdateViews(updates, new UpdateText(localizer, UpdateApp.Studio, updates), UpdateText.Icon(UpdateApp.Studio), () => window.Window.Close());
         window.UseUpdates(updateViews);
         var settingsPage = new SettingsPage(localizer, settings, settingsStore, shell, uploadsVm, PickFolderAsync, window.SignOut, window.AddPasskeyAsync, updates.InstalledVersion, updateViews);
         window.AddPage(StudioPages.Settings, localizer["studio.tab.settings"], Symbol.Setting, settingsPage.Root);
@@ -210,6 +208,8 @@ public sealed partial class App : Application
         _ = updates.RunAsync(closing.Token);
         window.Window.Closed += (_, _) =>
         {
+            // While the queues still say whether work is running
+            updates.OnExit();
             closing.Cancel();
             uploadsVm.Dispose();
         };

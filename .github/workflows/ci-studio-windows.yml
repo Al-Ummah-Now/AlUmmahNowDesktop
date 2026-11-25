@@ -237,25 +237,27 @@ jobs:
             ./scripts/windows-studio-shot.ps1 $exe $lang $theme $size $mode $name $out $tab | Out-Host
             if (-not (Select-String -Quiet "update=${scene}:ok.*RESULT PASS" "$out/$name.txt")) { $script:failed += $name }
           }
-          foreach ($scene in "bar","notes","dismissed","forced","waiting","required","settings","uptodate","offline","off") { foreach ($lang in "en","ar") { foreach ($theme in "dark","light") { Shot $scene $lang $theme "1440x900" } } }
+          foreach ($scene in "bar","notes","dismissed","forced","waiting","required","settings","uptodate","offline","off","update","downloading","failed","ready","readybusy","forcedupdate","forcedready","settingsupdate") { foreach ($lang in "en","ar") { foreach ($theme in "dark","light") { Shot $scene $lang $theme "1440x900" } } }
           # The smallest window: nothing of the bar or the screen is cut.
-          foreach ($scene in "bar","forced") { foreach ($lang in "en","ar") { Shot $scene $lang "dark" "1024x700" } }
+          foreach ($scene in "bar","forced","readybusy","forcedready") { foreach ($lang in "en","ar") { Shot $scene $lang "dark" "1024x700" } }
           # Screen readers: the bar's controls have names; behind the screen of an unsupported version nothing is left to reach.
           $read = (New-Item -ItemType Directory -Force artifacts/updates-read).FullName
           $env:AUN_WATCH_DIR = ""
-          foreach ($scene in "bar","forced","required") { $env:AUN_DEMO_UPDATE = $scene; ./scripts/windows-studio-scenario.ps1 $exe en videos shell "read-$scene" $read }
+          foreach ($scene in "bar","forced","required","ready","settingsupdate") { $env:AUN_DEMO_UPDATE = $scene; ./scripts/windows-studio-scenario.ps1 $exe en videos shell "read-$scene" $read }
           function Has($file, $text) { Select-String -Quiet -SimpleMatch $text "$read/$file.uia.txt" }
           if (-not (Has "read-bar" "`tUpdateDownload`tDownload")) { $failed += "Download is not exposed" }
           if (-not (Has "read-bar" "`tUpdateClose`tClose for this version")) { $failed += "the bar's close has no name" }
           if (-not (Has "read-bar" "`tPage_settings`t")) { $failed += "the page list is not there under the bar" }
           if (-not (Has "read-forced" "`tUpdateForcedDownload`tDownload")) { $failed += "the screen's Download is not exposed" }
           if (-not (Has "read-forced" "`tUpdateQuit`tQuit")) { $failed += "Quit is not exposed" }
+          if (-not (Has "read-ready" "`tUpdateDownload`tRestart now")) { $failed += "Restart now is not exposed" }
+          if (-not (Has "read-settingsupdate" "`tUpdateAuto`tInstall updates automatically")) { $failed += "the choice has no name" }
           foreach ($behind in "`tPage_", "`tTitleSearch`t", "`tIdentityMenu`t") { if (Has "read-forced" $behind) { $failed += "reachable behind the screen: $behind" } }
           if (Has "read-required" "`tUpdateClose`t") { $failed += "a bar that stays can be closed" }
           # High contrast, and off again: the bar, the screen and the section are the system's colors.
           $contrast = ./scripts/high-contrast.ps1 on
           if ("$contrast" -notmatch "on=True") { $failed += "high contrast was not turned on: $contrast" }
-          foreach ($scene in "bar","notes","forced","settings") { foreach ($lang in "en","ar") { Shot $scene $lang "dark" "1440x900" "highcontrast" } }
+          foreach ($scene in "bar","notes","forced","settings","update","readybusy","forcedready","settingsupdate") { foreach ($lang in "en","ar") { Shot $scene $lang "dark" "1440x900" "highcontrast" } }
           ./scripts/high-contrast.ps1 off
           # A scene whose window is not as it must be fails.
           $env:AUN_DEMO_UPDATE = "forced"; $env:AUN_DEMO_UPDATE_ANSWER = "bar"

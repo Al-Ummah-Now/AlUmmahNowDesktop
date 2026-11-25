@@ -1,0 +1,14 @@
+<Project>
+  <!-- Installing updates in place (wiki AUN-APP-UPDATES §5), for both Windows apps. -->
+  <PropertyGroup>
+    <!-- AppStart.cs has Main: Velopack's hooks run before anything else. -->
+    <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
+    <!-- An MSIX is updated by the Store or by its own package: the updater is not even in it. -->
+    <DefineConstants Condition="'$(BuildMsix)' == 'true'">$(DefineConstants);AUN_STORE</DefineConstants>
+    <!-- CI's update test alone; never in a release (scripts/no-test-hooks.mjs). -->
+    <DefineConstants Condition="'$(UpdateTest)' == 'true'">$(DefineConstants);UPDATE_TEST</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(BuildMsix)' != 'true'">
+    <PackageReference Include="Velopack" />
+  </ItemGroup>
+</Project>

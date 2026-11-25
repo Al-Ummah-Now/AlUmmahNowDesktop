@@ -15,6 +15,10 @@ public interface IPackageInstaller
     void VerifyStaged();
 
     void Discard();
+
+    /// <summary>Another process runs from the same folder.</summary>
+    bool IsOpenElsewhere { get; }
+
     void ApplyOnExit();
     void ApplyAndRestart();
 }
@@ -81,7 +85,12 @@ public sealed class SelfUpdater : ISelfUpdate
     }
 
     /// <summary>HTTPS through the OS stack; redirects are left to <see cref="SelfUpdater"/>.</summary>
-    public static HttpMessageHandler CreateHandler() => new SocketsHttpHandler { AllowAutoRedirect = false, PooledConnectionLifetime = TimeSpan.FromMinutes(5), ConnectTimeout = TimeSpan.FromSeconds(20) };
+    public static HttpMessageHandler CreateHandler() =>
+#if UPDATE_TEST
+        new UpdateTestHandler();
+#else
+        new SocketsHttpHandler { AllowAutoRedirect = false, PooledConnectionLifetime = TimeSpan.FromMinutes(5), ConnectTimeout = TimeSpan.FromSeconds(20) };
+#endif
 
     /// <summary>Where a release's manifest is. From the tag alone: no address is taken from an answer.</summary>
     internal static string ManifestUrl(string tag) => $"https://github.com/Al-Ummah-Now/{CoreUpdateChecker.Repo}/releases/download/{Uri.EscapeDataString(tag)}/app-release.json";
@@ -159,6 +168,8 @@ public sealed class SelfUpdater : ISelfUpdate
         _staged = null;
         _installer.Discard();
     }
+
+    public bool IsOpenElsewhere => _installer.IsOpenElsewhere;
 
     public void ApplyOnExit()
     {

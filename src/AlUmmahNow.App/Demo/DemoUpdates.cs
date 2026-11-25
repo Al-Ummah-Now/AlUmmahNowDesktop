@@ -23,13 +23,17 @@ namespace AlUmmahNow.App.Demo
             var kind = _scene switch
             {
                 "off" or "uptodate" => UpdatePromptKind.None,
-                "forced" or "waiting" => UpdatePromptKind.Forced,
+                "forced" or "waiting" or "forcedupdate" or "forcedready" => UpdatePromptKind.Forced,
                 "required" => UpdatePromptKind.RequiredBar,
                 _ => UpdatePromptKind.Notice,
             };
             return Task.FromResult(new UpdateAnswer
             {
                 Enabled = _scene != "off",
+                CanInstall = UpdateScene.Installing.Contains(_scene),
+                Tag = "v" + Newest,
+                // The others show it downloaded by itself
+                InstallsByDefault = _scene != "update" && _scene != "downloading" && _scene != "failed",
                 Kind = kind,
                 Version = Newest,
                 MinimumVersion = kind is UpdatePromptKind.Forced or UpdatePromptKind.RequiredBar ? Minimum : "0.0.0",
@@ -51,6 +55,55 @@ namespace AlUmmahNow.App.Demo
         public int Begun { get; private set; }
 
         public void Begin() => Begun++;
+    }
+
+    /// <summary>Downloads nothing and installs nothing; says how far a scene has come.</summary>
+    public sealed class DemoSelfUpdate : ISelfUpdate
+    {
+        public const double Far = 0.42;
+        private readonly string _scene;
+
+        public DemoSelfUpdate(string scene) => _scene = scene;
+
+        public int Restarts { get; private set; }
+
+        public bool IsOpenElsewhere => false;
+
+        private static VerifiedUpdate Update(string tag, string version)
+        {
+            var notes = new DemoUpdateChecker("update").CheckAsync().Result;
+            return new VerifiedUpdate(version, tag, notes.NotesEn ?? "", notes.NotesAr ?? "");
+        }
+
+        public Task<VerifiedUpdate> VerifyAsync(string tag, string version, CancellationToken cancellationToken = default) => Task.FromResult(Update(tag, version));
+
+        public async Task<VerifiedUpdate> StageAsync(string tag, string version, IProgress<double>? progress, CancellationToken cancellationToken = default)
+        {
+            if (_scene == "failed") throw new UpdateCheckFailedException("offline (demo)");
+            if (_scene == "downloading")
+            {
+                progress?.Report(Far);
+                await Task.Delay(Timeout.Infinite, cancellationToken);
+            }
+
+            return Update(tag, version);
+        }
+
+        public void VerifyStaged()
+        {
+        }
+
+        public void Discard()
+        {
+        }
+
+        public void ApplyOnExit()
+        {
+        }
+
+        public void ApplyAndRestart() => Restarts++;
+
+        public Task ReportAsync(string tag, string reason, CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 
     /// <summary>What the views say is on the screen, and what a scene presses in them.</summary>
@@ -83,6 +136,17 @@ namespace AlUmmahNow.App.Demo
         void PressDownload();
 
         void PressCheckNow();
+
+        /// <summary>The words of the bar's, the screen's or the section's button, whichever is there.</summary>
+        string ButtonText { get; }
+
+        bool IsButtonEnabled { get; }
+
+        /// <summary>The choice to install automatically is in Settings.</summary>
+        bool IsAutoShown { get; }
+
+        bool IsAutoOn { get; }
+        void PressAuto();
     }
 
     /// <summary>
@@ -98,7 +162,13 @@ namespace AlUmmahNow.App.Demo
 
         public static readonly IReadOnlyList<string> All = new[] { "bar", "notes", "dismissed", "forced", "waiting", "required", "settings", "uptodate", "offline", "off" };
 
+        /// <summary>The scenes of a copy that installs updates itself, on Windows alone.</summary>
+        public static readonly IReadOnlyList<string> Installing = new[] { "update", "downloading", "failed", "ready", "readybusy", "forcedupdate", "forcedready", "settingsupdate" };
+
         private readonly Localizer _l;
+        private readonly DemoSelfUpdate _self;
+        private bool _wasAutoOff;
+        private string _buttonBefore = "";
         private readonly DemoDelivery _delivery = new DemoDelivery();
         private TimeSpan _passed = TimeSpan.Zero;
         private bool _wasBarShown;
@@ -108,7 +178,9 @@ namespace AlUmmahNow.App.Demo
             Name = name;
             _l = l;
             var store = new UpdateStore(null);
-            Service = new UpdateService(new DemoUpdateChecker(answer), store, install, DemoUpdateChecker.Installed, isBusy ?? (() => answer == "waiting"), _delivery,
+            _self = new DemoSelfUpdate(answer);
+            if (Installing.Contains(name)) install = UpdateInstall.SelfUpdating;
+            Service = new UpdateService(new DemoUpdateChecker(answer), store, install, DemoUpdateChecker.Installed, name == "readybusy" ? () => true : isBusy ?? (() => answer == "waiting"), _delivery,
                 () => DemoClock.Now + _passed,
                 async (wait, stop) =>
                 {
@@ -116,14 +188,14 @@ namespace AlUmmahNow.App.Demo
                     await Task.Delay(TimeSpan.FromSeconds(name == "waiting" && wait > UpdateService.BusyPoll ? 10 : 1), stop);
                     _passed += wait;
                 },
-                wasEnabled: name == "offline");
+                wasEnabled: name == "offline", self: _self);
         }
 
         public string Name { get; }
         public UpdateService Service { get; }
 
         /// <summary>Settings → Updates is open in these.</summary>
-        public bool IsInSettings => Name is "settings" or "uptodate" or "offline" or "off";
+        public bool IsInSettings => Name is "settings" or "uptodate" or "offline" or "off" or "settingsupdate";
 
         /// <summary>The scene of the environment, or null in a normal launch.</summary>
         /// <param name="isBusy">What the app itself would say.</param>
@@ -134,7 +206,7 @@ namespace AlUmmahNow.App.Demo
         }
 
         public static UpdateScene Named(string name, Localizer l, UpdateInstall install, string? answer = null, Func<bool>? isBusy = null) =>
-            All.Contains(name) ? new UpdateScene(name, string.IsNullOrEmpty(answer) ? name : answer!, l, install, isBusy) : throw new ArgumentException("no update scene " + name);
+            All.Contains(name) || Installing.Contains(name) ? new UpdateScene(name, string.IsNullOrEmpty(answer) ? name : answer!, l, install, isBusy) : throw new ArgumentException("no update scene " + name);
 
         /// <summary>What a person does, once the first answer is there.</summary>
         public async Task ActAsync(IUpdateViews views)
@@ -144,6 +216,24 @@ namespace AlUmmahNow.App.Demo
                 case "bar":
                 case "forced":
                     views.PressDownload();
+                    break;
+                case "downloading":
+                case "failed":
+                case "ready":
+                case "readybusy":
+                    _buttonBefore = views.ButtonText;
+                    views.PressDownload();
+                    break;
+                case "forcedready":
+                    _buttonBefore = views.ButtonText;
+                    views.PressDownload();
+                    await Task.Delay(500);
+                    views.PressDownload();
+                    break;
+                case "settingsupdate":
+                    views.PressAuto();
+                    _wasAutoOff = !Service.InstallsAutomatically && !views.IsAutoOn;
+                    views.PressAuto();
                     break;
                 case "notes":
                     views.PressNotes();
@@ -182,6 +272,16 @@ namespace AlUmmahNow.App.Demo
                 "uptodate" => Check((v.IsSectionShown, "no section"), (v.SectionText.Contains(_l["updates.upToDate"]), "not up to date"), (!v.IsBarShown, "a bar")),
                 "offline" => Check((v.IsSectionShown, "no section"), (v.SectionText.Contains(_l["updates.failed"]), "it is not told"), (v.SectionText.Contains(_l["updates.neverChecked"]), "it was checked"), (!v.IsBarShown, "a bar")),
                 "off" => Check((!v.IsSectionShown, "a section"), (!v.IsBarShown, "a bar"), (!v.IsForcedShown, "a screen"), (Service.Result == UpdateResult.UpToDate, "it was not checked")),
+                "update" => Check((v.IsBarShown, "no bar"), (v.BarText.Contains(newest), "the bar has no version"), (v.ButtonText == _l["updates.update"], "no Update"), (v.IsButtonEnabled, "Update does nothing"),
+                    (v.IsCloseShown, "no close"), (v.IsNotesShown, "no what's new"), (_delivery.Begun == 0, "a page was opened")),
+                "downloading" => Check((_buttonBefore == _l["updates.update"], "there was no Update"), (v.IsBarShown, "no bar"), (v.BarText.Contains(_l.Percent(DemoSelfUpdate.Far)), "it does not say how far"), (!v.IsButtonEnabled, "it can be asked twice"),
+                    (!v.IsCloseShown, "it can be closed"), (_delivery.Begun == 0, "a page was opened")),
+                "failed" => Check((v.IsBarShown, "no bar"), (v.BarText == _l["updates.notDownloaded"], "it is not told"), (v.ButtonText == _l["updates.update"] && v.IsButtonEnabled, "it cannot be tried again"), (_delivery.Begun == 0, "a page was opened")),
+                "ready" => Check((v.IsBarShown, "no bar"), (v.BarText == _l["updates.ready"], "it is not told"), (_buttonBefore == _l["updates.restart"] && v.ButtonText == _buttonBefore, "no Restart now"), (v.IsCloseShown, "no close"), (_self.Restarts == 1, "it did not restart"), (_delivery.Begun == 0, "a page was opened")),
+                "readybusy" => Check((v.IsBarShown, "no bar"), (v.BarText == _l["updates.readyBusy.studio"] || v.BarText == _l["updates.readyBusy.viewer"], "it is not told"), (v.ButtonText == _l["updates.restart"], "no Restart now"), (!v.IsButtonEnabled, "it can be restarted"), (_self.Restarts == 0, "it restarted over work")),
+                "forcedupdate" => Check((v.IsForcedShown, "no screen"), (v.IsForcedWhole, "the screen is not the whole window"), (v.IsForcedFocused, "the keyboard is elsewhere"), (v.ButtonText == _l["updates.update"] && v.IsButtonEnabled, "no Update"), (!v.IsBarShown, "a bar")),
+                "forcedready" => Check((v.IsForcedShown, "no screen"), (_buttonBefore == _l["updates.update"], "there was no Update"), (v.ForcedText.Contains(_l["updates.readyForced"]), "it is not told"), (v.ButtonText == _l["updates.restart"], "no Restart now"), (_self.Restarts == 1, "it did not restart"), (_delivery.Begun == 0, "a page was opened")),
+                "settingsupdate" => Check((v.IsSectionShown, "no section"), (v.SectionText.Contains(installed), "no version"), (v.SectionText.Contains(_l["updates.ready"]), "nothing is ready"), (v.IsAutoShown, "no choice"), (_wasAutoOff, "the choice did nothing"), (v.IsAutoOn && Service.InstallsAutomatically, "the choice is off"), (v.ButtonText == _l["updates.restart"], "no Restart now")),
                 _ => "no such scene",
             };
         }
