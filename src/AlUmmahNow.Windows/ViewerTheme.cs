@@ -1,6 +1,7 @@
 using AlUmmahNow.App.Theme;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Shapes;
 using Windows.UI;
@@ -64,32 +65,57 @@ internal static class ViewerTheme
             t["AccentButtonBackground" + state] = B(fill);
             t["AccentButtonForeground" + state] = B("OnPrimary");
             t["HyperlinkButtonForeground" + state] = B("Link");
-            t["SliderTrackValueFill" + state] = B("Primary");
-            t["SliderThumbBackground" + state] = B("Primary");
-            t["SliderInnerThumbBackground" + state] = B("Primary");
+            // Not gold in light mode, where it is under 3:1 on the page: the registry's accent is darker there
+            t["SliderTrackValueFill" + state] = B("Accent");
+            t["SliderThumbBackground" + state] = B("Accent");
+            t["SliderInnerThumbBackground" + state] = B("Accent");
         }
+
+        // The thumb's ring is the framework's, and white on the light page: its edge is what is seen
+        t["SliderThumbBorderBrush"] = B("PrimaryEdge");
 
         t["ComboBoxItemPillFillBrush"] = B("Primary");
         return t;
     }
 
-    /// <summary>The parts of a page with the accent, and which of them are not gold (CI's scenarios ask).</summary>
-    public static (int Parts, string Wrong) Check(DependencyObject root, bool dark)
+    /// <summary>
+    /// The parts of a page with the accent, and which of them are not in the theme's color or cannot be seen: a control's
+    /// parts have 3:1 to what is beside them (CI's scenarios ask). High contrast has Windows' own colors.
+    /// </summary>
+    public static (int Parts, string Wrong) Check(Panel root, bool dark)
     {
         var parts = 0;
+        var high = new global::Windows.UI.ViewManagement.AccessibilitySettings().HighContrast;
+        var page = (root.Background as SolidColorBrush)?.Color ?? default;
         var wrong = new List<string>();
         void Is(string part, Brush? brush, string name)
         {
             parts++;
-            if (brush is not SolidColorBrush solid || solid.Color != ColorOf(name, dark)) wrong.Add(part);
+            if (!high && (brush is not SolidColorBrush solid || solid.Color != ColorOf(name, dark))) wrong.Add(part);
+        }
+
+        void IsSeen(string part, Brush? brush, Brush? beside)
+        {
+            parts++;
+            var contrast = brush is SolidColorBrush a && beside is SolidColorBrush b ? ColorMath.Contrast(OnPage(a.Color, page), OnPage(b.Color, page)) : 0;
+            if (!high && contrast < 3) wrong.Add(FormattableString.Invariant($"{part} {Math.Round(contrast, 2)}"));
         }
 
         foreach (var part in Descendants(root))
         {
             if (part is Slider { IsEnabled: true, ActualWidth: > 0 } slider)
             {
-                Is("seek bar", Descendants(slider).OfType<Rectangle>().FirstOrDefault(r => r.Name == "HorizontalDecreaseRect")?.Fill, "Primary");
-                Is("thumb", Descendants(slider).OfType<Ellipse>().FirstOrDefault(e => e.Name == "SliderInnerThumb")?.Fill, "Primary");
+                var fill = Descendants(slider).OfType<Rectangle>().FirstOrDefault(r => r.Name == "HorizontalDecreaseRect")?.Fill;
+                var rest = Descendants(slider).OfType<Rectangle>().FirstOrDefault(r => r.Name == "HorizontalTrackRect")?.Fill;
+                var thumb = Descendants(slider).OfType<Ellipse>().FirstOrDefault(e => e.Name == "SliderInnerThumb")?.Fill;
+                var ring = Descendants(slider).OfType<Thumb>().Where(t => t.Name == "HorizontalThumb").SelectMany(Descendants).OfType<Border>().FirstOrDefault();
+                Is("seek bar", fill, "Accent");
+                Is("thumb", thumb, "Accent");
+                Is("thumb's edge", ring?.BorderBrush, "PrimaryEdge");
+                IsSeen("seek bar", fill, root.Background);
+                IsSeen("the rest of the bar", rest, root.Background);
+                IsSeen("thumb", thumb, ring?.Background);
+                IsSeen("thumb's edge", ring?.BorderBrush, root.Background);
             }
 
             if (part is Button { ActualWidth: > 0 } button && button.Style != null && button.Style == AccentButton)
@@ -100,6 +126,13 @@ internal static class ViewerTheme
         }
 
         return (parts, string.Join(", ", wrong));
+    }
+
+    /// <summary>A color that lets the page through, as it is drawn on it.</summary>
+    private static uint OnPage(Color color, Color page)
+    {
+        static uint Argb(Color c) => 0xFF000000u | ((uint)c.R << 16) | ((uint)c.G << 8) | c.B;
+        return ColorMath.Over(Argb(color), Argb(page), color.A / 255.0);
     }
 
     public static Style AccentButton => (Style)Application.Current.Resources["AccentButtonStyle"];

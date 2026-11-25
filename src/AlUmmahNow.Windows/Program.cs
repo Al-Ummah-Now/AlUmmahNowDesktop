@@ -95,6 +95,11 @@ public sealed partial class App : Application
         var shell = new Shell(catalog, localizer, navigator, player, session, settings, store, auth, live, environment.ShortLinkHost);
 
         _window = new Window { Title = localizer["app.name"], Content = shell.Root };
+        // The title bar follows the viewer's theme, not Windows'
+        var titleBar = _window.AppWindow.TitleBar;
+        void Title() => titleBar.PreferredTheme = shell.IsDark ? TitleBarTheme.Dark : TitleBarTheme.Light;
+        shell.Root.ActualThemeChanged += (_, _) => Title();
+        Title();
         _window.AppWindow.Resize(new global::Windows.Graphics.SizeInt32(1280, 800));
         if (_window.AppWindow.Presenter is OverlappedPresenter presenter) presenter.Maximize();
         _window.Closed += (_, _) =>
@@ -131,9 +136,10 @@ public sealed partial class App : Application
                     : shell.Home.Rails.Count > 0;
                 var (accents, wrong) = ViewerTheme.Check(shell.Root, shell.IsDark);
                 if (accents == 0 && (isWatch || automation.StartsWith("behind:", StringComparison.Ordinal))) wrong = "nothing found";
-                pass = pass && shell.IsBuiltOnce && wrong.Length == 0;
+                var title = titleBar.PreferredTheme;
+                pass = pass && shell.IsBuiltOnce && wrong.Length == 0 && title == (shell.IsDark ? TitleBarTheme.Dark : TitleBarTheme.Light);
                 File.WriteAllText(Environment.GetEnvironmentVariable("AUN_RESULT") ?? "aun-result.txt",
-                    $"AUTOMATION {automation} core={coreVersion} rails={shell.Home.Rails.Count} furthest={furthest:F1} caption={sawCaption} failed={shell.Watch?.PlaybackFailed} once={shell.IsBuiltOnce} accents={accents} notGold='{wrong}' RESULT {(pass ? "PASS" : "FAIL")}");
+                    $"AUTOMATION {automation} core={coreVersion} rails={shell.Home.Rails.Count} furthest={furthest:F1} caption={sawCaption} failed={shell.Watch?.PlaybackFailed} once={shell.IsBuiltOnce} accents={accents} notGold='{wrong}' titleBar={title} RESULT {(pass ? "PASS" : "FAIL")}");
                 player.Stop();
                 Exit();
             };

@@ -1,3 +1,4 @@
+using AlUmmahNow.App.Theme;
 using AlUmmahNow.Studio.Shell;
 using Xunit;
 
@@ -44,23 +45,7 @@ public sealed class StudioThemeTests
         Assert.Contains("headerbar.night", css);
     }
 
-    private static double Contrast(uint a, uint b) => StudioTheme.Contrast(a, b);
-
-    [Fact]
-    public void ContrastIsWcags()
-    {
-        Assert.Equal(21, Contrast(0x000000, 0xFFFFFF), 3);
-        Assert.Equal(1, Contrast(0xF4AE3A, 0xF4AE3A), 3);
-        Assert.Equal(4.48, Contrast(0x777777, 0xFFFFFF), 2);
-    }
-
-    [Fact]
-    public void OverIsOneOpaqueColor()
-    {
-        Assert.Equal(0xFFFF8000u, StudioTheme.Over(0xFFFF8000, 0xFF123456, 1));
-        Assert.Equal(0xFF123456u, StudioTheme.Over(0xFFFF8000, 0xFF123456, 0));
-        Assert.Equal(0xFF7F7F7Fu, StudioTheme.Over(0xFFFEFEFE, 0xFF000000, 0.5));
-    }
+    private static double Contrast(uint a, uint b) => ColorMath.Contrast(a, b);
 
     /// <summary>The picked card of Analytics, on Windows and Linux: its label and its value, at its top and bottom.</summary>
     [Theory]
@@ -73,7 +58,7 @@ public sealed class StudioThemeTests
         {
             foreach (var alpha in new[] { StudioTheme.PickedTop, StudioTheme.PickedBottom })
             {
-                var on = StudioTheme.Over(c["FanousPrimaryColor"], c["FanousSurfaceColor"], alpha);
+                var on = ColorMath.Over(c["FanousPrimaryColor"], c["FanousSurfaceColor"], alpha);
                 Assert.True(Contrast(c["Fanous" + text + "Color"], on) >= 4.5, theme + ": " + text + " on the picked card");
             }
         }
