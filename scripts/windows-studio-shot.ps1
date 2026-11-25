@@ -23,8 +23,15 @@ public static bool MoveTo(int x, int y) {
 [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
 "@
 $env:AUN_LANG = $Lang; $env:AUN_TAB = $Tab; $env:AUN_AUTOMATION = $(if ($Demo -eq "1") { "shell" } else { "" }); $env:AUN_DEMO = $Demo; $env:AUN_STORE_SHOT = "1"
-$env:AUN_THEME = $Theme; $env:AUN_WINDOW_SIZE = $Size; $env:AUN_SCENE = $Scene; $env:AUN_EXIT_AFTER = $(if ($Scene -eq "highcontrastswitch") { "48" } else { "30" })
+$env:AUN_THEME = $Theme; $env:AUN_WINDOW_SIZE = $Size; $env:AUN_SCENE = $Scene; $env:AUN_EXIT_AFTER = "30"
 $env:AUN_RESULT = Join-Path $Out "$Name.txt"
+# Scene "highcontrastswitch": how long it takes is not known, so Studio ends when it is told to, after the shot.
+$end = "$env:AUN_RESULT.end"
+$env:AUN_END_FILE = $(if ($Scene -eq "highcontrastswitch") { $end } else { "" })
+if ($Scene -eq "highcontrastswitch") {
+  if (Test-Path $end) { Remove-Item $end }
+  & "$PSScriptRoot/high-contrast.ps1" load
+}
 $p = Start-Process -FilePath $Exe -PassThru
 Start-Sleep -Seconds 8
 $p.Refresh()
@@ -65,7 +72,9 @@ $g = [System.Drawing.Graphics]::FromImage($bmp)
 $g.CopyFromScreen($r.Left, $r.Top, 0, 0, (New-Object System.Drawing.Size $w, $hgt))
 $bmp.Save((Join-Path $Out "$Name.png"), [System.Drawing.Imaging.ImageFormat]::Png)
 $g.Dispose(); $bmp.Dispose()
+if ($Scene -eq "highcontrastswitch") { Set-Content $end "" }
 if (-not $p.WaitForExit(40000)) { $p.Kill(); "EXIT HANG" | Add-Content "$env:AUN_RESULT.hang.txt" }
+if ($Scene -eq "highcontrastswitch") { Remove-Item $end; $env:AUN_END_FILE = "" }
 & "$PSScriptRoot/windows-result.ps1" $env:AUN_RESULT
 # The pointer stays until Studio has said whether it is over the search.
 if ($Scene -in "searchhover", "cardhover") { [AunShot.Win]::MoveTo($r.Right + 200, $r.Bottom - 60) | Out-Null }
