@@ -164,11 +164,11 @@ public sealed partial class App : Application
                 var (accents, wrong) = ViewerTheme.Check(shell.Root, shell.IsDark);
                 if (accents == 0 && (isWatch || automation.StartsWith("behind:", StringComparison.Ordinal))) wrong = "nothing found";
                 var title = titleBar.PreferredTheme;
-                var strays = SystemBrushes.Strays(shell.Root);
+                var (looked, strays) = SystemBrushes.Strays(shell.Root);
                 pass = pass && updateWrong == null && shell.IsBuiltOnce && shell.LiveTitlesAreWhole && wrong.Length == 0 && title == TitleTheme() && strays.Length == 0
-                    && (Environment.GetEnvironmentVariable("AUN_EXPECT_HIGH_CONTRAST") != "1" || SystemBrushes.IsHighContrast);
+                    && (Environment.GetEnvironmentVariable("AUN_EXPECT_HIGH_CONTRAST") != "1" || (SystemBrushes.IsHighContrast && looked > 0));
                 File.WriteAllText(Environment.GetEnvironmentVariable("AUN_RESULT") ?? "aun-result.txt",
-                    $"AUTOMATION {automation} core={coreVersion} rails={shell.Home.Rails.Count} furthest={furthest:F1} caption={sawCaption} failed={shell.Watch?.PlaybackFailed} once={shell.IsBuiltOnce}{updateLine} accents={accents} notGold='{wrong}' titleBar={title} highContrast={SystemBrushes.IsHighContrast} strays='{strays}' titlesWhole={shell.LiveTitlesAreWhole} RESULT {(pass ? "PASS" : "FAIL")}");
+                    $"AUTOMATION {automation} core={coreVersion} rails={shell.Home.Rails.Count} furthest={furthest:F1} caption={sawCaption} failed={shell.Watch?.PlaybackFailed} once={shell.IsBuiltOnce}{updateLine} accents={accents} notGold='{wrong}' titleBar={title} highContrast={SystemBrushes.IsHighContrast} looked={looked} strays='{strays}' titlesWhole={shell.LiveTitlesAreWhole} RESULT {(pass ? "PASS" : "FAIL")}");
                 player.Stop();
                 Exit();
             };

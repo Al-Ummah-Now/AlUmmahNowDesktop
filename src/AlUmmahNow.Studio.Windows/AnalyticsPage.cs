@@ -1,4 +1,5 @@
 using AlUmmahNow.App.Theme;
+using AlUmmahNow.Contrast;
 using AlUmmahNow.App.I18n;
 using AlUmmahNow.Studio.Analytics;
 using Microsoft.UI.Xaml;
@@ -43,6 +44,8 @@ internal sealed class AnalyticsPage
         chartBody.Children.Add(Heading(l["studio.analytics.daily"]));
         AutomationProperties.SetAccessibilityView(_chart, AccessibilityView.Raw);
         _chart.SizeChanged += (_, _) => DrawChart();
+        // The framework's brushes of the chart are others in high contrast, a moment after the change
+        SystemBrushes.Painted += () => _chart.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, DrawChart);
         chartBody.Children.Add(_chart);
         chartBody.Children.Add(_summary);
         chartBody.Children.Add(new Expander { Header = l["studio.analytics.table"], Content = _table, HorizontalAlignment = HorizontalAlignment.Stretch, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent) });
@@ -202,9 +205,9 @@ internal sealed class AnalyticsPage
         var w = _chart.ActualWidth > 0 ? _chart.ActualWidth : 900;
         if (s.Count == 0) return;
         var layout = ChartLayout.Compute(w, _chart.Height, s.Select(p => p.Value).ToList(), integer: _vm.Metric != "watch", _l.IsRtl);
-        var text = ThemeBrush("TextFillColorSecondaryBrush");
-        var grid = ThemeBrush("DividerStrokeColorDefaultBrush");
-        var baseline = ThemeBrush("ControlStrongStrokeColorDefaultBrush");
+        var text = ChartBrush("TextFillColorSecondaryBrush");
+        var grid = ChartBrush("DividerStrokeColorDefaultBrush");
+        var baseline = ChartBrush("ControlStrongStrokeColorDefaultBrush");
         var accent = LanternGlass.Res("StudioChartBrush");
         var edge = LanternGlass.Res("StudioChartEdgeBrush");
 
@@ -265,7 +268,8 @@ internal sealed class AnalyticsPage
         }
     }
 
-    private static Brush ThemeBrush(string key) => (Brush)Application.Current.Resources[key];
+    private static Brush ChartBrush(string key) =>
+        LanternGlass.IsHighContrast ? SystemBrushes.Brush(Microsoft.UI.Colors.Transparent, HighContrastRole.Text) : (Brush)Application.Current.Resources[key];
 
     private static TextBlock Label(string value, Brush brush) => new() { Text = value, FontSize = 12, Foreground = brush };
 

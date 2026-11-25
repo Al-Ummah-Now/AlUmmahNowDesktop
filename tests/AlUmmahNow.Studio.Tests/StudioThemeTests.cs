@@ -163,6 +163,7 @@ public sealed class StudioThemeTests
         foreach (var file in Directory.EnumerateFiles(Path.Combine(root!.FullName, "src", "AlUmmahNow.Studio.Windows"), "*.cs").Where(f => !f.EndsWith("LanternGlass.cs", StringComparison.Ordinal)))
         {
             var brushes = System.Text.RegularExpressions.Regex.Matches(File.ReadAllText(file), @"new (?:Microsoft\.UI\.Xaml\.Media\.)?SolidColorBrush\((.{0,60})");
+            Assert.DoesNotMatch(@"new (?:Microsoft\.UI\.Xaml\.Media\.)?\w*GradientBrush", File.ReadAllText(file));
             Assert.All(brushes, b => Assert.Matches(@"^(Microsoft\.UI\.)?Colors\.Transparent\)|FromArgb\(0, 0, 0, 0\)", b.Groups[1].Value));
         }
 

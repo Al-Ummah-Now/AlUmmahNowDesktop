@@ -409,7 +409,11 @@ internal sealed class VideosPage
         HorizontalAlignment = h,
         VerticalAlignment = v,
         Margin = new Thickness(8),
-        Padding = new Thickness(8, 2, 8, 2),
+        // An edge in high contrast, where the tile under it may be the same color
+        Padding = new Thickness(7, 1, 7, 1),
+        BorderThickness = new Thickness(1),
+        BorderBrush = LanternGlass.Brush(Microsoft.UI.Colors.Transparent, HighContrastRole.Text),
+        BackgroundSizing = Microsoft.UI.Xaml.Controls.BackgroundSizing.OuterBorderEdge,
         CornerRadius = new CornerRadius(radius),
         Background = LanternGlass.Brush(global::Windows.UI.Color.FromArgb(0xC0, 0x09, 0x15, 0x1E), HighContrastRole.Window),
         Child = new TextBlock { Text = text, FontSize = 11.5, FontWeight = Microsoft.UI.Text.FontWeights.Bold, Foreground = LanternGlass.Brush(color, HighContrastRole.Text) },

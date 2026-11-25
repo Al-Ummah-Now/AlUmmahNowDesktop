@@ -103,6 +103,9 @@ internal static class Tile
         CornerRadius = new CornerRadius(8),
         VerticalAlignment = VerticalAlignment.Center,
         Background = LanternGlass.Film(),
+        BorderThickness = new Thickness(1),
+        BorderBrush = LanternGlass.Brush(Microsoft.UI.Colors.Transparent, HighContrastRole.Text),
+        BackgroundSizing = BackgroundSizing.OuterBorderEdge,
         Child = new FontIcon { Glyph = "\uE8B2", FontSize = height * 0.4, Foreground = LanternGlass.Brush(LanternGlass.Gold, HighContrastRole.Highlight) },
     };
 }
