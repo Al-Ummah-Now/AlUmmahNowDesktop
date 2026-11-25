@@ -350,8 +350,12 @@ namespace AlUmmahNow.App.Updates
             }
 
             if (_ready != null && (!Installs || _answer.Tag != _ready.Tag)) Drop();
-            if (_ready != null) await IsStillGoodAsync();
-            else if (_answer.Kind == UpdatePromptKind.Forced && Installs && !IsStaging)
+            if (_ready is { } ready)
+            {
+                // The answer has come anew: its words are still the manifest's
+                if (await IsStillGoodAsync()) Take(ready);
+            }
+            else if (_answer.Kind == UpdatePromptKind.Forced && Installs)
             {
                 try
                 {
@@ -453,7 +457,8 @@ namespace AlUmmahNow.App.Updates
         private async Task RefusedAsync(string tag, string reason)
         {
             Drop();
-            NothingToUpdateTo();
+            // Another release may be offered by now: that one was not refused
+            if (_answer.Tag == tag) NothingToUpdateTo();
             Show();
             await _self!.ReportAsync(tag, reason, _stop);
         }

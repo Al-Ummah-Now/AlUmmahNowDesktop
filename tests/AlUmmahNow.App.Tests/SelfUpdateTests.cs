@@ -351,6 +351,58 @@ public sealed class SelfUpdateTests
     }
 
     [Fact]
+    public async Task A_late_refusal_does_not_touch_what_is_offered_by_then()
+    {
+        Offers(byDefault: false);
+        _self.Gate = new TaskCompletionSource();
+        var service = Service();
+        await service.CheckAsync();
+        service.Begin();
+        Offers(version: "1.5.1", byDefault: false);
+        await service.CheckAsync();
+        _self.Breaks = new UpdateRefusedException("hash");
+        _self.Gate.SetResult();
+        await Until(() => _self.Reports.Count == 1);
+        Assert.Equal("v1.5.0 hash", _self.Reports[0]);
+        Assert.Equal("1.5.1", service.View.Version);
+        Assert.Equal(UpdateStage.Available, service.View.Stage);
+    }
+
+    [Fact]
+    public async Task The_notes_stay_the_manifests_when_the_server_is_asked_again()
+    {
+        Offers();
+        var service = Service();
+        await service.CheckAsync();
+        Offers();
+        await service.CheckAsync();
+        Assert.Equal(UpdateStep.Ready, service.View.Step);
+        Assert.Equal("signed notes", service.View.NotesEn);
+    }
+
+    /// <summary>The minimum was raised while the update was downloading: the screen needs a manifest that verifies all the same.</summary>
+    [Fact]
+    public async Task Forced_while_it_downloads_is_verified_first()
+    {
+        Offers();
+        _self.Gate = new TaskCompletionSource();
+        var service = Service();
+        await service.CheckAsync();
+        Offers(UpdatePromptKind.Forced);
+        _self.Breaks = new UpdateRefusedException("bad_signature");
+        await service.CheckAsync();
+        Assert.Equal(1, _self.Verified);
+        Assert.Equal(UpdateStage.Required, service.View.Stage);
+        _self.Breaks = null;
+        _self.Gate.SetResult();
+        await Task.Delay(50);
+        // What the download brought is not what is offered any more
+        Assert.Equal(UpdateStage.Required, service.View.Stage);
+        service.OnExit();
+        Assert.Equal(0, _self.OnExit);
+    }
+
+    [Fact]
     public async Task The_screen_still_waits_for_work()
     {
         Offers(UpdatePromptKind.Forced);
