@@ -18,10 +18,10 @@ internal sealed class AnalyticsPage
     private readonly AnalyticsViewModel _vm;
     private readonly Grid _totals = new() { ColumnSpacing = 14 };
     private readonly Canvas _chart = new() { Height = 300, FlowDirection = FlowDirection.LeftToRight };
-    private readonly TextBlock _summary = new() { Opacity = 0.8, TextWrapping = TextWrapping.Wrap };
+    private readonly TextBlock _summary = new TextBlock { TextWrapping = TextWrapping.Wrap }.Dim(0.8);
     private readonly StackPanel _table = new();
     private readonly StackPanel _top = new() { Spacing = 4 };
-    private readonly TextBlock _status = new() { Opacity = 0.8 };
+    private readonly TextBlock _status = new TextBlock().Dim(0.8);
     private Button? _picked;
 
     public AnalyticsPage(Localizer l, AnalyticsViewModel vm)

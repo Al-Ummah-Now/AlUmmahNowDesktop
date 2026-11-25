@@ -220,7 +220,7 @@ jobs:
           ./scripts/set-resolution.ps1 1920 1080
           $exe = (Resolve-Path "src/AlUmmahNow.Studio.Windows/bin/x64/Release/net9.0-windows10.0.22621.0/win-x64/AlUmmahNowStudio.exe").Path
           $out = (New-Item -ItemType Directory -Force artifacts/updates).FullName
-          $watch = (New-Item -ItemType Directory -Force watched).FullName
+          $watch = (New-Item -ItemType Directory -Force "C:\Videos\New").FullName
           foreach ($n in "friday-khutbah.mp4","seerah-part-4.mov") { $f = [IO.File]::Create("$watch/$n"); $f.SetLength(90000000); $f.Close() }
           $failed = @()
           function Shot($scene, $lang, $theme, $size, $mode = "") {

@@ -24,8 +24,10 @@ public static class HighContrast
         ["StudioPickedEdgeBrush"] = HighContrastRole.Highlight,
         ["StudioChartBrush"] = HighContrastRole.Highlight,
         ["StudioChartEdgeBrush"] = HighContrastRole.Highlight,
-        ["StudioDangerFillBrush"] = HighContrastRole.Highlight,
-        ["StudioOnDangerFillBrush"] = HighContrastRole.HighlightText,
+        // Not the highlight, which is the default button beside it
+        ["StudioDangerFillBrush"] = HighContrastRole.Window,
+        ["StudioDangerEdgeBrush"] = HighContrastRole.Text,
+        ["StudioOnDangerFillBrush"] = HighContrastRole.Text,
         ["StudioOnGoldBrush"] = HighContrastRole.HighlightText,
     };
 }

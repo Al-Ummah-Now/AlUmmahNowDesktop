@@ -89,7 +89,7 @@ public sealed partial class Shell
 
         if (LiveList.All.Count == 0)
         {
-            column.Children.Add(new TextBlock { Text = _localizer["live.empty"], Opacity = 0.7, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 48, 0, 0) });
+            column.Children.Add(new TextBlock { Text = _localizer["live.empty"], HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 48, 0, 0) }.Dim(0.7));
         }
 
         foreach (var (key, cards) in new[] { ("live.onAir", LiveList.OnAir), ("live.coming", LiveList.Coming) })
@@ -126,14 +126,14 @@ public sealed partial class Shell
         var thumb = new Grid { Background = CardFill, CornerRadius = new CornerRadius(8), BorderBrush = SystemBrushes.Brush(Colors.Transparent, HighContrastRole.Text), BorderThickness = new Thickness(SystemBrushes.IsHighContrast ? 1 : 0) };
         panel.SizeChanged += (_, e) => thumb.Height = e.NewSize.Width * 9 / 16;
         // A stream without a picture of its own shows what it is
-        thumb.Children.Add(new FontIcon { Glyph = "", FontSize = 32, Opacity = 0.7 });
+        thumb.Children.Add(new FontIcon { Glyph = "", FontSize = 32 }.Dim(0.7));
         if (card.ThumbnailUrl != null) thumb.Children.Add(new Image { Stretch = Stretch.UniformToFill, Source = new BitmapImage(new Uri(card.ThumbnailUrl)) });
         panel.Children.Add(thumb);
         panel.Children.Add(LiveTitle(card.Title));
         panel.Children.Add(Badges(card.Badges));
         foreach (var text in new[] { card.Channel, card.Stats })
         {
-            if (!string.IsNullOrEmpty(text)) panel.Children.Add(new TextBlock { Text = text, Opacity = 0.7, TextTrimming = TextTrimming.CharacterEllipsis });
+            if (!string.IsNullOrEmpty(text)) panel.Children.Add(new TextBlock { Text = text, TextTrimming = TextTrimming.CharacterEllipsis }.Dim(0.7));
         }
 
         var button = new Button { Content = panel, Padding = new Thickness(6), Background = new SolidColorBrush(Colors.Transparent), BorderThickness = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Top };
@@ -244,7 +244,7 @@ public sealed partial class Shell
         var text = new StackPanel { Spacing = 6 };
         text.Children.Add(Badges(vm.Badges));
         text.Children.Add(new TextBlock { Text = vm.Title, FontSize = 22, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
-        var meta = new TextBlock { Opacity = 0.7, TextWrapping = TextWrapping.Wrap };
+        var meta = new TextBlock { TextWrapping = TextWrapping.Wrap }.Dim(0.7);
         text.Children.Add(meta);
         if (vm.Description.Length > 0) text.Children.Add(new TextBlock { Text = vm.Description, TextWrapping = TextWrapping.Wrap });
         row.Children.Add(text);
@@ -261,7 +261,7 @@ public sealed partial class Shell
             remind.IsEnabled = true;
         };
         actions.Children.Add(remind);
-        var note = new TextBlock { Opacity = 0.7, TextWrapping = TextWrapping.Wrap, HorizontalAlignment = HorizontalAlignment.Right };
+        var note = new TextBlock { TextWrapping = TextWrapping.Wrap, HorizontalAlignment = HorizontalAlignment.Right }.Dim(0.7);
         actions.Children.Add(note);
         Grid.SetColumn(actions, 1);
         row.Children.Add(actions);
@@ -295,7 +295,7 @@ public sealed partial class Shell
         var scroll = new ScrollViewer { Content = list, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
         Grid.SetRow(scroll, 2);
         panel.Children.Add(scroll);
-        var empty = new TextBlock { Text = vm.ChatEmpty, Opacity = 0.7, TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12) };
+        var empty = new TextBlock { Text = vm.ChatEmpty, TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12) }.Dim(0.7);
         Grid.SetRow(empty, 2);
         panel.Children.Add(empty);
 
@@ -353,7 +353,7 @@ public sealed partial class Shell
     {
         var box = new StackPanel { Spacing = 2 };
         var head = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
-        if (at != null) head.Children.Add(new TextBlock { Text = at, FontSize = 12, Opacity = 0.7, VerticalAlignment = VerticalAlignment.Center });
+        if (at != null) head.Children.Add(new TextBlock { Text = at, FontSize = 12, VerticalAlignment = VerticalAlignment.Center }.Dim(0.7));
         head.Children.Add(new TextBlock { Text = message.AuthorName, FontSize = 12, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, MaxWidth = 190, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center });
         if (message.Role is { } role) head.Children.Add(Badge(_localizer[role == LiveChatRole.Owner ? "live.chat.host" : "live.chat.moderator"], false));
         box.Children.Add(head);

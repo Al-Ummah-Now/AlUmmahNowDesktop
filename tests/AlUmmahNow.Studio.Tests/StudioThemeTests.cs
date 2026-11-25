@@ -159,6 +159,15 @@ public sealed class StudioThemeTests
         Assert.Contains("foreach (var paint in Painters) paint(IsHighContrast);", shared);
         Assert.Contains("        Painters.Add(paint);\n        paint(IsHighContrast);", shared.Replace("\r\n", "\n"));
         Assert.Contains("controls.ThemeDictionaries[\"HighContrast\"] = SystemBrushes.Controls();", glass);
+        // Nor of a part of one: what is dim is opaque there
+        foreach (var file in new[] { "AlUmmahNow.Windows", "AlUmmahNow.Studio.Windows" }.SelectMany(p => Directory.EnumerateFiles(Path.Combine(root!.FullName, "src", p), "*.cs")))
+        {
+            Assert.DoesNotContain(File.ReadAllLines(file), l => System.Text.RegularExpressions.Regex.IsMatch(l, @"\bOpacity = 0\.\d") && !l.Contains("new Image", StringComparison.Ordinal));
+        }
+
+        Assert.NotEqual(HighContrast.Roles["StudioDangerFillBrush"], HighContrast.Roles["StudioDangerEdgeBrush"]);
+        Assert.NotEqual(HighContrastRole.Highlight, HighContrast.Roles["StudioDangerFillBrush"]);
+
         // A brush of its own color, outside LanternGlass, would keep it: only a transparent one may
         foreach (var file in Directory.EnumerateFiles(Path.Combine(root!.FullName, "src", "AlUmmahNow.Studio.Windows"), "*.cs").Where(f => !f.EndsWith("LanternGlass.cs", StringComparison.Ordinal)))
         {
