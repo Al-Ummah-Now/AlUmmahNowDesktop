@@ -6,7 +6,7 @@ using AlUmmahNow.Admin.Review;
 using AlUmmahNow.Admin.Security;
 using AlUmmahNow.App.I18n;
 using AlUmmahNow.CoreBridge;
-using AlUmmahNow.CoreBridge.Logging;
+using AlUmmahNow.Tests.Shared;
 using Xunit;
 
 namespace AlUmmahNow.Admin.Tests;
@@ -92,23 +92,15 @@ public class AdminApiReviewServiceTests
     [Fact]
     public async Task Logs_never_carry_urls_ids_tokens_or_signatures()
     {
-        var sink = new ListSink();
-        Log.AddSink(sink);
-        try
-        {
-            var handler = new StubHandler((_, _) => StubHandler.Json(HttpStatusCode.Conflict, """{"code":"weird"}"""));
-            await Assert.ThrowsAnyAsync<ReviewException>(() => Make(handler).MediaAsync("rev-secret-id", "frames/x.jpg?sig=zzz"));
-            var text = string.Join("\n", sink.Lines);
-            Assert.Contains("/api/review/:id/media", text);
-            Assert.DoesNotContain("rev-secret-id", text);
-            Assert.DoesNotContain("sig=", text);
-            Assert.DoesNotContain("token-1", text);
-            Assert.Equal("ReviewStream(preview=False)", new ReviewStream { Url = new Uri("https://cdn.example/v.m3u8?sig=abc") }.ToString());
-        }
-        finally
-        {
-            Log.RemoveSink(sink);
-        }
+        using var sink = new TestLogSink();
+        var handler = new StubHandler((_, _) => StubHandler.Json(HttpStatusCode.Conflict, """{"code":"weird"}"""));
+        await Assert.ThrowsAnyAsync<ReviewException>(() => Make(handler).MediaAsync("rev-secret-id", "frames/x.jpg?sig=zzz"));
+        var text = string.Join("\n", sink.Entries);
+        Assert.Contains("/api/review/:id/media", text);
+        Assert.DoesNotContain("rev-secret-id", text);
+        Assert.DoesNotContain("sig=", text);
+        Assert.DoesNotContain("token-1", text);
+        Assert.Equal("ReviewStream(preview=False)", new ReviewStream { Url = new Uri("https://cdn.example/v.m3u8?sig=abc") }.ToString());
     }
 
     [Fact]
@@ -131,16 +123,6 @@ public class AdminApiReviewServiceTests
         Assert.Contains("\"provider\":\"wns\"", body);
         Assert.Contains("\"locale\":\"ar\"", body);
         Assert.Throws<ArgumentException>(() => AdminPushRegistration.Body("https://evil.example/notify.windows.com", "en", "1"));
-    }
-
-    private sealed class ListSink : ILogSink
-    {
-        public List<string> Lines { get; } = new();
-
-        public void Write(LogEntry entry)
-        {
-            lock (Lines) Lines.Add(entry.ToString());
-        }
     }
 }
 
