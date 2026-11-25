@@ -61,7 +61,7 @@ STUDIO = [  # (category, English, Arabic): DemoTransport's videos, in order
     ("khutbah", "Friday khutbah: patience", "خطبة الجمعة: الصبر"),
     ("hadith_studies", "Hadith of the week: intentions", "حديث الأسبوع: النيات"),
     ("islamic_history", "Stories of the prophets: Yunus", "قصص الأنبياء: يونس عليه السلام"),
-    ("fiqh", "Q&A: prayer while travelling", "سؤال وجواب: الصلاة في السفر"),
+    ("fiqh", "Q&A: prayer while traveling", "سؤال وجواب: الصلاة في السفر"),
 ]
 # Noor Channel's new short clips, staged on the Upload page (ci-studio-linux.yml). File names come from the titles, so
 # each English title and its Arabic twin sort to the same place: the staged list has one order in both languages.

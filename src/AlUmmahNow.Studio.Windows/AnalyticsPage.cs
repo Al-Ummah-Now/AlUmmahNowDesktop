@@ -122,6 +122,7 @@ internal sealed class AnalyticsPage
                 Width = 72,
                 Height = 40,
                 CornerRadius = new CornerRadius(6),
+                FlowDirection = FlowDirection.LeftToRight, // the picture itself never mirrors
                 Background = hasThumb
                     ? new ImageBrush { ImageSource = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(thumbUrl) { DecodePixelWidth = 144 }, Stretch = Stretch.UniformToFill }
                     : new SolidColorBrush(global::Windows.UI.Color.FromArgb(0xFF, 0x18, 0x44, 0x56)),
