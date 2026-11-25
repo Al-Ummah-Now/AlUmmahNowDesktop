@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using AlUmmahNow.App.I18n;
 using AlUmmahNow.App.Services;
 using AlUmmahNow.CoreBridge.Studio;
@@ -29,7 +28,7 @@ internal sealed class SettingsPage
     private readonly Func<StudioAccount, Task> _signOut;
 
     public SettingsPage(Localizer l, AppSettings settings, SettingsStore store, StudioShellViewModel shell, UploadsViewModel uploads,
-        Func<Task<string?>> chooseFolder, Func<StudioAccount, Task> signOut, Func<Task> addPasskey, string version, UpdateViews updates, Action close)
+        Func<Task<string?>> chooseFolder, Func<StudioAccount, Task> signOut, Func<Task> addPasskey, string version, UpdateViews updates, Action restart)
     {
         _l = l;
         _shell = shell;
@@ -40,7 +39,8 @@ internal sealed class SettingsPage
 
         Root = new StackPanel { Spacing = 18, Padding = new Thickness(16, 4, 16, 8) };
         var restartNow = new Button { Content = l["studio.settings.restartNow"] };
-        restartNow.Click += (_, _) => Restart(close);
+        // Ends this Studio as its close button does, and starts it again
+        restartNow.Click += (_, _) => restart();
         _restart = new InfoBar { Severity = InfoBarSeverity.Informational, IsClosable = false, Message = l["studio.settings.restart"], ActionButton = restartNow };
         Root.Children.Add(_restart);
         void Changed() => _restart.IsOpen = (settings.Theme == ThemePreference.Light ? ThemePreference.Light : ThemePreference.Dark) != startTheme || settings.Language != startLanguage;
@@ -185,14 +185,5 @@ internal sealed class SettingsPage
     {
         _watch.Text = _uploads.WatchFolder is { } f ? _l.Format("studio.upload.watchingFolder", Localizer.Isolate(f)) : _l["studio.settings.noWatch"];
         _stopWatching.Visibility = _uploads.WatchFolder != null ? Visibility.Visible : Visibility.Collapsed;
-    }
-
-    /// <summary>Starts a new Studio and quits this one (the theme and language are read at start-up).</summary>
-    private static void Restart(Action close)
-    {
-        if (Environment.ProcessPath is not { } path) return;
-        Process.Start(new ProcessStartInfo(path) { UseShellExecute = false });
-        // As its window closes: the new one is running by then, so no update is installed under it
-        close();
     }
 }

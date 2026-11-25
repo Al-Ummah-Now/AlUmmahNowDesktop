@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using AlUmmahNow.Core;
 using AlUmmahNow.CoreBridge.Studio;
 using CoreUploadRequest = AlUmmahNow.Core.UploadRequest;
@@ -12,10 +14,13 @@ namespace AlUmmahNow.CoreBridge.Native.Studio;
 public sealed class CoreUploadService : IUploadService
 {
     private readonly UploadEngine _engine;
+    private readonly string _lock;
+    private int _stopped;
 
     public CoreUploadService(CoreStudioAccounts accounts, Uri videosApi, string userAgent, string storeDir, string accountId)
     {
         AccountId = accountId;
+        _lock = LockPath(storeDir, accountId);
         try
         {
             var client = accounts.Manager.ApiClient(new ApiClientConfig(videosApi.AbsoluteUri.TrimEnd('/'), userAgent, null, 60_000, 4, AunClient.FromUserAgent(userAgent)), accountId);
@@ -28,6 +33,14 @@ public sealed class CoreUploadService : IUploadService
         {
             throw CoreApiTransport.Map(ex, "upload queue");
         }
+    }
+
+    /// <summary>On an engine of the tests.</summary>
+    internal CoreUploadService(UploadEngine engine, string storeDir, string accountId)
+    {
+        AccountId = accountId;
+        _lock = LockPath(storeDir, accountId);
+        _engine = engine;
     }
 
     public event EventHandler<string>? Changed;
@@ -66,10 +79,57 @@ public sealed class CoreUploadService : IUploadService
         }
     }
 
+    public async Task StopAsync(CancellationToken cancellationToken = default)
+    {
+        if (Interlocked.Exchange(ref _stopped, 1) != 0) return;
+        // It returns at once; the engine gives its store's lock back when the last transfer has written what it has
+        _engine.Shutdown();
+        try
+        {
+            while (!IsFree(_lock)) await Task.Delay(50, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _engine.Dispose();
+        }
+    }
+
     public void Dispose()
     {
+        if (Interlocked.Exchange(ref _stopped, 1) != 0) return;
         _engine.Shutdown();
         _engine.Dispose();
+    }
+
+    /// <summary>The file the engine locks (aun-upload, Store::lock_path).</summary>
+    internal static string LockPath(string storeDir, string accountId) =>
+        Path.Combine(storeDir, ".account-" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(accountId)).AsSpan(0, 8)) + ".lock");
+
+    /// <summary>Nobody holds the engine's lock on it.</summary>
+    internal static bool IsFree(string path)
+    {
+        if (!File.Exists(path)) return true;
+        try
+        {
+            if (OperatingSystem.IsWindows())
+            {
+                // A lock on the file's bytes
+                using var file = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite | FileShare.Delete);
+                file.Lock(0, long.MaxValue);
+                file.Unlock(0, long.MaxValue);
+            }
+            else
+            {
+                // flock, which is also what an unshared open takes
+                using var file = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+            }
+
+            return true;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
     }
 
     internal static UploadSnapshot ToSnapshot(UploadInfo u) => new(

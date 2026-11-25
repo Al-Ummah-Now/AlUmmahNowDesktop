@@ -44,8 +44,13 @@ public sealed partial class Shell
         if (LiveWatch == null && _watch == null && (before != Shown() || state != LiveList.State)) Render();
     }
 
-    /// <summary>The window is closing.</summary>
-    public void Close() => LiveWatch?.Close(TimeSpan.FromSeconds(2));
+    /// <summary>The app ends: completes when the stream was told that this viewer left.</summary>
+    public Task LeaveLive()
+    {
+        if (LiveWatch is not { } watch) return Task.CompletedTask;
+        watch.Dispose();
+        return watch.Leaving;
+    }
 
     private SolidColorBrush Gold => ViewerTheme.Brush("Primary", IsDark, HighContrastRole.Highlight);
     private SolidColorBrush OnGold => ViewerTheme.Brush("OnPrimary", IsDark, HighContrastRole.HighlightText);

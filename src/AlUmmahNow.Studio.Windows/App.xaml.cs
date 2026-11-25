@@ -191,10 +191,14 @@ public sealed partial class App : Application
         bool IsBusy() => uploadsVm.IsWorking || encode.IsBusy;
         var updateScene = UpdateScene.FromEnvironment(localizer, UpdateInstall.Installer, IsBusy);
         var updateStore = new UpdateStore(Path.Combine(dataRoot, "updates.json"));
-        var updates = updateScene?.Service ?? WindowsInstall.Service("studio", environment.VideosApi, version, userAgent, dataRoot, updateStore, demo, IsBusy, () => window.Window.Close());
-        var updateViews = new UpdateViews(updates, new UpdateText(localizer, UpdateApp.Studio, updates), UpdateText.Icon(UpdateApp.Studio), () => window.Window.Close());
+        var updates = updateScene?.Service ?? WindowsInstall.Service("studio", environment.VideosApi, version, userAgent, dataRoot, updateStore, demo, IsBusy, WindowsEnd.Close);
+        var updateViews = new UpdateViews(updates, new UpdateText(localizer, UpdateApp.Studio, updates), UpdateText.Icon(UpdateApp.Studio), WindowsEnd.Close);
         window.UseUpdates(updateViews);
-        var settingsPage = new SettingsPage(localizer, settings, settingsStore, shell, uploadsVm, PickFolderAsync, window.SignOut, window.AddPasskeyAsync, updates.InstalledVersion, updateViews, () => window.Window.Close());
+        var settingsPage = new SettingsPage(localizer, settings, settingsStore, shell, uploadsVm, PickFolderAsync, window.SignOut, window.AddPasskeyAsync, updates.InstalledVersion, updateViews, () =>
+        {
+            updates.AskRestart();
+            WindowsEnd.Close();
+        });
         window.AddPage(StudioPages.Settings, localizer["studio.tab.settings"], Symbol.Setting, settingsPage.Root);
         window.UsePages(pages);
         window.SearchRequested += (_, q) => videos.SearchFor(q);
@@ -206,15 +210,9 @@ public sealed partial class App : Application
         };
         var closing = new CancellationTokenSource();
         _ = updates.RunAsync(closing.Token);
-        window.Window.Closed += (_, _) =>
-        {
-            // The one end of the app: its work stops (the upload queue is closed on disk), then an update may be installed
-            updates.OnExit(() =>
-            {
-                closing.Cancel();
-                uploadsVm.Dispose();
-            });
-        };
+        WindowsEnd.Attach(window.Window, updates, closing.Cancel,
+            // Uploads (and the details of finished ones) and encodes, at once and within the end's limit
+            stop => Task.WhenAll(uploadsVm.StopAsync(stop), encode.StopAsync(stop)));
 
         _refresh = ui.CreateTimer();
         _refresh.Interval = TimeSpan.FromMilliseconds(300);

@@ -34,11 +34,15 @@ public class EncodeTests
         public List<string> Tried = new();
         public IReadOnlyList<EncoderChoice> Encoders = new[] { new EncoderChoice("hw", EncoderKind.Hardware), new EncoderChoice("sw", EncoderKind.Software) };
         public TaskCompletionSource? Gate;
+
+        /// <summary>Does not look at being cancelled.</summary>
+        public TaskCompletionSource? Stuck { get; init; }
         public IReadOnlyList<EncoderChoice> AvailableEncoders() => Encoders;
 
         public async Task EncodeAsync(EncodeRequest r, EncoderChoice e, IProgress<double> p, CancellationToken ct)
         {
             Tried.Add(e.Name);
+            if (Stuck != null) await Stuck.Task;
             if (Gate != null) await Gate.Task.WaitAsync(ct);
             if (Failing.Contains(e.Name)) throw new InvalidOperationException(e.Name + " failed");
             p.Report(0.5);
@@ -89,6 +93,38 @@ public class EncodeTests
         await q.WhenIdleAsync();
         Assert.Equal(EncodeStatus.Canceled, job.Status);
         Assert.Single(b.Tried);
+    }
+
+    [Fact]
+    public async Task Stopping_cancels_what_runs_forgets_what_waits_and_waits_for_the_encoder()
+    {
+        var b = new Backend { Gate = new TaskCompletionSource() };
+        var q = new EncodeQueue(b);
+        var running = q.Add(R);
+        var waiting = q.Add(R);
+        Assert.True(q.IsBusy);
+        await q.StopAsync();
+        Assert.False(q.IsBusy);
+        Assert.Equal(EncodeStatus.Canceled, running.Status);
+        Assert.Equal(EncodeStatus.Canceled, waiting.Status);
+        Assert.Single(b.Tried);
+        // Nothing begins after it
+        Assert.Equal(EncodeStatus.Queued, q.Add(R).Status);
+        await q.StopAsync();
+        Assert.Single(b.Tried);
+    }
+
+    [Fact]
+    public async Task Stopping_an_encoder_that_does_not_let_go_is_bounded()
+    {
+        var b = new Backend { Stuck = new TaskCompletionSource() };
+        var q = new EncodeQueue(b);
+        q.Add(R);
+        using var late = new CancellationTokenSource(50);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => q.StopAsync(late.Token));
+        Assert.True(q.IsBusy);
+        b.Stuck.SetResult();
+        await q.StopAsync();
     }
 
     [Fact]

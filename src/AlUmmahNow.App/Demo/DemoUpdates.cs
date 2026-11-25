@@ -195,7 +195,11 @@ namespace AlUmmahNow.App.Demo
                 },
                 wasEnabled: name == "offline", self: _self,
                 // The scene goes on after it: what closing would do is what it looks at
-                close: () => Service!.OnExit());
+                close: () =>
+                {
+                    Service!.BeginEnd();
+                    Service.HandOver();
+                });
         }
 
         public string Name { get; }

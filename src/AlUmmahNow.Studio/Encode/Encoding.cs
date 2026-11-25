@@ -108,6 +108,32 @@ public sealed class EncodeQueue
 
     public void CancelCurrent() => _current?.Cancel();
 
+    /// <summary>Cancels what runs, forgets what waits, and waits until the encoder has let go.</summary>
+    public async Task StopAsync(CancellationToken cancellationToken = default)
+    {
+        lock (_gate)
+        {
+            _paused = true;
+            foreach (var job in _pending) job.Status = EncodeStatus.Canceled;
+            _pending.Clear();
+        }
+
+        while (IsBusy)
+        {
+            // Again: the job may have been taken before it was paused, and only now have begun
+            try
+            {
+                CancelCurrent();
+            }
+            catch (ObjectDisposedException)
+            {
+                // It has just ended
+            }
+
+            await Task.Delay(20, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
     public async Task WhenIdleAsync(CancellationToken cancellationToken = default)
     {
         while (true)
@@ -143,7 +169,7 @@ public sealed class EncodeQueue
                 job = _pending.Dequeue();
             }
 
-            await RunAsync(job);
+            await RunAsync(job).ConfigureAwait(false);
         }
     }
 
@@ -170,7 +196,7 @@ public sealed class EncodeQueue
             job.Error = null;
             try
             {
-                await _backend.EncodeAsync(job.Request, encoder, progress, cts.Token);
+                await _backend.EncodeAsync(job.Request, encoder, progress, cts.Token).ConfigureAwait(false);
                 job.Status = EncodeStatus.Completed;
                 job.Progress = 1;
                 break;

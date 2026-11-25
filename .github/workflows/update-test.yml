@@ -12,6 +12,10 @@ on:
       - scripts/no-test-hooks.mjs
       - scripts/vpk-pack.sh
       - src/AlUmmahNow.App/Updates/**
+      - src/AlUmmahNow.App/Services/AppEnd.cs
+      - src/AlUmmahNow.Studio/Upload/**
+      - src/AlUmmahNow.Studio/Encode/Encoding.cs
+      - src/AlUmmahNow.CoreBridge.Native/Studio/CoreUploadService.cs
       - src/AlUmmahNow.CoreBridge/ISelfUpdate.cs
       - src/AlUmmahNow.CoreBridge/IUpdateChecker.cs
       - src/AlUmmahNow.CoreBridge.Native/CoreUpdateChecker.cs
@@ -40,13 +44,13 @@ jobs:
             project: AlUmmahNow.Windows
             exe: AlUmmahNow.exe
             id: AlUmmahNow.Viewer
-            cases: tampered bad-signature foreign-host planted swapped yanked twice older
+            cases: tampered bad-signature foreign-host planted swapped yanked twice older session restart-fails watching
           - app: studio
             project: AlUmmahNow.Studio.Windows
             exe: AlUmmahNowStudio.exe
             id: AlUmmahNow.Studio
             # Its own work can be started without a live stream
-            cases: tampered bad-signature foreign-host planted swapped yanked twice older working
+            cases: tampered bad-signature foreign-host planted swapped yanked twice older session restart-fails working uploading
     defaults:
       run:
         shell: bash
@@ -60,6 +64,11 @@ jobs:
           node-version: 22
       - name: Fetch AlUmmahNow.Core
         run: ./scripts/fetch-core.sh
+      - name: Enable Media Foundation (optional feature on Windows Server)
+        if: matrix.app == 'viewer'
+        continue-on-error: true
+        shell: pwsh
+        run: Install-WindowsFeature Server-Media-Foundation | Format-List
       - name: Build and pack 1.0.1, 1.0.2 and 1.0.3
         run: |
           for n in 1 2 3; do
@@ -77,7 +86,7 @@ jobs:
       - name: What must not be installed changes nothing
         run: |
           for c in ${{ matrix.cases }}; do
-            node scripts/update-test.mjs --app ${{ matrix.app }} --exe "$LOCALAPPDATA/${{ matrix.id }}/current/${{ matrix.exe }}" --package keep/2/*-full.nupkg --packages "$LOCALAPPDATA/${{ matrix.id }}/packages" --package-name ${{ matrix.id }}-1.0.2-full.nupkg --from 1.0.1 --to 1.0.2 --case $c
+            node scripts/update-test.mjs --app ${{ matrix.app }} --exe "$LOCALAPPDATA/${{ matrix.id }}/current/${{ matrix.exe }}" --package keep/2/*-full.nupkg --packages "$LOCALAPPDATA/${{ matrix.id }}/packages" --package-name ${{ matrix.id }}-1.0.2-full.nupkg --from 1.0.1 --to 1.0.2 --media "$(cygpath -w "$PWD/tests/fixtures/watch")" --case $c
           done
       - name: 1.0.1 becomes 1.0.2 as it closes
         run: node scripts/update-test.mjs --app ${{ matrix.app }} --exe "$LOCALAPPDATA/${{ matrix.id }}/current/${{ matrix.exe }}" --package keep/2/*-full.nupkg --packages "$LOCALAPPDATA/${{ matrix.id }}/packages" --package-name ${{ matrix.id }}-1.0.2-full.nupkg --from 1.0.1 --to 1.0.2

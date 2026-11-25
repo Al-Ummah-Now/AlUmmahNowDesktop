@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace AlUmmahNow.CoreBridge.Studio
@@ -75,6 +76,12 @@ namespace AlUmmahNow.CoreBridge.Studio
 
         /// <summary>Stops the upload and discards the partial upload on the server.</summary>
         Task CancelAsync(string id);
+
+        /// <summary>
+        /// Stops every upload (they go on at the next start) and waits until nothing of them is written any more and the store
+        /// is free. The service is of no use after it.
+        /// </summary>
+        Task StopAsync(CancellationToken cancellationToken = default);
 
         /// <summary>Forgets a finished, failed or cancelled upload.</summary>
         void Remove(string id);

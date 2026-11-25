@@ -94,6 +94,9 @@ internal sealed class VelopackInstaller : IPackageInstaller
     /// </summary>
     public void ApplyOnExit(bool restart)
     {
+#if UPDATE_TEST
+        if (Environment.GetEnvironmentVariable("AUN_UPDATE_TEST_NO_UPDATER") == "1") throw new IOException("the updater does not start (test)");
+#endif
         if (_info is { } info) _manager.WaitExitThenApplyUpdates(info.TargetFullRelease, silent: !restart, restart, restart ? new[] { AppStart.AfterUpdate } : null);
     }
 

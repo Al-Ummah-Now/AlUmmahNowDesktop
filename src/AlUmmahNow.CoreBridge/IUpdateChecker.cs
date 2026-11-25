@@ -25,7 +25,7 @@ namespace AlUmmahNow.CoreBridge
     /// </summary>
     public sealed class UpdateAnswer
     {
-        public static readonly UpdateAnswer Off = new UpdateAnswer();
+        public static UpdateAnswer Off => new UpdateAnswer();
 
         /// <summary>The server's <c>appUpdates</c> switch.</summary>
         public bool Enabled { get; set; }
