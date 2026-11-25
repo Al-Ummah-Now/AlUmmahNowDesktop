@@ -208,6 +208,9 @@ internal sealed class UploadPage
     /// <summary>The title-pattern hint; its {n} examples use the UI digits (the token itself writes 0–9).</summary>
     private static string TitlePatternHint(Localizer l) => l.Format("studio.upload.titlePatternHint", 1, 2, 3);
 
+    /// <summary>The line under a field, in more lines where the column is narrow: the field's own is one, and cut.</summary>
+    private TextBlock Hint(string text) => new() { Text = text, TextWrapping = TextWrapping.Wrap, FlowDirection = _direction };
+
     private static Button Button(string text, Func<Task> click, bool accent = false, string? id = null, string? glyph = null)
     {
         var b = new Button { Content = text };
@@ -230,7 +233,7 @@ internal sealed class UploadPage
     {
         var panel = new StackPanel { Spacing = 12 };
 
-        var title = new TextBox { Header = _l["studio.upload.titlePattern"], Text = D.TitlePattern, Description = TitlePatternHint(_l) };
+        var title = new TextBox { Header = _l["studio.upload.titlePattern"], Text = D.TitlePattern, Description = Hint(TitlePatternHint(_l)) };
         title.TextChanged += (_, _) =>
         {
             D.TitlePattern = title.Text;
@@ -306,7 +309,7 @@ internal sealed class UploadPage
             }
 
             var t = Formats.ParseLocal(Localizer.NormalizeDigits(start.Text));
-            start.Description = t == null ? _l["studio.upload.scheduleInvalid"] : null;
+            start.Description = t == null ? Hint(_l["studio.upload.scheduleInvalid"]) : null;
             if (t == null) return;
             D.ScheduleStart = t;
             _vm.ApplyDefaults();

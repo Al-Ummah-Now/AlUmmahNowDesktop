@@ -561,14 +561,19 @@ internal static class LanternGlass
         return (pictures, mirrored, avatars, avatarPictures, unreadable);
     }
 
-    /// <summary>How many texts and buttons of a page are not wholly within its width (CI's scenarios ask).</summary>
-    public static int CutOff(FrameworkElement page) => Descendants(page).OfType<FrameworkElement>()
-        .Where(e => e is TextBlock or Button && e.ActualWidth > 0)
-        .Count(e =>
+    /// <summary>The texts and buttons of a page that are not wholly within its width, and by how much (CI's scenarios ask).</summary>
+    public static string CutOff(FrameworkElement page)
+    {
+        var cut = new List<string>();
+        foreach (var part in Descendants(page).OfType<FrameworkElement>().Where(e => e is TextBlock or Button && e.ActualWidth > 0))
         {
-            var at = e.TransformToVisual(page).TransformBounds(new Windows.Foundation.Rect(0, 0, e.ActualWidth, e.ActualHeight));
-            return at.Left < -0.5 || at.Right > page.ActualWidth + 0.5;
-        });
+            var at = part.TransformToVisual(page).TransformBounds(new Windows.Foundation.Rect(0, 0, part.ActualWidth, part.ActualHeight));
+            if (at.Left >= -0.5 && at.Right <= page.ActualWidth + 0.5) continue;
+            cut.Add(FormattableString.Invariant($"{(part as TextBlock)?.Text ?? part.GetType().Name} {Math.Round(at.Left)}..{Math.Round(at.Right)} of {Math.Round(page.ActualWidth)}"));
+        }
+
+        return string.Join("; ", cut);
+    }
 
     private static IEnumerable<DependencyObject> Descendants(DependencyObject root)
     {
