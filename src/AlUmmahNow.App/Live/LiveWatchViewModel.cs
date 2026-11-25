@@ -270,8 +270,14 @@ namespace AlUmmahNow.App.Live
             if (_stop.IsCancellationRequested) return;
             _stop.Cancel();
             Leave();
-            Watch?.Dispose();
-            _player.Dispose();
+            try
+            {
+                Watch?.Dispose();
+            }
+            finally
+            {
+                _player.Dispose();
+            }
         }
 
         /// <summary>The app is closing: the viewer is counted out before it does, as far as the server answers in time.</summary>

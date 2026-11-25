@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 
 namespace AlUmmahNow.Studio.Encode;
@@ -53,6 +54,7 @@ public sealed class EncodeQueue
     private readonly Queue<EncodeJob> _pending = new();
     private readonly object _gate = new();
     private CancellationTokenSource? _current;
+    private Task _running = Task.CompletedTask;
     private bool _pumping;
     private bool _paused;
 
@@ -106,32 +108,35 @@ public sealed class EncodeQueue
         Pump();
     }
 
-    public void CancelCurrent() => _current?.Cancel();
+    public void CancelCurrent()
+    {
+        CancellationTokenSource? current;
+        lock (_gate) current = _current;
+        try
+        {
+            current?.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // It has just ended
+        }
+    }
 
     /// <summary>Cancels what runs, forgets what waits, and waits until the encoder has let go.</summary>
     public async Task StopAsync(CancellationToken cancellationToken = default)
     {
+        Task running;
         lock (_gate)
         {
             _paused = true;
             foreach (var job in _pending) job.Status = EncodeStatus.Canceled;
             _pending.Clear();
+            running = _running;
         }
 
-        while (IsBusy)
-        {
-            // Again: the job may have been taken before it was paused, and only now have begun
-            try
-            {
-                CancelCurrent();
-            }
-            catch (ObjectDisposedException)
-            {
-                // It has just ended
-            }
-
-            await Task.Delay(20, cancellationToken).ConfigureAwait(false);
-        }
+        // What runs was decided under the same lock: it is this one, or none
+        CancelCurrent();
+        await running.WaitAsync(cancellationToken).ConfigureAwait(false);
     }
 
     public async Task WhenIdleAsync(CancellationToken cancellationToken = default)
@@ -147,43 +152,64 @@ public sealed class EncodeQueue
         }
     }
 
-    /// <summary>On no thread of the app's: its end waits for the running job, with a message loop that may be blocked or gone.</summary>
+    /// <summary>
+    /// The next job runs, if none does: from here on it is the running one. Its work is on no thread of the app's: the end waits
+    /// for it, with a message loop that may be blocked or gone.
+    /// </summary>
     private void Pump()
     {
         lock (_gate)
         {
-            if (_pumping || _paused || _pending.Count == 0) return;
+            if (_pumping || !TakeNext(out var job, out var cancel)) return;
             _pumping = true;
+            _running = Task.Run(() => PumpAsync(job, cancel));
         }
-
-        _ = Task.Run(PumpAsync);
     }
 
-    private async Task PumpAsync()
+    /// <summary>Under the lock.</summary>
+    private bool TakeNext([NotNullWhen(true)] out EncodeJob? job, [NotNullWhen(true)] out CancellationTokenSource? cancel)
+    {
+        job = null;
+        cancel = null;
+        if (_paused || _pending.Count == 0) return false;
+        job = _pending.Dequeue();
+        job.Status = EncodeStatus.Running;
+        cancel = _current = new CancellationTokenSource();
+        return true;
+    }
+
+    private async Task PumpAsync(EncodeJob job, CancellationTokenSource cancel)
     {
         while (true)
         {
-            EncodeJob job;
-            lock (_gate)
+            try
             {
-                if (_paused || _pending.Count == 0)
-                {
-                    _pumping = false;
-                    return;
-                }
-
-                job = _pending.Dequeue();
+                await RunAsync(job, cancel.Token).ConfigureAwait(false);
+            }
+#pragma warning disable CA1031 // Whatever it is, it is this job's: the queue goes on, and is never busy for good.
+            catch (Exception ex)
+#pragma warning restore CA1031
+            {
+                job.Error = ex.Message;
+                job.Status = EncodeStatus.Failed;
             }
 
-            await RunAsync(job).ConfigureAwait(false);
+            EncodeJob? next;
+            CancellationTokenSource? nextCancel;
+            lock (_gate)
+            {
+                _current = null;
+                if (!TakeNext(out next, out nextCancel)) _pumping = false;
+            }
+
+            cancel.Dispose();
+            if (next == null || nextCancel == null) return;
+            (job, cancel) = (next, nextCancel);
         }
     }
 
-    private async Task RunAsync(EncodeJob job)
+    private async Task RunAsync(EncodeJob job, CancellationToken cancellationToken)
     {
-        using var cts = new CancellationTokenSource();
-        _current = cts;
-        job.Status = EncodeStatus.Running;
         job.StartedAt = _now();
         job.Remaining = null;
         Changed?.Invoke(this, EventArgs.Empty);
@@ -202,7 +228,9 @@ public sealed class EncodeQueue
             job.Error = null;
             try
             {
-                await _backend.EncodeAsync(job.Request, encoder, progress, cts.Token).ConfigureAwait(false);
+                // Canceled before it began, it does not touch the output
+                cancellationToken.ThrowIfCancellationRequested();
+                await _backend.EncodeAsync(job.Request, encoder, progress, cancellationToken).ConfigureAwait(false);
                 job.Status = EncodeStatus.Completed;
                 job.Progress = 1;
                 break;
@@ -228,7 +256,6 @@ public sealed class EncodeQueue
         }
 
         job.Remaining = null;
-        _current = null;
         Changed?.Invoke(this, EventArgs.Empty);
     }
 

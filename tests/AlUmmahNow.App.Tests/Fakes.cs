@@ -62,7 +62,15 @@ public sealed class FakePlayer : IMediaPlayer
     public void Play() => Set(PlayerState.Playing);
     public void Pause() => Set(PlayerState.Paused);
     public void Seek(double p) => Tick(p);
-    public void Stop() { Stopped = true; Set(PlayerState.Idle); }
+    /// <summary>As a player that is stopped on another thread than its own.</summary>
+    public Exception? StopFails;
+
+    public void Stop()
+    {
+        if (StopFails != null) throw StopFails;
+        Stopped = true;
+        Set(PlayerState.Idle);
+    }
     public void Tick(double p) { Position = p; PositionChanged?.Invoke(this, EventArgs.Empty); }
     public void Set(PlayerState s) { State = s; StateChanged?.Invoke(this, EventArgs.Empty); }
 }

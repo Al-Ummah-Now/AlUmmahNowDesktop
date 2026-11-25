@@ -359,6 +359,18 @@ public class LiveTests
         Assert.False(stuck.Leaving.IsCompleted);
     }
 
+    [Fact]
+    public async Task A_player_that_cannot_be_stopped_does_not_lose_the_leave()
+    {
+        _live.Current = OnAir();
+        var vm = await Loaded();
+        await vm.TickAsync();
+        _player.StopFails = new InvalidOperationException("another thread");
+        Assert.NotNull(Record.Exception(vm.Dispose));
+        await vm.Leaving;
+        Assert.Equal(new[] { false, true }, _live.Beats);
+    }
+
     /// <summary>What is queued on other threads has run.</summary>
     private static async Task Until(Func<bool> done)
     {
