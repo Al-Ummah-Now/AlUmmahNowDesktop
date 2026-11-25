@@ -224,9 +224,11 @@ internal sealed class AnalyticsPage
         {
             if (bar.Height > 0)
             {
-                var rect = new Rectangle { Width = bar.Width, Height = bar.Height, Fill = accent, Stroke = edge, StrokeThickness = 1, RadiusX = 2, RadiusY = 2 };
-                Canvas.SetLeft(rect, bar.X);
-                Canvas.SetTop(rect, bar.Y);
+                // On whole pixels: between two, the edge is half of each, and under 3:1
+                var (x, y) = (Math.Round(bar.X), Math.Round(bar.Y));
+                var rect = new Rectangle { Width = Math.Max(1, Math.Round(bar.X + bar.Width) - x), Height = Math.Max(1, Math.Round(bar.Y + bar.Height) - y), Fill = accent, Stroke = edge, StrokeThickness = 1, RadiusX = 2, RadiusY = 2 };
+                Canvas.SetLeft(rect, x);
+                Canvas.SetTop(rect, y);
                 _chart.Children.Add(rect);
             }
 
