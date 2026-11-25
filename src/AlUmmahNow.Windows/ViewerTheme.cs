@@ -23,14 +23,14 @@ internal static class ViewerTheme
 
     /// <summary>
     /// Not before OnLaunched: Application.Resources cannot be read in App's constructor. The colors are a dictionary
-    /// merged after the framework's own, which answers before the application's theme dictionaries. High contrast has
-    /// none here and keeps the framework's.
+    /// merged after the framework's own, which answers before the application's theme dictionaries, and in high contrast too.
     /// </summary>
     public static void Apply(Application app)
     {
         var merged = new ResourceDictionary();
         merged.ThemeDictionaries["Dark"] = Accent(dark: true);
         merged.ThemeDictionaries["Light"] = Accent(dark: false);
+        merged.ThemeDictionaries["HighContrast"] = SystemBrushes.Controls();
         app.Resources.MergedDictionaries.Add(merged);
     }
 

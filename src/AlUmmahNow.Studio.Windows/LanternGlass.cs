@@ -43,7 +43,7 @@ internal static class LanternGlass
 
         // Text and check marks on gold (the framework's are white in light mode, 1.9:1 on it), and links (the accent's
         // shade, 2.4:1). In a dictionary merged after the framework's own, which answers before the application's theme
-        // dictionaries. High contrast keeps the framework's.
+        // dictionaries.
         var controls = new ResourceDictionary();
         foreach (var (theme, source) in new[] { ("Dark", "Default"), ("Light", "Light") })
         {
@@ -61,6 +61,7 @@ internal static class LanternGlass
             controls.ThemeDictionaries[theme] = d;
         }
 
+        controls.ThemeDictionaries["HighContrast"] = SystemBrushes.Controls();
         app.Resources.MergedDictionaries.Add(controls);
     }
 
