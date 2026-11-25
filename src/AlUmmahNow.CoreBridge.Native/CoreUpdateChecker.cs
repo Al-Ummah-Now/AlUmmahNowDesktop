@@ -108,18 +108,22 @@ public sealed class CoreUpdateChecker : IUpdateChecker
         if (document.RootElement.ValueKind != JsonValueKind.Object || !document.RootElement.TryGetProperty("update", out var update) || update.ValueKind != JsonValueKind.Object)
             throw new JsonException("no update block");
         var prompt = _core!.ApplyAnswer(json, null);
-        return new UpdateAnswer
+        var kind = Kind(prompt.Kind, prompt.Action, update.TryGetProperty("signed", out var signed) && signed.ValueKind == JsonValueKind.True);
+        var answer = new UpdateAnswer
         {
             Enabled = update.TryGetProperty("enabled", out var enabled) && enabled.ValueKind == JsonValueKind.True,
-            Kind = Kind(prompt.Kind, prompt.Action, update.TryGetProperty("signed", out var signed) && signed.ValueKind == JsonValueKind.True),
-            Version = prompt.Version,
-            MinimumVersion = update.TryGetProperty("minimumVersion", out var minimum) && minimum.ValueKind == JsonValueKind.String ? minimum.GetString() : null,
-            NotesEn = prompt.NotesEn,
-            NotesAr = prompt.NotesAr,
-            MessageEn = prompt.MessageEn,
-            MessageAr = prompt.MessageAr,
+            Kind = kind,
             CheckHours = (int)prompt.CheckHours,
         };
+        // Nothing to update to, or nothing that may be told of: no word of it goes further (the core names it all the same)
+        if (kind is not (UpdatePromptKind.Notice or UpdatePromptKind.Forced)) return answer;
+        answer.Version = prompt.Version;
+        answer.MinimumVersion = update.TryGetProperty("minimumVersion", out var minimum) && minimum.ValueKind == JsonValueKind.String ? minimum.GetString() : null;
+        answer.NotesEn = prompt.NotesEn;
+        answer.NotesAr = prompt.NotesAr;
+        answer.MessageEn = prompt.MessageEn;
+        answer.MessageAr = prompt.MessageAr;
+        return answer;
     }
 
     /// <summary>

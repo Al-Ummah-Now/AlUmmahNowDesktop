@@ -276,6 +276,24 @@ public sealed class UpdateTests
         Assert.Null(new UpdateStore(_file).Load().Dismissed);
     }
 
+    /// <summary>Too old with nothing to update to: Settings names no version and no notes, and does not say "latest".</summary>
+    [Theory]
+    [InlineData(UpdatePromptKind.RequiredBar, UpdateResult.Required, "This version will stop working soon. Update when a new version is offered.")]
+    [InlineData(UpdatePromptKind.None, UpdateResult.UpToDate, "You have the latest version.")]
+    public async Task Settings_tells_of_a_version_only_when_there_is_one_to_update_to(UpdatePromptKind kind, UpdateResult result, string told)
+    {
+        _checker.Answers(kind);
+        var service = Service();
+        await service.CheckAsync(isAsked: true);
+        Assert.Equal(result, service.Result);
+        Assert.Equal(told, Text(service, "en").Result);
+        foreach (var view in new[] { service.View, service.Found })
+        {
+            Assert.Null(view.Version);
+            Assert.Equal("", view.NotesEn + view.NotesAr + view.MessageEn + view.MessageAr);
+        }
+    }
+
     [Fact]
     public async Task The_screen_waits_for_running_work_and_comes_when_it_is_done()
     {
@@ -457,6 +475,7 @@ public sealed class UpdateTests
         Assert.Equal(told ? UpdateStage.Available : UpdateStage.Hidden, service.View.Stage);
         Assert.Equal(told ? UpdateResult.Found : UpdateResult.UpToDate, service.Result);
         Assert.Equal(told ? version : null, service.Found.Version);
+        Assert.Equal(told ? "n" : "", service.Found.NotesEn);
     }
 
     [Fact]

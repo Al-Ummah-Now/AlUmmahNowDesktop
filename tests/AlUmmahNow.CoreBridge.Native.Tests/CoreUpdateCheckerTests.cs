@@ -61,8 +61,27 @@ public sealed class CoreUpdateCheckerTests
     [InlineData("other", true)]
     public async Task With_a_root_key_an_unsigned_release_is_nothing(string action, bool? signed)
     {
-        Assert.Equal(UpdatePromptKind.None, (await Checker(Answer("recommended", action, "1.5.0", signed: signed)).CheckAsync()).Kind);
-        Assert.Equal(UpdatePromptKind.RequiredBar, (await Checker(Answer("required", action, "1.5.0", "1.4.8", signed: signed)).CheckAsync()).Kind);
+        var words = new { en = "new", ar = "جديد" };
+        AssertNothingIsTold(UpdatePromptKind.None, await Checker(Answer("recommended", action, "1.5.0", signed: signed, notes: words)).CheckAsync());
+        AssertNothingIsTold(UpdatePromptKind.RequiredBar, await Checker(Answer("required", action, "1.5.0", "1.4.8", signed: signed, notes: words, message: words)).CheckAsync());
+    }
+
+    /// <summary>The core names a version, notes and a message for a build that is too old, also when there is nothing to update to.</summary>
+    [Theory]
+    [InlineData("none", null, false)]
+    [InlineData("download", true, false)]
+    [InlineData("download", true, null)]
+    [InlineData("notice", false, false)]
+    public async Task Required_with_nothing_to_update_to_names_nothing(string action, bool? signed, bool? available)
+    {
+        var words = new { en = "new", ar = "جديد" };
+        AssertNothingIsTold(UpdatePromptKind.RequiredBar, await Checker(Answer("required", action, "1.5.0", "1.4.8", signed, available, notes: words, message: words)).CheckAsync());
+    }
+
+    private static void AssertNothingIsTold(UpdatePromptKind kind, UpdateAnswer answer)
+    {
+        Assert.Equal(kind, answer.Kind);
+        foreach (var told in new[] { answer.Version, answer.MinimumVersion, answer.NotesEn, answer.NotesAr, answer.MessageEn, answer.MessageAr }) Assert.Null(told);
     }
 
     /// <summary>§4.1.1: a build without one treats the three alike.</summary>

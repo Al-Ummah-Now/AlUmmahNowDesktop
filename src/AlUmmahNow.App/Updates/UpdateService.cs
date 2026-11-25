@@ -28,7 +28,7 @@ namespace AlUmmahNow.App.Updates
     }
 
     /// <summary>What the last check came to, for Settings → Updates.</summary>
-    public enum UpdateResult { None, Checking, UpToDate, Found, Failed }
+    public enum UpdateResult { None, Checking, UpToDate, Found, Required, Failed }
 
     /// <summary>Everything the views show of an update. Replaced, never changed.</summary>
     public sealed class UpdateView
@@ -194,8 +194,9 @@ namespace AlUmmahNow.App.Updates
                 _memory.Enabled = answer.Enabled;
                 _memory.LastChecked = _now();
                 Keep();
-                _answer = answer.Enabled ? answer : UpdateAnswer.Off;
-                Result = IsNew(_answer) ? UpdateResult.Found : UpdateResult.UpToDate;
+                _answer = Told(answer);
+                // Too old with nothing to update to is neither: it must not read as the latest version
+                Result = IsNew(_answer) ? UpdateResult.Found : _answer.Kind is UpdatePromptKind.RequiredBar or UpdatePromptKind.Forced ? UpdateResult.Required : UpdateResult.UpToDate;
                 ok = true;
             }
             catch (OperationCanceledException) when (_stop.IsCancellationRequested)
@@ -221,7 +222,14 @@ namespace AlUmmahNow.App.Updates
             return ok;
         }
 
-        private static bool IsNew(UpdateAnswer a) => a.Kind != UpdatePromptKind.None && CleanVersion(a.Version) != null;
+        private static bool IsNew(UpdateAnswer a) => a.Kind is (UpdatePromptKind.Notice or UpdatePromptKind.Forced) && CleanVersion(a.Version) != null;
+
+        /// <summary>Only a notice and the screen have a version, notes and a message: of anything else nothing is kept.</summary>
+        private static UpdateAnswer Told(UpdateAnswer a)
+        {
+            if (!a.Enabled || a.Kind == UpdatePromptKind.None || a.Kind == UpdatePromptKind.Notice && !IsNew(a)) return UpdateAnswer.Off;
+            return a.Kind == UpdatePromptKind.RequiredBar ? new UpdateAnswer { Enabled = true, Kind = a.Kind } : a;
+        }
 
         private void Show()
         {

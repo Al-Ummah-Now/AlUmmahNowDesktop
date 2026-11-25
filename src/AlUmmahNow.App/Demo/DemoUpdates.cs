@@ -31,7 +31,7 @@ namespace AlUmmahNow.App.Demo
             {
                 Enabled = _scene != "off",
                 Kind = kind,
-                Version = kind == UpdatePromptKind.RequiredBar ? null : Newest,
+                Version = Newest,
                 MinimumVersion = kind is UpdatePromptKind.Forced or UpdatePromptKind.RequiredBar ? Minimum : "0.0.0",
                 NotesEn = "Uploads continue where they stopped after a restart.\nThe schedule shows times in your time zone.",
                 NotesAr = "تستأنف عمليات الرفع من حيث توقفت بعد إعادة التشغيل.\nيعرض الجدول الأوقات حسب منطقتك الزمنية.",

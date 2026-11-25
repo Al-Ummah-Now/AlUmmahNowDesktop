@@ -89,7 +89,7 @@ internal sealed class UpdateViews : IUpdateViews, IDisposable
         forced.FlowDirection = direction;
         Forced = forced;
         var image = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage { DecodePixelWidth = 192 };
-        _ = image.SetSourceAsync(icon.AsRandomAccessStream());
+        _ = LoadAsync(image, icon);
         Part<Border>(forced, "Icon").Background = new Microsoft.UI.Xaml.Media.ImageBrush { ImageSource = image, Stretch = Microsoft.UI.Xaml.Media.Stretch.UniformToFill };
         Part<TextBlock>(forced, "Title").Text = text["updates.forced.title"];
         _forcedBody = Part<TextBlock>(forced, "Body");
@@ -143,6 +143,12 @@ internal sealed class UpdateViews : IUpdateViews, IDisposable
         quitButton.Click += (_, _) => quit();
         service.PropertyChanged += OnChanged;
         Render();
+    }
+
+    private static async Task LoadAsync(Microsoft.UI.Xaml.Media.Imaging.BitmapImage image, Stream icon)
+    {
+        using (icon)
+        using (var source = icon.AsRandomAccessStream()) await image.SetSourceAsync(source);
     }
 
     /// <summary>Under the header, across the window.</summary>
