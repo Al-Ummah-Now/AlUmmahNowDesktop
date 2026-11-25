@@ -1,16 +1,11 @@
 using AlUmmahNow.CoreBridge.Logging;
+using AlUmmahNow.Tests.Shared;
 using Xunit;
 
 namespace AlUmmahNow.Studio.Tests;
 
 public sealed class LoggingTests
 {
-    private sealed class ListSink : ILogSink
-    {
-        public readonly List<LogEntry> Entries = new();
-        public void Write(LogEntry entry) => Entries.Add(entry);
-    }
-
     [Theory]
     [InlineData("Authorization: Bearer abc.def-ghi", "Authorization: Bearer [redacted]")]
     [InlineData("token eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiJ1In0.c2ln here", "token [redacted] here")]
@@ -25,22 +20,42 @@ public sealed class LoggingTests
     [Fact]
     public void LoggerScrubsMessagesAndExceptionsAndHonoursTheLevel()
     {
-        var sink = new ListSink();
-        Log.AddSink(sink);
-        try
+        using var sink = new TestLogSink();
+        var log = Log.For("test");
+        log.Debug("hidden");
+        log.Warn("refresh failed for a@b.co", new InvalidOperationException("Bearer secret"));
+        var entry = Assert.Single(sink.Entries);
+        Assert.Equal("test", entry.Category);
+        Assert.Equal(LogLevel.Warning, entry.Level);
+        Assert.DoesNotContain("a@b.co", entry.Message);
+        Assert.DoesNotContain("secret", entry.Exception);
+    }
+
+    /// <summary>#91: the log is one for the process; a test sees what it wrote, not what others write meanwhile.</summary>
+    [Fact]
+    public async Task TheTestSinkKeepsOnlyItsOwnTestsEntries()
+    {
+        using var sink = new TestLogSink();
+        using var stop = new CancellationTokenSource();
+        Task others;
+        using (ExecutionContext.SuppressFlow())
         {
-            var log = Log.For("test");
-            log.Debug("hidden");
-            log.Warn("refresh failed for a@b.co", new InvalidOperationException("Bearer secret"));
-            var entry = Assert.Single(sink.Entries, e => e.Category == "test");
-            Assert.Equal(LogLevel.Warning, entry.Level);
-            Assert.DoesNotContain("a@b.co", entry.Message);
-            Assert.DoesNotContain("secret", entry.Exception);
+            others = Task.WhenAll(Enumerable.Range(0, 4).Select(_ => Task.Run(() =>
+            {
+                var log = Log.For("test");
+                while (!stop.IsCancellationRequested) log.Warn("of another test");
+            })));
         }
-        finally
+
+        for (var i = 0; i < 500; i++)
         {
-            Log.RemoveSink(sink);
+            await Task.Run(() => Log.For("test").Warn("mine"));
+            Assert.All(sink.Entries, e => Assert.Equal("mine", e.Message));
         }
+
+        await stop.CancelAsync();
+        await others;
+        Assert.Equal(500, sink.Entries.Count);
     }
 
     [Fact]
