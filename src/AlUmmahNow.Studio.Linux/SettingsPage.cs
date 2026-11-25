@@ -67,7 +67,7 @@ public sealed class SettingsPage
         var about = Gtk.Box.New(Gtk.Orientation.Vertical, 6);
         about.Append(Ui.CardTitle(l["studio.settings.about"]));
         about.Append(Ui.Label(l["studio.name"]));
-        about.Append(Ui.Label(l.Format("studio.settings.version", l.InputDigits(version)), dim: true));
+        about.Append(Ui.Label(l.Format("studio.settings.version", l.Version(version)), dim: true));
         left.Append(Ui.Card(about));
 
         // Accounts: each person, Sign out; Add another account in the footer.

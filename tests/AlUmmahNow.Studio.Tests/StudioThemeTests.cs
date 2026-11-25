@@ -127,7 +127,7 @@ public sealed class StudioThemeTests
         Assert.Contains("app.Resources.MergedDictionaries.Add(controls);", glass);
         Assert.Contains("d[\"HyperlinkButtonForeground\" + state] = link;", glass);
         Assert.Contains("            button.Foreground = onGold;", glass);
-        Assert.Contains("dialog button.destructive, dialog button.destructive-action {\n  background-color: @fanous_error_fill;", css.Replace("\r\n", "\n"));
+        Assert.Contains("\nbutton.destructive, button.destructive-action {\n  background-color: @fanous_error_fill;", css.Replace("\r\n", "\n"));
     }
 
     /// <summary>An image brush mirrors in a right-to-left layout: every picture is made in the one place where it does not.</summary>
