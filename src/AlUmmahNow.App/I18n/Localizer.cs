@@ -246,8 +246,10 @@ namespace AlUmmahNow.App.I18n
             return Isolate(ShortTime(clamped / 60, clamped % 60));
         }
 
-        /// <summary>A playback speed: "1.5x" / "١٫٥x".</summary>
-        public string Speed(double rate) => Digits(rate.ToString("0.##", CultureInfo.InvariantCulture)) + "x";
+        /// <summary>A playback speed, as in the web player's menu: "1.5×" / «١٫٥×»; normal speed is the word.</summary>
+        public string Speed(double rate) => Math.Abs(rate - 1) < 0.001
+            ? this["player.speed.normal"]
+            : Digits(rate.ToString("0.##", CultureInfo.InvariantCulture)) + "×";
 
         /// <summary>A rendition label: "1080p" / "١٠٨٠p", or the bitrate when the height is unknown.</summary>
         public string Quality(int height, long bandwidth) => height > 0

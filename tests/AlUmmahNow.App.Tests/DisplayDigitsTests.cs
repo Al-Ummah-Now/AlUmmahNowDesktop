@@ -58,7 +58,8 @@ public class DisplayDigitsTests
         Assert.Equal("١٢٫٦٩ دولار أمريكي", ar.Money(12.69m, "USD"));
         Assert.Equal("١٢٫٣ م.ب", ar.Bytes(12_900_000));
         Assert.Equal("⁨١:٠٢:٠٥⁩", ar.Duration(3725));
-        Assert.Equal("١٫٥x", ar.Speed(1.5));
+        // The web player's menu
+        Assert.Equal(new[] { "٠٫٥×", "٠٫٧٥×", "عادي", "١٫٢٥×", "١٫٥×", "٢×" }, new[] { 0.5, 0.75, 1, 1.25, 1.5, 2 }.Select(ar.Speed));
         Assert.Equal("١٫٢ ألف مشاهدة", ar.Views(1234));
     }
 
@@ -144,7 +145,7 @@ public class DisplayDigitsTests
         Assert.Equal("12.3 MB", en.Bytes(12_900_000));
         Assert.Equal("512 byte", en.Bytes(512));
         Assert.Equal("⁨1:02:05⁩", en.Duration(3725));
-        Assert.Equal("1.5x", en.Speed(1.5));
+        Assert.Equal(new[] { "0.5×", "Normal", "1.5×", "2×" }, new[] { 0.5, 1, 1.5, 2 }.Select(en.Speed));
         Assert.Equal("1080p", en.Quality(1080, 0));
         Assert.Equal("800 kbps", en.Quality(0, 800_000));
         Assert.Equal("1.2K views", en.Views(1234));
