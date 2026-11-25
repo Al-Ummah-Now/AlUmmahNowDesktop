@@ -37,11 +37,14 @@ public class EncodeTests
 
         /// <summary>Does not look at being cancelled.</summary>
         public TaskCompletionSource? Stuck { get; init; }
+
+        public TaskCompletionSource HasBegun { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public IReadOnlyList<EncoderChoice> AvailableEncoders() => Encoders;
 
         public async Task EncodeAsync(EncodeRequest r, EncoderChoice e, IProgress<double> p, CancellationToken ct)
         {
             Tried.Add(e.Name);
+            HasBegun.TrySetResult();
             if (Stuck != null) await Stuck.Task;
             if (Gate != null) await Gate.Task.WaitAsync(ct);
             if (Failing.Contains(e.Name)) throw new InvalidOperationException(e.Name + " failed");
@@ -88,7 +91,7 @@ public class EncodeTests
         var b = new Backend { Gate = new TaskCompletionSource() };
         var q = new EncodeQueue(b);
         var job = q.Add(R);
-        while (job.Status != EncodeStatus.Running) await Task.Delay(5);
+        await b.HasBegun.Task;
         q.CancelCurrent();
         await q.WhenIdleAsync();
         Assert.Equal(EncodeStatus.Canceled, job.Status);
@@ -102,7 +105,10 @@ public class EncodeTests
         var q = new EncodeQueue(b);
         var running = q.Add(R);
         var waiting = q.Add(R);
+        // Which one runs is known before Add returns
+        Assert.Equal((EncodeStatus.Running, EncodeStatus.Queued), (running.Status, waiting.Status));
         Assert.True(q.IsBusy);
+        await b.HasBegun.Task;
         await q.StopAsync();
         Assert.False(q.IsBusy);
         Assert.Equal(EncodeStatus.Canceled, running.Status);
@@ -122,9 +128,35 @@ public class EncodeTests
         var q = new EncodeQueue(b);
         EncodeJob job = null!;
         var loop = DeadLoop.Around(() => job = q.Add(R));
+        await b.HasBegun.Task;
         await Task.Run(() => q.StopAsync());
         Assert.Equal(0, loop.Posted);
         Assert.Equal(EncodeStatus.Canceled, job.Status);
+        Assert.False(q.IsBusy);
+    }
+
+    /// <summary>However the end and the queue's own thread meet: nothing runs after it, and nothing is left as running.</summary>
+    [Fact]
+    public async Task Stopping_right_after_adding_leaves_nothing_running()
+    {
+        for (var i = 0; i < 200; i++)
+        {
+            var q = new EncodeQueue(new Backend { Gate = new TaskCompletionSource() });
+            var jobs = new[] { q.Add(R), q.Add(R) };
+            await q.StopAsync();
+            Assert.False(q.IsBusy);
+            Assert.All(jobs, j => Assert.Equal(EncodeStatus.Canceled, j.Status));
+        }
+    }
+
+    /// <summary>A queue that stays busy for good would keep every update, and the end, waiting.</summary>
+    [Fact]
+    public async Task A_backend_that_cannot_even_list_its_encoders_does_not_keep_the_queue_busy()
+    {
+        var q = new EncodeQueue(new Backend { Encoders = null! });
+        var job = q.Add(R);
+        await q.WhenIdleAsync().WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.Equal(EncodeStatus.Failed, job.Status);
         Assert.False(q.IsBusy);
     }
 
@@ -134,6 +166,7 @@ public class EncodeTests
         var b = new Backend { Stuck = new TaskCompletionSource() };
         var q = new EncodeQueue(b);
         q.Add(R);
+        await b.HasBegun.Task;
         using var late = new CancellationTokenSource(50);
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => q.StopAsync(late.Token));
         Assert.True(q.IsBusy);

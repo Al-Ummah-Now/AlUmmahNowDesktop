@@ -1,3 +1,4 @@
+using AlUmmahNow.CoreBridge.Logging;
 using AlUmmahNow.App.Theme;
 using AlUmmahNow.Contrast;
 using System.ComponentModel;
@@ -48,7 +49,17 @@ public sealed partial class Shell
     public Task LeaveLive()
     {
         if (LiveWatch is not { } watch) return Task.CompletedTask;
-        watch.Dispose();
+        try
+        {
+            watch.Dispose();
+        }
+#pragma warning disable CA1031 // A player that cannot be stopped (on another thread than its own) must not lose the leave that is on its way.
+        catch (Exception ex)
+#pragma warning restore CA1031
+        {
+            Log.For("live").Warn("the stream's page was not closed", ex);
+        }
+
         return watch.Leaving;
     }
 
