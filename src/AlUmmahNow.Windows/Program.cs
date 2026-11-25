@@ -24,15 +24,6 @@ public sealed partial class App : Application
     {
         InitializeComponent();
         UnhandledException += (_, e) => ReportCrash("unhandled: " + e.Message + "\n" + e.Exception);
-        try
-        {
-            ViewerTheme.Apply(this);
-        }
-        catch (Exception ex)
-        {
-            // Never a dead viewer over styling: report it, keep the stock accent.
-            ReportCrash("theme: " + ex);
-        }
     }
 
     private static void ReportCrash(string text)
@@ -43,6 +34,17 @@ public sealed partial class App : Application
 
     protected override async void OnLaunched(LaunchActivatedEventArgs args)
     {
+        // Application.Resources only exists from here on (not in App()).
+        try
+        {
+            ViewerTheme.Apply(this);
+        }
+        catch (Exception ex)
+        {
+            // Never a dead viewer over styling: report it, keep the stock accent.
+            ReportCrash("theme: " + ex);
+        }
+
         try
         {
             await LaunchAsync();
@@ -127,9 +129,11 @@ public sealed partial class App : Application
                 var pass = isWatch ? furthest > 2 && (sawCaption || Environment.GetEnvironmentVariable("AUN_EXPECT_CAPTION") == "0")
                     : LiveAutomation.Passed(automation, shell.LiveList, shell.LiveWatch, auth, furthest) is { } asAsked ? asAsked
                     : shell.Home.Rails.Count > 0;
-                pass = pass && shell.IsBuiltOnce;
+                var (accents, wrong) = ViewerTheme.Check(shell.Root, shell.IsDark);
+                if (accents == 0 && (isWatch || automation.StartsWith("behind:", StringComparison.Ordinal))) wrong = "nothing found";
+                pass = pass && shell.IsBuiltOnce && wrong.Length == 0;
                 File.WriteAllText(Environment.GetEnvironmentVariable("AUN_RESULT") ?? "aun-result.txt",
-                    $"AUTOMATION {automation} core={coreVersion} rails={shell.Home.Rails.Count} furthest={furthest:F1} caption={sawCaption} failed={shell.Watch?.PlaybackFailed} once={shell.IsBuiltOnce} RESULT {(pass ? "PASS" : "FAIL")}");
+                    $"AUTOMATION {automation} core={coreVersion} rails={shell.Home.Rails.Count} furthest={furthest:F1} caption={sawCaption} failed={shell.Watch?.PlaybackFailed} once={shell.IsBuiltOnce} accents={accents} notGold='{wrong}' RESULT {(pass ? "PASS" : "FAIL")}");
                 player.Stop();
                 Exit();
             };

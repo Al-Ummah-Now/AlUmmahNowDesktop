@@ -19,7 +19,6 @@ namespace AlUmmahNow.Windows;
 /// <summary>Renders the current route. Views are rebuilt on navigation and language change.</summary>
 public sealed partial class Shell
 {
-    private static readonly global::Windows.UI.Color Lantern = global::Windows.UI.Color.FromArgb(255, 255, 160, 55);
     private static readonly global::Windows.UI.Color Night = global::Windows.UI.Color.FromArgb(255, 9, 48, 65);
     private static readonly global::Windows.UI.Color Parchment = global::Windows.UI.Color.FromArgb(255, 247, 241, 232);
 
@@ -93,7 +92,7 @@ public sealed partial class Shell
         _root.KeyboardAccelerators.Add(accelerator);
     }
 
-    private bool IsDark => _settings.Theme != ThemePreference.Light;
+    public bool IsDark => _settings.Theme != ThemePreference.Light;
 
     /// <summary>The header and one page: what the window must hold (CI's scenarios ask).</summary>
     public bool IsBuiltOnce => _root.Children.Count == 2;
@@ -364,11 +363,8 @@ public sealed partial class Shell
         controls.Children.Add(transport);
 
         // Media time never mirrors (Apple HIG, Material; our web and mobile players): the seek bar runs left to
-        // right in every language. Its thumb is gold like the fill (the slider's own keys; the app's accent
-        // overrides don't reach the framework's slider brushes).
-        var slider = new Slider { Minimum = 0, Maximum = Math.Max(1, vm.Duration), VerticalAlignment = VerticalAlignment.Center, Foreground = new SolidColorBrush(Lantern), FlowDirection = FlowDirection.LeftToRight };
-        foreach (var key in new[] { "SliderThumbBackground", "SliderThumbBackgroundPointerOver", "SliderThumbBackgroundPressed", "SliderInnerThumbBackground", "SliderInnerThumbBackgroundPointerOver", "SliderInnerThumbBackgroundPressed" })
-            slider.Resources[key] = new SolidColorBrush(Lantern);
+        // right in every language.
+        var slider = new Slider { Minimum = 0, Maximum = Math.Max(1, vm.Duration), VerticalAlignment = VerticalAlignment.Center, FlowDirection = FlowDirection.LeftToRight };
         var syncing = false;
         slider.ValueChanged += (_, e) =>
         {
