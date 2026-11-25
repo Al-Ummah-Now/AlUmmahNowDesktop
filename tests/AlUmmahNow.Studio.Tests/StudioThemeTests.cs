@@ -121,8 +121,8 @@ public sealed class StudioThemeTests
             Assert.DoesNotMatch("LanternGlass\\.Res\\(\"(?!Studio)", File.ReadAllText(file));
         }
 
-        Assert.Contains("PlaceholderForeground = new SolidColorBrush(LanternGlass.C(h.SearchPlaceholder))", Source("AlUmmahNow.Studio.Windows", "StudioWindow.cs"));
-        Assert.Contains("TextControlPlaceholderForeground\" + state] = new SolidColorBrush(LanternGlass.C(h.SearchPlaceholder))", Source("AlUmmahNow.Studio.Windows", "StudioWindow.cs"));
+        Assert.Contains("PlaceholderForeground = LanternGlass.Brush(LanternGlass.C(h.SearchPlaceholder), HighContrastRole.Text)", Source("AlUmmahNow.Studio.Windows", "StudioWindow.cs"));
+        Assert.Contains("TextControlPlaceholderForeground\" + state] = LanternGlass.Brush(LanternGlass.C(h.SearchPlaceholder), HighContrastRole.Text)", Source("AlUmmahNow.Studio.Windows", "StudioWindow.cs"));
         var glass = Source("AlUmmahNow.Studio.Windows", "LanternGlass.cs");
         Assert.Contains("app.Resources.MergedDictionaries.Add(controls);", glass);
         Assert.Contains("d[\"HyperlinkButtonForeground\" + state] = link;", glass);
@@ -154,7 +154,17 @@ public sealed class StudioThemeTests
         Assert.Equal(names, HighContrast.Roles.Keys.OrderBy(n => n, StringComparer.Ordinal));
         // Applied, at the start and as the system's colors change
         Assert.Contains("FollowHighContrast(app, app.RequestedTheme == ApplicationTheme.Dark);", glass);
-        Assert.Contains("        Paint();\n        Settings.ColorValuesChanged += (_, _) => ui.TryEnqueue(Paint);", glass.Replace("\r\n", "\n"));
+        Assert.Contains("SystemBrushes.Follow(Painter((Brush)theme[key], role));", glass);
+        var shared = File.ReadAllText(Path.Combine(root!.FullName, "src", "Shared", "HighContrast", "SystemBrushes.cs"));
+        Assert.Contains("foreach (var paint in Painters) paint(IsHighContrast);", shared);
+        Assert.Contains("        Painters.Add(paint);\n        paint(IsHighContrast);", shared.Replace("\r\n", "\n"));
+        // A brush of its own color, outside LanternGlass, would keep it: only a transparent one may
+        foreach (var file in Directory.EnumerateFiles(Path.Combine(root!.FullName, "src", "AlUmmahNow.Studio.Windows"), "*.cs").Where(f => !f.EndsWith("LanternGlass.cs", StringComparison.Ordinal)))
+        {
+            var brushes = System.Text.RegularExpressions.Regex.Matches(File.ReadAllText(file), @"new (?:Microsoft\.UI\.Xaml\.Media\.)?SolidColorBrush\((.{0,60})");
+            Assert.All(brushes, b => Assert.Matches(@"^(Microsoft\.UI\.)?Colors\.Transparent\)|FromArgb\(0, 0, 0, 0\)", b.Groups[1].Value));
+        }
+
         // Text is never the color of what it is on
         foreach (var (on, text) in new[] { ("StudioCardBrush", "StudioMutedBrush"), ("StudioCardBrush", "StudioLinkBrush"), ("StudioMenuBrush", "StudioDangerBrush"), ("StudioDangerFillBrush", "StudioOnDangerFillBrush"), ("StudioSidebarBrush", "StudioSelectedTextBrush"), ("StudioPickedCardBrush", "StudioTextBrush"), ("StudioPickedCardBrush", "StudioMutedBrush"), ("StudioPickedCardBrush", "StudioPickedEdgeBrush") })
         {

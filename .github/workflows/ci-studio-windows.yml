@@ -170,7 +170,7 @@ jobs:
           ./scripts/windows-studio-shot.ps1 $exe en dark 1440x900 highcontrastswitch $name $out videos
           if (Select-String -Quiet "on=True" "$out/high-contrast.txt") {
             if (-not (Select-String -Quiet "RESULT PASS" "$out/$name.txt")) { $failed += $name }
-            foreach ($lang in "en","ar") { foreach ($tab in "videos","timeline","analytics") {
+            foreach ($lang in "en","ar") { foreach ($tab in "videos","timeline","analytics","uploads","settings","encode") {
               $name = "windows-$tab-highcontrast-$lang-dark-1440x900"
               ./scripts/windows-studio-shot.ps1 $exe $lang dark 1440x900 highcontrast $name $out $tab
               if (-not (Select-String -Quiet "RESULT PASS" "$out/$name.txt")) { $failed += $name }

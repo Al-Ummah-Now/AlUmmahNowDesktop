@@ -1,3 +1,5 @@
+using AlUmmahNow.App.Theme;
+using AlUmmahNow.Contrast;
 using System.ComponentModel;
 using AlUmmahNow.App.Live;
 using AlUmmahNow.App.ViewModels;
@@ -45,10 +47,13 @@ public sealed partial class Shell
     /// <summary>The window is closing.</summary>
     public void Close() => LiveWatch?.Close(TimeSpan.FromSeconds(2));
 
-    private SolidColorBrush Gold => ViewerTheme.Brush("Primary", IsDark);
-    private SolidColorBrush OnGold => ViewerTheme.Brush("OnPrimary", IsDark);
+    private SolidColorBrush Gold => ViewerTheme.Brush("Primary", IsDark, HighContrastRole.Highlight);
+    private SolidColorBrush OnGold => ViewerTheme.Brush("OnPrimary", IsDark, HighContrastRole.HighlightText);
 
-    private SolidColorBrush CardFill => new(IsDark ? global::Windows.UI.Color.FromArgb(255, 14, 43, 61) : Colors.White);
+    private SolidColorBrush CardFill => SystemBrushes.Brush(IsDark ? global::Windows.UI.Color.FromArgb(255, 14, 43, 61) : Colors.White, HighContrastRole.Window);
+
+    /// <summary>The edge of a card: gold, and the text's color in high contrast.</summary>
+    private SolidColorBrush CardEdge => ViewerTheme.Brush("Primary", IsDark, HighContrastRole.Text);
 
     // ---- Home's row and the list
 
@@ -118,7 +123,7 @@ public sealed partial class Shell
     private FrameworkElement BuildLiveCard(LiveCardViewModel card)
     {
         var panel = new StackPanel { Spacing = 4 };
-        var thumb = new Grid { Background = CardFill, CornerRadius = new CornerRadius(8) };
+        var thumb = new Grid { Background = CardFill, CornerRadius = new CornerRadius(8), BorderBrush = SystemBrushes.Brush(Colors.Transparent, HighContrastRole.Text), BorderThickness = new Thickness(SystemBrushes.IsHighContrast ? 1 : 0) };
         panel.SizeChanged += (_, e) => thumb.Height = e.NewSize.Width * 9 / 16;
         // A stream without a picture of its own shows what it is
         thumb.Children.Add(new FontIcon { Glyph = "", FontSize = 32, Opacity = 0.7 });
@@ -177,7 +182,7 @@ public sealed partial class Shell
         else
         {
             border.BorderThickness = new Thickness(1);
-            border.BorderBrush = new SolidColorBrush(Colors.Gray);
+            border.BorderBrush = SystemBrushes.Brush(Colors.Gray, HighContrastRole.Text);
         }
 
         return border;
@@ -216,7 +221,7 @@ public sealed partial class Shell
         var text = new StackPanel { Spacing = 10, VerticalAlignment = VerticalAlignment.Center, Padding = new Thickness(24, 0, 24, 0) };
         text.Children.Add(headline);
         text.Children.Add(lines);
-        grid.Children.Add(new Border { Child = text, Background = CardFill, BorderBrush = Gold, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(12) });
+        grid.Children.Add(new Border { Child = text, Background = CardFill, BorderBrush = CardEdge, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(12) });
         Grid.SetRow(heading, 1);
         grid.Children.Add(heading);
 
@@ -275,14 +280,14 @@ public sealed partial class Shell
 
     private FrameworkElement BuildChat(LiveWatchViewModel vm)
     {
-        var panel = new Grid { Width = ChatWidth, Margin = new Thickness(0, 4, 20, 16), Background = CardFill, BorderBrush = Gold, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(12) };
+        var panel = new Grid { Width = ChatWidth, Margin = new Thickness(0, 4, 20, 16), Background = CardFill, BorderBrush = CardEdge, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(12) };
         panel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         panel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         panel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         panel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
         panel.Children.Add(new TextBlock { Text = vm.ChatTitle, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Margin = new Thickness(12, 10, 12, 10) });
-        var pinned = new Border { Padding = new Thickness(12, 10, 12, 10), Background = new SolidColorBrush(global::Windows.UI.Color.FromArgb(24, 128, 128, 128)) };
+        var pinned = new Border { Padding = new Thickness(12, 10, 12, 10), Background = SystemBrushes.Brush(global::Windows.UI.Color.FromArgb(24, 128, 128, 128), HighContrastRole.None) };
         Grid.SetRow(pinned, 1);
         panel.Children.Add(pinned);
 

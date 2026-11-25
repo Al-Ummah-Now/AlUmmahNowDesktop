@@ -1,5 +1,6 @@
 using System.Numerics;
 using AlUmmahNow.App.Theme;
+using AlUmmahNow.Contrast;
 using AlUmmahNow.Studio.Shell;
 using Microsoft.UI;
 using Microsoft.UI.Composition;
@@ -70,49 +71,29 @@ internal static class LanternGlass
     /// </summary>
     private static void FollowHighContrast(Application app, bool dark)
     {
+        SystemBrushes.Start();
         var theme = Theme(app, dark ? "Dark" : "Light");
         var high = Theme(app, "HighContrast");
-        var repaint = new List<Action<bool>>();
         foreach (var (key, role) in HighContrast.Roles)
         {
             high[key] = theme[key];
-            repaint.Add(Painter((Brush)theme[key], role));
+            SystemBrushes.Follow(Painter((Brush)theme[key], role));
         }
-
-        var ui = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
-        void Paint()
-        {
-            IsHighContrast = Accessibility.HighContrast;
-            foreach (var paint in repaint) paint(IsHighContrast);
-        }
-
-        Paint();
-        Settings.ColorValuesChanged += (_, _) => ui.TryEnqueue(Paint);
     }
 
     /// <summary>High contrast is on, and the Studio's brushes are in its colors.</summary>
-    public static bool IsHighContrast { get; private set; }
+    public static bool IsHighContrast => SystemBrushes.IsHighContrast;
 
     /// <summary>Brushes that were asked for and are not there (CI's scenarios ask).</summary>
     public static int Missing { get; private set; }
 
     /// <summary>Whether the Studio's text and cards are the system's colors, or no high contrast is on.</summary>
     public static bool IsPainted =>
-        !IsHighContrast || (Res("StudioLinkBrush") is SolidColorBrush link && link.Color == SystemColor(HighContrastRole.Link)
-            && Res("StudioCardBrush") is AcrylicBrush card && card.FallbackColor == SystemColor(HighContrastRole.Window));
+        !IsHighContrast || (Res("StudioLinkBrush") is SolidColorBrush link && link.Color == SystemBrushes.ColorOf(HighContrastRole.Link)
+            && Res("StudioCardBrush") is AcrylicBrush card && card.FallbackColor == SystemBrushes.ColorOf(HighContrastRole.Window));
 
-    private static readonly global::Windows.UI.ViewManagement.UISettings Settings = new();
-    private static readonly global::Windows.UI.ViewManagement.AccessibilitySettings Accessibility = new();
-
-    private static Color SystemColor(HighContrastRole role) => role switch
-    {
-        HighContrastRole.Window => Settings.UIElementColor(global::Windows.UI.ViewManagement.UIElementType.Window),
-        HighContrastRole.Link => Settings.UIElementColor(global::Windows.UI.ViewManagement.UIElementType.Hotlight),
-        HighContrastRole.Highlight => Settings.UIElementColor(global::Windows.UI.ViewManagement.UIElementType.Highlight),
-        HighContrastRole.HighlightText => Settings.UIElementColor(global::Windows.UI.ViewManagement.UIElementType.HighlightText),
-        HighContrastRole.None => Colors.Transparent,
-        _ => Settings.UIElementColor(global::Windows.UI.ViewManagement.UIElementType.WindowText),
-    };
+    /// <summary>A color of the Studio's, and the system's in high contrast.</summary>
+    public static SolidColorBrush Brush(Color color, HighContrastRole role) => SystemBrushes.Brush(color, role);
 
     /// <summary>Paints one brush in the system's color, or again as the theme has it.</summary>
     private static Action<bool> Painter(Brush brush, HighContrastRole role)
@@ -122,7 +103,7 @@ internal static class LanternGlass
             case SolidColorBrush solid:
             {
                 var color = solid.Color;
-                return high => solid.Color = high ? SystemColor(role) : color;
+                return high => solid.Color = high ? SystemBrushes.ColorOf(role) : color;
             }
 
             case AcrylicBrush acrylic:
@@ -130,10 +111,10 @@ internal static class LanternGlass
                 var (tint, opacity, luminosity, fallback) = (acrylic.TintColor, acrylic.TintOpacity, acrylic.TintLuminosityOpacity, acrylic.FallbackColor);
                 return high =>
                 {
-                    acrylic.TintColor = high ? SystemColor(role) : tint;
+                    acrylic.TintColor = high ? SystemBrushes.ColorOf(role) : tint;
                     acrylic.TintOpacity = high ? 1 : opacity;
                     acrylic.TintLuminosityOpacity = high ? 1 : luminosity;
-                    acrylic.FallbackColor = high ? SystemColor(role) : fallback;
+                    acrylic.FallbackColor = high ? SystemBrushes.ColorOf(role) : fallback;
                 };
             }
 
@@ -142,7 +123,7 @@ internal static class LanternGlass
                 var colors = gradient.GradientStops.Select(s => s.Color).ToList();
                 return high =>
                 {
-                    for (var i = 0; i < colors.Count; i++) gradient.GradientStops[i].Color = high ? SystemColor(role) : colors[i];
+                    for (var i = 0; i < colors.Count; i++) gradient.GradientStops[i].Color = high ? SystemBrushes.ColorOf(role) : colors[i];
                 };
             }
 
@@ -330,6 +311,7 @@ internal static class LanternGlass
     /// </summary>
     public static ContentDialog Dialog(ContentDialog dialog, bool destructive)
     {
+        dialog.HighContrastAdjustment = ElementHighContrastAdjustment.None;
         dialog.Background = Res("StudioMenuBrush");
         dialog.BorderBrush = Res("StudioEdgeStrongBrush");
         dialog.BorderThickness = new Thickness(1);
@@ -427,21 +409,11 @@ internal static class LanternGlass
     {
         var band = new Grid
         {
-            Background = new LinearGradientBrush
-            {
-                StartPoint = new Windows.Foundation.Point(0, 0.5),
-                EndPoint = new Windows.Foundation.Point(1, 0.5),
-                GradientStops =
-                {
-                    new GradientStop { Color = C(h.Background), Offset = 0 },
-                    new GradientStop { Color = C(h.Middle), Offset = 0.5 },
-                    new GradientStop { Color = C(h.Background), Offset = 1 },
-                },
-            },
+            Background = SystemBrushes.Gradient(C(h.Background), C(h.Middle), C(h.Background), down: false, HighContrastRole.Window),
         };
         var rules = new StackPanel { VerticalAlignment = VerticalAlignment.Bottom, IsHitTestVisible = false };
-        rules.Children.Add(new Border { Height = 1, Background = new SolidColorBrush(C(h.Border)) });
-        rules.Children.Add(new Border { Height = 1, Background = new SolidColorBrush(C(h.GoldRule)) });
+        rules.Children.Add(new Border { Height = 1, Background = Brush(C(h.Border), HighContrastRole.None) });
+        rules.Children.Add(new Border { Height = 1, Background = Brush(C(h.GoldRule), HighContrastRole.Text) });
         band.Children.Add(rules);
         // Never clip outside the band.
         band.SizeChanged += (_, e) => band.Clip = new RectangleGeometry { Rect = new Windows.Foundation.Rect(0, 0, e.NewSize.Width, e.NewSize.Height) };
@@ -531,6 +503,7 @@ internal static class LanternGlass
     /// <summary>A picture with rounded corners. It never mirrors: a right-to-left layout would flip the brush.</summary>
     public static Border Picture(ImageSource source, CornerRadius corners) => new()
     {
+        Tag = "art",
         CornerRadius = corners,
         FlowDirection = FlowDirection.LeftToRight,
         Background = new ImageBrush { ImageSource = source, Stretch = Stretch.UniformToFill },
@@ -585,6 +558,32 @@ internal static class LanternGlass
         }
     }
 
+    /// <summary>The night tile of a video without a picture.</summary>
+    public static LinearGradientBrush Film() => _film ??= FilmBrush();
+
+    private static LinearGradientBrush? _film;
+
+    private static LinearGradientBrush FilmBrush()
+    {
+        var (top, end) = (Color.FromArgb(0xFF, 0x18, 0x44, 0x56), Night);
+        var film = new LinearGradientBrush
+        {
+            StartPoint = new Windows.Foundation.Point(0, 0),
+            EndPoint = new Windows.Foundation.Point(1, 1),
+            GradientStops = { new GradientStop { Color = top, Offset = 0 }, new GradientStop { Color = end, Offset = 1 } },
+        };
+        SystemBrushes.Follow(high =>
+        {
+            film.GradientStops[0].Color = high ? SystemBrushes.ColorOf(HighContrastRole.Window) : top;
+            film.GradientStops[1].Color = high ? SystemBrushes.ColorOf(HighContrastRole.Window) : end;
+        });
+        return film;
+    }
+
+    /// <summary>From the top color down to the other.</summary>
+    public static LinearGradientBrush Down(Color top, Color bottom) =>
+        SystemBrushes.Gradient(top, Over(top, bottom, 0.5), bottom, down: true, HighContrastRole.Window);
+
     /// <summary>Round logo: initials on gold (a channel) or teal (a person) until the picture loads; gold ring.</summary>
     public static FrameworkElement Avatar(string? initials, string? url, double size, bool person)
     {
@@ -592,8 +591,8 @@ internal static class LanternGlass
         face.Children.Add(new Border
         {
             CornerRadius = new CornerRadius(size / 2),
-            Background = person
-                ? new SolidColorBrush(Color.FromArgb(0xFF, 0x3E, 0x75, 0x8C))
+            Background = person || IsHighContrast
+                ? Brush(Color.FromArgb(0xFF, 0x3E, 0x75, 0x8C), HighContrastRole.Window)
                 : new RadialGradientBrush
                 {
                     GradientOrigin = new Windows.Foundation.Point(0.3, 0.25),
@@ -606,14 +605,14 @@ internal static class LanternGlass
                     },
                 },
             BorderThickness = new Thickness(2),
-            BorderBrush = new SolidColorBrush(Color.FromArgb(0x99, GoldEdge.R, GoldEdge.G, GoldEdge.B)),
+            BorderBrush = Brush(Color.FromArgb(0x99, GoldEdge.R, GoldEdge.G, GoldEdge.B), HighContrastRole.Text),
         });
         face.Children.Add(new TextBlock
         {
             Text = initials ?? "",
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             FontSize = size * 0.38,
-            Foreground = new SolidColorBrush(person ? Colors.White : Night),
+            Foreground = Brush(person ? Colors.White : Night, HighContrastRole.Text),
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
             FlowDirection = FlowDirection.LeftToRight,

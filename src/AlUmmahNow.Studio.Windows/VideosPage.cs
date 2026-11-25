@@ -1,3 +1,4 @@
+using AlUmmahNow.App.Theme;
 using System.Globalization;
 using AlUmmahNow.App.I18n;
 using AlUmmahNow.CoreBridge.Studio;
@@ -325,21 +326,12 @@ internal sealed class VideosPage
     private FrameworkElement Card(StudioVideo v)
     {
         var title = v.TitleFor(_l.Language);
-        var gold = new Microsoft.UI.Xaml.Media.SolidColorBrush(LanternGlass.Gold);
+        var gold = LanternGlass.Brush(LanternGlass.Gold, HighContrastRole.Highlight);
         var thumb = new Grid { Height = 146 };
         thumb.Children.Add(new Border
         {
             CornerRadius = new CornerRadius(13, 13, 0, 0),
-            Background = new Microsoft.UI.Xaml.Media.LinearGradientBrush
-            {
-                StartPoint = new global::Windows.Foundation.Point(0, 0),
-                EndPoint = new global::Windows.Foundation.Point(1, 1),
-                GradientStops =
-                {
-                    new Microsoft.UI.Xaml.Media.GradientStop { Color = global::Windows.UI.Color.FromArgb(0xFF, 0x18, 0x44, 0x56), Offset = 0 },
-                    new Microsoft.UI.Xaml.Media.GradientStop { Color = LanternGlass.Night, Offset = 1 },
-                },
-            },
+            Background = LanternGlass.Film(),
             Child = new FontIcon { Glyph = "\uE8B2", FontSize = 40, Foreground = gold },
         });
         if (Uri.TryCreate(v.ThumbnailUrl, UriKind.Absolute, out var url))
@@ -419,8 +411,8 @@ internal sealed class VideosPage
         Margin = new Thickness(8),
         Padding = new Thickness(8, 2, 8, 2),
         CornerRadius = new CornerRadius(radius),
-        Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(global::Windows.UI.Color.FromArgb(0xC0, 0x09, 0x15, 0x1E)),
-        Child = new TextBlock { Text = text, FontSize = 11.5, FontWeight = Microsoft.UI.Text.FontWeights.Bold, Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(color) },
+        Background = LanternGlass.Brush(global::Windows.UI.Color.FromArgb(0xC0, 0x09, 0x15, 0x1E), HighContrastRole.Window),
+        Child = new TextBlock { Text = text, FontSize = 11.5, FontWeight = Microsoft.UI.Text.FontWeights.Bold, Foreground = LanternGlass.Brush(color, HighContrastRole.Text) },
     };
 
     private void RenderEmpty()

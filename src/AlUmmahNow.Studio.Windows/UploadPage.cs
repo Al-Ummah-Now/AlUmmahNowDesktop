@@ -1,3 +1,4 @@
+using AlUmmahNow.App.Theme;
 using System.Globalization;
 using AlUmmahNow.App.I18n;
 using AlUmmahNow.CoreBridge.Studio;
@@ -196,11 +197,11 @@ internal sealed class UploadPage
             Height = 72,
             CornerRadius = new CornerRadius(36),
             BorderThickness = new Thickness(2),
-            BorderBrush = new Microsoft.UI.Xaml.Media.SolidColorBrush(LanternGlass.GoldEdge),
-            Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(global::Windows.UI.Color.FromArgb(0x33, 0xF4, 0xAE, 0x3A)),
+            BorderBrush = LanternGlass.Brush(LanternGlass.GoldEdge, HighContrastRole.Text),
+            Background = LanternGlass.Brush(global::Windows.UI.Color.FromArgb(0x33, 0xF4, 0xAE, 0x3A), HighContrastRole.Window),
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(14, 0, 0, 0),
-            Child = new FontIcon { Glyph = "\uE898", FontSize = 30, Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(LanternGlass.Gold) },
+            Child = new FontIcon { Glyph = "\uE898", FontSize = 30, Foreground = LanternGlass.Brush(LanternGlass.Gold, HighContrastRole.Highlight) },
         };
         return LanternGlass.WithGlow(ring, 36, 0.55f, 30f);
     }
@@ -456,17 +457,8 @@ internal sealed class UploadPage
         VerticalAlignment = VerticalAlignment.Center,
         BorderThickness = new Thickness(1),
         BorderBrush = LanternGlass.Res("StudioEdgeBrush"),
-        Background = new Microsoft.UI.Xaml.Media.LinearGradientBrush
-        {
-            StartPoint = new global::Windows.Foundation.Point(0, 0),
-            EndPoint = new global::Windows.Foundation.Point(1, 1),
-            GradientStops =
-            {
-                new Microsoft.UI.Xaml.Media.GradientStop { Color = global::Windows.UI.Color.FromArgb(0xFF, 0x18, 0x44, 0x56), Offset = 0 },
-                new Microsoft.UI.Xaml.Media.GradientStop { Color = LanternGlass.Night, Offset = 1 },
-            },
-        },
-        Child = new FontIcon { Glyph = "\uE8B2", FontSize = height * 0.4, Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(LanternGlass.Gold) },
+        Background = LanternGlass.Film(),
+        Child = new FontIcon { Glyph = "\uE8B2", FontSize = height * 0.4, Foreground = LanternGlass.Brush(LanternGlass.Gold, HighContrastRole.Highlight) },
     };
 
     private void RenderQueue()

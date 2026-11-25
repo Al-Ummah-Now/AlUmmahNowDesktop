@@ -1,17 +1,6 @@
+using AlUmmahNow.App.Theme;
+
 namespace AlUmmahNow.Studio.Shell;
-
-/// <summary>What a Studio brush of Windows is in high contrast, where the system's colors are the only ones.</summary>
-public enum HighContrastRole
-{
-    Text,
-    Window,
-    Link,
-    Highlight,
-    HighlightText,
-
-    /// <summary>A decoration that is not drawn.</summary>
-    None,
-}
 
 /// <summary>The role of each of the Studio's own brushes; one without a role would keep the theme's color.</summary>
 public static class HighContrast

@@ -26,6 +26,8 @@
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" />
     <!-- The update views of both Windows apps -->
     <Compile Include="..\Shared\WinUI\*.cs" Link="Updates\%(Filename)%(Extension)" />
+    <!-- Brushes that follow high contrast, of both apps -->
+    <Compile Include="..\Shared\HighContrast\*.cs" Link="HighContrast\%(Filename)%(Extension)" />
     <ProjectReference Include="..\AlUmmahNow.App\AlUmmahNow.App.csproj" />
     <ProjectReference Include="..\AlUmmahNow.CoreBridge\AlUmmahNow.CoreBridge.csproj" />
     <ProjectReference Include="..\AlUmmahNow.CoreBridge.Native\AlUmmahNow.CoreBridge.Native.csproj" />
