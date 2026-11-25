@@ -80,6 +80,39 @@ internal static class SystemBrushes
         return brush;
     }
 
+    /// <summary>
+    /// The controls' own names in high contrast. A dictionary that is merged after the framework's answers for its names in
+    /// high contrast too, with the theme's colors, when it has no part for it.
+    /// </summary>
+    public static ResourceDictionary Controls()
+    {
+        SolidColorBrush B(HighContrastRole role) => Brush(Colors.Transparent, role);
+        var d = new ResourceDictionary();
+        foreach (var state in new[] { "", "PointerOver", "Pressed" })
+        {
+            d["HyperlinkButtonForeground" + state] = B(HighContrastRole.Link);
+            d["AccentButtonBackground" + state] = B(HighContrastRole.Highlight);
+            d["AccentButtonForeground" + state] = B(HighContrastRole.HighlightText);
+            d["AccentButtonBorderBrush" + state] = B(HighContrastRole.Text);
+            foreach (var on in new[] { "Checked", "Indeterminate" })
+            {
+                d["CheckBoxCheckBackgroundFill" + on + state] = B(HighContrastRole.Highlight);
+                d["CheckBoxCheckGlyphForeground" + on + state] = B(HighContrastRole.HighlightText);
+            }
+
+            d["SliderTrackValueFill" + state] = B(HighContrastRole.Highlight);
+            d["SliderTrackFill" + state] = B(HighContrastRole.Text);
+            d["SliderThumbBackground" + state] = B(HighContrastRole.Highlight);
+            d["SliderInnerThumbBackground" + state] = B(HighContrastRole.Highlight);
+        }
+
+        d["SliderThumbBorderBrush"] = B(HighContrastRole.Text);
+        d["SliderOuterThumbBackground"] = B(HighContrastRole.Window);
+        d["ComboBoxItemPillFillBrush"] = B(HighContrastRole.Highlight);
+        d["HyperlinkForeground"] = B(HighContrastRole.Link);
+        return d;
+    }
+
     /// <summary>Paints now, and whenever high contrast or its colors change.</summary>
     public static void Follow(Action<bool> paint)
     {

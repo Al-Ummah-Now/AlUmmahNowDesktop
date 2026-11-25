@@ -158,6 +158,7 @@ public sealed class StudioThemeTests
         var shared = File.ReadAllText(Path.Combine(root!.FullName, "src", "Shared", "HighContrast", "SystemBrushes.cs"));
         Assert.Contains("foreach (var paint in Painters) paint(IsHighContrast);", shared);
         Assert.Contains("        Painters.Add(paint);\n        paint(IsHighContrast);", shared.Replace("\r\n", "\n"));
+        Assert.Contains("controls.ThemeDictionaries[\"HighContrast\"] = SystemBrushes.Controls();", glass);
         // A brush of its own color, outside LanternGlass, would keep it: only a transparent one may
         foreach (var file in Directory.EnumerateFiles(Path.Combine(root!.FullName, "src", "AlUmmahNow.Studio.Windows"), "*.cs").Where(f => !f.EndsWith("LanternGlass.cs", StringComparison.Ordinal)))
         {
