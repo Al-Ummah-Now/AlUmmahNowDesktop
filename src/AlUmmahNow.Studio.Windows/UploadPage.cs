@@ -294,6 +294,7 @@ internal sealed class UploadPage
             Header = new TextBlock { Text = _l["studio.upload.scheduleStart"], FlowDirection = _direction, TextWrapping = TextWrapping.Wrap },
             Text = _l.InputLeftToRight(Formats.ToLocalInput(D.ScheduleStart.Value)),
             FlowDirection = FlowDirection.LeftToRight,
+            TextAlignment = _l.IsRtl ? TextAlignment.Right : TextAlignment.Left,
             MinWidth = 220,
         };
         AutomationProperties.SetName(start, _l["studio.upload.scheduleStart"]);
