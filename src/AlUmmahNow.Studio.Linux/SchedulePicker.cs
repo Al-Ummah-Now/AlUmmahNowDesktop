@@ -120,8 +120,14 @@ internal sealed class SchedulePicker
         _popover.SetChild(panel);
         _popover.AddCssClass("glass");
         _popover.SetHasArrow(false);
-        // The day that is picked has the focus
-        _popover.OnShow += (_, _) => (_days.FirstOrDefault(d => d.GetActive() && d.GetVisible()) ?? _days.FirstOrDefault(d => d.GetSensitive() && d.GetVisible()))?.GrabFocus();
+        _popover.OnShow += (_, _) =>
+        {
+            // Time has passed since it was drawn
+            pick.Open();
+            Render();
+            // The day that is picked has the focus
+            (_days.FirstOrDefault(d => d.GetActive() && d.GetSensitive()) ?? _days.FirstOrDefault(d => d.GetSensitive()))?.GrabFocus();
+        };
         Field.SetPopover(_popover);
 
         var label = Gtk.Label.NewWithMnemonic(l["studio.upload.scheduleStart"]);

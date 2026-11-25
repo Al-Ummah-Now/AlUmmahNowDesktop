@@ -122,6 +122,7 @@ public sealed class UploadsViewModelTests : IDisposable
         vm.Tick();
         vm.Tick();
         Assert.Equal("b", Assert.Single(_services[0].Specs).Title);
+        Assert.Equal(vm.Now.AddMinutes(15), vm.FinishStepFor("up1")?.PublishAt);
         vm.Defaults.ScheduleStart = vm.Now.AddMinutes(15);
         vm.ApplyDefaults();
         Assert.True(vm.CanStart);

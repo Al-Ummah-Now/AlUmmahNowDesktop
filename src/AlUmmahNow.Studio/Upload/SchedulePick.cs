@@ -27,7 +27,7 @@ public sealed class SchedulePick
         _l = localizer;
         _now = now;
         _zone = zone ?? TimeZoneInfo.Local;
-        _local = TimeZoneInfo.ConvertTime(value, _zone).DateTime;
+        _local = Real(TimeZoneInfo.ConvertTime(value, _zone).DateTime);
         Month = new DateTime(_local.Year, _local.Month, 1);
         Minutes = Enumerable.Range(0, 12).Select(i => i * 5).Append(_local.Minute).Distinct().OrderBy(m => m).ToList();
     }
@@ -45,15 +45,13 @@ public sealed class SchedulePick
     /// <summary>The first day of the month that is shown.</summary>
     public DateTime Month { get; private set; }
 
-    public DateTimeOffset Value
+    public DateTimeOffset Value => new(_local, _zone.GetUtcOffset(_local));
+
+    /// <summary>An hour the clocks skip is the one after it, in the lists too.</summary>
+    private DateTime Real(DateTime local)
     {
-        get
-        {
-            // An hour the clocks skip is the one after it
-            var at = DateTime.SpecifyKind(_local, DateTimeKind.Unspecified);
-            if (_zone.IsInvalidTime(at)) at = at.AddHours(1);
-            return new DateTimeOffset(at, _zone.GetUtcOffset(at));
-        }
+        var at = DateTime.SpecifyKind(local, DateTimeKind.Unspecified);
+        return _zone.IsInvalidTime(at) ? at.AddHours(1) : at;
     }
 
     /// <summary>Too soon, or past: no upload starts with it.</summary>
@@ -78,13 +76,22 @@ public sealed class SchedulePick
     {
         get
         {
-            var today = TimeZoneInfo.ConvertTime(_now() + Lead, _zone).Date;
             return Enumerable.Range(0, DateTime.DaysInMonth(Month.Year, Month.Month)).Select(i => Month.AddDays(i))
-                .Select(d => new PickDay(d, _l.DayOfMonth(d), _l.LongDay(d), d == _local.Date, d >= today && d <= LastDay)).ToList();
+                .Select(d => new PickDay(d, _l.DayOfMonth(d), _l.LongDay(d), d == _local.Date, d >= FirstDay && d <= LastDay)).ToList();
         }
     }
 
-    public bool CanGoBack => Month > TimeZoneInfo.ConvertTime(_now(), _zone).Date;
+    /// <summary>The first day that has a time which is not too soon.</summary>
+    private DateTime FirstDay => TimeZoneInfo.ConvertTime(_now() + Lead, _zone).Date;
+
+    /// <summary>The month is opened: the one of the time that is picked, or where a day can be picked.</summary>
+    public void Open()
+    {
+        var day = _local < FirstDay ? FirstDay : _local;
+        Month = new DateTime(day.Year, day.Month, 1);
+    }
+
+    public bool CanGoBack => Month > FirstDay;
 
     public void Back()
     {
@@ -139,8 +146,10 @@ public sealed class SchedulePick
 
     private void Set(DateTime local)
     {
-        if (local == _local) return;
-        _local = local;
+        // The lists change back when what was chosen is not a time, so this is said even if nothing else changes
+        var real = Real(local);
+        if (real == _local && real == local) return;
+        _local = real;
         Changed?.Invoke(this, EventArgs.Empty);
     }
 }
