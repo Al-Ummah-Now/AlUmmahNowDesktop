@@ -55,19 +55,38 @@ namespace AlUmmahNow.App.Updates
         public bool Save(UpdateMemory memory)
         {
             if (_path == null) return true;
+            // A name of its own: the app may be open twice
+            var temp = _path + "." + Guid.NewGuid().ToString("N") + ".tmp";
             try
             {
                 var directory = Path.GetDirectoryName(_path);
                 if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
-                var temp = _path + ".tmp";
                 File.WriteAllText(temp, JsonSerializer.Serialize(memory));
-                if (File.Exists(_path)) File.Delete(_path);
-                File.Move(temp, _path);
+                // In one step: never a moment without the file
+#if NETSTANDARD2_0
+                if (File.Exists(_path)) File.Replace(temp, _path, null);
+                else File.Move(temp, _path);
+#else
+                File.Move(temp, _path, overwrite: true);
+#endif
                 return true;
             }
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is NotSupportedException)
             {
+                Remove(temp);
                 return false;
+            }
+        }
+
+        private static void Remove(string temp)
+        {
+            try
+            {
+                File.Delete(temp);
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+            {
+                // Left behind: nothing reads it
             }
         }
     }

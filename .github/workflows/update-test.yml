@@ -40,13 +40,13 @@ jobs:
             project: AlUmmahNow.Windows
             exe: AlUmmahNow.exe
             id: AlUmmahNow.Viewer
-            cases: tampered bad-signature foreign-host planted swapped yanked twice
+            cases: tampered bad-signature foreign-host planted swapped yanked twice older
           - app: studio
             project: AlUmmahNow.Studio.Windows
             exe: AlUmmahNowStudio.exe
             id: AlUmmahNow.Studio
             # Its own work can be started without a live stream
-            cases: tampered bad-signature foreign-host planted swapped yanked twice working
+            cases: tampered bad-signature foreign-host planted swapped yanked twice older working
     defaults:
       run:
         shell: bash
@@ -77,12 +77,12 @@ jobs:
       - name: What must not be installed changes nothing
         run: |
           for c in ${{ matrix.cases }}; do
-            node scripts/update-test.mjs --app ${{ matrix.app }} --exe "$LOCALAPPDATA/${{ matrix.id }}/current/${{ matrix.exe }}" --package keep/2/*-full.nupkg --packages "$LOCALAPPDATA/${{ matrix.id }}/packages" --package-name ${{ matrix.id }}-1.0.2-full.nupkg --state "$LOCALAPPDATA/AlUmmahNow/updates.json" --from 1.0.1 --to 1.0.2 --case $c
+            node scripts/update-test.mjs --app ${{ matrix.app }} --exe "$LOCALAPPDATA/${{ matrix.id }}/current/${{ matrix.exe }}" --package keep/2/*-full.nupkg --packages "$LOCALAPPDATA/${{ matrix.id }}/packages" --package-name ${{ matrix.id }}-1.0.2-full.nupkg --from 1.0.1 --to 1.0.2 --case $c
           done
       - name: 1.0.1 becomes 1.0.2 as it closes
-        run: node scripts/update-test.mjs --app ${{ matrix.app }} --exe "$LOCALAPPDATA/${{ matrix.id }}/current/${{ matrix.exe }}" --package keep/2/*-full.nupkg --packages "$LOCALAPPDATA/${{ matrix.id }}/packages" --package-name ${{ matrix.id }}-1.0.2-full.nupkg --state "$LOCALAPPDATA/AlUmmahNow/updates.json" --from 1.0.1 --to 1.0.2
+        run: node scripts/update-test.mjs --app ${{ matrix.app }} --exe "$LOCALAPPDATA/${{ matrix.id }}/current/${{ matrix.exe }}" --package keep/2/*-full.nupkg --packages "$LOCALAPPDATA/${{ matrix.id }}/packages" --package-name ${{ matrix.id }}-1.0.2-full.nupkg --from 1.0.1 --to 1.0.2
       - name: 1.0.2 becomes 1.0.3 with Restart now
-        run: node scripts/update-test.mjs --app ${{ matrix.app }} --exe "$LOCALAPPDATA/${{ matrix.id }}/current/${{ matrix.exe }}" --package keep/3/*-full.nupkg --packages "$LOCALAPPDATA/${{ matrix.id }}/packages" --package-name ${{ matrix.id }}-1.0.3-full.nupkg --state "$LOCALAPPDATA/AlUmmahNow/updates.json" --from 1.0.2 --to 1.0.3 --case restart
+        run: node scripts/update-test.mjs --app ${{ matrix.app }} --exe "$LOCALAPPDATA/${{ matrix.id }}/current/${{ matrix.exe }}" --package keep/3/*-full.nupkg --packages "$LOCALAPPDATA/${{ matrix.id }}/packages" --package-name ${{ matrix.id }}-1.0.3-full.nupkg --from 1.0.2 --to 1.0.3 --case restart
       - name: Velopack log
         if: always()
         run: tail -n 80 "$LOCALAPPDATA/${{ matrix.id }}"/*.log "$LOCALAPPDATA"/velopack/*.log "$TEMP"/velopack*.log 2>/dev/null || true

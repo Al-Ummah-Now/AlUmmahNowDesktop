@@ -1,0 +1,20 @@
+{
+  "about": "Made for the tests, with keys that were thrown away: AlUmmahNow.CoreBridge.Native.Tests/SavedStateTests.",
+  "rootPublicKey": "royyqdpLo6erDEYSqzYAzb6oxMFTnYQfwBfFJOpqO5c=",
+  "keyList": "{\"schema\":1,\"repo\":\"AlUmmahNowDesktop\",\"serial\":1,\"keys\":[{\"keyId\":\"500ca605\",\"publicKey\":\"XucV8eT8MvZrKpdfVosoV9lNyuZ/8W1nJcaykcPelmc=\"}],\"revoked\":[],\"yanked\":[]}",
+  "keyListSig": "{\"signatures\":[{\"keyId\":\"cacd6a24\",\"sig\":\"oQKlFoiVIKtQqGAQisM9LG2+1/dNI/oNpY0v1J5FT7WlNp9MFDeYVfIdmR6nACNkNpkoD8SuSaJnHtSJF8mSDg==\"}]}",
+  "manifests": {
+    "1.5.0": {
+      "text": "{\"schema\":1,\"repo\":\"AlUmmahNowDesktop\",\"tag\":\"v1.5.0\",\"version\":\"1.5.0\",\"channel\":\"stable\",\"publishedAt\":\"2026-11-25T12:00:00Z\",\"notes\":{\"en\":\"Test.\",\"ar\":\"اختبار.\"},\"artifacts\":[{\"app\":\"studio\",\"platform\":\"windows\",\"arch\":\"x64\",\"kind\":\"velopack-full\",\"url\":\"https://github.com/Al-Ummah-Now/AlUmmahNowDesktop/releases/download/v1.5.0/update.nupkg\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"size\":1}],\"stores\":[],\"yanked\":[]}",
+      "sig": "{\"signatures\":[{\"keyId\":\"500ca605\",\"sig\":\"FIAQ/RzLfw8eR5nmyhpegsIgIyUaxmlrHwG3ZIAy8jVixKyId45CcmZB2XViZMt/yWqbHxG8oqbbGKa1yRujAg==\"}]}"
+    },
+    "1.6.0": {
+      "text": "{\"schema\":1,\"repo\":\"AlUmmahNowDesktop\",\"tag\":\"v1.6.0\",\"version\":\"1.6.0\",\"channel\":\"stable\",\"publishedAt\":\"2026-11-25T12:00:00Z\",\"notes\":{\"en\":\"Test.\",\"ar\":\"اختبار.\"},\"artifacts\":[{\"app\":\"studio\",\"platform\":\"windows\",\"arch\":\"x64\",\"kind\":\"velopack-full\",\"url\":\"https://github.com/Al-Ummah-Now/AlUmmahNowDesktop/releases/download/v1.6.0/update.nupkg\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"size\":1}],\"stores\":[],\"yanked\":[\"1.6.2\"]}",
+      "sig": "{\"signatures\":[{\"keyId\":\"500ca605\",\"sig\":\"OtQQbhVnXZLCQmEZMRMtYOMUKyBcP5TO3Q/dLhPz8OFOYI9OJNAwe6krFWU83N02lDSVqv1rMHCj6DhKsTozAA==\"}]}"
+    },
+    "1.6.2": {
+      "text": "{\"schema\":1,\"repo\":\"AlUmmahNowDesktop\",\"tag\":\"v1.6.2\",\"version\":\"1.6.2\",\"channel\":\"stable\",\"publishedAt\":\"2026-11-25T12:00:00Z\",\"notes\":{\"en\":\"Test.\",\"ar\":\"اختبار.\"},\"artifacts\":[{\"app\":\"studio\",\"platform\":\"windows\",\"arch\":\"x64\",\"kind\":\"velopack-full\",\"url\":\"https://github.com/Al-Ummah-Now/AlUmmahNowDesktop/releases/download/v1.6.2/update.nupkg\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"size\":1}],\"stores\":[],\"yanked\":[]}",
+      "sig": "{\"signatures\":[{\"keyId\":\"500ca605\",\"sig\":\"VnSK5GNUO9tbVZ7bGwFUbS0PySBvHzaF96IhXq8/lB3HmSqUAseP0GVD1c7uUPzVqpuSuFZLxOvrEud9UkZFBw==\"}]}"
+    }
+  }
+}

@@ -6,7 +6,7 @@
  *
  *   update-test.mjs --app viewer|studio --exe <installed exe> --package <N+1 nupkg> --from <N> --to <N+1>
  *                   --packages <Velopack's package folder> --package-name <its file name there>
- *                   [--case ok|restart|tampered|bad-signature|foreign-host|planted|swapped|yanked|working|twice]
+ *                   [--case ok|restart|tampered|bad-signature|foreign-host|planted|swapped|yanked|working|twice|older]
  *
  * `ok` (as it closes) and `restart` (Restart now) must end on N+1. Every other case must stay on N through a second start:
  *  - tampered, bad-signature, foreign-host: the download is refused and the reason reported;
@@ -14,14 +14,16 @@
  *  - swapped: the staged file is replaced (same size) before the app closes;
  *  - yanked: after staging, a newer key list yanks N+1; the app learns it on a check and then closes;
  *  - working (Studio): the update is ready while an encode runs: Restart now does nothing, and closing installs nothing;
- *  - twice: the app is open a second time: closing the one installs nothing and leaves the other running.
+ *  - older: the manifest of a newer release was checked, its package was refused and the app ended; started again, it is
+ *    offered N+1, which is older than what it knows of: what it knew was kept;
+ *  - twice: the app is open a second time, through a junction: closing the one installs nothing and leaves the other running.
  */
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, symlinkSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { generateKey, signBytes, buildKeyList } from './app-release.mjs';
 
@@ -29,10 +31,12 @@ const a = {};
 for (let i = 2; i < process.argv.length; i += 2) a[process.argv[i].slice(2)] = process.argv[i + 1];
 const kase = a.case ?? 'ok';
 const REPO = 'AlUmmahNowDesktop';
+const baseOf = (version) => `https://github.com/Al-Ummah-Now/${REPO}/releases/download/v${version}/`;
 const tag = `v${a.to}`;
-const base = `https://github.com/Al-Ummah-Now/${REPO}/releases/download/${tag}/`;
+const later = '99.0.0';
 const dir = mkdtempSync(join(tmpdir(), 'aun-update-test-'));
 const log = join(dir, 'log.txt');
+const state = join(dir, 'updates.json');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const lines = () => (existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n') : []);
 const ready = (l) => l.startsWith(`Available Ready ${a.to}`);
@@ -43,30 +47,36 @@ const list = Buffer.from(JSON.stringify(await buildKeyList({ repo: REPO, serial,
 const yankedList = Buffer.from(JSON.stringify(await buildKeyList({ repo: REPO, serial: serial + 1, keys: [release.publicKey], yanked: [a.to] })));
 const stagedFile = join(a.packages, a['package-name']);
 const pkg = readFileSync(a.package);
-const manifest = Buffer.from(
+const manifestOf = (version) => Buffer.from(
 	JSON.stringify({
 		schema: 1,
 		repo: REPO,
-		tag,
-		version: a.to,
+		tag: `v${version}`,
+		version,
 		channel: 'stable',
 		publishedAt: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
 		notes: { en: 'Test.', ar: 'اختبار.' },
-		artifacts: [{ app: a.app, platform: 'windows', arch: 'x64', kind: 'velopack-full', url: `${base}update.nupkg`, sha256: createHash('sha256').update(pkg).digest('hex'), size: pkg.byteLength }],
+		artifacts: [{ app: a.app, platform: 'windows', arch: 'x64', kind: 'velopack-full', url: `${baseOf(version)}update.nupkg`, sha256: createHash('sha256').update(pkg).digest('hex'), size: pkg.byteLength }],
 		stores: [],
 		yanked: [],
 	}),
 );
 const served = Buffer.from(pkg);
+const changed = Buffer.from(pkg);
+changed[changed.length >> 1] ^= 1;
 if (kase === 'tampered') served[served.length >> 1] ^= 1;
-const sig = await signBytes(manifest, [kase === 'bad-signature' || kase === 'planted' ? stranger.privateKey : release.privateKey]);
+const manifests = new Map();
+for (const version of [a.to, later]) {
+	const manifest = manifestOf(version);
+	manifests.set(version, { manifest, sig: await signBytes(manifest, [kase === 'bad-signature' || kase === 'planted' ? stranger.privateKey : release.privateKey]) });
+}
 const asset = kase === 'foreign-host' ? 'https://downloads.example.com/update.nupkg' : 'https://release-assets.githubusercontent.com/update.nupkg';
-const configWith = async (keys) =>
+const configWith = async (keys, version = a.to) =>
 	JSON.stringify({
-		update: { enabled: true, status: 'recommended', minimumVersion: '0.0.0', latestVersion: a.to, storeUrl: null, channel: 'stable', publishedAt: null, notes: null, message: null, action: 'install', url: null, manifestUrl: `${base}app-release.json`, tag, signed: true, available: true, checkHours: 6, keys: { list: keys.toString(), sig: await signBytes(keys, [root.privateKey]) } },
+		update: { enabled: true, status: 'recommended', minimumVersion: '0.0.0', latestVersion: version, storeUrl: null, channel: 'stable', publishedAt: null, notes: null, message: null, action: 'install', url: null, manifestUrl: `${baseOf(version)}app-release.json`, tag: `v${version}`, signed: true, available: true, checkHours: 6, keys: { list: keys.toString(), sig: await signBytes(keys, [root.privateKey]) } },
 		config: {},
 	});
-let config = await configWith(list);
+let config = await configWith(list, kase === 'older' ? later : a.to);
 const calls = [];
 let reported = null;
 let asked = null;
@@ -81,10 +91,14 @@ const server = createServer((req, res) => {
 		req.on('end', () => ((reported = JSON.parse(body)), res.writeHead(202), res.end()));
 		return;
 	}
-	const gh = `/github.com${new URL(base).pathname}`;
-	if (path === `${gh}app-release.json`) return ok(manifest);
-	if (path === `${gh}app-release.json.sig`) return ok(sig);
-	if (path === `${gh}update.nupkg`) return res.writeHead(302, { Location: asset }), res.end();
+	for (const [version, { manifest, sig }] of manifests) {
+		const gh = `/github.com${new URL(baseOf(version)).pathname}`;
+		if (path === `${gh}app-release.json`) return ok(manifest);
+		if (path === `${gh}app-release.json.sig`) return ok(sig);
+		// The later release's package is not the one its manifest lists
+		if (path === `${gh}update.nupkg` && version === later) return ok(changed);
+		if (path === `${gh}update.nupkg`) return res.writeHead(302, { Location: asset }), res.end();
+	}
 	if (path === '/release-assets.githubusercontent.com/update.nupkg' || path === '/downloads.example.com/update.nupkg') return ok(served);
 	res.writeHead(404);
 	res.end();
@@ -98,17 +112,17 @@ const env = {
 	AUN_UPDATE_TEST_ROOT: root.publicKey,
 	AUN_UPDATE_TEST_SERVER: `http://127.0.0.1:${server.address().port}`,
 	AUN_UPDATE_TEST_LOG: log,
+	AUN_UPDATE_TEST_STATE: state,
 	...(kase === 'yanked' ? { AUN_UPDATE_TEST_RECHECK: '1' } : {}),
 	// Studio's demo queue: one encode done, one running (after 5 s)
 	...(kase === 'working' ? { AUN_SCENE: 'active', AUN_UPDATE_TEST_CHECK_MS: '15000' } : {}),
 };
-// Each case starts as a new install: a yank is remembered for good, so an earlier case's would count here
-if (a.state) rmSync(a.state, { force: true });
+// Each case starts as a new install, with a state of its own: a yank is remembered for good, so an earlier case's would count here
 if (kase === 'planted') {
 	mkdirSync(a.packages, { recursive: true });
 	writeFileSync(stagedFile, pkg);
 }
-const start = (more = {}) => spawn(a.exe, [], { env: { ...env, ...more }, stdio: 'inherit' });
+const start = (more = {}, exe = a.exe) => spawn(exe, [], { env: { ...env, ...more }, stdio: 'inherit' });
 const exited = (p) => new Promise((r) => (p.exitCode !== null || p.signalCode !== null ? r() : p.once('exit', r)));
 function fail(why) {
 	console.error(`::error::update test (${a.app}, ${kase}): ${why}\nlog:\n${lines().join('\n')}\ncalls:\n${calls.join('\n')}\nreported: ${JSON.stringify(reported)}`);
@@ -195,6 +209,22 @@ if (kase === 'ok') {
 	await closes(first);
 	if (kase === 'yanked' && reported?.reason !== 'yanked') fail(`reported ${reported?.reason}, expected yanked`);
 	await unchanged();
+} else if (kase === 'older') {
+	await until('the later release is refused', 180_000, () => reported !== null);
+	if (reported.reason !== 'hash' || reported.tag !== `v${later}`) fail(`reported ${JSON.stringify(reported)}`);
+	if (!readFileSync(state, 'utf8').includes(later)) fail('what it learned was not kept');
+	first.kill();
+	await exited(first);
+	reported = null;
+	config = await configWith(list);
+	const before = lines().length;
+	const second = start();
+	await until('the older release is refused', 180_000, () => reported !== null);
+	if (reported.reason !== 'below_floor' || reported.tag !== tag) fail(`reported ${JSON.stringify(reported)}`);
+	if (lines().slice(before).some((l) => l.includes('Ready'))) fail('staged an older release');
+	second.kill();
+	await exited(second);
+	await unchanged();
 } else if (kase === 'working') {
 	await staged();
 	if (!lines().some((l) => l === `Available Ready ${a.to} busy`)) fail('the encode is not seen as work');
@@ -204,8 +234,11 @@ if (kase === 'ok') {
 	await unchanged();
 } else if (kase === 'twice') {
 	await staged();
-	// It asks nothing: only its being open counts
-	const other = start({ AUN_UPDATE_TEST_LOG: join(dir, 'other.txt'), AUN_UPDATE_TEST_CHECK_MS: '3600000' });
+	// It asks nothing: only its being open counts. Its path is another one than the first's
+	const install = dirname(dirname(a.exe));
+	const junction = join(dir, 'junction');
+	symlinkSync(install, junction, 'junction');
+	const other = start({ AUN_UPDATE_TEST_LOG: join(dir, 'other.txt'), AUN_UPDATE_TEST_STATE: join(dir, 'other.json'), AUN_UPDATE_TEST_CHECK_MS: '3600000' }, join(junction, 'current', basename(a.exe)));
 	await until('the first one sees the other', 30_000, () => lines().some((l) => l === `Available Ready ${a.to} busy`));
 	await closes(first);
 	// Through the updater's time: it ends every process of the folder
@@ -227,6 +260,7 @@ if (kase === 'ok') {
 	if (kase === 'foreign-host' && calls.some((c) => c.startsWith('/downloads.example.com'))) fail('asked the foreign host');
 	await unchanged();
 }
+if (!existsSync(state)) fail('the state was not kept');
 console.log(`update test (${a.app}, ${kase}) passed:\n${lines().join('\n')}`);
 server.close();
 process.exit(0);

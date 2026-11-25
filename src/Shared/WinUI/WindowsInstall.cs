@@ -19,6 +19,8 @@ internal static class WindowsInstall
 #if UPDATE_TEST
         // CI's update test is of a demo: the app itself asks nothing of a server
         isDemo = false;
+        // And keeps its state from one start to the next, as an app does
+        store = new UpdateStore(Environment.GetEnvironmentVariable("AUN_UPDATE_TEST_STATE"));
 #endif
         IPackageInstaller? installer = null;
 #if !AUN_STORE

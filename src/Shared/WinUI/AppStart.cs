@@ -6,6 +6,9 @@ namespace AlUmmahNow.Updates.Views;
 /// <summary>The start of both Windows apps.</summary>
 internal static class AppStart
 {
+    /// <summary>The updater itself started this run, and may not have ended yet.</summary>
+    public const string AfterUpdate = "--after-update";
+
     /// <param name="product">The app's name, as the setup has it.</param>
     /// <param name="shortcut">Its name in the Start menu, as the MSI has it.</param>
     public static void Run(string product, string shortcut, Func<Application> create)
@@ -18,6 +21,8 @@ internal static class AppStart
             .OnAfterInstallFastCallback(_ => Rename(product, shortcut))
             .OnFirstRun(_ => Rename(product, shortcut))
             .Run();
+        // Started while an update is installed: the updater ends what runs from the folder, so no work begins before it is done
+        if (!Environment.GetCommandLineArgs().Contains(AfterUpdate)) CoreBridge.Native.SelfUpdate.InstallGuard.ForThisProcess()?.WaitForUpdater(TimeSpan.FromSeconds(90));
 #endif
         WinRT.ComWrappersSupport.InitializeComWrappers();
         Application.Start(_ =>

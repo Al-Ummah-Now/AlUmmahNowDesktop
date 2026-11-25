@@ -29,7 +29,7 @@ internal sealed class SettingsPage
     private readonly Func<StudioAccount, Task> _signOut;
 
     public SettingsPage(Localizer l, AppSettings settings, SettingsStore store, StudioShellViewModel shell, UploadsViewModel uploads,
-        Func<Task<string?>> chooseFolder, Func<StudioAccount, Task> signOut, Func<Task> addPasskey, string version, UpdateViews updates)
+        Func<Task<string?>> chooseFolder, Func<StudioAccount, Task> signOut, Func<Task> addPasskey, string version, UpdateViews updates, Action close)
     {
         _l = l;
         _shell = shell;
@@ -40,7 +40,7 @@ internal sealed class SettingsPage
 
         Root = new StackPanel { Spacing = 18, Padding = new Thickness(16, 4, 16, 8) };
         var restartNow = new Button { Content = l["studio.settings.restartNow"] };
-        restartNow.Click += (_, _) => Restart();
+        restartNow.Click += (_, _) => Restart(close);
         _restart = new InfoBar { Severity = InfoBarSeverity.Informational, IsClosable = false, Message = l["studio.settings.restart"], ActionButton = restartNow };
         Root.Children.Add(_restart);
         void Changed() => _restart.IsOpen = (settings.Theme == ThemePreference.Light ? ThemePreference.Light : ThemePreference.Dark) != startTheme || settings.Language != startLanguage;
@@ -188,10 +188,11 @@ internal sealed class SettingsPage
     }
 
     /// <summary>Starts a new Studio and quits this one (the theme and language are read at start-up).</summary>
-    private static void Restart()
+    private static void Restart(Action close)
     {
         if (Environment.ProcessPath is not { } path) return;
         Process.Start(new ProcessStartInfo(path) { UseShellExecute = false });
-        Application.Current.Exit();
+        // As its window closes: the new one is running by then, so no update is installed under it
+        close();
     }
 }

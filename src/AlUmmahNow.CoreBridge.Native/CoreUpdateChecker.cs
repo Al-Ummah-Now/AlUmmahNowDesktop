@@ -32,7 +32,9 @@ public sealed class CoreUpdateChecker : IUpdateChecker, IReleaseVerifier
     private static readonly Logger Logger = Log.For("updates");
 
     /// <summary>This repo's release tags (release.yml).</summary>
-    private static readonly Regex TagShape = new(@"\Av[0-9]{1,6}\.[0-9]{1,6}\.[0-9]{1,6}(-[0-9A-Za-z.]{1,24})?\z", RegexOptions.CultureInvariant);
+    private static readonly Regex TagShape = new(@"\Av[0-9]{1,6}\.[0-9]{1,6}\.[0-9]{1,6}(-[0-9A-Za-z.]{1,40})?\z", RegexOptions.CultureInvariant);
+
+    public event Action? Checked;
 
     private readonly Func<CancellationToken, Task<string>> _fetch;
     private readonly UpdateChecker? _core;
@@ -51,13 +53,13 @@ public sealed class CoreUpdateChecker : IUpdateChecker, IReleaseVerifier
     private CoreUpdateChecker(Api api, string version, string? state)
         : this(api.FetchAsync, version, state, RootKeys) => _report = api.ReportAsync;
 
-    internal CoreUpdateChecker(Func<CancellationToken, Task<string>> fetch, string version, string? state, IReadOnlyList<string> rootKeys)
+    internal CoreUpdateChecker(Func<CancellationToken, Task<string>> fetch, string version, string? state, IReadOnlyList<string> rootKeys, bool hasKeyList = true)
     {
         _fetch = fetch;
         _hasRootKey = rootKeys.Count > 0;
         try
         {
-            _core = new UpdateChecker(Repo, rootKeys.ToArray(), version, IsBeta(version), state, KeyList("update-keys.json"), KeyList("update-keys.json.sig"));
+            _core = new UpdateChecker(Repo, rootKeys.ToArray(), version, IsBeta(version), state, hasKeyList ? KeyList("update-keys.json") : null, hasKeyList ? KeyList("update-keys.json.sig") : null);
         }
         catch (AunException ex)
         {
@@ -144,6 +146,7 @@ public sealed class CoreUpdateChecker : IUpdateChecker, IReleaseVerifier
     {
         if (_core == null) throw new UpdateRefusedException("bad_manifest");
         var check = _core.VerifyManifest(manifest, signature, tag);
+        Checked?.Invoke();
         if (check.Refused != null || check.Release is not { } r) throw new UpdateRefusedException(check.Refused ?? "bad_manifest");
         return new CheckedRelease(r.Version, r.Tag, r.NotesEn, r.NotesAr,
             r.Artifacts.Select(a => new CheckedArtifact(a.App, a.Platform, a.Arch, a.Kind, new ReleaseFile(a.Url, a.Sha256, (long)a.Size))).ToList());
@@ -177,14 +180,15 @@ public sealed class CoreUpdateChecker : IUpdateChecker, IReleaseVerifier
             Enabled = update.TryGetProperty("enabled", out var enabled) && enabled.ValueKind == JsonValueKind.True,
             Kind = kind,
             CheckHours = (int)prompt.CheckHours,
+            // Also when nothing is offered: Settings shows it
+            InstallsByDefault = !(document.RootElement.TryGetProperty("config", out var config) && config.ValueKind == JsonValueKind.Object
+                && config.TryGetProperty("updates.autoInstallDefault", out var byDefault) && byDefault.ValueKind == JsonValueKind.False),
         };
         // Nothing to update to, or nothing that may be told of: no word of it goes further (the core names it all the same)
         if (kind is not (UpdatePromptKind.Notice or UpdatePromptKind.Forced)) return answer;
         answer.Version = prompt.Version;
         answer.Tag = update.TryGetProperty("tag", out var tag) && tag.ValueKind == JsonValueKind.String && TagShape.IsMatch(tag.GetString()!) ? tag.GetString() : null;
         answer.CanInstall = prompt.Action == "install" && answer.Tag != null && _hasRootKey;
-        answer.InstallsByDefault = !(document.RootElement.TryGetProperty("config", out var config) && config.ValueKind == JsonValueKind.Object
-            && config.TryGetProperty("updates.autoInstallDefault", out var byDefault) && byDefault.ValueKind == JsonValueKind.False);
         answer.MinimumVersion = update.TryGetProperty("minimumVersion", out var minimum) && minimum.ValueKind == JsonValueKind.String ? minimum.GetString() : null;
         answer.NotesEn = prompt.NotesEn;
         answer.NotesAr = prompt.NotesAr;

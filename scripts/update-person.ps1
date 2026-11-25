@@ -8,14 +8,16 @@ Add-Type -Namespace AunPerson -Name Win -MemberDefinition '[DllImport("user32.dl
 $ofApp = New-Object System.Windows.Automation.PropertyCondition ([System.Windows.Automation.AutomationElement]::ProcessIdProperty), $Id
 $window = $null
 for ($i = 0; $i -lt 30 -and -not $window; $i++) {
-  $window = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst([System.Windows.Automation.TreeScope]::Children, $ofApp)
+  # The app's window, not one without a name that the framework keeps
+  $window = @([System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, $ofApp)) | Where-Object { $_.Current.Name } | Select-Object -First 1
   if (-not $window) { Start-Sleep -Milliseconds 500 }
 }
 if (-not $window) { throw "process $Id has no window" }
 if ($Action -eq "close") {
+  $title = $window.Current.Name
   # WM_SYSCOMMAND, SC_CLOSE
   if (-not [AunPerson.Win]::PostMessage([IntPtr]$window.Current.NativeWindowHandle, 0x0112, [IntPtr]0xF060, [IntPtr]::Zero)) { throw "the window took no message" }
-  "closed '$($window.Current.Name)'"
+  "closed '$title'"
 } elseif ($Action -eq "press") {
   $named = New-Object System.Windows.Automation.PropertyCondition ([System.Windows.Automation.AutomationElement]::AutomationIdProperty), "UpdateDownload"
   $button = $null
