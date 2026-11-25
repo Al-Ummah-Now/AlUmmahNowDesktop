@@ -465,14 +465,21 @@ internal sealed class UpdateViews : IUpdateViews, IDisposable
     }
 
     /// <summary>
-    /// In high contrast every part that is shown is in the system's colors, and some part is shown. A part that is not in
+    /// The buttons that are shown are in the theme's colors. In high contrast every part that is shown is in the system's colors, and some part is shown. A part that is not in
     /// the window has not got its own resources yet: the app's answer for it.
     /// </summary>
     public bool IsPainted
     {
         get
         {
-            if (!new global::Windows.UI.ViewManagement.AccessibilitySettings().HighContrast) return true;
+            if (!new global::Windows.UI.ViewManagement.AccessibilitySettings().HighContrast)
+            {
+                // Also one that waits: the framework's own grey cannot be read on it
+                var theme = AlUmmahNow.App.Theme.Fanous.ReadXamlColors(AlUmmahNow.App.Theme.Fanous.File("Fanous.Colors.xaml"))[Bar.ActualTheme == ElementTheme.Light ? "Light" : "Default"];
+                return new[] { _barDownload, _forcedDownload, _sectionDownload }.Where(IsShown).All(b =>
+                    Is(Presenter(b)?.Background, theme["FanousPrimary" + (b.IsEnabled ? "" : "Disabled") + "Color"]) && Is(Presenter(b)?.Foreground, theme["FanousOnPrimary" + (b.IsEnabled ? "" : "Disabled") + "Color"]));
+            }
+
             var system = new global::Windows.UI.ViewManagement.UISettings();
             // What a button paints in its state is its template's, not its own brush
             (FrameworkElement, Microsoft.UI.Xaml.Media.Brush?, global::Windows.UI.ViewManagement.UIElementType)[] Of(Button b)
@@ -501,6 +508,9 @@ internal sealed class UpdateViews : IUpdateViews, IDisposable
             return shown.Count > 0 && shown.All(p => p.Brush is Microsoft.UI.Xaml.Media.SolidColorBrush b && b.Color == system.UIElementColor(p.Color));
         }
     }
+
+    private static bool Is(Microsoft.UI.Xaml.Media.Brush? brush, uint color) => brush is Microsoft.UI.Xaml.Media.SolidColorBrush b
+        && b.Color == global::Windows.UI.Color.FromArgb((byte)(color >> 24), (byte)(color >> 16), (byte)(color >> 8), (byte)color);
 
     private static ContentPresenter? Presenter(DependencyObject at)
     {
