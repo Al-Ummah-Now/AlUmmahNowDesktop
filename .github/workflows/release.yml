@@ -154,6 +154,9 @@ jobs:
             -d "InstallDirName=${{ matrix.dir }}" `
             -d "UpgradeCode={${{ matrix.upgrade }}}" `
             -o "dist/${{ matrix.package }}-${{ needs.verify.outputs.version }}-x64-unsigned.msi"
+          if ($LASTEXITCODE -ne 0) { throw "wix build failed" }
+          # WiX's debug file is nothing to download
+          Remove-Item dist/*.wixpdb
       - name: Install, launch and uninstall the MSI
         if: matrix.smoke
         shell: pwsh
