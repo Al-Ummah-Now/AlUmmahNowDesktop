@@ -113,7 +113,7 @@ checkbutton check:checked, radiobutton radio:checked { background-color: @fanous
 
 /* The month the first video publishes in: the day that is picked is gold. Arabic letters need the whole line of their
    head: without it the tails of س ن ر ح خ ج were cut. */
-.schedule-weekday { line-height: 22px; }
+.schedule-weekday { line-height: 1.8; }
 button.schedule-day { min-width: 36px; min-height: 32px; padding: 0; border-radius: 8px; font-weight: 400; }
 button.schedule-day:checked { background-image: linear-gradient(to bottom, @fanous_primary_hover, @fanous_primary 60%, @fanous_primary_pressed); }
 button.schedule-day:checked label { color: @fanous_on_primary; font-weight: 700; }
