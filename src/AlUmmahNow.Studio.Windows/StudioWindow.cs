@@ -493,6 +493,7 @@ internal sealed class StudioWindow
             CornerRadius = new CornerRadius(56),
             BorderThickness = new Thickness(3),
             BorderBrush = new SolidColorBrush(Color.FromArgb(0x99, LanternGlass.GoldEdge.R, LanternGlass.GoldEdge.G, LanternGlass.GoldEdge.B)),
+            FlowDirection = FlowDirection.LeftToRight, // the picture itself never mirrors
             Background = new ImageBrush { ImageSource = icon, Stretch = Stretch.UniformToFill },
             HorizontalAlignment = HorizontalAlignment.Center,
         };

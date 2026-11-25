@@ -347,6 +347,7 @@ internal sealed class VideosPage
             thumb.Children.Add(new Border
             {
                 CornerRadius = new CornerRadius(13, 13, 0, 0),
+                FlowDirection = FlowDirection.LeftToRight, // the picture itself never mirrors
                 Background = new Microsoft.UI.Xaml.Media.ImageBrush { ImageSource = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(url) { DecodePixelWidth = 520 }, Stretch = Microsoft.UI.Xaml.Media.Stretch.UniformToFill },
             });
         }
