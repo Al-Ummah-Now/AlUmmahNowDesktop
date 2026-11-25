@@ -287,6 +287,13 @@ public sealed class StudioWindow
         _pageInfo[name] = (title, row, label);
     }
 
+    public bool IsRail => _rail;
+
+    /// <summary>In the rail every page's icon is in the middle of its row; true without a rail (CI's scenarios ask).</summary>
+    public bool RailIsCentered => !_rail || _pageInfo.Values.Where(p => p.Row.GetVisible()).All(p =>
+        p.Label.GetPrevSibling() is { } icon && icon.ComputeBounds(p.Row, out var at)
+        && Math.Abs(at.GetX() + (at.GetWidth() / 2) - (p.Row.GetWidth() / 2.0)) <= 1);
+
     /// <summary>A page's name beside its icon; in the rail the icon is alone, in the middle of its row.</summary>
     private void ShowLabel(Gtk.Label label)
     {

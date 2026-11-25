@@ -178,6 +178,13 @@ jobs:
           for lang in en ar; do shot videos search $lang dark 1440x900; shot videos edit $lang dark 1440x900; shot videos delete $lang dark 1440x900; n=$((n+3)); done
           grep -h AUTOMATION artifacts/review/*.log
           test "$(cat artifacts/review/*.log | grep -c 'RESULT PASS')" = $n
+          # The narrow window has the rail, with each icon in the middle of its row.
+          for f in artifacts/review/*1024x*.log; do grep -q "rail=True railCentered=True" "$f" || { echo "no centered rail: $f"; exit 1; }; done
+          # Days in US order, as on the web.
+          grep -F "from Oct 25 to Nov 21" artifacts/review/linux-analytics-closed-en-light-1440x900.atspi.txt
+          # The initials of the two accounts in Settings can be read on their circles.
+          for f in artifacts/review/linux-settings-closed-en-*-1440x900.png; do python3 scripts/initials-contrast.py $f 897,228 897,267; done
+          for f in artifacts/review/linux-settings-closed-ar-*-1440x900.png; do python3 scripts/initials-contrast.py $f 543,228 543,267; done
           grep -P "\tActing as$" artifacts/review/linux-uploads-channels-en-light-1440x900.atspi.txt
           grep -P "\tتتصرّف باسم$" artifacts/review/linux-uploads-channels-ar-light-1440x900.atspi.txt
           grep -P "^button\t.*Masjid Media Team Channel · Editor$" artifacts/review/linux-uploads-channels-en-light-1440x900.atspi.txt

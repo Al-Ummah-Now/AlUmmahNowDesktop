@@ -136,6 +136,18 @@ public sealed class StudioThemeTests
         Assert.Contains("dialog button.destructive, dialog button.destructive-action {\n  background-color: @fanous_error_fill;", css.Replace("\r\n", "\n"));
     }
 
+    /// <summary>An image brush mirrors in a right-to-left layout: every picture is made in the one place where it does not.</summary>
+    [Fact]
+    public void PicturesAreMadeInOnePlace()
+    {
+        var root = new DirectoryInfo(AppContext.BaseDirectory);
+        while (root != null && !File.Exists(Path.Combine(root.FullName, "AlUmmahNow.sln"))) root = root.Parent;
+        Assert.NotNull(root);
+        var made = Directory.EnumerateFiles(Path.Combine(root!.FullName, "src", "AlUmmahNow.Studio.Windows"), "*.cs")
+            .SelectMany(File.ReadAllLines).Where(l => l.Contains("new ImageBrush", StringComparison.Ordinal) || l.Contains(".ImageBrush {", StringComparison.Ordinal));
+        Assert.Equal("Background = new ImageBrush { ImageSource = source, Stretch = Stretch.UniformToFill },", Assert.Single(made).Trim());
+    }
+
     /// <summary>A Studio brush that high contrast does not have is transparent there, or keeps the theme's color.</summary>
     [Fact]
     public void EveryStudioBrushHasARoleInHighContrast()

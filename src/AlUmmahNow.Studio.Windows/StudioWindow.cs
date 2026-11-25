@@ -486,17 +486,12 @@ internal sealed class StudioWindow
         var panel = new StackPanel { Spacing = 14, HorizontalAlignment = HorizontalAlignment.Stretch };
         var icon = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage { DecodePixelWidth = 224 };
         _ = icon.SetSourceAsync(StudioTheme.AppIcon().AsRandomAccessStream());
-        var lantern = new Border
-        {
-            Width = 112,
-            Height = 112,
-            CornerRadius = new CornerRadius(56),
-            BorderThickness = new Thickness(3),
-            BorderBrush = new SolidColorBrush(Color.FromArgb(0x99, LanternGlass.GoldEdge.R, LanternGlass.GoldEdge.G, LanternGlass.GoldEdge.B)),
-            FlowDirection = FlowDirection.LeftToRight, // the picture itself never mirrors
-            Background = new ImageBrush { ImageSource = icon, Stretch = Stretch.UniformToFill },
-            HorizontalAlignment = HorizontalAlignment.Center,
-        };
+        var lantern = LanternGlass.Picture(icon, new CornerRadius(56));
+        lantern.Width = 112;
+        lantern.Height = 112;
+        lantern.BorderThickness = new Thickness(3);
+        lantern.BorderBrush = new SolidColorBrush(Color.FromArgb(0x99, LanternGlass.GoldEdge.R, LanternGlass.GoldEdge.G, LanternGlass.GoldEdge.B));
+        lantern.HorizontalAlignment = HorizontalAlignment.Center;
         panel.Children.Add(LanternGlass.WithGlow(lantern, 56, 0.6f, 40f));
         var heading = new TextBlock { Text = title, FontSize = 22, FontWeight = Microsoft.UI.Text.FontWeights.Bold, TextWrapping = TextWrapping.Wrap, HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center };
         AutomationProperties.SetHeadingLevel(heading, AutomationHeadingLevel.Level1);

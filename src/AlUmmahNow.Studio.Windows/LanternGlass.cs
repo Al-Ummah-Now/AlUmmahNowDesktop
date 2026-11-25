@@ -304,6 +304,7 @@ internal static class LanternGlass
         {
             SolidColorBrush solid => new[] { solid.Color },
             AcrylicBrush acrylic => new[] { acrylic.FallbackColor },
+            RadialGradientBrush radial => radial.GradientStops.Select(s => s.Color).ToArray(),
             GradientBrush gradient => gradient.GradientStops.Select(s => s.Color).ToArray(),
             _ => Array.Empty<Color>(),
         };
@@ -523,10 +524,52 @@ internal static class LanternGlass
         return host;
     }
 
+    /// <summary>A picture with rounded corners. It never mirrors: a right-to-left layout would flip the brush.</summary>
+    public static Border Picture(ImageSource source, CornerRadius corners) => new()
+    {
+        CornerRadius = corners,
+        FlowDirection = FlowDirection.LeftToRight,
+        Background = new ImageBrush { ImageSource = source, Stretch = Stretch.UniformToFill },
+    };
+
+    private const string AvatarTag = "avatar";
+
+    /// <summary>What is on the page of pictures and avatars, and how many are mirrored or have initials that cannot be read (CI's scenarios ask).</summary>
+    public static (int Pictures, int Mirrored, int Avatars, int Unreadable) Look(DependencyObject root)
+    {
+        var (pictures, mirrored, avatars, unreadable) = (0, 0, 0, 0);
+        foreach (var part in Descendants(root))
+        {
+            if (part is Border { Background: ImageBrush, ActualWidth: > 0 } picture)
+            {
+                pictures++;
+                if (picture.FlowDirection != FlowDirection.LeftToRight) mirrored++;
+            }
+
+            if (part is Grid { Tag: AvatarTag, ActualWidth: > 0 } face)
+            {
+                avatars++;
+                if (!IsReadable(face.Children.OfType<TextBlock>().FirstOrDefault()?.Foreground, face.Children.OfType<Border>().FirstOrDefault()?.Background)) unreadable++;
+            }
+        }
+
+        return (pictures, mirrored, avatars, unreadable);
+    }
+
+    private static IEnumerable<DependencyObject> Descendants(DependencyObject root)
+    {
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            yield return child;
+            foreach (var below in Descendants(child)) yield return below;
+        }
+    }
+
     /// <summary>Round logo: initials on gold (a channel) or teal (a person) until the picture loads; gold ring.</summary>
     public static FrameworkElement Avatar(string? initials, string? url, double size, bool person)
     {
-        var face = new Grid { Width = size, Height = size };
+        var face = new Grid { Width = size, Height = size, Tag = AvatarTag };
         face.Children.Add(new Border
         {
             CornerRadius = new CornerRadius(size / 2),
@@ -558,12 +601,9 @@ internal static class LanternGlass
         });
         if (Uri.TryCreate(url, UriKind.Absolute, out var u))
         {
-            face.Children.Add(new Border
-            {
-                CornerRadius = new CornerRadius(size / 2),
-                Margin = new Thickness(2),
-                Background = new ImageBrush { ImageSource = new BitmapImage(u) { DecodePixelWidth = (int)(size * 2) }, Stretch = Stretch.UniformToFill },
-            });
+            var picture = Picture(new BitmapImage(u) { DecodePixelWidth = (int)(size * 2) }, new CornerRadius(size / 2));
+            picture.Margin = new Thickness(2);
+            face.Children.Add(picture);
         }
 
         return face;
