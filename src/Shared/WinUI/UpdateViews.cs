@@ -403,18 +403,34 @@ internal sealed class UpdateViews : IUpdateViews, IDisposable
         return true;
     }
 
-    /// <summary>In high contrast the bar, the screen and their text are the system's colors.</summary>
+    /// <summary>
+    /// In high contrast every part that is shown is in the system's colors, and some part is shown. A part that is not in
+    /// the window has not got its own resources yet: the app's answer for it.
+    /// </summary>
     public bool IsPainted
     {
         get
         {
             if (!new global::Windows.UI.ViewManagement.AccessibilitySettings().HighContrast) return true;
             var system = new global::Windows.UI.ViewManagement.UISettings();
-            bool Is(Microsoft.UI.Xaml.Media.Brush? brush, global::Windows.UI.ViewManagement.UIElementType of) => brush is Microsoft.UI.Xaml.Media.SolidColorBrush b && b.Color == system.UIElementColor(of);
-            return Is(((Grid)Bar).Background, global::Windows.UI.ViewManagement.UIElementType.Window) && Is(((Grid)Forced).Background, global::Windows.UI.ViewManagement.UIElementType.Window)
-                && Is(_barText.Foreground, global::Windows.UI.ViewManagement.UIElementType.WindowText) && Is(_forcedBody.Foreground, global::Windows.UI.ViewManagement.UIElementType.WindowText)
-                && Is(_barNotes.Foreground, global::Windows.UI.ViewManagement.UIElementType.Hotlight) && Is(_sectionNotes.Foreground, global::Windows.UI.ViewManagement.UIElementType.Hotlight)
-                && Is(_barDownload.Foreground, global::Windows.UI.ViewManagement.UIElementType.HighlightText) && Is(_barDownload.Background, global::Windows.UI.ViewManagement.UIElementType.Highlight);
+            var parts = new (FrameworkElement Part, Microsoft.UI.Xaml.Media.Brush? Brush, global::Windows.UI.ViewManagement.UIElementType Color)[]
+            {
+                (Bar, ((Grid)Bar).Background, global::Windows.UI.ViewManagement.UIElementType.Window),
+                (_barText, _barText.Foreground, global::Windows.UI.ViewManagement.UIElementType.WindowText),
+                (_barNotes, _barNotes.Foreground, global::Windows.UI.ViewManagement.UIElementType.Hotlight),
+                (_barDownload, _barDownload.Background, global::Windows.UI.ViewManagement.UIElementType.Highlight),
+                (_barDownload, _barDownload.Foreground, global::Windows.UI.ViewManagement.UIElementType.HighlightText),
+                (Forced, ((Grid)Forced).Background, global::Windows.UI.ViewManagement.UIElementType.Window),
+                (_forcedBody, _forcedBody.Foreground, global::Windows.UI.ViewManagement.UIElementType.WindowText),
+                (_forcedDownload, _forcedDownload.Background, global::Windows.UI.ViewManagement.UIElementType.Highlight),
+                (_forcedDownload, _forcedDownload.Foreground, global::Windows.UI.ViewManagement.UIElementType.HighlightText),
+                (_version, _version.Foreground, global::Windows.UI.ViewManagement.UIElementType.WindowText),
+                (_sectionNotes, _sectionNotes.Foreground, global::Windows.UI.ViewManagement.UIElementType.Hotlight),
+                (_sectionDownload, _sectionDownload.Background, global::Windows.UI.ViewManagement.UIElementType.Highlight),
+                (_sectionDownload, _sectionDownload.Foreground, global::Windows.UI.ViewManagement.UIElementType.HighlightText),
+            };
+            var shown = parts.Where(p => IsShown(p.Part)).ToList();
+            return shown.Count > 0 && shown.All(p => p.Brush is Microsoft.UI.Xaml.Media.SolidColorBrush b && b.Color == system.UIElementColor(p.Color));
         }
     }
 
