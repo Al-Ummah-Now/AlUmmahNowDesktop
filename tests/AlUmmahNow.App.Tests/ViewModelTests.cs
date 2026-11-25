@@ -191,6 +191,34 @@ public class WatchViewModelTests
         Assert.Equal(100, p.Position);
     }
 
+    [Theory]
+    [InlineData("en")]
+    [InlineData("ar")]
+    public async Task The_right_arrow_seeks_forward_in_every_language(string language)
+    {
+        var (vm, p, _, _) = Make(language);
+        await vm.LoadAsync("v");
+        p.Tick(30);
+        vm.SkipByArrow(right: true);
+        Assert.Equal(40, p.Position);
+        vm.SkipByArrow(right: false);
+        vm.SkipByArrow(right: false);
+        Assert.Equal(20, p.Position);
+    }
+
+    /// <summary>Every app's player keys go through the one rule: no shell turns them around for a language.</summary>
+    [Fact]
+    public void No_shell_skips_by_language()
+    {
+        var root = AppContext.BaseDirectory;
+        while (!Directory.Exists(Path.Combine(root, "src"))) root = Path.GetDirectoryName(root)!;
+        var lines = new[] { "AlUmmahNow.Linux", "AlUmmahNow.Windows", "AlUmmahNow.Tizen" }
+            .SelectMany(app => Directory.EnumerateFiles(Path.Combine(root, "src", app), "*.cs", SearchOption.TopDirectoryOnly))
+            .SelectMany(File.ReadAllLines).ToList();
+        Assert.True(lines.Count(l => l.Contains("SkipByArrow", StringComparison.Ordinal)) >= 7);
+        Assert.DoesNotContain(lines, l => l.Contains("IsRtl", StringComparison.Ordinal) && l.Contains("Skip", StringComparison.Ordinal));
+    }
+
     [Fact]
     public async Task Speed_is_applied()
     {

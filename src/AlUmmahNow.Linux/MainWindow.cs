@@ -87,12 +87,8 @@ public sealed partial class MainWindow
     private bool OnKey(uint key)
     {
         if (Watch is not { } watch) return false;
-        // Left and right follow the mirrored seek direction in RTL.
-        var forward = _localizer.IsRtl ? KeyLeft : KeyRight;
-        var back = _localizer.IsRtl ? KeyRight : KeyLeft;
         if (key == KeySpace) watch.TogglePlay();
-        else if (key == forward) watch.SkipForward();
-        else if (key == back) watch.SkipBack();
+        else if (key is KeyLeft or KeyRight) watch.SkipByArrow(right: key == KeyRight);
         else return false;
         return true;
     }

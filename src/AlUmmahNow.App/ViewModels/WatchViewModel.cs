@@ -201,6 +201,16 @@ namespace AlUmmahNow.App.ViewModels
         [RelayCommand]
         public void SkipBack() => Seek(_player.Position - SkipSeconds);
 
+        /// <summary>
+        /// The left or right arrow key. The seek bar runs left to right in every language, so the right arrow always
+        /// seeks forward and the left one back: each moves the handle its way (the web player's rule).
+        /// </summary>
+        public void SkipByArrow(bool right)
+        {
+            if (right) SkipForward();
+            else SkipBack();
+        }
+
         public void Seek(double position)
         {
             if (IsLive) return;

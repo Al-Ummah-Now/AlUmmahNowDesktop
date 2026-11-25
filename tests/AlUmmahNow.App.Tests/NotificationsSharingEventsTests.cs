@@ -79,8 +79,12 @@ public class NotificationsSharingEventsTests
         Assert.Equal("٩+", ar.BadgeCap9(14));
         Assert.Equal("9+", en.BadgeCap9(14));
 
-        Assert.Equal("\u2068٢٢:٠٠\u2069", ar.MinuteOfDay(1320));
-        Assert.Equal("\u206806:05\u2069", en.MinuteOfDay(365));
+        Assert.Equal("\u2068١٠:٠٠ م\u2069", ar.MinuteOfDay(1320));
+        Assert.Equal("\u206810:00 PM\u2069", en.MinuteOfDay(1320));
+        Assert.Equal("\u20686:05 AM\u2069", en.MinuteOfDay(365));
+        Assert.Equal("\u206812:00 AM\u2069", en.MinuteOfDay(0));
+        Assert.Equal("\u2068١٢:٣٠ م\u2069", ar.MinuteOfDay(750));
+        Assert.Equal("\u206811:59 PM\u2069", en.MinuteOfDay(-1));
     }
 
     [Fact]

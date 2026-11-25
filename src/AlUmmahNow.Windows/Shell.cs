@@ -61,8 +61,8 @@ public sealed partial class Shell
         };
         localizer.LanguageChanged += (_, _) => Render();
         AddKey(VirtualKey.Space, () => Watch?.TogglePlay());
-        AddKey(VirtualKey.Left, () => Skip(!_localizer.IsRtl));
-        AddKey(VirtualKey.Right, () => Skip(_localizer.IsRtl));
+        AddKey(VirtualKey.Left, () => Watch?.SkipByArrow(right: false));
+        AddKey(VirtualKey.Right, () => Watch?.SkipByArrow(right: true));
     }
 
     public FrameworkElement Root => _root;
@@ -74,12 +74,6 @@ public sealed partial class Shell
         Render();
         await Task.WhenAll(Home.LoadAsync(), LiveList.LoadAsync());
         Render();
-    }
-
-    private void Skip(bool back)
-    {
-        if (back) Watch?.SkipBack();
-        else Watch?.SkipForward();
     }
 
     private void AddKey(VirtualKey key, Action action)
