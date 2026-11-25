@@ -97,8 +97,9 @@ public sealed partial class App : Application
         Func<string, IUploadService> uploadServiceFor;
         if (demo)
         {
-            accounts = new DemoAccounts();
-            transport = new DemoTransport(DemoTransport.FeaturesOff(Environment.GetEnvironmentVariable("AUN_DEMO_FEATURES_OFF")), Environment.GetEnvironmentVariable("AUN_DEMO_THUMBS"), localizer.Language, withDeleted: scene.StartsWith("deleted", StringComparison.Ordinal));
+            var canned = new DemoTransport(DemoTransport.FeaturesOff(Environment.GetEnvironmentVariable("AUN_DEMO_FEATURES_OFF")), Environment.GetEnvironmentVariable("AUN_DEMO_THUMBS"), localizer.Language, withDeleted: scene.StartsWith("deleted", StringComparison.Ordinal), withAvatars: scene == "avatar");
+            transport = canned;
+            accounts = new DemoAccounts(canned.Avatar);
             uploadServiceFor = account => new SimulatedUploadService(account, TimeSpan.FromMilliseconds(250));
         }
         else
@@ -252,11 +253,12 @@ public sealed partial class App : Application
                     && (scene != "searchhover" || window.SearchIsHovered)
                     && (pages.Current != StudioPages.Analytics || !demo || analytics.PickedIsReadable == true)
                     && (scene != "cardhover" || analytics.PickedIsHovered)
+                    && (scene != "avatar" || look.AvatarPictures >= 3)
                     && look.Mirrored == 0 && look.Unreadable == 0
                     && (automation != "shell" || look.Avatars > 0) && (demo || look.Pictures > 0)
                     && (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("AUN_DEMO_THUMBS")) || pages.Current is not (StudioPages.Videos or StudioPages.Analytics) || look.Pictures > 0)
                     && (!scene.StartsWith("highcontrast", StringComparison.Ordinal) || LanternGlass.IsHighContrast);
-                File.WriteAllText(ResultPath, $"AUTOMATION {tabName} page={pages.Current} upload={pages.IsVisible(StudioPages.Uploads)} analytics={pages.IsVisible(StudioPages.Analytics)} bulkSchedule={uploadsVm.BulkScheduleOn} scene={scene} shell={shell.State} channel={shell.ActiveChannel?.Id} accounts={shell.AccountList.Count} uploads={snapshot.Count} uploadsDone={uploadsDone} encode={job?.Status} encoder={job?.UsedEncoder?.Name} error={job?.Error} searchFocused={window.SearchHasFocus} fieldFocused={window.FieldHasFocus} cardsWhole={videos.CardsAreWhole} searchHovered={window.SearchIsHovered} pickedReadable={analytics.PickedIsReadable} pickedHovered={analytics.PickedIsHovered} pictures={look.Pictures} mirrored={look.Mirrored} avatars={look.Avatars} unreadableInitials={look.Unreadable} highContrast={LanternGlass.IsHighContrast} painted={LanternGlass.IsPainted} missing={LanternGlass.Missing} unreadableDialogs={LanternGlass.UnreadableDialogs} checkedDialogs={LanternGlass.CheckedDialogs} deletedShown={videos.DeletedIsShown} RESULT {(pass ? "PASS" : "FAIL")}");
+                File.WriteAllText(ResultPath, $"AUTOMATION {tabName} page={pages.Current} upload={pages.IsVisible(StudioPages.Uploads)} analytics={pages.IsVisible(StudioPages.Analytics)} bulkSchedule={uploadsVm.BulkScheduleOn} scene={scene} shell={shell.State} channel={shell.ActiveChannel?.Id} accounts={shell.AccountList.Count} uploads={snapshot.Count} uploadsDone={uploadsDone} encode={job?.Status} encoder={job?.UsedEncoder?.Name} error={job?.Error} searchFocused={window.SearchHasFocus} fieldFocused={window.FieldHasFocus} cardsWhole={videos.CardsAreWhole} searchHovered={window.SearchIsHovered} pickedReadable={analytics.PickedIsReadable} pickedHovered={analytics.PickedIsHovered} pictures={look.Pictures} mirrored={look.Mirrored} avatars={look.Avatars} avatarPictures={look.AvatarPictures} unreadableInitials={look.Unreadable} highContrast={LanternGlass.IsHighContrast} painted={LanternGlass.IsPainted} missing={LanternGlass.Missing} unreadableDialogs={LanternGlass.UnreadableDialogs} checkedDialogs={LanternGlass.CheckedDialogs} deletedShown={videos.DeletedIsShown} RESULT {(pass ? "PASS" : "FAIL")}");
                 Exit();
             };
             _endTimer.Start();

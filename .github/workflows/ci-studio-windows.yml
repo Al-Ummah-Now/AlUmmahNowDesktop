@@ -152,6 +152,12 @@ jobs:
             ./scripts/windows-studio-shot.ps1 $exe $lang light 1440x900 $scene $name $out videos
             if (-not (Select-String -Quiet "RESULT PASS" "$out/$name.txt")) { $failed += $name }
           } }
+          # A channel and accounts with a picture of their own.
+          foreach ($lang in "en","ar") {
+            $name = "windows-settings-avatar-$lang-dark-1440x900"
+            ./scripts/windows-studio-shot.ps1 $exe $lang dark 1440x900 avatar $name $out settings
+            if (-not (Select-String -Quiet "RESULT PASS" "$out/$name.txt")) { $failed += $name }
+          }
           foreach ($lang in "en","ar") { foreach ($theme in "dark","light") {
             # Signed out: the sign-in card.
             $name = "windows-signin-closed-$lang-$theme-1440x900"

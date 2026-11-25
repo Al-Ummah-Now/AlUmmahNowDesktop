@@ -11,10 +11,13 @@ namespace AlUmmahNow.Studio.Demo;
 /// </summary>
 public sealed class DemoAccounts : IStudioAccounts
 {
-    private readonly List<StudioAccount> _accounts = new()
+    private readonly List<StudioAccount> _accounts;
+
+    /// <param name="avatarUrl">Review frames: the accounts' picture; none, and so their initials, without it.</param>
+    public DemoAccounts(string? avatarUrl = null) => _accounts = new()
     {
-        new StudioAccount("demo-1", "amina@example.com", "Amina Studio", null, null, false),
-        new StudioAccount("demo-2", "omar@example.com", "Omar", null, null, false),
+        new StudioAccount("demo-1", "amina@example.com", "Amina Studio", avatarUrl, null, false),
+        new StudioAccount("demo-2", "omar@example.com", "Omar", avatarUrl, null, false),
     };
 
     private string? _active = "demo-1";
@@ -82,12 +85,14 @@ public sealed class DemoTransport : IApiTransport
     /// <see cref="DemoClock.Today"/> (<c>AUN_DEMO_TODAY</c> when CI pins it, else the real day).
     /// </param>
     /// <param name="withDeleted">Review frames: the channel has deleted videos, two to restore and one queued for good.</param>
-    public DemoTransport(IEnumerable<string>? featuresOff = null, string? thumbnailFolder = null, string language = "ar", DateTime? today = null, bool withDeleted = false)
+    /// <param name="withAvatars">Review frames: the channels and accounts have a picture, the first title card.</param>
+    public DemoTransport(IEnumerable<string>? featuresOff = null, string? thumbnailFolder = null, string language = "ar", DateTime? today = null, bool withDeleted = false, bool withAvatars = false)
     {
         _today = (today ?? DemoClock.Today).Date;
         _off = new HashSet<string>(featuresOff ?? Array.Empty<string>(), StringComparer.Ordinal);
         _thumbs = thumbnailFolder;
         _language = language;
+        Avatar = withAvatars ? Thumbnail(0) : null;
         // A hand-made library, like a real channel's: original title plus the creator's per-language titles (the API's
         // titleLocalized), the category the subject belongs to, and uneven views, lengths and upload days. The second
         // video was just uploaded and is still processing, so it has no views yet.
@@ -200,8 +205,8 @@ public sealed class DemoTransport : IApiTransport
                     success = true,
                     data = new object[]
                     {
-                        new { id = "demo-c1", userId = "demo-1", name = _language == "ar" ? "قناة النور" : "Noor Channel", handle = "alnoor", isMain = true, role = "owner", capabilities = Array.Empty<string>() },
-                        new { id = "demo-c2", userId = "demo-9", name = _language == "ar" ? "فريق إعلام المسجد" : "Masjid Media Team", handle = "masjidmedia", isMain = false, role = "editor", capabilities = new[] { "video.upload", "video.edit" } },
+                        new { id = "demo-c1", userId = "demo-1", name = _language == "ar" ? "قناة النور" : "Noor Channel", handle = "alnoor", avatarUrl = Avatar, isMain = true, role = "owner", capabilities = Array.Empty<string>() },
+                        new { id = "demo-c2", userId = "demo-9", name = _language == "ar" ? "فريق إعلام المسجد" : "Masjid Media Team", handle = "masjidmedia", avatarUrl = Avatar, isMain = false, role = "editor", capabilities = new[] { "video.upload", "video.edit" } },
                     },
                 });
             case "get_VideosList":
@@ -335,6 +340,9 @@ public sealed class DemoTransport : IApiTransport
     /// </summary>
     private static long PeriodViews(Dictionary<string, object?> video) =>
         (long)Math.Floor(Convert.ToInt64(video["views"], System.Globalization.CultureInfo.InvariantCulture) * DemoSeries.PeriodShare);
+
+    /// <summary>The picture of the channels and accounts, if they have one.</summary>
+    public string? Avatar { get; }
 
     private string? Thumbnail(int index)
     {

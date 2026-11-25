@@ -147,6 +147,13 @@ public class DemoDataTests
             var page = await new StudioApiClient(new DemoTransport(null, dir.FullName, language)).ListVideosAsync(new StudioVideoQuery { ChannelId = "demo-c1" });
             Assert.EndsWith("/" + file, page.Items.First(v => v.Id == "demo-v1").ThumbnailUrl);
             Assert.Null(page.Items.First(v => v.Id == "demo-v2").ThumbnailUrl);
+            // Initials, unless a scene asks for pictures
+            Assert.Null(new DemoTransport(null, dir.FullName, language).Avatar);
+            var withAvatars = new DemoTransport(null, dir.FullName, language, withAvatars: true);
+            Assert.EndsWith("/" + file, withAvatars.Avatar);
+            Assert.All(await new StudioApiClient(withAvatars).ListMyChannelsAsync(), c => Assert.Equal(withAvatars.Avatar, c.AvatarUrl));
+            Assert.All(new DemoAccounts(withAvatars.Avatar).Accounts, a => Assert.Equal(withAvatars.Avatar, a.AvatarUrl));
+            Assert.All(new DemoAccounts().Accounts, a => Assert.Null(a.AvatarUrl));
         }
         finally
         {
