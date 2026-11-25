@@ -318,17 +318,18 @@ internal static class LanternGlass
         // frames): the button itself has ours.
         var onGold = Res("StudioOnGoldBrush");
         foreach (var state in new[] { "", "PointerOver", "Pressed" }) dialog.Resources["AccentButtonForeground" + state] = onGold;
-        dialog.Opened += (d, _) =>
+        // Not Opened: it may come before the dialog has any of its parts (the edit dialog, whose field takes the focus)
+        dialog.Loaded += (_, _) =>
         {
-            if (d.DefaultButton == ContentDialogButton.None) return;
-            if (DefaultButton(d) is not { } button)
+            if (dialog.DefaultButton == ContentDialogButton.None) return;
+            if (DefaultButton(dialog) is not { } button)
             {
                 UnreadableDialogs++;
                 return;
             }
 
             button.Foreground = onGold;
-            d.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+            dialog.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
             {
                 CheckedDialogs++;
                 // What cannot be read is counted: it is not known to be drawn in ours
