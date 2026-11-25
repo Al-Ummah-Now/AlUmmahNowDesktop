@@ -67,8 +67,11 @@ public sealed class SelfUpdaterTests : IDisposable
         }
 
         public bool IsOpenElsewhere => false;
-        public void ApplyOnExit() => Exits++;
-        public void ApplyAndRestart() => Restarts++;
+        public void ApplyOnExit(bool restart)
+        {
+            if (restart) Restarts++;
+            else Exits++;
+        }
     }
 
     private readonly Http _http = new();
@@ -125,8 +128,8 @@ public sealed class SelfUpdaterTests : IDisposable
     {
         Assert.Null(_installer.Staged);
         Assert.False(Directory.Exists(Path.Combine(_root, "updates")) && Directory.EnumerateFiles(Path.Combine(_root, "updates")).Any());
-        _updater.ApplyOnExit();
-        _updater.ApplyAndRestart();
+        _updater.ApplyOnExit(false);
+        _updater.ApplyOnExit(true);
         Assert.Equal(0, _installer.Exits + _installer.Restarts);
     }
 
@@ -146,8 +149,10 @@ public sealed class SelfUpdaterTests : IDisposable
         Assert.Equal(0, _installer.Exits + _installer.Restarts);
         _updater.VerifyStaged();
         Assert.Equal(_verifier.Seen[0].Manifest, _verifier.Seen[1].Manifest);
-        _updater.ApplyOnExit();
+        _updater.ApplyOnExit(false);
         Assert.Equal(1, _installer.Exits);
+        _updater.ApplyOnExit(true);
+        Assert.Equal(1, _installer.Restarts);
     }
 
     private sealed class Told(Action<double> told) : IProgress<double>

@@ -8,7 +8,7 @@ namespace AlUmmahNow.CoreBridge.Native.SelfUpdate;
 /// <summary>What installs a package (Velopack on Windows); it downloads nothing and decides nothing.</summary>
 public interface IPackageInstaller
 {
-    /// <summary>Takes the checked file; it is installed by the two applying calls only.</summary>
+    /// <summary>Takes the checked file; it is installed by the applying call only.</summary>
     Task StageAsync(string file, string version, ReleaseFile listed, CancellationToken cancellationToken);
 
     /// <exception cref="UpdateRefusedException">What is staged is not the file the signed manifest lists.</exception>
@@ -19,8 +19,7 @@ public interface IPackageInstaller
     /// <summary>Another process runs from the same folder.</summary>
     bool IsOpenElsewhere { get; }
 
-    void ApplyOnExit();
-    void ApplyAndRestart();
+    void ApplyOnExit(bool restart);
 }
 
 /// <summary>The core's part: what is trusted, under the keys it has at that moment.</summary>
@@ -171,14 +170,9 @@ public sealed class SelfUpdater : ISelfUpdate
 
     public bool IsOpenElsewhere => _installer.IsOpenElsewhere;
 
-    public void ApplyOnExit()
+    public void ApplyOnExit(bool restart)
     {
-        if (_staged != null) _installer.ApplyOnExit();
-    }
-
-    public void ApplyAndRestart()
-    {
-        if (_staged != null) _installer.ApplyAndRestart();
+        if (_staged != null) _installer.ApplyOnExit(restart);
     }
 
     public async Task ReportAsync(string tag, string reason, CancellationToken cancellationToken = default)

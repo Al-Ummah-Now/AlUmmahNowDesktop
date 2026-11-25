@@ -22,23 +22,20 @@ internal sealed class VelopackInstaller : IPackageInstaller
     private static readonly InstallGuard? Guard = InstallGuard.ForThisProcess();
     private readonly UpdateManager _manager;
     private readonly string _folder;
-    private readonly Action _exit;
     private UpdateInfo? _info;
     private StagedPackage? _package;
 
-    private VelopackInstaller(UpdateManager manager, string folder, Action exit)
+    private VelopackInstaller(UpdateManager manager, string folder)
     {
         _manager = manager;
         _folder = folder;
-        _exit = exit;
     }
 
     /// <summary>
     /// Null in a copy that our setup did not install (the MSI, the zip), or whose package folder others can change: those
     /// get the notice with the link.
     /// </summary>
-    /// <param name="exit">Closes the app, as its window's close button does.</param>
-    public static VelopackInstaller? Find(Action exit)
+    public static VelopackInstaller? Find()
     {
         try
         {
@@ -47,7 +44,7 @@ internal sealed class VelopackInstaller : IPackageInstaller
             PrivateFolder.Ensure(folder, PrivateFolder.UserRoot);
             // Nothing an earlier run left is ever installed. Not while another copy runs, whose it may be
             if (!IsRunningTwice()) StagedPackage.Clear(folder);
-            return new VelopackInstaller(manager, folder, exit);
+            return new VelopackInstaller(manager, folder);
         }
 #pragma warning disable CA1031 // Whatever it is, this copy then only tells of a new version.
         catch (Exception ex)
@@ -95,17 +92,9 @@ internal sealed class VelopackInstaller : IPackageInstaller
     /// As the app closes, never earlier: the updater waits 60 seconds for it. If it cannot run, the next start clears the
     /// package and the next check stages it again.
     /// </summary>
-    public void ApplyOnExit()
+    public void ApplyOnExit(bool restart)
     {
-        if (_info is { } info) _manager.WaitExitThenApplyUpdates(info.TargetFullRelease, silent: true, restart: false);
-    }
-
-    /// <summary>The same, and the updater starts the new version. The app closes as it always does, not from under its own feet.</summary>
-    public void ApplyAndRestart()
-    {
-        if (_info is not { } info) throw new InvalidOperationException("nothing is staged");
-        _manager.WaitExitThenApplyUpdates(info.TargetFullRelease, silent: false, restart: true, restartArgs: new[] { AppStart.AfterUpdate });
-        _exit();
+        if (_info is { } info) _manager.WaitExitThenApplyUpdates(info.TargetFullRelease, silent: !restart, restart, restart ? new[] { AppStart.AfterUpdate } : null);
     }
 
     /// <summary>Velopack's source: one release, the file that was checked.</summary>

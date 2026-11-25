@@ -103,11 +103,10 @@ namespace AlUmmahNow.App.Demo
         {
         }
 
-        public void ApplyOnExit()
+        public void ApplyOnExit(bool restart)
         {
+            if (restart) Restarts++;
         }
-
-        public void ApplyAndRestart() => Restarts++;
 
         public Task ReportAsync(string tag, string reason, CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
@@ -194,7 +193,9 @@ namespace AlUmmahNow.App.Demo
                     await Task.Delay(TimeSpan.FromSeconds(name == "waiting" && wait > UpdateService.BusyPoll ? 10 : 1), stop);
                     _passed += wait;
                 },
-                wasEnabled: name == "offline", self: _self);
+                wasEnabled: name == "offline", self: _self,
+                // The scene goes on after it: what closing would do is what it looks at
+                close: () => Service!.OnExit());
         }
 
         public string Name { get; }

@@ -101,6 +101,38 @@ public sealed class UploadsViewModelTests : IDisposable
         Assert.Null(vm.FinishStepFor("up1"));
     }
 
+    /// <summary>What an update must not interrupt: as the queue says now, not as it was at the last tick.</summary>
+    [Fact]
+    public async Task WorkingIsAsTheQueueSaysNowAndWhileDetailsAreSent()
+    {
+        var (_, vm) = await CreateAsync();
+        Assert.False(vm.IsWorking);
+        vm.Defaults.PlaylistIds = new List<string> { "p1" };
+        vm.AddFiles(new[] { Video("a.mp4") });
+        vm.Start();
+        var service = _services.Single();
+        Assert.True(vm.IsWorking);
+        // Done, and nothing has ticked since: the list itself says so
+        service.Finish("up1", "v1");
+        Assert.False(vm.IsWorking);
+        var whileSent = false;
+        _t.Responses["post_PlaylistVideosBulkAdd"] = _ =>
+        {
+            whileSent = vm.IsWorking;
+            return FakeTransport.Json(new { data = new { } });
+        };
+        vm.Tick();
+        for (var i = 0; i < 100 && vm.FinishStepFor("up1") != null; i++) await Task.Delay(10);
+        Assert.Single(_t.Calls("post_PlaylistVideosBulkAdd"));
+        Assert.True(whileSent);
+        for (var i = 0; i < 100 && vm.IsWorking; i++) await Task.Delay(10);
+        Assert.False(vm.IsWorking);
+        // Closed: its queue is closed, and it works no more
+        vm.Dispose();
+        Assert.True(service.Disposed);
+        Assert.False(vm.IsWorking);
+    }
+
     [Fact]
     public async Task NothingStartsAtATimeThatIsTooSoon()
     {
