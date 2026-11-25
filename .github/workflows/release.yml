@@ -70,7 +70,8 @@ jobs:
         run: |
           case "$GITHUB_EVENT_NAME" in
             push) v="${GITHUB_REF_NAME#v}" ;;
-            pull_request) v="0.0.0-pr.${{ github.event.number }}" ;;
+            # Velopack takes no version below 0.0.1
+            pull_request) v="0.0.1-pr.${{ github.event.number }}" ;;
             *) v="$INPUT_VERSION" ;;
           esac
           echo "$v" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'
@@ -196,7 +197,10 @@ jobs:
             Get-ChildItem -Recurse "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" | Out-Host
             throw "no Start menu shortcut named ${{ matrix.shortcut }}"
           }
-          $p = Start-Process "$root\Update.exe" -ArgumentList "--silent", "uninstall" -Wait -PassThru
+          # As Windows' Settings removes it
+          $quiet = (Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$id").QuietUninstallString
+          if (-not $quiet) { throw "the setup registered no uninstaller" }
+          $p = Start-Process cmd.exe -ArgumentList "/s /c `"$quiet`"" -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "uninstall failed: $($p.ExitCode)" }
           if (Test-Path $exe) { throw "uninstall left the app behind" }
           if (Test-Path "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\${{ matrix.shortcut }}.lnk") { throw "uninstall left the shortcut behind" }
