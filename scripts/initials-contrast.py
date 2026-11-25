@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Fails unless white initials can be read on their circles in a frame: 4.5 to the circle's color, as drawn.
+"""Fails unless white text (an initial on its circle, a button's label) can be read on its fill in a frame: 4.5, as drawn.
 
-Usage: initials-contrast.py <frame.png> <x,y of a circle's middle>...   (ImageMagick's convert reads the frame)
+Usage: initials-contrast.py <frame.png> <x,y of the text's middle>...   (ImageMagick's convert reads the frame)
 """
 import re
 import subprocess
 import sys
 
-SIZE = 18  # inside the circle (32), around its initial
+SIZE = 18  # inside a circle of 32, around its initial
 
 
 def light(color):

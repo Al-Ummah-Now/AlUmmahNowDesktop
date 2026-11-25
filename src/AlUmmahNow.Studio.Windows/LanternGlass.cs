@@ -561,6 +561,15 @@ internal static class LanternGlass
         return (pictures, mirrored, avatars, avatarPictures, unreadable);
     }
 
+    /// <summary>How many texts and buttons of a page are not wholly within its width (CI's scenarios ask).</summary>
+    public static int CutOff(FrameworkElement page) => Descendants(page).OfType<FrameworkElement>()
+        .Where(e => e is TextBlock or Button && e.ActualWidth > 0)
+        .Count(e =>
+        {
+            var at = e.TransformToVisual(page).TransformBounds(new Windows.Foundation.Rect(0, 0, e.ActualWidth, e.ActualHeight));
+            return at.Left < -0.5 || at.Right > page.ActualWidth + 0.5;
+        });
+
     private static IEnumerable<DependencyObject> Descendants(DependencyObject root)
     {
         for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)

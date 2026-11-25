@@ -272,12 +272,29 @@ public sealed class UploadPage
         D.TimeZone = Formats.LocalTimeZone();
         D.ScheduleStart ??= _vm.Now.Date.AddDays(1).AddHours(9);
         // Prefilled in the UI's digits (٠–٩ in Arabic); typed digits of either kind read back.
-        _scheduleStart.SetText(_l.InputDigits(Formats.ToLocalInput(D.ScheduleStart.Value)));
+        // The field reads left to right in Arabic too.
+        _scheduleStart.SetDirection(Gtk.TextDirection.Ltr);
+        _scheduleStart.SetText(_l.InputLeftToRight(Formats.ToLocalInput(D.ScheduleStart.Value)));
         var scheduleError = Ui.Label("");
         scheduleError.AddCssClass("error");
         scheduleError.SetVisible(false); // A blank label still takes the row spacing.
         _scheduleStart.OnChanged += (_, _) =>
         {
+            if (_l.InputLeftToRight(_scheduleStart.GetText()) != _scheduleStart.GetText())
+            {
+                // Not inside the change itself: the entry still moves its cursor
+                GLib.Functions.IdleAdd(0, () =>
+                {
+                    var typed = _scheduleStart.GetText();
+                    var kept = _l.InputLeftToRight(typed);
+                    if (kept == typed) return false;
+                    var at = _scheduleStart.GetPosition() + kept.Length - typed.Length;
+                    _scheduleStart.SetText(kept);
+                    _scheduleStart.SetPosition(Math.Clamp(at, 0, kept.Length));
+                    return false;
+                });
+            }
+
             var t = Formats.ParseLocal(Localizer.NormalizeDigits(_scheduleStart.GetText()));
             scheduleError.SetText(t == null ? _l["studio.upload.scheduleInvalid"] : "");
             scheduleError.SetVisible(t == null);

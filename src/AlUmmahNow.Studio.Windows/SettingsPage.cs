@@ -69,7 +69,7 @@ internal sealed class SettingsPage
         var about = new StackPanel { Spacing = 6 };
         about.Children.Add(Heading(l["studio.settings.about"]));
         about.Children.Add(new TextBlock { Text = l["studio.name"] });
-        about.Children.Add(new TextBlock { Text = l.Format("studio.settings.version", l.InputDigits(version)), Foreground = LanternGlass.Res("StudioMutedBrush") });
+        about.Children.Add(new TextBlock { Text = l.Format("studio.settings.version", l.Version(version)), Foreground = LanternGlass.Res("StudioMutedBrush") });
         left.Children.Add(LanternGlass.Card(about));
 
         var accountsBody = new StackPanel { Spacing = 8 };

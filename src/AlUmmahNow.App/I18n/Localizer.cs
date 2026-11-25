@@ -315,10 +315,22 @@ namespace AlUmmahNow.App.I18n
         public static string Isolate(string text) => "\u2068" + text + "\u2069";
 
         /// <summary>
-        /// Prefilled input text ("2026-11-17 09:00") in the UI's digits: ٠–٩ in Arabic. No isolates, so the
-        /// field's text reads back through <see cref="NormalizeDigits"/>.
+        /// The text of a field that reads left to right in every language ("2026-11-22 09:00" / «٢٠٢٦-١١-٢٢ ٠٩:٠٠»): in
+        /// Arabic with a left-to-right override before it, as the hyphens between Arabic digits put the parts in another
+        /// order in a left-to-right field too. Given what is in the field, typed or not, it is what the field should hold.
         /// </summary>
-        public string InputDigits(string text) => Digits(text);
+        public string InputLeftToRight(string text) => _language == "ar" ? "\u202D" + Digits(NormalizeDigits(text)) : NormalizeDigits(text);
+
+        /// <summary>
+        /// A version for display, isolated: "1.4.2-preview.3" / «١.٤.٢-preview.٣». It is no decimal number, so its dots
+        /// stay dots (wiki AUN-APP-UPDATES §12). With letters it is embedded left to right as well: Windows' text does not
+        /// know isolates, and put the parts in another order.
+        /// </summary>
+        public string Version(string version)
+        {
+            var shown = Digits(version).Replace('\u066B', '.');
+            return Isolate(version.Contains('-') ? "\u202A" + shown + "\u202C" : shown);
+        }
 
         /// <summary>Typed Eastern Arabic ٠–٩ and Persian ۰–۹ digits become 0–9 (for parsing input).</summary>
         public static string NormalizeDigits(string? text)
@@ -327,6 +339,8 @@ namespace AlUmmahNow.App.I18n
             var sb = new StringBuilder(text!.Length);
             foreach (var c in text)
             {
+                // Marks of direction are of the field, not of what was typed
+                if (c == '\u200E' || c == '\u200F' || (c >= '\u202A' && c <= '\u202E') || (c >= '\u2066' && c <= '\u2069')) continue;
                 if (c >= '\u0660' && c <= '\u0669') sb.Append((char)('0' + (c - '\u0660')));
                 else if (c >= '\u06F0' && c <= '\u06F9') sb.Append((char)('0' + (c - '\u06F0')));
                 else if (c == '\u066B') sb.Append('.');

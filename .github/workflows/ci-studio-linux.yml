@@ -161,7 +161,7 @@ jobs:
             shot uploads "" $lang $theme 1440x900; shot uploads channels $lang $theme 1440x900
             shot uploads "" $lang $theme 1920x1080; shot uploads "" $lang $theme 1024x700
             shot uploads scheduled $lang $theme 1440x900
-            shot videos "" $lang $theme 1440x900; shot videos bulk $lang $theme 1440x900
+            shot videos "" $lang $theme 1440x900; shot videos bulk $lang $theme 1440x900; shot videos selected $lang $theme 1440x900
             # The narrow window (icon rail) at full-page height for the scrolling pages, so no card or chart is cut off.
             shot videos "" $lang $theme 1920x1080; shot videos "" $lang $theme 1024x1180
             shot analytics "" $lang $theme 1440x900; shot analytics "" $lang $theme 1920x1080; shot analytics "" $lang $theme 1024x820
@@ -173,7 +173,7 @@ jobs:
             shot encode active $lang $theme 1440x900
             shot videos deleted $lang $theme 1440x900; shot videos deleted-open $lang $theme 1440x900
             shot videos searchfocus $lang $theme 1440x900
-            n=$((n+22))
+            n=$((n+23))
           done; done
           for lang in en ar; do shot videos search $lang dark 1440x900; shot videos edit $lang dark 1440x900; shot videos delete $lang dark 1440x900; n=$((n+3)); done
           grep -h AUTOMATION artifacts/review/*.log
@@ -187,6 +187,9 @@ jobs:
           # The initials of the two accounts in Settings can be read on their circles.
           for f in artifacts/review/linux-settings-closed-en-*-1440x900.png; do python3 scripts/initials-contrast.py $f 897,228 897,267; done
           for f in artifacts/review/linux-settings-closed-ar-*-1440x900.png; do python3 scripts/initials-contrast.py $f 543,228 543,267; done
+          # Delete beside the selection can be read, outside a dialog too.
+          for f in artifacts/review/linux-videos-selected-en-*-1440x900.png; do python3 scripts/initials-contrast.py $f 689,253; done
+          for f in artifacts/review/linux-videos-selected-ar-*-1440x900.png; do python3 scripts/initials-contrast.py $f 716,254; done
           grep -P "\tActing as$" artifacts/review/linux-uploads-channels-en-light-1440x900.atspi.txt
           grep -P "\tتتصرّف باسم$" artifacts/review/linux-uploads-channels-ar-light-1440x900.atspi.txt
           grep -P "^button\t.*Masjid Media Team Channel · Editor$" artifacts/review/linux-uploads-channels-en-light-1440x900.atspi.txt

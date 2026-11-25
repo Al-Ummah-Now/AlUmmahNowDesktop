@@ -63,8 +63,9 @@ internal sealed class UploadPage
         // Add: the lantern, where the files go, and the ways to add them.
         // Two rows, so the actions fit the card down to the 1024 window: Add videos and Add a folder, then
         // Include subfolders and Watch folder.
-        var add = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        var addMore = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        // A row that does not fit wraps: it must not push the column out of the page.
+        var add = new WrapRow();
+        var addMore = new WrapRow();
         add.Children.Add(Button(l["studio.upload.addFiles"], async () => _vm.AddFiles(await pickFiles()), accent: true, id: "AddFiles", glyph: "\uE710"));
         add.Children.Add(Button(l["studio.upload.addFolder"], async () =>
         {
@@ -284,9 +285,26 @@ internal sealed class UploadPage
 
         D.TimeZone = Formats.LocalTimeZone();
         D.ScheduleStart ??= _vm.Now.Date.AddDays(1).AddHours(9);
-        var start = new TextBox { Header = _l["studio.upload.scheduleStart"], Text = _l.InputDigits(Formats.ToLocalInput(D.ScheduleStart.Value)), MinWidth = 220 };
+        // The field reads left to right in Arabic too, under a heading that does not
+        var start = new TextBox
+        {
+            Header = new TextBlock { Text = _l["studio.upload.scheduleStart"], FlowDirection = _direction, TextWrapping = TextWrapping.Wrap },
+            Text = _l.InputLeftToRight(Formats.ToLocalInput(D.ScheduleStart.Value)),
+            FlowDirection = FlowDirection.LeftToRight,
+            MinWidth = 220,
+        };
+        AutomationProperties.SetName(start, _l["studio.upload.scheduleStart"]);
         start.TextChanged += (_, _) =>
         {
+            var kept = _l.InputLeftToRight(start.Text);
+            if (kept != start.Text)
+            {
+                var at = start.SelectionStart + kept.Length - start.Text.Length;
+                start.Text = kept;
+                start.SelectionStart = Math.Clamp(at, 0, kept.Length);
+                return;
+            }
+
             var t = Formats.ParseLocal(Localizer.NormalizeDigits(start.Text));
             start.Description = t == null ? _l["studio.upload.scheduleInvalid"] : null;
             if (t == null) return;

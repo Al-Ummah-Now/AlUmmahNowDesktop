@@ -286,7 +286,7 @@ public sealed class VideosPage
         _spinner.SetVisible(_vm.IsLoading);
     }
 
-    /// <summary>CI screenshots: "search", "edit", "bulk", "delete", "deleted" (the closed row) or "deleted-open".</summary>
+    /// <summary>CI screenshots: "search", "edit", "selected", "bulk", "delete", "deleted" (the closed row) or "deleted-open".</summary>
     public void RunScene(string scene)
     {
         switch (scene)
@@ -301,6 +301,10 @@ public sealed class VideosPage
             }
             case "edit" when _vm.Items.Count > 0:
                 _ = EditAsync(_vm.Items[0]);
+                break;
+            case "selected":
+                _vm.SelectAll(true);
+                RenderList();
                 break;
             case "bulk":
                 _vm.SelectAll(true);
