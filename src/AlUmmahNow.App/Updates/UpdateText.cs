@@ -61,6 +61,7 @@ namespace AlUmmahNow.App.Updates
             UpdateResult.Checking => _l["updates.checking"],
             UpdateResult.UpToDate => _l["updates.upToDate"],
             UpdateResult.Found when _service.Found.Version is { } version => _l.Format("updates.found", _l.Version(version)),
+            UpdateResult.Required => _l["updates.required"],
             UpdateResult.Failed when _service.IsCheckAsked => _l["updates.failed"],
             _ => "",
         };
