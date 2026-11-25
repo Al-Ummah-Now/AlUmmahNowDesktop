@@ -25,11 +25,24 @@ namespace AlUmmahNow.App.Updates
 
         public string Bar(UpdateView v) => v.Stage switch
         {
+            UpdateStage.Available or UpdateStage.Waiting when v.Step != UpdateStep.None => Step(v),
             UpdateStage.Available => _l.Format("updates.available", _l.Version(v.Version ?? "")),
             UpdateStage.Waiting => _l[_app == UpdateApp.Studio ? "updates.waiting.studio" : "updates.waiting.viewer"],
             UpdateStage.Required => _l["updates.required"],
             _ => "",
         };
+
+        /// <summary>How far an update is that the app installs itself; empty before it is asked for.</summary>
+        public string Step(UpdateView v) => v.Step switch
+        {
+            UpdateStep.Downloading => _l.Format("updates.downloading", _l.Percent(v.Progress)),
+            UpdateStep.Ready => _l[v.IsBusy ? _app == UpdateApp.Studio ? "updates.readyBusy.studio" : "updates.readyBusy.viewer" : v.Stage == UpdateStage.Forced ? "updates.readyForced" : "updates.ready"],
+            UpdateStep.Failed => _l["updates.notDownloaded"],
+            _ => "",
+        };
+
+        /// <summary>The button: installs, restarts, or opens the download page.</summary>
+        public string Button(UpdateView v) => _l[!v.Installs ? "updates.download" : v.Step == UpdateStep.Ready ? "updates.restart" : "updates.update"];
 
         /// <summary>The notes in the app's language; empty when there are none.</summary>
         public string Notes(UpdateView v) => _l.IsRtl ? v.NotesAr : v.NotesEn;

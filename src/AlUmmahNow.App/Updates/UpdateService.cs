@@ -30,14 +30,31 @@ namespace AlUmmahNow.App.Updates
     /// <summary>What the last check came to, for Settings → Updates.</summary>
     public enum UpdateResult { None, Checking, UpToDate, Found, Required, Failed }
 
+    /// <summary>How far an update is that is installed in place.</summary>
+    public enum UpdateStep
+    {
+        None,
+        Downloading,
+
+        /// <summary>Downloaded and checked: installed when the app closes, or restarts.</summary>
+        Ready,
+
+        /// <summary>It could not be downloaded; it can be tried again.</summary>
+        Failed,
+    }
+
     /// <summary>Everything the views show of an update. Replaced, never changed.</summary>
     public sealed class UpdateView
     {
         public static readonly UpdateView None = new UpdateView(UpdateStage.Hidden, UpdateAnswer.Off);
 
-        internal UpdateView(UpdateStage stage, UpdateAnswer answer)
+        internal UpdateView(UpdateStage stage, UpdateAnswer answer, bool installs = false, UpdateStep step = UpdateStep.None, double progress = 0, bool isBusy = false)
         {
             Stage = stage;
+            Installs = installs;
+            Step = step;
+            Progress = progress;
+            IsBusy = isBusy;
             Version = UpdateService.CleanVersion(answer.Version);
             MinimumVersion = UpdateService.CleanVersion(answer.MinimumVersion);
             NotesEn = UpdateService.CleanText(answer.NotesEn);
@@ -54,8 +71,22 @@ namespace AlUmmahNow.App.Updates
         public string MessageEn { get; }
         public string MessageAr { get; }
 
+        /// <summary>The app installs it itself: the button updates, and does not open the download page.</summary>
+        public bool Installs { get; }
+
+        public UpdateStep Step { get; }
+
+        /// <summary>Of the download, 0 to 1.</summary>
+        public double Progress { get; }
+
+        /// <summary>Work is running that a restart would interrupt.</summary>
+        public bool IsBusy { get; }
+
+        /// <summary>The button does something now.</summary>
+        public bool CanBegin => Step != UpdateStep.Downloading && !(Step == UpdateStep.Ready && IsBusy);
+
         public bool IsBar => Stage == UpdateStage.Available || Stage == UpdateStage.Required || Stage == UpdateStage.Waiting;
-        public bool CanClose => Stage == UpdateStage.Available;
+        public bool CanClose => Stage == UpdateStage.Available && Step != UpdateStep.Downloading;
 
         /// <summary>There is a version to download.</summary>
         public bool CanDownload => Stage == UpdateStage.Available || Stage == UpdateStage.Waiting || Stage == UpdateStage.Forced;
@@ -63,8 +94,10 @@ namespace AlUmmahNow.App.Updates
 
     /// <summary>
     /// The app's check for a new version (wiki AUN-APP-UPDATES): about 30 s after launch, every <c>checkHours</c>, and on
-    /// Check now. It only tells: the app downloads and installs nothing, and its one link is compiled in
-    /// (<see cref="UpdateInstalls.DownloadPage"/>, opened by <see cref="IUpdateDelivery"/>, where installing in place goes).
+    /// Check now. Most copies only tell: their one link is compiled in (<see cref="UpdateInstalls.DownloadPage"/>, opened by
+    /// <see cref="IUpdateDelivery"/>). A copy of our own setup installs in place (<see cref="ISelfUpdate"/>): downloaded and
+    /// checked in the background or when asked, checked again right before it is installed, which is when the app closes or
+    /// is restarted, and never while work is running.
     /// Everything runs on the thread that made it, the UI thread.
     /// </summary>
     public sealed class UpdateService : ObservableObject
@@ -88,6 +121,7 @@ namespace AlUmmahNow.App.Updates
         private readonly UpdateMemory _memory;
         private readonly Func<bool> _isBusy;
         private readonly IUpdateDelivery _delivery;
+        private readonly ISelfUpdate? _self;
         private readonly Func<DateTimeOffset> _now;
         private readonly Func<TimeSpan, CancellationToken, Task> _delay;
         private UpdateAnswer _answer = UpdateAnswer.Off;
@@ -98,12 +132,22 @@ namespace AlUmmahNow.App.Updates
         private TimeSpan _every = TimeSpan.FromHours(6);
         private CancellationToken _stop;
         private bool _isWaitingForWork;
+        private VerifiedUpdate? _ready;
+        private Task? _staging;
+        /// <summary>The person pressed Update for this release; else it is downloaded in the background.</summary>
+        private bool _isAsked;
+        private string? _tag;
+        private UpdateStep _step;
+        private double _progress;
+        private bool _isApplied;
 
         /// <param name="isBusy">An upload, an encode or a live session is running: the screen waits for it.</param>
         /// <param name="wasEnabled">Review frames: the switch was on in an earlier run.</param>
+        /// <param name="self">Installs in place, in a copy of our own setup.</param>
         public UpdateService(IUpdateChecker checker, UpdateStore store, UpdateInstall install, string installedVersion, Func<bool> isBusy, IUpdateDelivery delivery,
-            Func<DateTimeOffset>? now = null, Func<TimeSpan, CancellationToken, Task>? delay = null, bool wasEnabled = false)
+            Func<DateTimeOffset>? now = null, Func<TimeSpan, CancellationToken, Task>? delay = null, bool wasEnabled = false, ISelfUpdate? self = null)
         {
+            _self = install == UpdateInstall.SelfUpdating ? self : null;
             _checker = checker;
             _store = store;
             _memory = store.Load();
@@ -140,7 +184,27 @@ namespace AlUmmahNow.App.Updates
         public bool IsCheckAsked { get; private set; }
 
         /// <summary>The version Settings tells of, also when its bar was closed.</summary>
-        public UpdateView Found => new UpdateView(_view.Stage, _answer);
+        public UpdateView Found => ViewOf(_view.Stage);
+
+        /// <summary>This copy installs updates itself: Settings has the choice of doing it automatically.</summary>
+        public bool CanInstall => _self != null;
+
+        /// <summary>The person's own choice, else the admins' default, else on.</summary>
+        public bool InstallsAutomatically
+        {
+            get => _memory.InstallsAutomatically ?? _memory.InstallsByDefault;
+            set
+            {
+                if (InstallsAutomatically == value) return;
+                _memory.InstallsAutomatically = value;
+                Keep();
+                // Downloaded without being asked: not installed either
+                if (!value && !_isAsked) Drop();
+                OnPropertyChanged();
+                Show();
+                BeginQuietly();
+            }
+        }
 
         /// <summary>The schedule, for as long as the app runs.</summary>
         public async Task RunAsync(CancellationToken stop = default)
@@ -193,10 +257,12 @@ namespace AlUmmahNow.App.Updates
                 _every = TimeSpan.FromHours(Math.Min(48, Math.Max(1, answer.CheckHours)));
                 _memory.Enabled = answer.Enabled;
                 _memory.LastChecked = _now();
+                _memory.InstallsByDefault = answer.InstallsByDefault;
                 Keep();
                 _answer = Told(answer);
                 // Too old with nothing to update to is neither: it must not read as the latest version
                 Result = IsNew(_answer) ? UpdateResult.Found : _answer.Kind is UpdatePromptKind.RequiredBar or UpdatePromptKind.Forced ? UpdateResult.Required : UpdateResult.UpToDate;
+                await LookAgainAsync();
                 ok = true;
             }
             catch (OperationCanceledException) when (_stop.IsCancellationRequested)
@@ -216,7 +282,12 @@ namespace AlUmmahNow.App.Updates
                 _due = _now() + _every;
             }
 
-            if (ok) Show();
+            if (ok)
+            {
+                Show();
+                BeginQuietly();
+            }
+
             OnPropertyChanged(nameof(IsSectionVisible));
             OnPropertyChanged(nameof(LastChecked));
             return ok;
@@ -241,8 +312,205 @@ namespace AlUmmahNow.App.Updates
                 UpdatePromptKind.Forced => View.Stage != UpdateStage.Forced && _isBusy() ? UpdateStage.Waiting : UpdateStage.Forced,
                 _ => UpdateStage.Hidden,
             };
-            View = stage == UpdateStage.Hidden ? UpdateView.None : new UpdateView(stage, _answer);
-            if (stage == UpdateStage.Waiting && !_isWaitingForWork) _ = WaitForWorkAsync();
+            // Downloaded in the background: told of when it is ready
+            if (stage == UpdateStage.Available && Installs && InstallsAutomatically && !_isAsked && _step != UpdateStep.Ready) stage = UpdateStage.Hidden;
+            View = stage == UpdateStage.Hidden ? UpdateView.None : ViewOf(stage);
+            if (IsWorkAwaited && !_isWaitingForWork) _ = WaitForWorkAsync();
+        }
+
+        private bool IsStaging => _staging is { IsCompleted: false };
+
+        private bool Installs => _self != null && _answer.CanInstall && _answer.Tag != null && IsNew(_answer);
+
+        private UpdateView ViewOf(UpdateStage stage) => new UpdateView(stage, _answer, Installs, Installs ? _step : UpdateStep.None, _progress, Installs && _step == UpdateStep.Ready && _isBusy());
+
+        /// <summary>The screen waits for work, or Restart now does.</summary>
+        private bool IsWorkAwaited => View.Stage == UpdateStage.Waiting || View.Stage != UpdateStage.Hidden && View.Step == UpdateStep.Ready;
+
+        /// <summary>
+        /// After each answer: what is staged is still offered and still trusted (a newer key list may have come with it), and
+        /// below the minimum there is an update this copy can really get, or the screen is a bar (wiki §3.7).
+        /// </summary>
+        private async Task LookAgainAsync()
+        {
+            if (_self == null) return;
+            if (_answer.Tag != _tag && !IsStaging)
+            {
+                _tag = _answer.Tag;
+                _isAsked = false;
+                if (_ready == null) _step = UpdateStep.None;
+            }
+
+            if (_ready != null && (!Installs || _answer.Tag != _ready.Tag)) Drop();
+            if (_ready != null) await IsStillGoodAsync();
+            else if (_answer.Kind == UpdatePromptKind.Forced && Installs && !IsStaging)
+            {
+                try
+                {
+                    Take(await _self.VerifyAsync(_answer.Tag!, _answer.Version!, _stop));
+                }
+                catch (UpdateRefusedException ex)
+                {
+                    await RefusedAsync(_answer.Tag!, ex.Reason);
+                }
+                catch (UpdateCheckFailedException ex)
+                {
+                    Logger.Warn("the required update could not be read", ex);
+                    NothingToUpdateTo();
+                }
+            }
+        }
+
+        /// <summary>The version and the notes are the signed manifest's.</summary>
+        private void Take(VerifiedUpdate update)
+        {
+            _answer.Version = update.Version;
+            _answer.NotesEn = update.NotesEn;
+            _answer.NotesAr = update.NotesAr;
+        }
+
+        private void BeginQuietly()
+        {
+            if (Installs && InstallsAutomatically && _answer.Kind == UpdatePromptKind.Notice && _ready == null && !IsStaging) _staging = StageAsync();
+        }
+
+        private async Task StageAsync()
+        {
+            var (tag, version) = (_answer.Tag!, _answer.Version!);
+            _step = UpdateStep.Downloading;
+            _progress = 0;
+            Show();
+            try
+            {
+                var update = await _self!.StageAsync(tag, version, new Percents(p =>
+                {
+                    _progress = p;
+                    if (View.Step == UpdateStep.Downloading) Show();
+                }), _stop);
+                // Another answer came meanwhile: this is not what it offers
+                if (!Installs || _answer.Tag != tag || !_isAsked && !InstallsAutomatically)
+                {
+                    Drop();
+                }
+                else
+                {
+                    Take(update);
+                    _ready = update;
+                    _step = UpdateStep.Ready;
+                }
+            }
+            catch (UpdateRefusedException ex)
+            {
+                await RefusedAsync(tag, ex.Reason);
+            }
+            catch (UpdateCheckFailedException ex)
+            {
+                // The network or the disk: no refusal. Asked for, it says so; else the next check tries again
+                Logger.Warn("the update could not be downloaded", ex);
+                _step = _isAsked ? UpdateStep.Failed : UpdateStep.None;
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+#pragma warning disable CA1031 // However it goes wrong, nothing is installed, and the app and its schedule go on.
+            catch (Exception ex)
+#pragma warning restore CA1031
+            {
+                Logger.Error("the update could not be prepared", ex);
+                Drop();
+                _step = _isAsked ? UpdateStep.Failed : UpdateStep.None;
+            }
+
+            Show();
+        }
+
+        /// <summary>Whether what is staged may still be installed; if not it is dropped, and the server is told.</summary>
+        private async Task<bool> IsStillGoodAsync()
+        {
+            if (_ready is not { } ready) return false;
+            try
+            {
+                _self!.VerifyStaged();
+                return true;
+            }
+            catch (UpdateRefusedException ex)
+            {
+                await RefusedAsync(ready.Tag, ex.Reason);
+                return false;
+            }
+        }
+
+        /// <summary>Nothing is installed and no link is offered (wiki §5.3 step 6); below the minimum the app stays usable behind a bar.</summary>
+        private async Task RefusedAsync(string tag, string reason)
+        {
+            Drop();
+            NothingToUpdateTo();
+            Show();
+            await _self!.ReportAsync(tag, reason, _stop);
+        }
+
+        private void NothingToUpdateTo()
+        {
+            _answer = _answer.Kind == UpdatePromptKind.Forced ? new UpdateAnswer { Enabled = true, Kind = UpdatePromptKind.RequiredBar } : UpdateAnswer.Off;
+            Result = _answer.Kind == UpdatePromptKind.RequiredBar ? UpdateResult.Required : UpdateResult.None;
+        }
+
+        private void Drop()
+        {
+            _ready = null;
+            _step = UpdateStep.None;
+            _self?.Discard();
+        }
+
+        /// <summary>The button when it is ready: restarts into the new version, unless work is running.</summary>
+        private async Task RestartAsync()
+        {
+            if (_isApplied || _isBusy()) return;
+            // Pressed: what goes wrong from here on is told
+            _isAsked = true;
+            if (await IsStillGoodAsync())
+            {
+                _isApplied = true;
+                try
+                {
+                    _self!.ApplyAndRestart();
+                    return;
+                }
+#pragma warning disable CA1031 // It could not be started: the app goes on as it is, and can be asked again.
+                catch (Exception ex)
+#pragma warning restore CA1031
+                {
+                    Logger.Error("the update could not be started", ex);
+                    _isApplied = false;
+                    Drop();
+                    _step = UpdateStep.Failed;
+                }
+            }
+
+            Show();
+        }
+
+        /// <summary>
+        /// The app is closing: what is ready is checked once more and installed after it has closed. Not with work running: an
+        /// upload is resumed by the same version, and the next start gets the update again.
+        /// </summary>
+        public void OnExit()
+        {
+            if (_self == null || _ready == null || _isApplied) return;
+            _isApplied = true;
+            try
+            {
+                if (_isBusy()) return;
+                _self.VerifyStaged();
+                _self.ApplyOnExit();
+            }
+#pragma warning disable CA1031 // The app closes all the same.
+            catch (Exception ex)
+#pragma warning restore CA1031
+            {
+                Logger.Warn("the update was not installed", ex);
+            }
         }
 
         private async Task WaitForWorkAsync()
@@ -250,10 +518,10 @@ namespace AlUmmahNow.App.Updates
             _isWaitingForWork = true;
             try
             {
-                while (View.Stage == UpdateStage.Waiting)
+                while (IsWorkAwaited)
                 {
                     await _delay(BusyPoll, _stop);
-                    if (View.Stage == UpdateStage.Waiting && !_isBusy()) Show();
+                    if (View.Stage == UpdateStage.Waiting ? !_isBusy() : IsWorkAwaited && View.IsBusy != _isBusy()) Show();
                 }
             }
             catch (OperationCanceledException)
@@ -279,7 +547,43 @@ namespace AlUmmahNow.App.Updates
         }
 
         /// <summary>The button of the bar, of the screen and of Settings.</summary>
-        public void Begin() => _delivery.Begin();
+        public void Begin()
+        {
+            if (!Installs)
+            {
+                _delivery.Begin();
+            }
+            else if (_ready != null)
+            {
+                _ = RestartAsync();
+            }
+            else
+            {
+                // Downloading in the background already: now it is shown
+                _isAsked = true;
+                if (IsStaging) Show();
+                else _staging = StageAsync();
+            }
+        }
+
+        /// <summary>The download's progress in whole percents, on the thread that asked.</summary>
+        private sealed class Percents : IProgress<double>
+        {
+            private readonly SynchronizationContext? _context = SynchronizationContext.Current;
+            private readonly Action<double> _told;
+            private int _last = -1;
+
+            public Percents(Action<double> told) => _told = told;
+
+            public void Report(double value)
+            {
+                var percent = (int)(Math.Min(1, Math.Max(0, value)) * 100);
+                if (percent == _last) return;
+                _last = percent;
+                if (_context == null) _told(percent / 100.0);
+                else _context.Post(_ => _told(percent / 100.0), null);
+            }
+        }
 
         private bool IsDismissed(string? version) => version != null && _memory.Dismissed?.Contains(version) == true;
 
@@ -312,10 +616,7 @@ namespace AlUmmahNow.App.Updates
         }
     }
 
-    /// <summary>
-    /// What the button does. Today there is one: the download page in the browser. An app that installs in place is another,
-    /// in a later change (wiki AUN-APP-UPDATES §5).
-    /// </summary>
+    /// <summary>What the button does in a copy that does not install in place.</summary>
     public interface IUpdateDelivery
     {
         void Begin();

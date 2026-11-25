@@ -109,6 +109,57 @@ public sealed class CoreUpdateCheckerTests
         Assert.Equal(6, off.CheckHours);
     }
 
+    /// <summary>Installing in place: only when the answer says install, for a signed release with a tag of ours.</summary>
+    [Theory]
+    [InlineData("install", true, "v1.5.0", true)]
+    [InlineData("install", true, "v1.5.0-preview.3", true)]
+    [InlineData("install", false, "v1.5.0", false)]
+    [InlineData("download", true, "v1.5.0", false)]
+    [InlineData("notice", true, "v1.5.0", false)]
+    [InlineData("install", true, "v1.5.0/../../evil", false)]
+    [InlineData("install", true, "admin-windows-v1.5.0", false)]
+    [InlineData("install", true, "", false)]
+    public async Task It_installs_only_a_signed_release_of_ours(string action, bool signed, string tag, bool installs)
+    {
+        var answer = await Checker(Answer("recommended", action, "1.5.0", signed: signed).Replace("\"tag\":\"v9\"", "\"tag\":\"" + tag + "\"")).CheckAsync();
+        Assert.Equal(installs, answer.CanInstall);
+        Assert.Equal(installs ? tag : answer.Tag, answer.Tag);
+        Assert.False((await Checker(Answer("recommended", action, "1.5.0", signed: signed), NoKeys).CheckAsync()).CanInstall);
+    }
+
+    [Theory]
+    [InlineData("{\"updates.autoInstallDefault\":false}", false)]
+    [InlineData("{\"updates.autoInstallDefault\":true}", true)]
+    [InlineData("{\"updates.autoInstallDefault\":\"no\"}", true)]
+    [InlineData("{}", true)]
+    public async Task The_admins_default_is_on_unless_it_is_off(string config, bool byDefault) =>
+        Assert.Equal(byDefault, (await Checker(Answer("recommended", "download", "1.5.0").Replace("\"config\":{}", "\"config\":" + config)).CheckAsync()).InstallsByDefault);
+
+    /// <summary>Through the real core: an address elsewhere, and a manifest that no trusted key signed, are refused.</summary>
+    [Fact]
+    public void The_core_refuses_other_hosts_and_other_signatures()
+    {
+        var checker = Checker("");
+        Assert.True(checker.IsAllowed("https://github.com/Al-Ummah-Now/AlUmmahNowDesktop/releases/download/v1.5.0/app-release.json"));
+        Assert.True(checker.IsAllowed("https://release-assets.githubusercontent.com/x"));
+        foreach (var url in new[] { "http://github.com/Al-Ummah-Now/AlUmmahNowDesktop/releases/download/v1.5.0/x", "https://github.com/Al-Ummah-Now/AlUmmahNowTools/releases/download/v1/x", "https://evil.example/x", "" })
+            Assert.False(checker.IsAllowed(url));
+        Assert.Throws<UpdateRefusedException>(() => checker.VerifyManifest("{}"u8.ToArray(), "{\"signatures\":[]}", "v1.5.0"));
+        Assert.Throws<UpdateRefusedException>(() => Checker("", version: "dev").VerifyManifest("{}"u8.ToArray(), "{}", "v1.5.0"));
+    }
+
+    [Fact]
+    public void A_refusal_is_told_without_an_account_or_a_device()
+    {
+        var call = CoreUpdateChecker.FailureCall("studio", "windows", "1.4.2", "v1.5.0", "hash");
+        Assert.Equal("POST", call.Method);
+        Assert.Equal("/api/v1/app-config/update-failure", call.PathTemplate);
+        using var body = JsonDocument.Parse(call.BodyJson!);
+        Assert.Equal(new[] { "app", "platform", "reason", "repo", "tag", "version" }, body.RootElement.EnumerateObject().Select(p => p.Name).Order());
+        Assert.False(call.AuthRequired);
+        Assert.Equal("direct", CoreUpdateChecker.Call("studio", "windows", "1.4.2", installs: true).Query["source"]);
+    }
+
     [Fact]
     public async Task A_preview_is_older_than_its_release()
     {

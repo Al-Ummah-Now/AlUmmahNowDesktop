@@ -17,6 +17,9 @@ namespace AlUmmahNow.App.Updates
         /// <summary>An MSIX from the release page.</summary>
         Msix,
 
+        /// <summary>Our per-user setup: it installs updates itself.</summary>
+        SelfUpdating,
+
         /// <summary>The MSI.</summary>
         Installer,
 
@@ -53,11 +56,13 @@ namespace AlUmmahNow.App.Updates
         /// <param name="isStoreSigned">That package was signed by the Microsoft Store.</param>
         /// <param name="folder">Where the app runs from.</param>
         /// <param name="programFiles">Windows' folder of installed programs.</param>
-        public static UpdateInstall OnWindows(bool isRelease, bool isPackaged, bool isStoreSigned, string folder, string programFiles)
+        /// <param name="installsItself">Our setup installed it, in a folder only this user can change.</param>
+        public static UpdateInstall OnWindows(bool isRelease, bool isPackaged, bool isStoreSigned, string folder, string programFiles, bool installsItself = false)
         {
             if (isPackaged && isStoreSigned) return UpdateInstall.MicrosoftStore;
             if (!isRelease) return UpdateInstall.Development;
             if (isPackaged) return UpdateInstall.Msix;
+            if (installsItself) return UpdateInstall.SelfUpdating;
             return IsUnder(folder, programFiles, '\\', StringComparison.OrdinalIgnoreCase) ? UpdateInstall.Installer : UpdateInstall.Portable;
         }
 
