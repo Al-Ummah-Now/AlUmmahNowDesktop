@@ -435,6 +435,8 @@ internal sealed class UpdateViews : IUpdateViews, IDisposable
     private static readonly string HighContrastButtons = "<ResourceDictionary x:Key=\"HighContrast\">"
         + string.Concat(new[] { "", "PointerOver", "Pressed" }.Select(state =>
             Brush("AccentButtonBackground" + state, "{ThemeResource SystemColorHighlightColor}") + Brush("AccentButtonForeground" + state, "{ThemeResource SystemColorHighlightTextColor}")
+            + Brush("CheckBoxCheckBackgroundFillChecked" + state, "{ThemeResource SystemColorHighlightColor}") + Brush("CheckBoxCheckBackgroundStrokeChecked" + state, "{ThemeResource SystemColorHighlightColor}")
+            + Brush("CheckBoxCheckGlyphForegroundChecked" + state, "{ThemeResource SystemColorHighlightTextColor}")
             + Brush("HyperlinkButtonForeground" + state, "{ThemeResource SystemColorHotlightColor}")))
         + Brush("AccentButtonBackgroundDisabled", "{ThemeResource SystemColorWindowColor}") + Brush("AccentButtonForegroundDisabled", "{ThemeResource SystemColorGrayTextColor}") + Brush("AccentButtonBorderBrushDisabled", "{ThemeResource SystemColorGrayTextColor}")
         + "</ResourceDictionary>";
