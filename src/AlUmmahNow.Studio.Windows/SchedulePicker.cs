@@ -116,7 +116,13 @@ internal sealed class SchedulePicker
         panel.Children.Add(done);
         _flyout.Content = panel;
         // The day that is picked has the focus
-        _flyout.Opened += (_, _) => (_days.FirstOrDefault(d => d.IsChecked == true && d.IsEnabled) ?? _days.FirstOrDefault(d => d.IsEnabled && d.Visibility == Visibility.Visible))?.Focus(FocusState.Programmatic);
+        _flyout.Opened += (_, _) => (_days.FirstOrDefault(d => d.IsChecked == true && d.IsEnabled) ?? _days.FirstOrDefault(d => d.IsEnabled))?.Focus(FocusState.Programmatic);
+        // Time has passed since it was drawn
+        _flyout.Opening += (_, _) =>
+        {
+            pick.Open();
+            Render();
+        };
         _field.Flyout = _flyout;
 
         Root.Children.Add(new TextBlock { Text = l["studio.upload.scheduleStart"], TextWrapping = TextWrapping.Wrap });
@@ -157,12 +163,12 @@ internal sealed class SchedulePicker
             var day = at >= 0 && at < days.Count ? days[at] : null;
             var button = _days[i];
             button.Visibility = day == null ? Visibility.Collapsed : Visibility.Visible;
+            button.IsChecked = day is { IsSelected: true };
+            button.IsEnabled = day is { IsEnabled: true };
             if (day == null) continue;
             _dates[i] = day.Date;
             button.Content = day.Label;
             AutomationProperties.SetName(button, day.Name);
-            button.IsChecked = day.IsSelected;
-            button.IsEnabled = day.IsEnabled;
         }
 
         _hour.SelectedIndex = _pick.Hour;
@@ -194,7 +200,10 @@ internal sealed class SchedulePicker
         AutomationProperties.SetName(box, _l[key]);
         box.SelectionChanged += (_, _) =>
         {
-            if (!_rendering && box.SelectedIndex >= 0) set(box.SelectedIndex);
+            if (_rendering || box.SelectedIndex < 0) return;
+            // Not inside the change itself: an hour the clocks skip changes the list back
+            var at = box.SelectedIndex;
+            box.DispatcherQueue.TryEnqueue(() => set(at));
         };
         return box;
     }

@@ -49,6 +49,39 @@ public sealed class SchedulePickTests
     }
 
     [Fact]
+    public void A_month_without_a_day_left_is_not_gone_back_to()
+    {
+        // 11:50 PM on November 30 there: November's last quarter of an hour
+        var pick = new SchedulePick(new Localizer("en", NewYork), new DateTimeOffset(2026, 12, 1, 14, 0, 0, TimeSpan.Zero), () => new DateTimeOffset(2026, 12, 1, 4, 50, 0, TimeSpan.Zero), NewYork);
+        Assert.Equal(12, pick.Month.Month);
+        Assert.False(pick.CanGoBack);
+        pick.Back();
+        Assert.Equal(12, pick.Month.Month);
+        Assert.Contains(pick.Days, d => d.IsEnabled);
+    }
+
+    [Fact]
+    public void Opened_later_it_is_of_the_time_that_is_now()
+    {
+        var now = Now;
+        var pick = new SchedulePick(new Localizer("en", NewYork), Now.AddMinutes(20), () => now, NewYork);
+        Assert.False(pick.IsTooSoon);
+        now = Now.AddMinutes(6);
+        Assert.True(pick.IsTooSoon);
+        // Another month that was looked at is not the one it opens with
+        pick.Next();
+        pick.Open();
+        Assert.Equal(new DateTime(2026, 11, 1), pick.Month);
+        // After midnight the day before cannot be picked; after the month, the month that is now is shown
+        now = Now.AddDays(1);
+        Assert.Equal(new DateTime(2026, 11, 22), pick.Days.First(d => d.IsEnabled).Date);
+        now = Now.AddDays(20);
+        pick.Open();
+        Assert.Equal(new DateTime(2026, 12, 11), pick.Days.First(d => d.IsEnabled).Date);
+        Assert.DoesNotContain(pick.Days, d => d.IsSelected);
+    }
+
+    [Fact]
     public void Nothing_is_planned_later_than_a_year()
     {
         var pick = Tomorrow();
@@ -118,6 +151,19 @@ public sealed class SchedulePickTests
         var pick = At("en", new DateTimeOffset(2027, 3, 13, 7, 30, 0, TimeSpan.Zero));
         pick.Pick(new DateTime(2027, 3, 14));
         Assert.Equal(new DateTimeOffset(2027, 3, 14, 3, 30, 0, TimeSpan.FromHours(-4)), pick.Value);
+        // The lists and the label say the same, and the next day keeps it
+        Assert.Equal((3, 30, false), (pick.Hour, pick.Minute, pick.IsAfternoon));
+        Assert.Contains("3:30", pick.Label);
+        // The hour is not there to choose: the list is told to go back
+        var said = 0;
+        pick.Changed += (_, _) => said++;
+        pick.Hour = 2;
+        Assert.Equal((3, 1), (pick.Hour, said));
+        pick.Hour = 3;
+        Assert.Equal(1, said);
+        pick.Pick(new DateTime(2027, 3, 15));
+        Assert.Equal(new DateTimeOffset(2027, 3, 15, 3, 30, 0, TimeSpan.FromHours(-4)), pick.Value);
+        Assert.Equal(3, At("en", new DateTimeOffset(2027, 3, 14, 7, 30, 0, TimeSpan.Zero)).Hour);
         pick.Pick(new DateTime(2027, 11, 7));
         pick.Hour = 1;
         Assert.Equal(new DateTime(2027, 11, 7, 1, 30, 0), pick.Value.DateTime);
