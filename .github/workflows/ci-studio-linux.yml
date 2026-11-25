@@ -182,6 +182,8 @@ jobs:
           for f in artifacts/review/*1024x*.log; do grep -q "rail=True railCentered=True" "$f" || { echo "no centered rail: $f"; exit 1; }; done
           # Days in US order, as on the web.
           grep -F "from Oct 25 to Nov 21" artifacts/review/linux-analytics-closed-en-light-1440x900.atspi.txt
+          # The chart's 28 bars are seen on the light card: their edges, across the row above the axis.
+          python3 scripts/edges-in-row.py artifacts/review/linux-analytics-closed-en-light-1440x900.png 650 360 840 3 50
           # The initials of the two accounts in Settings can be read on their circles.
           for f in artifacts/review/linux-settings-closed-en-*-1440x900.png; do python3 scripts/initials-contrast.py $f 897,228 897,267; done
           for f in artifacts/review/linux-settings-closed-ar-*-1440x900.png; do python3 scripts/initials-contrast.py $f 543,228 543,267; done

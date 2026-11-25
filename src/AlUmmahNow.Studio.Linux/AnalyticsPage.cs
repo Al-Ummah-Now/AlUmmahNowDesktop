@@ -1,5 +1,6 @@
 using AlUmmahNow.App.I18n;
 using AlUmmahNow.Studio.Analytics;
+using AlUmmahNow.Studio.Shell;
 
 namespace AlUmmahNow.Studio.Linux;
 
@@ -221,7 +222,9 @@ public sealed class AnalyticsPage
         }
 
         cr.SetDash(System.Array.Empty<double>(), 0);
-        // Lantern gold bars: a soft glow behind, then a gold gradient (glow #fbc661 to pressed #e0962a).
+        // Lantern gold bars: a soft glow behind, then a gold gradient (glow #fbc661 to pressed #e0962a), and in light mode
+        // an edge, on whole pixels so that it is one line.
+        var edge = StudioTheme.BarEdge(Adw.StyleManager.GetDefault().GetDark());
         foreach (var bar in layout.Bars.Where(b => b.Height > 0))
         {
             cr.SetSourceRgba(0.957, 0.682, 0.227, 0.22);
@@ -231,8 +234,15 @@ public sealed class AnalyticsPage
             gold.AddColorStopRgb(0, 0.984, 0.776, 0.380);
             gold.AddColorStopRgb(1, 0.878, 0.588, 0.165);
             cr.SetSource(gold);
-            cr.Rectangle(bar.X, bar.Y, bar.Width, bar.Height);
+            var (x, y, right, bottom) = edge == null
+                ? (bar.X, bar.Y, bar.X + bar.Width, bar.Y + bar.Height)
+                : (Math.Round(bar.X), Math.Round(bar.Y), Math.Round(bar.X + bar.Width), Math.Round(bar.Y + bar.Height));
+            cr.Rectangle(x, y, right - x, bottom - y);
             cr.Fill();
+            if (edge is not { } c || right - x < 2 || bottom - y < 2) continue;
+            cr.SetSourceRgb(((c >> 16) & 255) / 255.0, ((c >> 8) & 255) / 255.0, (c & 255) / 255.0);
+            cr.Rectangle(x + 0.5, y + 0.5, right - x - 1, bottom - y - 1);
+            cr.Stroke();
         }
 
         foreach (var (index, x) in layout.Dates)
