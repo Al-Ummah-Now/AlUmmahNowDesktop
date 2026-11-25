@@ -224,6 +224,8 @@ namespace AlUmmahNow.App.Demo
                 case "readybusy":
                     _buttonBefore = views.ButtonText;
                     views.PressDownload();
+                    // How far it is comes in a turn of its own
+                    for (var i = 0; i < 100 && Service.View.Step == UpdateStep.Downloading && Service.View.Progress == 0; i++) await Task.Delay(20);
                     break;
                 case "forcedready":
                     _buttonBefore = views.ButtonText;

@@ -482,10 +482,10 @@ internal sealed class UpdateViews : IUpdateViews, IDisposable
 
             var system = new global::Windows.UI.ViewManagement.UISettings();
             // What a button paints in its state is its template's, not its own brush
-            (FrameworkElement, Microsoft.UI.Xaml.Media.Brush?, global::Windows.UI.ViewManagement.UIElementType)[] Of(Button b)
+            (FrameworkElement Part, Microsoft.UI.Xaml.Media.Brush? Brush, global::Windows.UI.ViewManagement.UIElementType Color)[] Of(Button b)
             {
                 var painted = Presenter(b);
-                return new (FrameworkElement, Microsoft.UI.Xaml.Media.Brush?, global::Windows.UI.ViewManagement.UIElementType)[]
+                return new (FrameworkElement Part, Microsoft.UI.Xaml.Media.Brush? Brush, global::Windows.UI.ViewManagement.UIElementType Color)[]
                 {
                     (b, painted?.Background, b.IsEnabled ? global::Windows.UI.ViewManagement.UIElementType.Highlight : global::Windows.UI.ViewManagement.UIElementType.Window),
                     (b, painted?.Foreground, b.IsEnabled ? global::Windows.UI.ViewManagement.UIElementType.HighlightText : global::Windows.UI.ViewManagement.UIElementType.GrayText),
