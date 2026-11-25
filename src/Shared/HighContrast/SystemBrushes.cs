@@ -122,11 +122,13 @@ internal static class SystemBrushes
 
     /// <summary>
     /// In high contrast, the parts of a window that are drawn in another color than the system's, as they are drawn (CI's
-    /// scenarios ask); empty without it. A picture, and what has the tag "art", has its own colors.
+    /// scenarios ask), its open dialogs and menus too; none without it. What was looked at is counted: none is not a pass.
+    /// A picture, and the fill of what has the tag "art", has its own colors.
     /// </summary>
-    public static string Strays(UIElement root)
+    public static (int Checked, string Strays) Strays(UIElement root)
     {
-        if (!IsHighContrast) return "";
+        if (!IsHighContrast) return (0, "");
+        var seen = 0;
         var system = Enum.GetValues<UIElementType>().Select(t => Settings.UIElementColor(t)).Select(c => (c.R, c.G, c.B)).ToHashSet();
         var strays = new List<string>();
 
@@ -135,21 +137,26 @@ internal static class SystemBrushes
             var colors = brush switch
             {
                 SolidColorBrush solid => new[] { solid.Color },
-                AcrylicBrush acrylic => new[] { acrylic.FallbackColor },
+                AcrylicBrush acrylic => new[] { acrylic.FallbackColor, acrylic.TintColor },
                 RadialGradientBrush radial => radial.GradientStops.Select(s => s.Color).ToArray(),
                 GradientBrush gradient => gradient.GradientStops.Select(s => s.Color).ToArray(),
                 _ => Array.Empty<Color>(),
             };
+            seen += colors.Length;
             foreach (var c in colors.Where(c => c.A > 0 && !system.Contains((c.R, c.G, c.B))).Take(1)) strays.Add($"{part} #{c.R:X2}{c.G:X2}{c.B:X2}");
         }
 
         void Walk(DependencyObject part, string path)
         {
-            if (part is FrameworkElement { Tag: "art" } or UIElement { Visibility: Visibility.Collapsed } or UIElement { Opacity: 0 }) return;
+            // The dimming under a dialog is the framework's
+            if (part is FrameworkElement { Name: "SmokeLayerBackground" } or UIElement { Visibility: Visibility.Collapsed } or UIElement { Opacity: 0 }) return;
             var here = part is FrameworkElement { Name.Length: > 0 } named ? path + "/" + named.Name : path + "/" + part.GetType().Name;
             if (here.Length > 90) here = "…" + here[^90..];
             switch (part)
             {
+                case Border { Tag: "art" } picture:
+                    if (picture.BorderThickness != default) Look(here + " edge", picture.BorderBrush);
+                    return;
                 case Border border:
                     Look(here + " fill", border.Background);
                     if (border.BorderThickness != default) Look(here + " edge", border.BorderBrush);
@@ -175,6 +182,11 @@ internal static class SystemBrushes
         }
 
         Walk(root, "");
-        return string.Join("; ", strays.Distinct().Take(12));
+        if (root.XamlRoot is { } xaml)
+        {
+            foreach (var popup in VisualTreeHelper.GetOpenPopupsForXamlRoot(xaml)) if (popup.Child is { } child) Walk(child, "popup");
+        }
+
+        return (seen, string.Join("; ", strays.Distinct().Take(12)));
     }
 }

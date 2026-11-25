@@ -235,6 +235,9 @@ internal sealed class StudioWindow
     /// <summary>CI: whether the header search has keyboard focus (it must not when the window opens).</summary>
     public bool SearchHasFocus => _searchText?.XamlRoot is { } r && ReferenceEquals(Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(r), _searchText);
 
+    /// <summary>CI: whether a dialog or a menu is open.</summary>
+    public bool HasPopup => Window.Content?.XamlRoot is { } r && VisualTreeHelper.GetOpenPopupsForXamlRoot(r).Count > 0;
+
     /// <summary>CI: whether the pointer is over the header search.</summary>
     public bool SearchIsHovered { get; private set; }
 
@@ -561,18 +564,7 @@ internal sealed class StudioWindow
         card.VerticalAlignment = VerticalAlignment.Center;
         var stage = new Grid
         {
-            Background = new RadialGradientBrush
-            {
-                Center = new global::Windows.Foundation.Point(0.5, 0.42),
-                GradientOrigin = new global::Windows.Foundation.Point(0.5, 0.42),
-                RadiusX = 0.5,
-                RadiusY = 0.6,
-                GradientStops =
-                {
-                    new GradientStop { Color = Color.FromArgb(0x26, 0xF4, 0xAE, 0x3A), Offset = 0 },
-                    new GradientStop { Color = Color.FromArgb(0x00, 0xF4, 0xAE, 0x3A), Offset = 1 },
-                },
-            },
+            Background = LanternGlass.Stage(),
         };
         // The owner's lantern string hangs over the sign-in stage (the header itself has no art, as on the web).
         var art = new Image { Stretch = Stretch.UniformToFill, VerticalAlignment = VerticalAlignment.Top, Height = 150, Opacity = 0.9, IsHitTestVisible = false };

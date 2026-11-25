@@ -454,6 +454,16 @@ internal static class LanternGlass
         return WithGlow(card, radius);
     }
 
+    private static CompositionPropertySet? _glows;
+
+    private static CompositionPropertySet Glows(Compositor compositor)
+    {
+        if (_glows != null) return _glows;
+        var glows = _glows = compositor.CreatePropertySet();
+        SystemBrushes.Follow(high => glows.InsertScalar("Shown", high ? 0 : 1));
+        return glows;
+    }
+
     /// <summary>Puts a gold glow behind <paramref name="element"/>.</summary>
     public static FrameworkElement WithGlow(FrameworkElement element, double radius = 14, float opacity = 0.32f, float blur = 26f)
     {
@@ -476,7 +486,11 @@ internal static class LanternGlass
         var shadow = compositor.CreateDropShadow();
         shadow.Color = Gold;
         shadow.BlurRadius = blur;
-        shadow.Opacity = opacity;
+        // None in high contrast. One value for every glow, as they come and go with the pages
+        var glow = compositor.CreateExpressionAnimation("all.Shown * opacity");
+        glow.SetReferenceParameter("all", Glows(compositor));
+        glow.SetScalarParameter("opacity", opacity);
+        shadow.StartAnimation("Opacity", glow);
         shadow.Offset = new Vector3(0, 8, 0);
         // A rounded mask keeps the glow's corners matching the card's.
         var geometry = compositor.CreateRoundedRectangleGeometry();
@@ -579,6 +593,30 @@ internal static class LanternGlass
             film.GradientStops[1].Color = high ? SystemBrushes.ColorOf(HighContrastRole.Window) : end;
         });
         return film;
+    }
+
+    /// <summary>The soft light behind the sign-in card.</summary>
+    public static RadialGradientBrush Stage() => _stage ??= StageBrush();
+
+    private static RadialGradientBrush? _stage;
+
+    private static RadialGradientBrush StageBrush()
+    {
+        var stage = new RadialGradientBrush
+        {
+            Center = new Windows.Foundation.Point(0.5, 0.42),
+            GradientOrigin = new Windows.Foundation.Point(0.5, 0.42),
+            RadiusX = 0.5,
+            RadiusY = 0.6,
+        };
+        SystemBrushes.Follow(high =>
+        {
+            // New stops: a radial gradient is not drawn again for another color of one
+            stage.GradientStops.Clear();
+            stage.GradientStops.Add(new GradientStop { Color = high ? Colors.Transparent : Color.FromArgb(0x26, 0xF4, 0xAE, 0x3A), Offset = 0 });
+            stage.GradientStops.Add(new GradientStop { Color = high ? Colors.Transparent : Color.FromArgb(0x00, 0xF4, 0xAE, 0x3A), Offset = 1 });
+        });
+        return stage;
     }
 
     /// <summary>From the top color down to the other.</summary>
