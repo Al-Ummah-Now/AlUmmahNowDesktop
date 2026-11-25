@@ -265,6 +265,8 @@ internal sealed class StudioWindow
         var text = new TextBox
         {
             PlaceholderText = label,
+            // Empty, it has no direction to detect: in Arabic the caret was at the far end, away from the placeholder
+            TextReadingOrder = TextReadingOrder.UseFlowDirection,
             // The style sets its own, over the field's resources
             PlaceholderForeground = new SolidColorBrush(LanternGlass.C(h.SearchPlaceholder)),
             FontSize = FawaneesHeader.SearchFontSize,

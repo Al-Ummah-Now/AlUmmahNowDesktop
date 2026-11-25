@@ -92,6 +92,7 @@ public sealed class StudioThemeTests
         var glass = Source("AlUmmahNow.Studio.Windows", "LanternGlass.cs");
         Assert.Contains("app.Resources.MergedDictionaries.Add(controls);", glass);
         Assert.Contains("d[\"HyperlinkButtonForeground\" + state] = link;", glass);
+        Assert.Contains("            button.Foreground = onGold;", glass);
         Assert.Contains("dialog button.destructive, dialog button.destructive-action {\n  background-color: @fanous_error_fill;", css.Replace("\r\n", "\n"));
     }
 

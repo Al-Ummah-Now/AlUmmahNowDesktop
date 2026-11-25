@@ -32,5 +32,6 @@ public static class HighContrast
         ["StudioSelectedBrush"] = HighContrastRole.None,
         ["StudioDangerFillBrush"] = HighContrastRole.Highlight,
         ["StudioOnDangerFillBrush"] = HighContrastRole.HighlightText,
+        ["StudioOnGoldBrush"] = HighContrastRole.HighlightText,
     };
 }

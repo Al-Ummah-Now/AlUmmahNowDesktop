@@ -252,7 +252,12 @@ internal sealed class VideosPage
             case "deleted":
             case "deleted-open":
                 _deletedExpander.IsExpanded = scene == "deleted-open";
-                _deletedCard?.StartBringIntoView();
+                // To the end of the page, once it has opened
+                var opened = _list.DispatcherQueue.CreateTimer();
+                opened.Interval = TimeSpan.FromMilliseconds(1500);
+                opened.IsRepeating = false;
+                opened.Tick += (_, _) => _deletedCard?.StartBringIntoView(new BringIntoViewOptions { VerticalAlignmentRatio = 1, AnimationDesired = false });
+                opened.Start();
                 break;
         }
     }

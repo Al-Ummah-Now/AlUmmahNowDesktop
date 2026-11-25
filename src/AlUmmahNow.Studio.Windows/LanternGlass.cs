@@ -248,6 +248,7 @@ internal static class LanternGlass
         t["StudioMutedBrush"] = B(muted);
         // The app's own name: under the framework's the merged WinUI dictionary answers first, with the accent's shade
         t["StudioLinkBrush"] = B(link);
+        t["StudioOnGoldBrush"] = B(onPrimary);
         t["StudioDangerBrush"] = B(C("ErrorText"));
         t["StudioDangerFillBrush"] = B(C("ErrorFill"));
         t["StudioOnDangerFillBrush"] = B(C("OnErrorFill"));
@@ -313,7 +314,46 @@ internal static class LanternGlass
             dialog.DefaultButton = ContentDialogButton.Primary;
         }
 
+        // The dialog's own state gives its default button the gold style, with the framework's white text (seen in the
+        // frames): the button itself has ours.
+        var onGold = Res("StudioOnGoldBrush");
+        foreach (var state in new[] { "", "PointerOver", "Pressed" }) dialog.Resources["AccentButtonForeground" + state] = onGold;
+        dialog.Opened += (d, _) =>
+        {
+            if (DefaultButton(d) is not { } button) return;
+            button.Foreground = onGold;
+            d.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+            {
+                if (!IsHighContrast && button.Foreground is SolidColorBrush b && Presenter(button)?.Foreground is SolidColorBrush shown && shown.Color != b.Color) UnreadableDialogs++;
+            });
+        };
         return dialog;
+    }
+
+    /// <summary>Dialogs whose default button was not drawn in the text color for gold (CI's scenarios ask).</summary>
+    public static int UnreadableDialogs { get; private set; }
+
+    private static Button? DefaultButton(ContentDialog dialog) => dialog.DefaultButton switch
+    {
+        ContentDialogButton.Primary => Find<Button>(dialog, "PrimaryButton"),
+        ContentDialogButton.Secondary => Find<Button>(dialog, "SecondaryButton"),
+        ContentDialogButton.Close => Find<Button>(dialog, "CloseButton"),
+        _ => null,
+    };
+
+    private static ContentPresenter? Presenter(Button button) => Find<ContentPresenter>(button, "ContentPresenter");
+
+    private static T? Find<T>(DependencyObject root, string name)
+        where T : FrameworkElement
+    {
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is T found && found.Name == name) return found;
+            if (Find<T>(child, name) is { } deeper) return deeper;
+        }
+
+        return null;
     }
 
     /// <summary>A Studio brush for the app's theme; transparent if the theme failed to load (never a crash).</summary>
