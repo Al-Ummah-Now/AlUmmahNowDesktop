@@ -1,3 +1,5 @@
+using AlUmmahNow.App.Theme;
+using AlUmmahNow.Contrast;
 using System.Runtime.InteropServices;
 using AlUmmahNow.App.I18n;
 using AlUmmahNow.CoreBridge.Logging;
@@ -144,6 +146,8 @@ internal sealed class StudioWindow
 
         Grid.SetRow(_body, 2);
         root.Children.Add(_body);
+        // Every brush follows high contrast itself: no box behind a text, which hid the selected page's highlight
+        root.HighContrastAdjustment = ElementHighContrastAdjustment.None;
         Window.Content = root;
 
         // The window opens at rest, as the web does: WinUI focuses the first field (the search), so focus
@@ -165,16 +169,12 @@ internal sealed class StudioWindow
         Window.SetTitleBar(_titleBar);
         var titleBar = Window.AppWindow.TitleBar;
         titleBar.PreferredHeightOption = TitleBarHeightOption.Tall;
-        // The header band is night blue in Light and Dark, so the caption glyphs are always light.
-        titleBar.ButtonBackgroundColor = Colors.Transparent;
-        titleBar.ButtonInactiveBackgroundColor = Colors.Transparent;
-        // The web header's icon, hover and pressed colours (nav-icon, nav-hover, nav-active-*).
-        titleBar.ButtonForegroundColor = LanternGlass.C(_header.Icon);
-        titleBar.ButtonInactiveForegroundColor = LanternGlass.C(_header.Icon);
-        titleBar.ButtonHoverBackgroundColor = LanternGlass.C(_header.Hover);
-        titleBar.ButtonHoverForegroundColor = LanternGlass.C(_header.Text);
-        titleBar.ButtonPressedBackgroundColor = LanternGlass.C(_header.ActiveBackground);
-        titleBar.ButtonPressedForegroundColor = LanternGlass.C(_header.ActiveText);
+        PaintCaption(titleBar);
+        SystemBrushes.Painted += () =>
+        {
+            PaintCaption(titleBar);
+            RenderIdentity();
+        };
 
         // A minimum size instead of a phone layout: nothing clips or truncates at any size it can take.
         var scale = GetDpiForWindow(hwnd) / 96.0;
@@ -191,6 +191,22 @@ internal sealed class StudioWindow
 
         _shell.PropertyChanged += (_, _) => Render();
         Render();
+    }
+
+    /// <summary>The caption buttons over the header band, which is night blue in Light and Dark, so their glyphs are always light.</summary>
+    private void PaintCaption(AppWindowTitleBar bar)
+    {
+        var high = LanternGlass.IsHighContrast;
+        Color C(Rgba color, HighContrastRole role) => high ? SystemBrushes.ColorOf(role) : LanternGlass.C(color);
+        bar.ButtonBackgroundColor = Colors.Transparent;
+        bar.ButtonInactiveBackgroundColor = Colors.Transparent;
+        // The web header's icon, hover and pressed colours (nav-icon, nav-hover, nav-active-*).
+        bar.ButtonForegroundColor = C(_header.Icon, HighContrastRole.Text);
+        bar.ButtonInactiveForegroundColor = C(_header.Icon, HighContrastRole.Text);
+        bar.ButtonHoverBackgroundColor = C(_header.Hover, HighContrastRole.Highlight);
+        bar.ButtonHoverForegroundColor = C(_header.Text, HighContrastRole.HighlightText);
+        bar.ButtonPressedBackgroundColor = C(_header.ActiveBackground, HighContrastRole.Highlight);
+        bar.ButtonPressedForegroundColor = C(_header.ActiveText, HighContrastRole.HighlightText);
     }
 
     public Window Window { get; }
@@ -270,7 +286,7 @@ internal sealed class StudioWindow
         _ = bitmap.SetSourceAsync(StudioTheme.AppIcon().AsRandomAccessStream());
         icon.Source = bitmap;
         app.Children.Add(icon);
-        app.Children.Add(new TextBlock { Text = _l["studio.name"], Foreground = new SolidColorBrush(LanternGlass.C(_header.Text)), FontSize = 12.5, VerticalAlignment = VerticalAlignment.Center });
+        app.Children.Add(new TextBlock { Text = _l["studio.name"], Foreground = LanternGlass.Brush(LanternGlass.C(_header.Text), HighContrastRole.Text), FontSize = 12.5, VerticalAlignment = VerticalAlignment.Center });
         row.Children.Add(app);
         Grid.SetColumn(_search, 1);
         row.Children.Add(_search);
@@ -288,7 +304,7 @@ internal sealed class StudioWindow
     private Border SearchPill(string label, Action<string> submit)
     {
         var h = _header;
-        var border = new SolidColorBrush(LanternGlass.C(h.SearchBorder));
+        var border = LanternGlass.Brush(LanternGlass.C(h.SearchBorder), HighContrastRole.Text);
         var text = new TextBox
         {
             PlaceholderText = label,
@@ -296,7 +312,7 @@ internal sealed class StudioWindow
             TextReadingOrder = TextReadingOrder.UseFlowDirection,
             TextAlignment = TextAlignment.Start,
             // The style sets its own, over the field's resources
-            PlaceholderForeground = new SolidColorBrush(LanternGlass.C(h.SearchPlaceholder)),
+            PlaceholderForeground = LanternGlass.Brush(LanternGlass.C(h.SearchPlaceholder), HighContrastRole.Text),
             FontSize = FawaneesHeader.SearchFontSize,
             VerticalAlignment = VerticalAlignment.Center,
             Padding = new Thickness(FawaneesHeader.SearchTextInset, 0, 8, 0),
@@ -309,9 +325,9 @@ internal sealed class StudioWindow
         {
             text.Resources["TextControlBackground" + state] = clear;
             text.Resources["TextControlBorderBrush" + state] = clear;
-            text.Resources["TextControlForeground" + state] = new SolidColorBrush(LanternGlass.C(h.SearchText));
+            text.Resources["TextControlForeground" + state] = LanternGlass.Brush(LanternGlass.C(h.SearchText), HighContrastRole.Text);
             // Hovered and focused, the template takes these; at rest the property above
-            text.Resources["TextControlPlaceholderForeground" + state] = new SolidColorBrush(LanternGlass.C(h.SearchPlaceholder));
+            text.Resources["TextControlPlaceholderForeground" + state] = LanternGlass.Brush(LanternGlass.C(h.SearchPlaceholder), HighContrastRole.Text);
         }
 
         text.Resources["TextControlBorderThemeThicknessFocused"] = new Thickness(0);
@@ -338,13 +354,13 @@ internal sealed class StudioWindow
             Background = clear,
             BorderThickness = new Thickness(1, 0, 0, 0),
             BorderBrush = border,
-            Foreground = new SolidColorBrush(LanternGlass.C(h.Icon)),
+            Foreground = LanternGlass.Brush(LanternGlass.C(h.Icon), HighContrastRole.Text),
             Content = new FontIcon { Glyph = "\uE721", FontSize = 18 },
         };
-        go.Resources["ButtonBackgroundPointerOver"] = new SolidColorBrush(LanternGlass.C(h.Hover));
-        go.Resources["ButtonBackgroundPressed"] = new SolidColorBrush(LanternGlass.C(h.Hover));
-        go.Resources["ButtonForegroundPointerOver"] = new SolidColorBrush(LanternGlass.C(h.Icon));
-        go.Resources["ButtonForegroundPressed"] = new SolidColorBrush(LanternGlass.C(h.Icon));
+        go.Resources["ButtonBackgroundPointerOver"] = LanternGlass.Brush(LanternGlass.C(h.Hover), HighContrastRole.Window);
+        go.Resources["ButtonBackgroundPressed"] = LanternGlass.Brush(LanternGlass.C(h.Hover), HighContrastRole.Window);
+        go.Resources["ButtonForegroundPointerOver"] = LanternGlass.Brush(LanternGlass.C(h.Icon), HighContrastRole.Text);
+        go.Resources["ButtonForegroundPressed"] = LanternGlass.Brush(LanternGlass.C(h.Icon), HighContrastRole.Text);
         go.Resources["ButtonBorderBrushPointerOver"] = border;
         go.Resources["ButtonBorderBrushPressed"] = border;
         AutomationProperties.SetName(go, label);
@@ -363,14 +379,14 @@ internal sealed class StudioWindow
             VerticalAlignment = VerticalAlignment.Center,
             // --r-pill (999px) on a 40 px field: half the height rounds the ends fully.
             CornerRadius = new CornerRadius(Math.Min(h.SearchRadius, FawaneesHeader.SearchHeight / 2)),
-            Background = new SolidColorBrush(LanternGlass.C(h.SearchBackground)),
+            Background = LanternGlass.Brush(LanternGlass.C(h.SearchBackground), HighContrastRole.Window),
             BorderBrush = border,
             BorderThickness = new Thickness(1),
             Child = row,
         };
         text.GotFocus += (_, _) =>
         {
-            pill.BorderBrush = new SolidColorBrush(LanternGlass.C(h.SearchFocus));
+            pill.BorderBrush = LanternGlass.Brush(LanternGlass.C(h.SearchFocus), HighContrastRole.Highlight);
             pill.BorderThickness = new Thickness(2);
         };
         text.LostFocus += (_, _) =>
@@ -517,7 +533,7 @@ internal sealed class StudioWindow
         lantern.Width = 112;
         lantern.Height = 112;
         lantern.BorderThickness = new Thickness(3);
-        lantern.BorderBrush = new SolidColorBrush(Color.FromArgb(0x99, LanternGlass.GoldEdge.R, LanternGlass.GoldEdge.G, LanternGlass.GoldEdge.B));
+        lantern.BorderBrush = LanternGlass.Brush(Color.FromArgb(0x99, LanternGlass.GoldEdge.R, LanternGlass.GoldEdge.G, LanternGlass.GoldEdge.B), HighContrastRole.Text);
         lantern.HorizontalAlignment = HorizontalAlignment.Center;
         panel.Children.Add(LanternGlass.WithGlow(lantern, 56, 0.6f, 40f));
         var heading = new TextBlock { Text = title, FontSize = 22, FontWeight = Microsoft.UI.Text.FontWeights.Bold, TextWrapping = TextWrapping.Wrap, HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center };
@@ -747,7 +763,7 @@ internal sealed class StudioWindow
         row.Children.Add(text);
         if (r.IsActive)
         {
-            var check = new FontIcon { Glyph = "", FontSize = 14, Foreground = new SolidColorBrush(LanternGlass.Gold), VerticalAlignment = VerticalAlignment.Center };
+            var check = new FontIcon { Glyph = "", FontSize = 14, Foreground = LanternGlass.Brush(LanternGlass.Gold, HighContrastRole.Text), VerticalAlignment = VerticalAlignment.Center };
             Grid.SetColumn(check, 2);
             row.Children.Add(check);
         }

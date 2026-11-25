@@ -4,6 +4,7 @@ using AlUmmahNow.App.Demo;
 using AlUmmahNow.App.Services;
 using AlUmmahNow.App.Updates;
 using AlUmmahNow.CoreBridge;
+using AlUmmahNow.Contrast;
 using AlUmmahNow.CoreBridge.Logging;
 using AlUmmahNow.CoreBridge.Native;
 using AlUmmahNow.CoreBridge.Native.Studio;
@@ -282,7 +283,8 @@ public sealed partial class App : Application
                     : uploadsDone || tabName != "uploads";
                 var look = LanternGlass.Look(window.Window.Content);
                 var cutOff = pages.Current == StudioPages.Uploads ? LanternGlass.CutOff(uploads.Root) : "";
-                pass = pass && cutOff.Length == 0 && videos.CardsAreWhole && LanternGlass.Missing == 0 && LanternGlass.IsPainted && LanternGlass.UnreadableDialogs == 0
+                var strays = SystemBrushes.Strays(window.Window.Content);
+                pass = pass && strays.Length == 0 && cutOff.Length == 0 && videos.CardsAreWhole && LanternGlass.Missing == 0 && LanternGlass.IsPainted && LanternGlass.UnreadableDialogs == 0
                     && (scene is not ("edit" or "bulk" or "delete") || LanternGlass.CheckedDialogs > 0)
                     && (!scene.StartsWith("deleted", StringComparison.Ordinal) || videos.DeletedIsShown)
                     && (scene != "searchfocus" || window.SearchHasFocus)
@@ -298,7 +300,7 @@ public sealed partial class App : Application
                 if (updateWrong == null && updateScene != null && !updateViews.IsPainted) updateWrong = "not the system's colors";
                 pass = pass && updateWrong == null;
                 var updateLine = updateScene == null ? "" : $" update={updateScene.Name}:{updateWrong ?? "ok"}";
-                File.WriteAllText(ResultPath, $"AUTOMATION {tabName} page={pages.Current} upload={pages.IsVisible(StudioPages.Uploads)} analytics={pages.IsVisible(StudioPages.Analytics)} bulkSchedule={uploadsVm.BulkScheduleOn} scene={scene}{updateLine} shell={shell.State} channel={shell.ActiveChannel?.Id} accounts={shell.AccountList.Count} uploads={snapshot.Count} uploadsDone={uploadsDone} encode={job?.Status} encoder={job?.UsedEncoder?.Name} error={job?.Error} searchFocused={window.SearchHasFocus} fieldFocused={window.FieldHasFocus} cardsWhole={videos.CardsAreWhole} searchHovered={window.SearchIsHovered} pickedReadable={analytics.PickedIsReadable} pickedHovered={analytics.PickedIsHovered} chartSeen={analytics.ChartIsSeen} cutOff='{cutOff}' pictures={look.Pictures} mirrored={look.Mirrored} avatars={look.Avatars} avatarPictures={look.AvatarPictures} unreadableInitials={look.Unreadable} highContrast={LanternGlass.IsHighContrast} painted={LanternGlass.IsPainted} missing={LanternGlass.Missing} unreadableDialogs={LanternGlass.UnreadableDialogs} checkedDialogs={LanternGlass.CheckedDialogs} deletedShown={videos.DeletedIsShown} RESULT {(pass ? "PASS" : "FAIL")}");
+                File.WriteAllText(ResultPath, $"AUTOMATION {tabName} page={pages.Current} upload={pages.IsVisible(StudioPages.Uploads)} analytics={pages.IsVisible(StudioPages.Analytics)} bulkSchedule={uploadsVm.BulkScheduleOn} scene={scene}{updateLine} shell={shell.State} channel={shell.ActiveChannel?.Id} accounts={shell.AccountList.Count} uploads={snapshot.Count} uploadsDone={uploadsDone} encode={job?.Status} encoder={job?.UsedEncoder?.Name} error={job?.Error} searchFocused={window.SearchHasFocus} fieldFocused={window.FieldHasFocus} cardsWhole={videos.CardsAreWhole} searchHovered={window.SearchIsHovered} pickedReadable={analytics.PickedIsReadable} pickedHovered={analytics.PickedIsHovered} chartSeen={analytics.ChartIsSeen} cutOff='{cutOff}' pictures={look.Pictures} mirrored={look.Mirrored} avatars={look.Avatars} avatarPictures={look.AvatarPictures} unreadableInitials={look.Unreadable} strays='{strays}' highContrast={LanternGlass.IsHighContrast} painted={LanternGlass.IsPainted} missing={LanternGlass.Missing} unreadableDialogs={LanternGlass.UnreadableDialogs} checkedDialogs={LanternGlass.CheckedDialogs} deletedShown={videos.DeletedIsShown} RESULT {(pass ? "PASS" : "FAIL")}");
                 Exit();
             };
             _endTimer.Start();

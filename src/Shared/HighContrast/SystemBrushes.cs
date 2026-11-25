@@ -1,0 +1,147 @@
+using AlUmmahNow.App.Theme;
+using Microsoft.UI;
+using Microsoft.UI.Dispatching;
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Shapes;
+using Windows.UI;
+using Windows.UI.ViewManagement;
+
+namespace AlUmmahNow.Contrast;
+
+/// <summary>
+/// Brushes of both Windows apps that are a color of the theme's, and in high contrast the system's for their role, also
+/// as it is turned on or off, or its colors change, while the app runs. There is one brush for a color and a role, and
+/// it is painted anew: what is on screen has it already.
+/// </summary>
+internal static class SystemBrushes
+{
+    private static readonly UISettings Settings = new();
+    private static readonly AccessibilitySettings Accessibility = new();
+    private static readonly List<Action<bool>> Painters = new();
+    private static readonly Dictionary<(Color, HighContrastRole), SolidColorBrush> Solid = new();
+    private static readonly Dictionary<(Color, Color, Color, bool, HighContrastRole), LinearGradientBrush> Gradients = new();
+
+    /// <summary>High contrast is on, and the brushes are in its colors.</summary>
+    public static bool IsHighContrast { get; private set; }
+
+    /// <summary>The brushes were painted anew.</summary>
+    public static event Action? Painted;
+
+    /// <summary>Once, on the window's thread, before any brush is drawn.</summary>
+    public static void Start()
+    {
+        var ui = DispatcherQueue.GetForCurrentThread();
+        IsHighContrast = Accessibility.HighContrast;
+        Settings.ColorValuesChanged += (_, _) => ui.TryEnqueue(() =>
+        {
+            IsHighContrast = Accessibility.HighContrast;
+            foreach (var paint in Painters) paint(IsHighContrast);
+            Painted?.Invoke();
+        });
+    }
+
+    public static Color ColorOf(HighContrastRole role) => role switch
+    {
+        HighContrastRole.Window => Settings.UIElementColor(UIElementType.Window),
+        HighContrastRole.Link => Settings.UIElementColor(UIElementType.Hotlight),
+        HighContrastRole.Highlight => Settings.UIElementColor(UIElementType.Highlight),
+        HighContrastRole.HighlightText => Settings.UIElementColor(UIElementType.HighlightText),
+        HighContrastRole.None => Colors.Transparent,
+        _ => Settings.UIElementColor(UIElementType.WindowText),
+    };
+
+    public static SolidColorBrush Brush(Color color, HighContrastRole role)
+    {
+        if (Solid.TryGetValue((color, role), out var known)) return known;
+        var brush = new SolidColorBrush(color);
+        Solid[(color, role)] = brush;
+        Follow(high => brush.Color = high ? ColorOf(role) : color);
+        return brush;
+    }
+
+    /// <summary>A gradient from the top to the bottom, or from the start over the middle to the end.</summary>
+    public static LinearGradientBrush Gradient(Color first, Color middle, Color last, bool down, HighContrastRole role)
+    {
+        if (Gradients.TryGetValue((first, middle, last, down, role), out var known)) return known;
+        var brush = new LinearGradientBrush
+        {
+            StartPoint = new global::Windows.Foundation.Point(0, down ? 0 : 0.5),
+            EndPoint = new global::Windows.Foundation.Point(down ? 0 : 1, down ? 1 : 0.5),
+        };
+        var colors = new[] { first, middle, last };
+        for (var i = 0; i < 3; i++) brush.GradientStops.Add(new GradientStop { Color = colors[i], Offset = i / 2.0 });
+        Gradients[(first, middle, last, down, role)] = brush;
+        Follow(high =>
+        {
+            for (var i = 0; i < 3; i++) brush.GradientStops[i].Color = high ? ColorOf(role) : colors[i];
+        });
+        return brush;
+    }
+
+    /// <summary>Paints now, and whenever high contrast or its colors change.</summary>
+    public static void Follow(Action<bool> paint)
+    {
+        Painters.Add(paint);
+        paint(IsHighContrast);
+    }
+
+    /// <summary>
+    /// In high contrast, the parts of a window that are drawn in another color than the system's, as they are drawn (CI's
+    /// scenarios ask); empty without it. A picture, and what has the tag "art", has its own colors.
+    /// </summary>
+    public static string Strays(UIElement root)
+    {
+        if (!IsHighContrast) return "";
+        var system = Enum.GetValues<UIElementType>().Select(t => Settings.UIElementColor(t)).Select(c => (c.R, c.G, c.B)).ToHashSet();
+        var strays = new List<string>();
+
+        void Look(string part, Brush? brush)
+        {
+            var colors = brush switch
+            {
+                SolidColorBrush solid => new[] { solid.Color },
+                AcrylicBrush acrylic => new[] { acrylic.FallbackColor },
+                RadialGradientBrush radial => radial.GradientStops.Select(s => s.Color).ToArray(),
+                GradientBrush gradient => gradient.GradientStops.Select(s => s.Color).ToArray(),
+                _ => Array.Empty<Color>(),
+            };
+            foreach (var c in colors.Where(c => c.A > 0 && !system.Contains((c.R, c.G, c.B))).Take(1)) strays.Add($"{part} #{c.R:X2}{c.G:X2}{c.B:X2}");
+        }
+
+        void Walk(DependencyObject part, string path)
+        {
+            if (part is FrameworkElement { Tag: "art" } or UIElement { Visibility: Visibility.Collapsed } or UIElement { Opacity: 0 }) return;
+            var here = part is FrameworkElement { Name.Length: > 0 } named ? path + "/" + named.Name : path + "/" + part.GetType().Name;
+            if (here.Length > 90) here = "…" + here[^90..];
+            switch (part)
+            {
+                case Border border:
+                    Look(here + " fill", border.Background);
+                    if (border.BorderThickness != default) Look(here + " edge", border.BorderBrush);
+                    break;
+                case TextBlock text when text.Text.Length > 0: Look(here + " text '" + text.Text + "'", text.Foreground); break;
+                case FontIcon icon: Look(here + " icon", icon.Foreground); break;
+                case Grid grid:
+                    Look(here + " fill", grid.Background);
+                    if (grid.BorderThickness != default) Look(here + " edge", grid.BorderBrush);
+                    break;
+                case Panel panel: Look(here + " fill", panel.Background); break;
+                case ContentPresenter presenter:
+                    Look(here + " fill", presenter.Background);
+                    if (presenter.BorderThickness != default) Look(here + " edge", presenter.BorderBrush);
+                    break;
+                case Shape shape:
+                    Look(here + " fill", shape.Fill);
+                    if (shape.StrokeThickness > 0) Look(here + " line", shape.Stroke);
+                    break;
+            }
+
+            for (var i = 0; i < VisualTreeHelper.GetChildrenCount(part); i++) Walk(VisualTreeHelper.GetChild(part, i), here);
+        }
+
+        Walk(root, "");
+        return string.Join("; ", strays.Distinct().Take(12));
+    }
+}

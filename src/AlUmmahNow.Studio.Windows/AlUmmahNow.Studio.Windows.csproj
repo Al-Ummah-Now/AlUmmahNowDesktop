@@ -27,6 +27,8 @@
     <Compile Include="..\Shared\WinUI\*.cs" Link="Updates\%(Filename)%(Extension)" />
     <AppxManifest Include="Package.appxmanifest" Condition="'$(BuildMsix)' == 'true'" />
     <Content Include="Assets\*.png" Condition="'$(BuildMsix)' == 'true'" />
+    <!-- Brushes that follow high contrast, of both apps -->
+    <Compile Include="..\Shared\HighContrast\*.cs" Link="HighContrast\%(Filename)%(Extension)" />
     <ProjectReference Include="..\AlUmmahNow.App\AlUmmahNow.App.csproj" />
     <ProjectReference Include="..\AlUmmahNow.Studio\AlUmmahNow.Studio.csproj" />
     <ProjectReference Include="..\AlUmmahNow.CoreBridge.Native\AlUmmahNow.CoreBridge.Native.csproj" />

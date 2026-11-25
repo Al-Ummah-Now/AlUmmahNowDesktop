@@ -1,3 +1,4 @@
+using AlUmmahNow.App.Theme;
 using AlUmmahNow.App.I18n;
 using AlUmmahNow.Studio.Encode;
 using AlUmmahNow.Studio.Timeline;
@@ -101,17 +102,8 @@ internal static class Tile
         Height = height,
         CornerRadius = new CornerRadius(8),
         VerticalAlignment = VerticalAlignment.Center,
-        Background = new LinearGradientBrush
-        {
-            StartPoint = new global::Windows.Foundation.Point(0, 0),
-            EndPoint = new global::Windows.Foundation.Point(1, 1),
-            GradientStops =
-            {
-                new GradientStop { Color = global::Windows.UI.Color.FromArgb(0xFF, 0x18, 0x44, 0x56), Offset = 0 },
-                new GradientStop { Color = LanternGlass.Night, Offset = 1 },
-            },
-        },
-        Child = new FontIcon { Glyph = "\uE8B2", FontSize = height * 0.4, Foreground = new SolidColorBrush(LanternGlass.Gold) },
+        Background = LanternGlass.Film(),
+        Child = new FontIcon { Glyph = "\uE8B2", FontSize = height * 0.4, Foreground = LanternGlass.Brush(LanternGlass.Gold, HighContrastRole.Highlight) },
     };
 }
 
@@ -277,19 +269,12 @@ internal sealed class TimelinePage
                     Height = TrackHeight,
                     CornerRadius = new CornerRadius(8),
                     BorderThickness = new Thickness(current ? 2 : 1),
-                    BorderBrush = new SolidColorBrush(current ? LanternGlass.GoldEdge : edge),
-                    Background = new LinearGradientBrush
-                    {
-                        StartPoint = new global::Windows.Foundation.Point(0, 0),
-                        EndPoint = new global::Windows.Foundation.Point(0, 1),
-                        GradientStops =
-                        {
-                            new GradientStop { Color = video ? global::Windows.UI.Color.FromArgb(0xFF, 0x1F, 0x4C, 0x60) : global::Windows.UI.Color.FromArgb(0xFF, 0x8E, 0x6C, 0x53), Offset = 0 },
-                            new GradientStop { Color = video ? global::Windows.UI.Color.FromArgb(0xFF, 0x11, 0x33, 0x44) : global::Windows.UI.Color.FromArgb(0xFF, 0x6B, 0x4F, 0x3C), Offset = 1 },
-                        },
-                    },
+                    BorderBrush = current ? LanternGlass.Brush(LanternGlass.GoldEdge, HighContrastRole.Highlight) : LanternGlass.Brush(edge, HighContrastRole.Text),
+                    Background = video
+                        ? LanternGlass.Down(global::Windows.UI.Color.FromArgb(0xFF, 0x1F, 0x4C, 0x60), global::Windows.UI.Color.FromArgb(0xFF, 0x11, 0x33, 0x44))
+                        : LanternGlass.Down(global::Windows.UI.Color.FromArgb(0xFF, 0x8E, 0x6C, 0x53), global::Windows.UI.Color.FromArgb(0xFF, 0x6B, 0x4F, 0x3C)),
                     Child = video
-                        ? new TextBlock { Text = clip.Source, Margin = new Thickness(8, 6, 8, 0), FontSize = 12, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = new SolidColorBrush(LanternGlass.OnNight), TextTrimming = TextTrimming.CharacterEllipsis, FlowDirection = FlowDirection.LeftToRight }
+                        ? new TextBlock { Text = clip.Source, Margin = new Thickness(8, 6, 8, 0), FontSize = 12, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = LanternGlass.Brush(LanternGlass.OnNight, HighContrastRole.Text), TextTrimming = TextTrimming.CharacterEllipsis, FlowDirection = FlowDirection.LeftToRight }
                         : Waveform(Math.Max(2, Math.Abs(b - a) - 2)),
                 };
                 Canvas.SetLeft(rect, Math.Min(a, b) + 1);
@@ -301,15 +286,15 @@ internal sealed class TimelinePage
         // The playhead, under the labels: a soft gold glow, the line, and a handle on the ruler.
         var px = viewport.ToX(_playhead);
         const double under = TimelineRuler.LabelRoom;
-        var glow = new Rectangle { Width = 8, Height = _canvas.Height - under, Fill = new SolidColorBrush(global::Windows.UI.Color.FromArgb(0x40, 0xF4, 0xAE, 0x3A)) };
+        var glow = new Rectangle { Width = 8, Height = _canvas.Height - under, Fill = LanternGlass.Brush(global::Windows.UI.Color.FromArgb(0x40, 0xF4, 0xAE, 0x3A), HighContrastRole.None) };
         Canvas.SetLeft(glow, px - 4);
         Canvas.SetTop(glow, under);
         _canvas.Children.Add(glow);
-        var head = new Rectangle { Width = 2, Height = _canvas.Height - under, Fill = new SolidColorBrush(LanternGlass.Gold) };
+        var head = new Rectangle { Width = 2, Height = _canvas.Height - under, Fill = LanternGlass.Brush(LanternGlass.Gold, HighContrastRole.Highlight) };
         Canvas.SetLeft(head, px - 1);
         Canvas.SetTop(head, under);
         _canvas.Children.Add(head);
-        var handle = new Polygon { Fill = new SolidColorBrush(LanternGlass.Gold), Points = { new global::Windows.Foundation.Point(px - 7, under), new global::Windows.Foundation.Point(px + 7, under), new global::Windows.Foundation.Point(px + 7, under + 8), new global::Windows.Foundation.Point(px, under + TimelineRuler.HandleHeight), new global::Windows.Foundation.Point(px - 7, under + 8) } };
+        var handle = new Polygon { Fill = LanternGlass.Brush(LanternGlass.Gold, HighContrastRole.Highlight), Points = { new global::Windows.Foundation.Point(px - 7, under), new global::Windows.Foundation.Point(px + 7, under), new global::Windows.Foundation.Point(px + 7, under + 8), new global::Windows.Foundation.Point(px, under + TimelineRuler.HandleHeight), new global::Windows.Foundation.Point(px - 7, under + 8) } };
         _canvas.Children.Add(handle);
     }
 
@@ -317,7 +302,7 @@ internal sealed class TimelinePage
     private static FrameworkElement Waveform(double width)
     {
         var canvas = new Canvas();
-        var brush = new SolidColorBrush(global::Windows.UI.Color.FromArgb(0xC0, 0xF5, 0xCF, 0x92));
+        var brush = LanternGlass.Brush(global::Windows.UI.Color.FromArgb(0xC0, 0xF5, 0xCF, 0x92), HighContrastRole.Text);
         for (var i = 4.0; i < width - 4; i += 4)
         {
             var amp = (Math.Abs(Math.Sin(i * 0.13)) * 0.6 + Math.Abs(Math.Cos(i * 0.031)) * 0.3) * (TrackHeight - 16);

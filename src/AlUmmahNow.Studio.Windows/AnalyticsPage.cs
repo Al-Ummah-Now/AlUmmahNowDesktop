@@ -1,3 +1,4 @@
+using AlUmmahNow.App.Theme;
 using AlUmmahNow.App.I18n;
 using AlUmmahNow.Studio.Analytics;
 using Microsoft.UI.Xaml;
@@ -133,8 +134,8 @@ internal sealed class AnalyticsPage
                 : new Border
                 {
                     CornerRadius = new CornerRadius(6),
-                    Background = new SolidColorBrush(global::Windows.UI.Color.FromArgb(0xFF, 0x18, 0x44, 0x56)),
-                    Child = new FontIcon { Glyph = "\uE8B2", FontSize = 16, Foreground = new SolidColorBrush(LanternGlass.Gold) },
+                    Background = LanternGlass.Brush(global::Windows.UI.Color.FromArgb(0xFF, 0x18, 0x44, 0x56), HighContrastRole.Window),
+                    Child = new FontIcon { Glyph = "\uE8B2", FontSize = 16, Foreground = LanternGlass.Brush(LanternGlass.Gold, HighContrastRole.Highlight) },
                 };
             tile.Width = 72;
             tile.Height = 40;

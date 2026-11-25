@@ -1,3 +1,4 @@
+using AlUmmahNow.Contrast;
 using AlUmmahNow.App.Demo;
 using AlUmmahNow.App.I18n;
 using AlUmmahNow.App.Navigation;
@@ -40,6 +41,7 @@ public sealed partial class App : Application
         // Application.Resources only exists from here on (not in App()).
         try
         {
+            SystemBrushes.Start();
             ViewerTheme.Apply(this);
         }
         catch (Exception ex)
@@ -111,8 +113,15 @@ public sealed partial class App : Application
         _window = new Window { Title = localizer["app.name"], Content = shell.Root };
         // The title bar follows the viewer's theme, not Windows'
         var titleBar = _window.AppWindow.TitleBar;
-        void Title() => titleBar.PreferredTheme = shell.IsDark ? TitleBarTheme.Dark : TitleBarTheme.Light;
+        TitleBarTheme TitleTheme() => SystemBrushes.IsHighContrast ? TitleBarTheme.UseDefaultAppMode : shell.IsDark ? TitleBarTheme.Dark : TitleBarTheme.Light;
+        void Title() => titleBar.PreferredTheme = TitleTheme();
         shell.Root.ActualThemeChanged += (_, _) => Title();
+        // Built anew: an edge that is there in high contrast only is not a brush
+        SystemBrushes.Painted += () =>
+        {
+            Title();
+            shell.Rebuild();
+        };
         Title();
         _window.AppWindow.Resize(new global::Windows.Graphics.SizeInt32(1280, 800));
         if (_window.AppWindow.Presenter is OverlappedPresenter presenter) presenter.Maximize();
@@ -155,9 +164,11 @@ public sealed partial class App : Application
                 var (accents, wrong) = ViewerTheme.Check(shell.Root, shell.IsDark);
                 if (accents == 0 && (isWatch || automation.StartsWith("behind:", StringComparison.Ordinal))) wrong = "nothing found";
                 var title = titleBar.PreferredTheme;
-                pass = pass && updateWrong == null && shell.IsBuiltOnce && shell.LiveTitlesAreWhole && wrong.Length == 0 && title == (shell.IsDark ? TitleBarTheme.Dark : TitleBarTheme.Light);
+                var strays = SystemBrushes.Strays(shell.Root);
+                pass = pass && updateWrong == null && shell.IsBuiltOnce && shell.LiveTitlesAreWhole && wrong.Length == 0 && title == TitleTheme() && strays.Length == 0
+                    && (Environment.GetEnvironmentVariable("AUN_EXPECT_HIGH_CONTRAST") != "1" || SystemBrushes.IsHighContrast);
                 File.WriteAllText(Environment.GetEnvironmentVariable("AUN_RESULT") ?? "aun-result.txt",
-                    $"AUTOMATION {automation} core={coreVersion} rails={shell.Home.Rails.Count} furthest={furthest:F1} caption={sawCaption} failed={shell.Watch?.PlaybackFailed} once={shell.IsBuiltOnce}{updateLine} accents={accents} notGold='{wrong}' titleBar={title} titlesWhole={shell.LiveTitlesAreWhole} RESULT {(pass ? "PASS" : "FAIL")}");
+                    $"AUTOMATION {automation} core={coreVersion} rails={shell.Home.Rails.Count} furthest={furthest:F1} caption={sawCaption} failed={shell.Watch?.PlaybackFailed} once={shell.IsBuiltOnce}{updateLine} accents={accents} notGold='{wrong}' titleBar={title} highContrast={SystemBrushes.IsHighContrast} strays='{strays}' titlesWhole={shell.LiveTitlesAreWhole} RESULT {(pass ? "PASS" : "FAIL")}");
                 player.Stop();
                 Exit();
             };

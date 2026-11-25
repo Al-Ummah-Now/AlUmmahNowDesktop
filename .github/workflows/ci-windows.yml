@@ -114,6 +114,19 @@ jobs:
             ./scripts/windows-scenario.ps1 $exe $r[0] $r[1] $r[2] $r[3] $out $shot ($shot + 5)
           }
           foreach ($r in $runs) { if (-not (Select-String -Quiet "RESULT PASS" "$out/$($r[3]).txt")) { throw "live $($r[3]) failed" } }
+          # High contrast, and off again: turned on while the viewer runs, and on from the start; only the system's colors are drawn.
+          $env:AUN_DEMO_LIVE = "1"; $env:AUN_DEMO_AUTH = ""; $env:AUN_DEMO_REMIND = ""
+          $high = @()
+          try {
+            ./scripts/windows-scenario.ps1 $exe en light live:demo-live live-highcontrastswitch-en-light $out 22 28 switch; $high += "live-highcontrastswitch-en-light"
+            $pages = @(@("home", "home", 12), @("list", "live", 12), @("live", "live:demo-live", 12), @("behind", "behind:demo-live", 18), @("recording", "live:demo-recording", 12), @("premiere", "live:demo-premiere", 12))
+            foreach ($lang in "en","ar") { foreach ($theme in "dark","light") { foreach ($p in $pages) {
+              if ($env:ALL -ne "true" -and ("$lang$theme" -notin "enlight","ardark" -or $p[0] -notin "home","behind")) { continue }
+              $name = "$($p[0])-highcontrast-$lang-$theme"
+              ./scripts/windows-scenario.ps1 $exe $lang $theme $p[1] $name $out $p[2] ($p[2] + 5) on; $high += $name
+            } } }
+          } finally { ./scripts/high-contrast.ps1 off }
+          foreach ($n in $high) { if (-not (Select-String -Quiet "highContrast=True.*RESULT PASS" "$out/$n.txt")) { throw "$n failed: $(Get-Content "$out/$n.txt")" } }
       - uses: actions/upload-artifact@v4
         if: always()
         with:

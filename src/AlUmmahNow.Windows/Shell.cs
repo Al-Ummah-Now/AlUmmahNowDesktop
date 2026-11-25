@@ -1,3 +1,5 @@
+using AlUmmahNow.App.Theme;
+using AlUmmahNow.Contrast;
 using System.ComponentModel;
 using System.Globalization;
 using AlUmmahNow.App.I18n;
@@ -73,6 +75,8 @@ public sealed partial class Shell
             if (!updates.IsSectionVisible && navigator.Current is Route.Settings) navigator.Back();
             else Render();
         };
+        // Every brush follows high contrast itself: no box behind a text on a highlight
+        _root.HighContrastAdjustment = ElementHighContrastAdjustment.None;
         AddKey(VirtualKey.Space, () => Watch?.TogglePlay());
         AddKey(VirtualKey.Left, () => Watch?.SkipByArrow(right: false));
         AddKey(VirtualKey.Right, () => Watch?.SkipByArrow(right: true));
@@ -111,6 +115,8 @@ public sealed partial class Shell
     /// <summary>The header and one page: what the window must hold (CI's scenarios ask).</summary>
     public bool IsBuiltOnce => _root.Children.Count == 2;
 
+    public void Rebuild() => Render();
+
     private void Render() => _page.Render();
 
     private void Build()
@@ -119,7 +125,7 @@ public sealed partial class Shell
         _unbind = null;
         _root.FlowDirection = _localizer.IsRtl ? FlowDirection.RightToLeft : FlowDirection.LeftToRight;
         _root.RequestedTheme = IsDark ? ElementTheme.Dark : ElementTheme.Light;
-        _root.Background = new SolidColorBrush(IsDark ? Night : Parchment);
+        _root.Background = SystemBrushes.Brush(IsDark ? Night : Parchment, HighContrastRole.Window);
         _root.Children.Clear();
         _liveTitles.Clear();
         _root.RowDefinitions.Clear();
@@ -371,17 +377,17 @@ public sealed partial class Shell
         grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         for (var i = 0; i < 4; i++) grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-        var surface = new Grid { Background = new SolidColorBrush(Colors.Black) };
+        var surface = new Grid { Background = SystemBrushes.Brush(Colors.Black, HighContrastRole.Window) };
         var element = new MediaPlayerElement { Stretch = Stretch.Uniform, AreTransportControlsEnabled = false };
         element.SetMediaPlayer(_player.Player);
         // The picture itself must not mirror; only the captions and controls follow the language.
         element.FlowDirection = FlowDirection.LeftToRight;
         surface.Children.Add(element);
-        var caption = new TextBlock { FontSize = 20, Foreground = new SolidColorBrush(Parchment), TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center };
+        var caption = new TextBlock { FontSize = 20, Foreground = SystemBrushes.Brush(Parchment, HighContrastRole.Text), TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center };
         var captionBox = new Border
         {
             Child = caption,
-            Background = new SolidColorBrush(global::Windows.UI.Color.FromArgb(210, 9, 48, 65)),
+            Background = SystemBrushes.Brush(global::Windows.UI.Color.FromArgb(210, 9, 48, 65), HighContrastRole.Window),
             Padding = new Thickness(14, 6, 14, 6),
             CornerRadius = new CornerRadius(6),
             HorizontalAlignment = HorizontalAlignment.Center,

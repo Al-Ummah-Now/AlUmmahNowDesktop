@@ -1,4 +1,5 @@
 using AlUmmahNow.App.Theme;
+using AlUmmahNow.Contrast;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
@@ -35,6 +36,9 @@ internal static class ViewerTheme
 
     /// <summary>A registry color ("Primary", "OnPrimary") of the viewer's theme, for the parts that are no control.</summary>
     public static SolidColorBrush Brush(string name, bool dark) => new(ColorOf(name, dark));
+
+    /// <summary>The same, and the system's color in high contrast.</summary>
+    public static SolidColorBrush Brush(string name, bool dark, HighContrastRole role) => SystemBrushes.Brush(ColorOf(name, dark), role);
 
     // The registry's dark dictionary is "Default" (the brand is dark-first).
     private static Color ColorOf(string name, bool dark) => Colors.Value[dark ? "Default" : "Light"]["Fanous" + name + "Color"];
@@ -85,7 +89,7 @@ internal static class ViewerTheme
     public static (int Parts, string Wrong) Check(Panel root, bool dark)
     {
         var parts = 0;
-        var high = new global::Windows.UI.ViewManagement.AccessibilitySettings().HighContrast;
+        var high = SystemBrushes.IsHighContrast;
         var page = (root.Background as SolidColorBrush)?.Color ?? default;
         var wrong = new List<string>();
         void Is(string part, Brush? brush, string name)
