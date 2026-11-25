@@ -113,14 +113,15 @@ public static class UploadPlanner
     /// <summary>
     /// Applies the defaults to each file in order. Scheduled times step by the interval when
     /// <paramref name="stepSchedule"/> (bulk scheduling, GET /api/me/features <c>bulkSchedule</c>); otherwise every
-    /// scheduled file publishes at the chosen time.
+    /// scheduled file publishes at the chosen time. One that is too soon is as soon as it may be when
+    /// <paramref name="movePast"/> (a watched folder, where nobody chooses another).
     /// </summary>
-    public static IReadOnlyList<PlannedUpload> Plan(IReadOnlyList<string> files, UploadDefaults d, DateTimeOffset now, bool stepSchedule = true)
+    public static IReadOnlyList<PlannedUpload> Plan(IReadOnlyList<string> files, UploadDefaults d, DateTimeOffset now, bool stepSchedule = true, bool movePast = false)
     {
         var step = stepSchedule ? d.ScheduleInterval : TimeSpan.Zero;
         var plans = new List<PlannedUpload>(files.Count);
         var start = d.ScheduleStart ?? now.AddHours(1);
-        if (start < now) start = now.AddMinutes(5);
+        if (movePast && SchedulePick.IsSoon(start, now)) start = now + SchedulePick.Lead;
         for (var i = 0; i < files.Count; i++)
         {
             var f = files[i];

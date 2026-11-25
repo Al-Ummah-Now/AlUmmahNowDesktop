@@ -48,10 +48,12 @@ public sealed class UploadPlannerTests
     }
 
     [Fact]
-    public void ASchedulePutInThePastStartsSoon()
+    public void AWatchedFolderStartsSoonWhenItsScheduleHasPassed()
     {
         var d = new UploadDefaults { Visibility = UploadVisibility.Scheduled, ScheduleStart = Now.AddDays(-1) };
-        Assert.Equal(Now.AddMinutes(5), UploadPlanner.Plan(new[] { "/a.mp4" }, d, Now)[0].PublishAt);
+        Assert.Equal(Now.AddMinutes(15), UploadPlanner.Plan(new[] { "/a.mp4" }, d, Now, movePast: true)[0].PublishAt);
+        // In the list it is what was chosen: the form says that it is too soon
+        Assert.Equal(Now.AddDays(-1), UploadPlanner.Plan(new[] { "/a.mp4" }, d, Now)[0].PublishAt);
         Assert.Null(UploadPlanner.Plan(new[] { "/a.mp4" }, new UploadDefaults { Visibility = UploadVisibility.Public }, Now)[0].PublishAt);
     }
 

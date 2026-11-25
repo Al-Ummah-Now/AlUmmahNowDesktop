@@ -198,6 +198,15 @@ public static class Ui
         return widget;
     }
 
+    /// <summary>What a screen reader calls the control, where its text alone does not say it ("22").</summary>
+    public static void Say(Gtk.Widget widget, string name)
+    {
+        var values = new[] { new GObject.Value(name) };
+        using var handle = GObject.Internal.ValueArray2OwnedHandle.Create(values);
+        Gtk.Internal.Accessible.UpdateProperty(widget.Handle.DangerousGetHandle(), 1, new[] { Gtk.AccessibleProperty.Label }, handle);
+        GC.KeepAlive(values);
+    }
+
     /// <summary>The same, with the label above the control (narrow cards).</summary>
     public static Gtk.Box LabelledAbove(string text, Gtk.Widget control)
     {

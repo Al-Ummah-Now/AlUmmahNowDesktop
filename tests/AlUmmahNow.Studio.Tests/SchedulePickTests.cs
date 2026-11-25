@@ -49,6 +49,24 @@ public sealed class SchedulePickTests
     }
 
     [Fact]
+    public void Nothing_is_planned_later_than_a_year()
+    {
+        var pick = Tomorrow();
+        for (var i = 0; i < 12; i++) pick.Next();
+        Assert.Equal(new DateTime(2027, 11, 1), pick.Month);
+        Assert.Equal(new DateTime(2027, 11, 20), pick.Days.Last(d => d.IsEnabled).Date);
+        Assert.False(pick.CanGoNext);
+        pick.Next();
+        Assert.Equal(new DateTime(2027, 11, 1), pick.Month);
+        pick.Back();
+        Assert.True(pick.CanGoNext);
+        // On the first of a month, the month a year later has no day of its own left
+        var first = new SchedulePick(new Localizer("en", NewYork), Now, () => new DateTimeOffset(2026, 12, 1, 17, 0, 0, TimeSpan.Zero), NewYork);
+        for (var i = 0; i < 20; i++) first.Next();
+        Assert.Equal(new DateTime(2027, 11, 1), first.Month);
+    }
+
+    [Fact]
     public void The_parts_make_the_time()
     {
         var pick = Tomorrow();
@@ -75,8 +93,15 @@ public sealed class SchedulePickTests
         Assert.Contains(7, pick.Minutes);
         Assert.Equal(13, pick.Minutes.Count);
         pick.Minute = 10;
-        Assert.Equal(12, pick.Minutes.Count);
+        Assert.Equal(10, pick.Minute);
+        // The list one picks from does not change under them
+        Assert.Contains(7, pick.Minutes);
     }
+
+    [Fact]
+    public void A_schedule_begins_with_tomorrow_morning() =>
+        // 12:30 AM on November 22 there, and still November 21 elsewhere
+        Assert.Equal(new DateTimeOffset(2026, 11, 23, 9, 0, 0, TimeSpan.FromHours(-5)), SchedulePick.TomorrowMorning(new DateTimeOffset(2026, 11, 21, 21, 30, 0, TimeSpan.FromHours(-8)), NewYork));
 
     [Fact]
     public void A_quarter_of_an_hour_is_needed()

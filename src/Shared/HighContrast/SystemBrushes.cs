@@ -95,6 +95,8 @@ internal static class SystemBrushes
             d["AccentButtonBackground" + state] = B(HighContrastRole.Highlight);
             d["AccentButtonForeground" + state] = B(HighContrastRole.HighlightText);
             d["AccentButtonBorderBrush" + state] = B(HighContrastRole.Text);
+            d["ToggleButtonBackgroundChecked" + state] = B(HighContrastRole.Highlight);
+            d["ToggleButtonForegroundChecked" + state] = B(HighContrastRole.HighlightText);
             foreach (var on in new[] { "Checked", "Indeterminate" })
             {
                 d["CheckBoxCheckBackgroundFill" + on + state] = B(HighContrastRole.Highlight);

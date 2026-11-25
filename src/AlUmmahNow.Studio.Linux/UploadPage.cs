@@ -31,7 +31,8 @@ public sealed class UploadPage
     private readonly Gtk.Label _watching = Ui.Label("", dim: true);
     private readonly Gtk.Button _stopWatching;
     private readonly Gtk.Box _playlists = Gtk.Box.New(Gtk.Orientation.Vertical, 4);
-    private readonly Gtk.Entry _scheduleStart = Gtk.Entry.New();
+    private SchedulePick? _pick;
+    private SchedulePicker? _picker;
     private readonly Gtk.SpinButton _scheduleEvery = Gtk.SpinButton.NewWithRange(0, 24 * 30, 1);
     private readonly Gtk.Box _scheduleRow = Gtk.Box.New(Gtk.Orientation.Vertical, 6);
     private readonly Gtk.CheckButton _recursive;
@@ -142,6 +143,10 @@ public sealed class UploadPage
             switch (e.PropertyName)
             {
                 case nameof(UploadsViewModel.Staged): RenderStaged(); break;
+                case nameof(UploadsViewModel.CanStart):
+                    RenderStaged();
+                    _picker?.Render();
+                    break;
                 case nameof(UploadsViewModel.Items): RenderQueue(); break;
                 case nameof(UploadsViewModel.Playlists): RenderPlaylists(); break;
                 case nameof(UploadsViewModel.ErrorKey):
@@ -168,8 +173,29 @@ public sealed class UploadPage
     /// <summary>CI screenshots: "scheduled" picks Scheduled, showing the schedule fields.</summary>
     public void RunScene(string scene)
     {
-        if (scene == "scheduled") _visibility?.SetSelected(2);
+        _visibility?.SetSelected(2);
+        // "schedulesoon": today at 12 AM, which is past
+        if (scene.StartsWith("schedulesoon", StringComparison.Ordinal) && _pick != null)
+        {
+            _pick.Pick(_vm.Now.ToLocalTime().Date);
+            _pick.Hour = 0;
+        }
+
+        // Not before the row that the month opens from has its place
+        if (scene.EndsWith("pick", StringComparison.Ordinal)) GLib.Functions.TimeoutAdd(0, 500, () =>
+        {
+            _picker?.Open();
+            return false;
+        });
     }
+
+    /// <summary>CI's scenarios: what the field shows is what the scene is of.</summary>
+    public bool ScheduleIs(string scene) => scene switch
+    {
+        "schedulepick" => _picker is { IsOpen: true } && _vm.CanStart,
+        "schedulesoon" or "schedulesoonpick" => _pick is { IsTooSoon: true } && !_vm.CanStart && !_start.GetSensitive() && (scene == "schedulesoon" || _picker is { IsOpen: true }),
+        _ => true,
+    };
 
     /// <summary>CI screenshots: what the hours stepper shows, so an empty field fails the log, not just the eye.</summary>
     public string ScheduleEveryText => _scheduleEvery.GetText();
@@ -270,38 +296,13 @@ public sealed class UploadPage
         Add(_l["studio.upload.visibility"], visibility);
 
         D.TimeZone = Formats.LocalTimeZone();
-        D.ScheduleStart ??= _vm.Now.Date.AddDays(1).AddHours(9);
-        // Prefilled in the UI's digits (٠–٩ in Arabic); typed digits of either kind read back.
-        // The field reads left to right in Arabic too.
-        _scheduleStart.SetDirection(Gtk.TextDirection.Ltr);
-        _scheduleStart.SetText(_l.InputLeftToRight(Formats.ToLocalInput(D.ScheduleStart.Value)));
-        var scheduleError = Ui.Label("");
-        scheduleError.AddCssClass("error");
-        scheduleError.SetVisible(false); // A blank label still takes the row spacing.
-        _scheduleStart.OnChanged += (_, _) =>
+        D.ScheduleStart ??= SchedulePick.TomorrowMorning(_vm.Now);
+        _pick = new SchedulePick(_l, D.ScheduleStart.Value, () => _vm.Now);
+        _picker = new SchedulePicker(_l, _pick, () =>
         {
-            if (_l.InputLeftToRight(_scheduleStart.GetText()) != _scheduleStart.GetText())
-            {
-                // Not inside the change itself: the entry still moves its cursor
-                GLib.Functions.IdleAdd(0, () =>
-                {
-                    var typed = _scheduleStart.GetText();
-                    var kept = _l.InputLeftToRight(typed);
-                    if (kept == typed) return false;
-                    var at = _scheduleStart.GetPosition() + kept.Length - typed.Length;
-                    _scheduleStart.SetText(kept);
-                    _scheduleStart.SetPosition(Math.Clamp(at, 0, kept.Length));
-                    return false;
-                });
-            }
-
-            var t = Formats.ParseLocal(Localizer.NormalizeDigits(_scheduleStart.GetText()));
-            scheduleError.SetText(t == null ? _l["studio.upload.scheduleInvalid"] : "");
-            scheduleError.SetVisible(t == null);
-            if (t == null) return;
-            D.ScheduleStart = t;
+            D.ScheduleStart = _pick.Value;
             _vm.ApplyDefaults();
-        };
+        });
         // The hours show in the UI's digits; typed ٠–٩ are read back (GTK's own parser only knows 0–9).
         _scheduleEvery.SetUpdatePolicy(Gtk.SpinButtonUpdatePolicy.IfValid);
         _scheduleEvery.OnOutput += (spin, _) =>
@@ -330,8 +331,7 @@ public sealed class UploadPage
             _vm.ApplyDefaults();
         };
         // Labels above the fields, as the rest of the form: the card keeps its width.
-        _scheduleRow.Append(Ui.LabelledAbove(_l["studio.upload.scheduleStart"], _scheduleStart));
-        _scheduleRow.Append(scheduleError);
+        _scheduleRow.Append(_picker.Root);
         // "Every … hours" across a batch is bulk scheduling: hidden when bulkSchedule is off.
         var every = Ui.LabelledAbove(_l["studio.upload.scheduleEvery"], _scheduleEvery);
         every.SetVisible(_vm.BulkScheduleOn);

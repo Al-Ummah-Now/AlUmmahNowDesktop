@@ -262,7 +262,7 @@ public sealed partial class App : Application
                 else if (act == "signout") window.AskSignOut();
                 else if (act == "searchfocus") window.FocusSearch();
                 else if (act == "addpasskey") _ = window.AddPasskeyAsync();
-                else if (act == "scheduled") uploads.RunScene(act);
+                else if (act is "scheduled" or "schedulepick" or "schedulesoon" or "schedulesoonpick") uploads.RunScene(act);
                 else if (act == "active") AlUmmahNow.Studio.Demo.DemoEncodeBackend.Seed(encode, Path.GetTempPath());
                 // The demo's second channel has no videos: the Videos empty state.
                 else if (act == "emptychannel") shell.SelectChannel(shell.Channels.ElementAtOrDefault(1));
@@ -298,12 +298,13 @@ public sealed partial class App : Application
                     && (automation != "shell" || updateViews.IsForced || look.Avatars > 0) && (demo || look.Pictures > 0)
                     && (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("AUN_DEMO_THUMBS")) || pages.Current is not (StudioPages.Videos or StudioPages.Analytics) || look.Pictures > 0)
                     && (!scene.StartsWith("highcontrast", StringComparison.Ordinal) || (LanternGlass.IsHighContrast && looked > 0))
-                    && (act is not ("edit" or "bulk" or "delete" or "channels") || !LanternGlass.IsHighContrast || window.HasPopup);
+                    && uploads.ScheduleIs(act)
+                    && (act is not ("edit" or "bulk" or "delete" or "channels" or "schedulepick" or "schedulesoonpick") || !LanternGlass.IsHighContrast || window.HasPopup);
                 var updateWrong = updateScene?.Wrong(updateViews);
                 if (updateWrong == null && updateScene != null && !updateViews.IsPainted) updateWrong = "not the system's colors";
                 pass = pass && updateWrong == null;
                 var updateLine = updateScene == null ? "" : $" update={updateScene.Name}:{updateWrong ?? "ok"}";
-                File.WriteAllText(ResultPath, $"AUTOMATION {tabName} page={pages.Current} upload={pages.IsVisible(StudioPages.Uploads)} analytics={pages.IsVisible(StudioPages.Analytics)} bulkSchedule={uploadsVm.BulkScheduleOn} scene={scene}{updateLine} shell={shell.State} channel={shell.ActiveChannel?.Id} accounts={shell.AccountList.Count} uploads={snapshot.Count} uploadsDone={uploadsDone} encode={job?.Status} encoder={job?.UsedEncoder?.Name} error={job?.Error} searchFocused={window.SearchHasFocus} fieldFocused={window.FieldHasFocus} cardsWhole={videos.CardsAreWhole} searchHovered={window.SearchIsHovered} pickedReadable={analytics.PickedIsReadable} pickedHovered={analytics.PickedIsHovered} chartSeen={analytics.ChartIsSeen} cutOff='{cutOff}' pictures={look.Pictures} mirrored={look.Mirrored} avatars={look.Avatars} avatarPictures={look.AvatarPictures} unreadableInitials={look.Unreadable} looked={looked} strays='{strays}' highContrast={LanternGlass.IsHighContrast} painted={LanternGlass.IsPainted} missing={LanternGlass.Missing} unreadableDialogs={LanternGlass.UnreadableDialogs} checkedDialogs={LanternGlass.CheckedDialogs} deletedShown={videos.DeletedIsShown} RESULT {(pass ? "PASS" : "FAIL")}");
+                File.WriteAllText(ResultPath, $"AUTOMATION {tabName} page={pages.Current} upload={pages.IsVisible(StudioPages.Uploads)} analytics={pages.IsVisible(StudioPages.Analytics)} bulkSchedule={uploadsVm.BulkScheduleOn} scene={scene}{updateLine} shell={shell.State} channel={shell.ActiveChannel?.Id} accounts={shell.AccountList.Count} uploads={snapshot.Count} uploadsDone={uploadsDone} encode={job?.Status} encoder={job?.UsedEncoder?.Name} error={job?.Error} searchFocused={window.SearchHasFocus} fieldFocused={window.FieldHasFocus} cardsWhole={videos.CardsAreWhole} searchHovered={window.SearchIsHovered} pickedReadable={analytics.PickedIsReadable} pickedHovered={analytics.PickedIsHovered} chartSeen={analytics.ChartIsSeen} schedule={uploads.ScheduleIs(act)} cutOff='{cutOff}' pictures={look.Pictures} mirrored={look.Mirrored} avatars={look.Avatars} avatarPictures={look.AvatarPictures} unreadableInitials={look.Unreadable} looked={looked} strays='{strays}' highContrast={LanternGlass.IsHighContrast} painted={LanternGlass.IsPainted} missing={LanternGlass.Missing} unreadableDialogs={LanternGlass.UnreadableDialogs} checkedDialogs={LanternGlass.CheckedDialogs} deletedShown={videos.DeletedIsShown} RESULT {(pass ? "PASS" : "FAIL")}");
                 Exit();
             };
             _endTimer.Start();

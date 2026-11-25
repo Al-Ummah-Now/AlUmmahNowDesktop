@@ -160,7 +160,8 @@ jobs:
             export AUN_STAGE_DIR=$PWD/staged-$lang
             shot uploads "" $lang $theme 1440x900; shot uploads channels $lang $theme 1440x900
             shot uploads "" $lang $theme 1920x1080; shot uploads "" $lang $theme 1024x700
-            shot uploads scheduled $lang $theme 1440x900
+            shot uploads scheduled $lang $theme 1440x900; shot uploads schedulepick $lang $theme 1440x900; shot uploads schedulesoon $lang $theme 1440x900
+            shot uploads schedulesoonpick $lang $theme 1440x900; shot uploads schedulepick $lang $theme 1024x700
             shot videos "" $lang $theme 1440x900; shot videos bulk $lang $theme 1440x900; shot videos selected $lang $theme 1440x900
             # The narrow window (icon rail) at full-page height for the scrolling pages, so no card or chart is cut off.
             shot videos "" $lang $theme 1920x1080; shot videos "" $lang $theme 1024x1180
@@ -173,13 +174,16 @@ jobs:
             shot encode active $lang $theme 1440x900
             shot videos deleted $lang $theme 1440x900; shot videos deleted-open $lang $theme 1440x900
             shot videos searchfocus $lang $theme 1440x900
-            n=$((n+23))
+            n=$((n+27))
           done; done
           for lang in en ar; do shot videos search $lang dark 1440x900; shot videos edit $lang dark 1440x900; shot videos delete $lang dark 1440x900; n=$((n+3)); done
           grep -h AUTOMATION artifacts/review/*.log
           test "$(cat artifacts/review/*.log | grep -c 'RESULT PASS')" = $n
           # The narrow window has the rail, with each icon in the middle of its row.
           for f in artifacts/review/*1024x*.log; do grep -q "rail=True railCentered=True" "$f" || { echo "no centered rail: $f"; exit 1; }; done
+          # The time the first video publishes at and the days of its month are named, in the language and its digits.
+          for t in "First video publishes" "Sunday, November 22, 2026" "Previous month" "combo box	Hour" "combo box	Minute" "combo box	AM or PM"; do grep -F "$t" artifacts/review/linux-uploads-schedulepick-en-light-1440x900.atspi.txt; done
+          for t in "يُنشر أول مرئي في" "الأحد، ٢٢ نوفمبر ٢٠٢٦" "الشهر السابق" "combo box	الساعة" "combo box	الدقيقة" "combo box	صباحًا أو مساءً"; do grep -F "$t" artifacts/review/linux-uploads-schedulepick-ar-light-1440x900.atspi.txt; done
           # Days in US order, as on the web.
           grep -F "from Oct 25 to Nov 21" artifacts/review/linux-analytics-closed-en-light-1440x900.atspi.txt
           # The chart's 28 bars are seen on the light card: their edges, across the row above the axis.
