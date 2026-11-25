@@ -320,11 +320,19 @@ internal static class LanternGlass
         foreach (var state in new[] { "", "PointerOver", "Pressed" }) dialog.Resources["AccentButtonForeground" + state] = onGold;
         dialog.Opened += (d, _) =>
         {
-            if (DefaultButton(d) is not { } button) return;
+            if (d.DefaultButton == ContentDialogButton.None) return;
+            if (DefaultButton(d) is not { } button)
+            {
+                UnreadableDialogs++;
+                return;
+            }
+
             button.Foreground = onGold;
             d.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
             {
-                if (!IsHighContrast && button.Foreground is SolidColorBrush b && Presenter(button)?.Foreground is SolidColorBrush shown && shown.Color != b.Color) UnreadableDialogs++;
+                CheckedDialogs++;
+                // What cannot be read is counted: it is not known to be drawn in ours
+                if (!IsHighContrast && (onGold is not SolidColorBrush ours || Presenter(button)?.Foreground is not SolidColorBrush shown || shown.Color != ours.Color)) UnreadableDialogs++;
             });
         };
         return dialog;
@@ -332,6 +340,9 @@ internal static class LanternGlass
 
     /// <summary>Dialogs whose default button was not drawn in the text color for gold (CI's scenarios ask).</summary>
     public static int UnreadableDialogs { get; private set; }
+
+    /// <summary>Dialogs whose default button was looked at.</summary>
+    public static int CheckedDialogs { get; private set; }
 
     private static Button? DefaultButton(ContentDialog dialog) => dialog.DefaultButton switch
     {

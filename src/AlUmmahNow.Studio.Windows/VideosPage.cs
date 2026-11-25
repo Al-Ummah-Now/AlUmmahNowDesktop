@@ -47,6 +47,9 @@ internal sealed class VideosPage
     private readonly ComboBox _filter;
     private readonly List<(FrameworkElement Card, FrameworkElement Footer)> _cards = new();
     private FrameworkElement? _deletedCard;
+
+    // Held in a field: a DispatcherQueueTimer referenced only locally can be garbage collected
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _sceneTimer;
     private readonly MenuFlyout _playlistMenu = new();
 
     /// <summary>The title-bar search: show this text in the search box and search for it.</summary>
@@ -253,12 +256,26 @@ internal sealed class VideosPage
             case "deleted-open":
                 _deletedExpander.IsExpanded = scene == "deleted-open";
                 // To the end of the page, once it has opened
-                var opened = _list.DispatcherQueue.CreateTimer();
-                opened.Interval = TimeSpan.FromMilliseconds(1500);
-                opened.IsRepeating = false;
-                opened.Tick += (_, _) => _deletedCard?.StartBringIntoView(new BringIntoViewOptions { VerticalAlignmentRatio = 1, AnimationDesired = false });
-                opened.Start();
+                _sceneTimer = _list.DispatcherQueue.CreateTimer();
+                _sceneTimer.Interval = TimeSpan.FromMilliseconds(1500);
+                _sceneTimer.IsRepeating = false;
+                _sceneTimer.Tick += (_, _) => _deletedCard?.StartBringIntoView(new BringIntoViewOptions { VerticalAlignmentRatio = 1, AnimationDesired = false });
+                _sceneTimer.Start();
                 break;
+        }
+    }
+
+    /// <summary>CI: the page is scrolled to the whole of the deleted videos' card.</summary>
+    public bool DeletedIsShown
+    {
+        get
+        {
+            if (_deletedCard is not { Visibility: Visibility.Visible, ActualHeight: > 0 } card) return false;
+            DependencyObject? parent = card;
+            while (parent is not (null or ScrollViewer)) parent = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(parent);
+            if (parent is not ScrollViewer scroll || (scroll.ScrollableHeight > 0 && scroll.VerticalOffset <= 0)) return false;
+            var top = card.TransformToVisual(scroll).TransformPoint(new global::Windows.Foundation.Point(0, 0)).Y;
+            return top >= 0 && top + card.ActualHeight <= scroll.ViewportHeight + 1;
         }
     }
 
