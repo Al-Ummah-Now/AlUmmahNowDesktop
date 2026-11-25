@@ -59,6 +59,7 @@ internal sealed class SchedulePicker
         {
             var name = Ui.Label(weekdays[i].Label, dim: true, start: false);
             name.AddCssClass("caption");
+            name.AddCssClass("schedule-weekday");
             name.SetXalign(0.5f);
             name.SetWrap(false);
             Ui.Say(name, weekdays[i].Name);
