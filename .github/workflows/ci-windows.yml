@@ -43,6 +43,15 @@ jobs:
           ./scripts/windows-scenario.ps1 $exe ar dark "watch:$video" watch-ar-dark $out
           ./scripts/windows-scenario.ps1 $exe en light "watch:$video" watch-en-light $out
           Get-Content artifacts/windows/*.txt
+      - name: A scenario that wrote an exception has not passed
+        shell: pwsh
+        run: |
+          $f = Join-Path $env:RUNNER_TEMP "scenario.txt"
+          "AUTOMATION home RESULT PASS" | Set-Content $f
+          if (-not ("$(./scripts/windows-result.ps1 $f)" -match "RESULT PASS")) { throw "a passed scenario was not shown as passed" }
+          "theme: System.Exception" | Set-Content "$f.crash.txt"
+          ./scripts/windows-result.ps1 $f
+          if (Select-String -Quiet "RESULT PASS" $f) { throw "a crashed scenario passed" }
       - name: Check scenario results and clean exit
         shell: pwsh
         run: |
