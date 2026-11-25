@@ -118,7 +118,7 @@ namespace AlUmmahNow.App.Updates
         public const int MaxDismissed = 10;
 
         private static readonly Logger Logger = Log.For("updates");
-        private static readonly Regex VersionShape = new Regex(@"\A[0-9]{1,6}(\.[0-9]{1,6}){2,3}(-[0-9A-Za-z.]{1,24})?\z", RegexOptions.CultureInvariant);
+        private static readonly Regex VersionShape = new Regex(@"\A[0-9]{1,6}(\.[0-9]{1,6}){2,3}(-[0-9A-Za-z.]{1,40})?\z", RegexOptions.CultureInvariant);
 
         private readonly IUpdateChecker _checker;
         private readonly UpdateStore _store;
@@ -155,6 +155,8 @@ namespace AlUmmahNow.App.Updates
             _checker = checker;
             _store = store;
             _memory = store.Load();
+            // What the core learns of a manifest is kept before anything else is done with it
+            checker.Checked += Keep;
             _memory.Enabled |= wasEnabled;
             Install = install;
             InstalledVersion = installedVersion;
@@ -388,7 +390,19 @@ namespace AlUmmahNow.App.Updates
 
         private async Task StageAsync()
         {
-            var (tag, version) = (_answer.Tag!, _answer.Version!);
+            while (true)
+            {
+                var tag = _answer.Tag!;
+                await StageAsync(tag, _answer.Version!);
+                // Another release was offered meanwhile: that one now, not at the next check
+                if (_answer.Tag == tag || !Installs || _stop.IsCancellationRequested) return;
+                if (!_isAsked && !(InstallsAutomatically && _answer.Kind == UpdatePromptKind.Notice)) return;
+                _tag = _answer.Tag;
+            }
+        }
+
+        private async Task StageAsync(string tag, string version)
+        {
             _step = UpdateStep.Downloading;
             _progress = 0;
             Show();
@@ -557,10 +571,14 @@ namespace AlUmmahNow.App.Updates
         public void Dismiss()
         {
             if (!View.CanClose || View.Version is not { } version) return;
-            var dismissed = _memory.Dismissed ??= new List<string>();
-            dismissed.Remove(version);
-            dismissed.Add(version);
-            if (dismissed.Count > MaxDismissed) dismissed.RemoveRange(0, dismissed.Count - MaxDismissed);
+            lock (_memory)
+            {
+                var dismissed = _memory.Dismissed ??= new List<string>();
+                dismissed.Remove(version);
+                dismissed.Add(version);
+                if (dismissed.Count > MaxDismissed) dismissed.RemoveRange(0, dismissed.Count - MaxDismissed);
+            }
+
             Keep();
             View = UpdateView.None;
         }
@@ -608,8 +626,12 @@ namespace AlUmmahNow.App.Updates
 
         private void Keep()
         {
-            _memory.Core = _checker.State();
-            if (!_store.Save(_memory)) Logger.Warn("the update state could not be saved");
+            // Also from a download's own thread
+            lock (_memory)
+            {
+                _memory.Core = _checker.State();
+                if (!_store.Save(_memory)) Logger.Warn("the update state could not be saved");
+            }
         }
 
         /// <summary>A version as ours are, else null: nothing else of the network's is shown as one.</summary>

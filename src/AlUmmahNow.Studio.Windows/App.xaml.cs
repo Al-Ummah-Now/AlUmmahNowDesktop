@@ -194,7 +194,7 @@ public sealed partial class App : Application
         var updates = updateScene?.Service ?? WindowsInstall.Service("studio", environment.VideosApi, version, userAgent, dataRoot, updateStore, demo, IsBusy, () => window.Window.Close());
         var updateViews = new UpdateViews(updates, new UpdateText(localizer, UpdateApp.Studio, updates), UpdateText.Icon(UpdateApp.Studio), () => window.Window.Close());
         window.UseUpdates(updateViews);
-        var settingsPage = new SettingsPage(localizer, settings, settingsStore, shell, uploadsVm, PickFolderAsync, window.SignOut, window.AddPasskeyAsync, updates.InstalledVersion, updateViews);
+        var settingsPage = new SettingsPage(localizer, settings, settingsStore, shell, uploadsVm, PickFolderAsync, window.SignOut, window.AddPasskeyAsync, updates.InstalledVersion, updateViews, () => window.Window.Close());
         window.AddPage(StudioPages.Settings, localizer["studio.tab.settings"], Symbol.Setting, settingsPage.Root);
         window.UsePages(pages);
         window.SearchRequested += (_, q) => videos.SearchFor(q);

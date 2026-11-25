@@ -1,6 +1,4 @@
 #if !AUN_STORE
-using System.ComponentModel;
-using System.Diagnostics;
 using System.Security.Cryptography;
 using AlUmmahNow.CoreBridge;
 using AlUmmahNow.CoreBridge.Logging;
@@ -21,6 +19,7 @@ internal sealed class VelopackInstaller : IPackageInstaller
 {
     private static readonly Logger Logger = Log.For("updates");
 
+    private static readonly InstallGuard? Guard = InstallGuard.ForThisProcess();
     private readonly UpdateManager _manager;
     private readonly string _folder;
     private readonly Action _exit;
@@ -89,34 +88,8 @@ internal sealed class VelopackInstaller : IPackageInstaller
 
     public bool IsOpenElsewhere => IsRunningTwice();
 
-    /// <summary>
-    /// The updater ends every process of the folder before it replaces it. One that cannot be looked at counts.
-    /// </summary>
-    private static bool IsRunningTwice()
-    {
-        var path = Environment.ProcessPath ?? "";
-        foreach (var process in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(path)))
-        {
-            using (process)
-            {
-                if (process.Id == Environment.ProcessId) continue;
-                try
-                {
-                    if (string.Equals(process.MainModule?.FileName, path, StringComparison.OrdinalIgnoreCase)) return true;
-                }
-                catch (InvalidOperationException)
-                {
-                    // It has ended
-                }
-                catch (Win32Exception)
-                {
-                    return true;
-                }
-            }
-        }
-
-        return false;
-    }
+    /// <summary>One that cannot be told is one.</summary>
+    private static bool IsRunningTwice() => Guard?.OtherCopyRunning() != false;
 
     /// <summary>
     /// As the app closes, never earlier: the updater waits 60 seconds for it. If it cannot run, the next start clears the
@@ -131,7 +104,7 @@ internal sealed class VelopackInstaller : IPackageInstaller
     public void ApplyAndRestart()
     {
         if (_info is not { } info) throw new InvalidOperationException("nothing is staged");
-        _manager.WaitExitThenApplyUpdates(info.TargetFullRelease, silent: false, restart: true);
+        _manager.WaitExitThenApplyUpdates(info.TargetFullRelease, silent: false, restart: true, restartArgs: new[] { AppStart.AfterUpdate });
         _exit();
     }
 

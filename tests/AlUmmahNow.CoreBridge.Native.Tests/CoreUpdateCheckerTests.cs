@@ -113,6 +113,7 @@ public sealed class CoreUpdateCheckerTests
     [Theory]
     [InlineData("install", true, "v1.5.0", true)]
     [InlineData("install", true, "v1.5.0-preview.3", true)]
+    [InlineData("install", true, "v1.5.0-preview.with.a.long.name.20261125", true)]
     [InlineData("install", false, "v1.5.0", false)]
     [InlineData("download", true, "v1.5.0", false)]
     [InlineData("notice", true, "v1.5.0", false)]
@@ -134,6 +135,10 @@ public sealed class CoreUpdateCheckerTests
     [InlineData("{}", true)]
     public async Task The_admins_default_is_on_unless_it_is_off(string config, bool byDefault) =>
         Assert.Equal(byDefault, (await Checker(Answer("recommended", "download", "1.5.0").Replace("\"config\":{}", "\"config\":" + config)).CheckAsync()).InstallsByDefault);
+
+    [Fact]
+    public async Task The_admins_default_is_read_also_when_nothing_is_offered() =>
+        Assert.False((await Checker(Answer("ok", "none", null).Replace("\"config\":{}", "\"config\":{\"updates.autoInstallDefault\":false}")).CheckAsync()).InstallsByDefault);
 
     /// <summary>Through the real core: an address elsewhere, and a manifest that no trusted key signed, are refused.</summary>
     [Fact]

@@ -16,6 +16,12 @@ public sealed class UpdateTests
         public UpdatePromptKind Known;
         public int Checks;
 
+        public event Action? Checked
+        {
+            add { }
+            remove { }
+        }
+
         public Task<UpdateAnswer> CheckAsync(CancellationToken cancellationToken = default)
         {
             Checks++;

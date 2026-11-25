@@ -13,13 +13,25 @@ public sealed class SelfUpdateTests
         public UpdateAnswer Next = new() { Enabled = true };
         public Task<UpdateAnswer> CheckAsync(CancellationToken cancellationToken = default) => Task.FromResult(Next);
         public UpdatePromptKind LastKnown() => UpdatePromptKind.None;
-        public string State() => "";
+        public string Learned = "";
+        public event Action? Checked;
+        public string State() => Learned;
+
+        /// <summary>A manifest was checked, and the core learned of it.</summary>
+        public void Learn(string what)
+        {
+            Learned = what;
+            Checked?.Invoke();
+        }
     }
 
     private sealed class Self : ISelfUpdate
     {
         public TaskCompletionSource? Gate;
         public Exception? Breaks, StagedBreaks, ApplyBreaks;
+        public string? BreaksOnly;
+        public Action? Checks;
+        public Action? OnApply;
         public int Verified, Staged, Discarded, OnExit, Restarts;
         public string NotesEn = "signed notes", Version = "1.5.0";
         public List<string> Reports = new();
@@ -27,29 +39,38 @@ public sealed class SelfUpdateTests
         public Task<VerifiedUpdate> VerifyAsync(string tag, string version, CancellationToken cancellationToken = default)
         {
             Verified++;
+            Checks?.Invoke();
             return Breaks == null ? Task.FromResult(new VerifiedUpdate(Version, tag, NotesEn, "ملاحظات")) : Task.FromException<VerifiedUpdate>(Breaks);
         }
 
         public async Task<VerifiedUpdate> StageAsync(string tag, string version, IProgress<double>? progress, CancellationToken cancellationToken = default)
         {
             Staged++;
+            Checks?.Invoke();
             progress?.Report(0.42);
             if (Gate != null) await Gate.Task;
-            if (Breaks != null) throw Breaks;
+            if (Breaks != null && (BreaksOnly == null || BreaksOnly == tag)) throw Breaks;
             return new VerifiedUpdate(Version, tag, NotesEn, "ملاحظات");
         }
 
         public void VerifyStaged()
         {
+            Checks?.Invoke();
             if (StagedBreaks != null) throw StagedBreaks;
         }
 
         public void Discard() => Discarded++;
         public bool IsOpenElsewhere { get; set; }
-        public void ApplyOnExit() => OnExit++;
+        public void ApplyOnExit()
+        {
+            OnApply?.Invoke();
+            OnExit++;
+        }
+
 
         public void ApplyAndRestart()
         {
+            OnApply?.Invoke();
             if (ApplyBreaks != null) throw ApplyBreaks;
             Restarts++;
         }
@@ -361,8 +382,11 @@ public sealed class SelfUpdateTests
         Offers(version: "1.5.1", byDefault: false);
         await service.CheckAsync();
         _self.Breaks = new UpdateRefusedException("hash");
+        _self.BreaksOnly = "v1.5.0";
+        _self.Version = "1.5.1";
         _self.Gate.SetResult();
-        await Until(() => _self.Reports.Count == 1);
+        await Until(() => service.View.Step == UpdateStep.Ready);
+        Assert.Single(_self.Reports);
         Assert.Equal("v1.5.0 hash", _self.Reports[0]);
         Assert.Equal("1.5.1", service.View.Version);
         Assert.Equal(UpdateStage.Available, service.View.Stage);
@@ -400,6 +424,105 @@ public sealed class SelfUpdateTests
         Assert.Equal(UpdateStage.Required, service.View.Stage);
         service.OnExit();
         Assert.Equal(0, _self.OnExit);
+    }
+
+    /// <summary>Not at the next check, hours later.</summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task A_newer_release_during_the_download_is_staged_right_after_it(bool automatically)
+    {
+        Offers(byDefault: automatically);
+        _self.Gate = new TaskCompletionSource();
+        var service = Service();
+        await service.CheckAsync();
+        if (!automatically) service.Begin();
+        Offers(version: "1.5.1", byDefault: automatically);
+        await service.CheckAsync();
+        Assert.Equal(1, _self.Staged);
+        _self.Version = "1.5.1";
+        _self.Gate.SetResult();
+        await Until(() => service.View.Step == UpdateStep.Ready);
+        Assert.Equal(2, _self.Staged);
+        Assert.Equal("1.5.1", service.View.Version);
+        service.OnExit();
+        Assert.Equal(1, _self.OnExit);
+    }
+
+    [Fact]
+    public async Task A_newer_release_is_not_staged_when_the_choice_was_taken_back()
+    {
+        Offers();
+        _self.Gate = new TaskCompletionSource();
+        var service = Service();
+        await service.CheckAsync();
+        Offers(version: "1.5.1");
+        await service.CheckAsync();
+        service.InstallsAutomatically = false;
+        _self.Gate.SetResult();
+        await Task.Delay(50);
+        Assert.Equal(1, _self.Staged);
+    }
+
+    private string Kept() => new UpdateStore(_file).Load().Core ?? "";
+
+    /// <summary>The update state is saved after every check of a manifest: the app may end at any moment after it.</summary>
+    [Fact]
+    public async Task What_a_check_of_a_manifest_taught_is_kept_while_the_package_still_downloads()
+    {
+        Offers();
+        _self.Gate = new TaskCompletionSource();
+        _self.Checks = () => _checker.Learn("1.5.0 was seen");
+        var service = Service();
+        await service.CheckAsync();
+        Assert.Equal(1, _self.Staged);
+        Assert.Equal("1.5.0 was seen", Kept());
+        _self.Breaks = new UpdateCheckFailedException("offline");
+        _self.Gate.SetResult();
+        await Task.Delay(50);
+        Assert.Equal("1.5.0 was seen", Kept());
+
+        // Started again: the core gets it
+        Assert.Equal("1.5.0 was seen", new UpdateStore(_file).Load().Core);
+    }
+
+    [Theory]
+    [InlineData("required")]
+    [InlineData("exit")]
+    [InlineData("restart")]
+    public async Task What_a_check_taught_is_kept_before_anything_else_is_done_with_it(string how)
+    {
+        Offers(how == "required" ? UpdatePromptKind.Forced : UpdatePromptKind.Notice);
+        var service = Service();
+        if (how == "required")
+        {
+            _self.Checks = () => _checker.Learn("learned");
+            await service.CheckAsync();
+            Assert.Equal("learned", Kept());
+            return;
+        }
+
+        await service.CheckAsync();
+        Assert.Equal("", Kept());
+        _self.Checks = () => _checker.Learn("learned");
+        var atHandOver = "";
+        _self.OnApply = () => atHandOver = Kept();
+        if (how == "exit") service.OnExit();
+        else service.Begin();
+        Assert.Equal("learned", atHandOver);
+    }
+
+    [Fact]
+    public void The_state_is_replaced_in_one_step_and_leaves_nothing_beside_it()
+    {
+        var folder = Path.GetDirectoryName(_file)!;
+        var store = new UpdateStore(_file);
+        Assert.True(store.Save(new UpdateMemory { Core = "first" }));
+        // A leftover of another's does not matter, and two that save at once do not meet
+        File.WriteAllText(_file + ".tmp", "half");
+        Parallel.For(0, 40, i => new UpdateStore(_file).Save(new UpdateMemory { Core = "c" + i }));
+        Assert.StartsWith("c", store.Load().Core);
+        Assert.Equal(2, Directory.GetFiles(folder).Length);
     }
 
     [Fact]

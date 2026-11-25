@@ -68,6 +68,9 @@ namespace AlUmmahNow.CoreBridge
     /// <summary>Asks for the newest version and keeps what must outlive the app (aun-core's <c>UpdateChecker</c>).</summary>
     public interface IUpdateChecker
     {
+        /// <summary>A release's manifest was checked, so <see cref="State"/> may be another: it is to be kept now. On any thread.</summary>
+        event Action? Checked;
+
         /// <exception cref="UpdateCheckFailedException">Offline, or an unreadable answer.</exception>
         Task<UpdateAnswer> CheckAsync(CancellationToken cancellationToken = default);
 

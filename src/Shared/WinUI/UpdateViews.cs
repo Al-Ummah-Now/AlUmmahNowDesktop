@@ -266,7 +266,7 @@ internal sealed class UpdateViews : IUpdateViews, IDisposable
         _checkNow.IsEnabled = _service.Result != UpdateResult.Checking;
 
         if (v.IsBar) Announce(v.Stage + ":" + v.Version + ":" + v.Step + (v.IsBusy ? ":busy" : ""), _barText, _barText.Text);
-        else if (IsForced) Announce("forced" + v.Step, _forcedBody, v.Step == UpdateStep.None ? _text["updates.forced.title"] + " " + _forcedBody.Text : _forcedStep.Text);
+        else if (IsForced) Announce("forced" + v.Step + (v.IsBusy ? ":busy" : ""), _forcedBody, v.Step == UpdateStep.None ? _text["updates.forced.title"] + " " + _forcedBody.Text : _forcedStep.Text);
         // What Check now came to, for a person who cannot see it change
         if (_service.IsCheckAsked && _result.Text != told && _result.Text.Length > 0) Speak(_result, _result.Text);
     }
@@ -436,7 +436,7 @@ internal sealed class UpdateViews : IUpdateViews, IDisposable
         + string.Concat(new[] { "", "PointerOver", "Pressed" }.Select(state =>
             Brush("AccentButtonBackground" + state, "{ThemeResource SystemColorHighlightColor}") + Brush("AccentButtonForeground" + state, "{ThemeResource SystemColorHighlightTextColor}")
             + Brush("CheckBoxCheckBackgroundFillChecked" + state, "{ThemeResource SystemColorHighlightColor}") + Brush("CheckBoxCheckBackgroundStrokeChecked" + state, "{ThemeResource SystemColorHighlightColor}")
-            + Brush("CheckBoxCheckGlyphForegroundChecked" + state, "{ThemeResource SystemColorHighlightTextColor}")
+            + Brush("CheckBoxCheckGlyphForegroundChecked" + state, "{ThemeResource SystemColorHighlightTextColor}") + Brush("AccentButtonBorderBrush" + state, "{ThemeResource SystemColorWindowTextColor}")
             + Brush("HyperlinkButtonForeground" + state, "{ThemeResource SystemColorHotlightColor}")))
         + Brush("AccentButtonBackgroundDisabled", "{ThemeResource SystemColorWindowColor}") + Brush("AccentButtonForegroundDisabled", "{ThemeResource SystemColorGrayTextColor}") + Brush("AccentButtonBorderBrushDisabled", "{ThemeResource SystemColorGrayTextColor}")
         + "</ResourceDictionary>";

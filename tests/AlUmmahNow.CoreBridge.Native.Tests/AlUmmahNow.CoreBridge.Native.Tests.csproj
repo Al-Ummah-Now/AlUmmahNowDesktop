@@ -11,4 +11,7 @@
     <ProjectReference Include="..\..\src\AlUmmahNow.CoreBridge.Native\AlUmmahNow.CoreBridge.Native.csproj" />
     <ProjectReference Include="..\..\src\AlUmmahNow.Platform.Linux\AlUmmahNow.Platform.Linux.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <Content Include="..\fixtures\update-manifests\*.json" Link="update-manifests\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

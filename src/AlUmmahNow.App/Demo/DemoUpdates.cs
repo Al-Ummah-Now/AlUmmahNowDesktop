@@ -15,6 +15,12 @@ namespace AlUmmahNow.App.Demo
         public const string Installed = "1.4.2", Newest = "1.5.0", Minimum = "1.4.8";
         private readonly string _scene;
 
+        public event Action? Checked
+        {
+            add { }
+            remove { }
+        }
+
         public DemoUpdateChecker(string scene) => _scene = scene;
 
         public Task<UpdateAnswer> CheckAsync(CancellationToken cancellationToken = default)
