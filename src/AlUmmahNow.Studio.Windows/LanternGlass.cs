@@ -249,6 +249,9 @@ internal static class LanternGlass
         // The picked card is opaque: its glow is behind it and would show through, under its text
         t["StudioPickedCardBrush"] = Gradient(Over(primary, surface, StudioTheme.PickedTop), Over(primary, surface, StudioTheme.PickedBottom));
         t["StudioPickedEdgeBrush"] = B(Gold);
+        // The chart's bars: the framework's accent is the window's color in high contrast
+        t["StudioChartBrush"] = B(dark ? C("PrimaryHover") : primary);
+        t["StudioChartEdgeBrush"] = B(StudioTheme.BarEdge(dark) == null ? C("PrimaryHover") : edge);
         t["StudioTextBrush"] = B(text);
         t["StudioMutedBrush"] = B(muted);
         // The app's own name: under the framework's the merged WinUI dictionary answers first, with the accent's shade
@@ -297,9 +300,9 @@ internal static class LanternGlass
 
     /// <summary>
     /// Whether text of one brush can be read on the other, everywhere on it (CI's scenarios ask). Not where something
-    /// behind it shows through, or where it is not known what is drawn.
+    /// behind it shows through, or where it is not known what is drawn. A graphic needs 3.
     /// </summary>
-    public static bool IsReadable(Brush? text, Brush? on)
+    public static bool IsReadable(Brush? text, Brush? on, double least = 4.5)
     {
         var colors = on switch
         {
@@ -310,7 +313,7 @@ internal static class LanternGlass
             _ => Array.Empty<Color>(),
         };
         return text is SolidColorBrush { Color.A: 255 } ink && colors.Length > 0
-            && colors.All(c => c.A == 255 && ColorMath.Contrast(Argb(ink.Color), Argb(c)) >= 4.5);
+            && colors.All(c => c.A == 255 && ColorMath.Contrast(Argb(ink.Color), Argb(c)) >= least);
     }
 
     private static LinearGradientBrush Gradient(Color top, Color bottom) => new()

@@ -33,6 +33,8 @@ public static class HighContrast
         ["StudioSelectedBrush"] = HighContrastRole.None,
         ["StudioPickedCardBrush"] = HighContrastRole.Window,
         ["StudioPickedEdgeBrush"] = HighContrastRole.Highlight,
+        ["StudioChartBrush"] = HighContrastRole.Highlight,
+        ["StudioChartEdgeBrush"] = HighContrastRole.Highlight,
         ["StudioDangerFillBrush"] = HighContrastRole.Highlight,
         ["StudioOnDangerFillBrush"] = HighContrastRole.HighlightText,
         ["StudioOnGoldBrush"] = HighContrastRole.HighlightText,

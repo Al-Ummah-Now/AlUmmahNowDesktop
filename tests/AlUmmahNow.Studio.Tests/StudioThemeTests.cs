@@ -66,6 +66,15 @@ public sealed class StudioThemeTests
         Assert.Contains(FormattableString.Invariant($"linear-gradient(to bottom, alpha(@fanous_primary, {StudioTheme.PickedTop}), alpha(@fanous_primary, {StudioTheme.PickedBottom}))"), StudioTheme.Studio("glass.css"));
     }
 
+    [Fact]
+    public void AChartsBarsAreSeenOnTheirCard()
+    {
+        var themes = StudioTheme.ReadXamlColors(StudioTheme.Fanous("Fanous.Colors.xaml"));
+        Assert.Null(StudioTheme.BarEdge(dark: true));
+        Assert.True(Contrast(themes["Default"]["FanousPrimaryPressedColor"], themes["Default"]["FanousSurfaceColor"]) >= 3);
+        Assert.True(Contrast(StudioTheme.BarEdge(dark: false)!.Value, themes["Light"]["FanousSurfaceColor"]) >= 3);
+    }
+
     /// <summary>The white initials of an account, on every color of the circle.</summary>
     [Fact]
     public void AnAccountsInitialsAreReadable()

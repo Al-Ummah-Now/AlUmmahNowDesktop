@@ -32,6 +32,9 @@ public static class StudioTheme
     /// <summary>The gold over the surface of the card that is picked, at its top and bottom (glass.css has the same).</summary>
     public const double PickedTop = 0.16, PickedBottom = 0.04;
 
+    /// <summary>The edge of a chart's bars. Gold is under 3:1 on the light card; on the dark one it needs none.</summary>
+    public static uint? BarEdge(bool dark) => dark ? null : ReadXamlColors(Fanous("Fanous.Colors.xaml"))["Light"]["FanousPrimaryEdgeColor"];
+
     private static string Text(string name)
     {
         using var reader = new StreamReader(Open(name));

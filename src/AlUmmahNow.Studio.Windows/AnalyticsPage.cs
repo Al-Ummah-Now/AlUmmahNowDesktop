@@ -69,6 +69,17 @@ internal sealed class AnalyticsPage
     public bool? PickedIsReadable => _picked is not { IsLoaded: true, ActualHeight: > 0 } card ? null
         : LanternGlass.Presenter(card) is { } drawn && ((StackPanel)card.Content).Children.OfType<TextBlock>().All(t => LanternGlass.IsReadable(t.Foreground, drawn.Background));
 
+    /// <summary>The chart has bars, and each is seen on its card, by its fill or its edge (CI's scenarios ask).</summary>
+    public bool ChartIsSeen
+    {
+        get
+        {
+            var card = LanternGlass.Res("StudioCardBrush");
+            var bars = _chart.Children.OfType<Rectangle>().Where(r => r.RadiusX > 0).ToList();
+            return bars.Count > 0 && bars.All(b => b.ActualHeight > 0 && (LanternGlass.IsReadable(b.Fill, card, 3) || LanternGlass.IsReadable(b.Stroke, card, 3)));
+        }
+    }
+
     private static TextBlock Heading(string text)
     {
         var t = new TextBlock { Text = text, Style = (Style)Application.Current.Resources["SubtitleTextBlockStyle"] };
@@ -193,7 +204,8 @@ internal sealed class AnalyticsPage
         var text = ThemeBrush("TextFillColorSecondaryBrush");
         var grid = ThemeBrush("DividerStrokeColorDefaultBrush");
         var baseline = ThemeBrush("ControlStrongStrokeColorDefaultBrush");
-        var accent = ThemeBrush("AccentFillColorDefaultBrush");
+        var accent = LanternGlass.Res("StudioChartBrush");
+        var edge = LanternGlass.Res("StudioChartEdgeBrush");
 
         foreach (var tick in layout.Ticks)
         {
@@ -212,7 +224,7 @@ internal sealed class AnalyticsPage
         {
             if (bar.Height > 0)
             {
-                var rect = new Rectangle { Width = bar.Width, Height = bar.Height, Fill = accent, RadiusX = 2, RadiusY = 2 };
+                var rect = new Rectangle { Width = bar.Width, Height = bar.Height, Fill = accent, Stroke = edge, StrokeThickness = 1, RadiusX = 2, RadiusY = 2 };
                 Canvas.SetLeft(rect, bar.X);
                 Canvas.SetTop(rect, bar.Y);
                 _chart.Children.Add(rect);

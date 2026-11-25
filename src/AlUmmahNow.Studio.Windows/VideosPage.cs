@@ -412,7 +412,7 @@ internal sealed class VideosPage
         return LanternGlass.WithGlow(card, 14, 0.22f, 22f);
     }
 
-    private static Border Chip(string text, global::Windows.UI.Color color, HorizontalAlignment h, VerticalAlignment v, double radius = 999) => new()
+    private static Border Chip(string text, global::Windows.UI.Color color, HorizontalAlignment h, VerticalAlignment v, double radius = 10) => new()
     {
         HorizontalAlignment = h,
         VerticalAlignment = v,
