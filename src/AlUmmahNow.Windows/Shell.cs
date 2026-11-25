@@ -260,7 +260,7 @@ public sealed partial class Shell
 
     private FrameworkElement BuildAccount()
     {
-        if (_auth.IsBusy) return new TextBlock { Text = _localizer["auth.signingIn"], Opacity = 0.7, VerticalAlignment = VerticalAlignment.Center };
+        if (_auth.IsBusy) return new TextBlock { Text = _localizer["auth.signingIn"], VerticalAlignment = VerticalAlignment.Center }.Dim(0.7);
 
         var button = new Button { Content = _localizer[_auth.IsSignedIn ? "auth.signOut" : "auth.signIn"] };
         var tip = _auth.Failed ? _localizer["auth.failed"] : Localizer.Isolate(_auth.AccountName);
@@ -359,7 +359,7 @@ public sealed partial class Shell
         // Channel on one line, views · duration on the next, so a compact Arabic count never trims the duration.
         foreach (var text in new[] { card.Channel, card.Stats })
         {
-            if (!string.IsNullOrEmpty(text)) panel.Children.Add(new TextBlock { Text = text, Opacity = 0.7, TextTrimming = TextTrimming.CharacterEllipsis });
+            if (!string.IsNullOrEmpty(text)) panel.Children.Add(new TextBlock { Text = text, TextTrimming = TextTrimming.CharacterEllipsis }.Dim(0.7));
         }
         var button = new Button { Content = panel, Padding = new Thickness(6), Background = new SolidColorBrush(Colors.Transparent), BorderThickness = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Top };
         AutomationName(button, card.Title);
@@ -407,7 +407,7 @@ public sealed partial class Shell
             var title = new TextBlock { Text = vm.Title, FontSize = 22, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap };
             Grid.SetRow(title, 1);
             grid.Children.Add(title);
-            var channel = new TextBlock { Text = vm.Channel, Opacity = 0.7 };
+            var channel = new TextBlock { Text = vm.Channel }.Dim(0.7);
             Grid.SetRow(channel, 2);
             grid.Children.Add(channel);
         }
@@ -455,7 +455,7 @@ public sealed partial class Shell
         Grid.SetRow(controls, 3);
         grid.Children.Add(controls);
 
-        var chapter = new TextBlock { Opacity = 0.7 };
+        var chapter = new TextBlock().Dim(0.7);
         Grid.SetRow(chapter, 4);
         grid.Children.Add(chapter);
 

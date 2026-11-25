@@ -241,6 +241,7 @@ internal static class LanternGlass
         t["StudioOnGoldBrush"] = B(onPrimary);
         t["StudioDangerBrush"] = B(C("ErrorText"));
         t["StudioDangerFillBrush"] = B(C("ErrorFill"));
+        t["StudioDangerEdgeBrush"] = B(C("ErrorFill"));
         t["StudioOnDangerFillBrush"] = B(C("OnErrorFill"));
 
         // NavigationView: Acrylic pane, transparent content (the Studio page brush sits over Mica), gold selection.
@@ -322,7 +323,7 @@ internal static class LanternGlass
             var danger = new Style(typeof(Button)) { BasedOn = (Style)Application.Current.Resources["DefaultButtonStyle"] };
             danger.Setters.Add(new Setter(Control.BackgroundProperty, Res("StudioDangerFillBrush")));
             danger.Setters.Add(new Setter(Control.ForegroundProperty, Res("StudioOnDangerFillBrush")));
-            danger.Setters.Add(new Setter(Control.BorderBrushProperty, Res("StudioDangerFillBrush")));
+            danger.Setters.Add(new Setter(Control.BorderBrushProperty, Res("StudioDangerEdgeBrush")));
             dialog.PrimaryButtonStyle = danger;
             dialog.DefaultButton = ContentDialogButton.Close;
         }
@@ -349,6 +350,8 @@ internal static class LanternGlass
             dialog.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
             {
                 CheckedDialogs++;
+                // A destructive action does not look as the default one beside it
+                if (destructive && !Differ(Find<Button>(dialog, "PrimaryButton"), button)) UnreadableDialogs++;
                 // What cannot be read is counted: it is not known to be drawn in ours
                 if (!IsHighContrast && (onGold is not SolidColorBrush ours || Presenter(button)?.Foreground is not SolidColorBrush shown || shown.Color != ours.Color)) UnreadableDialogs++;
             });
@@ -356,7 +359,10 @@ internal static class LanternGlass
         return dialog;
     }
 
-    /// <summary>Dialogs whose default button was not drawn in the text color for gold (CI's scenarios ask).</summary>
+    private static bool Differ(Button? a, Button b) =>
+        a != null && Presenter(a)?.Background is SolidColorBrush one && Presenter(b)?.Background is { } other && (other is not SolidColorBrush two || one.Color != two.Color);
+
+    /// <summary>Dialogs whose default button was not drawn in the text color for gold, or as the destructive one (CI's scenarios ask).</summary>
     public static int UnreadableDialogs { get; private set; }
 
     /// <summary>Dialogs whose default button was looked at.</summary>

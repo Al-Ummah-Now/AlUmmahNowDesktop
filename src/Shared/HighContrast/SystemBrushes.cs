@@ -38,6 +38,7 @@ internal static class SystemBrushes
         {
             IsHighContrast = Accessibility.HighContrast;
             foreach (var paint in Painters) paint(IsHighContrast);
+            foreach (var (part, opacity) in Dims) if (part.TryGetTarget(out var shown)) shown.Opacity = IsHighContrast ? 1 : opacity;
             Painted?.Invoke();
         });
     }
@@ -113,6 +114,21 @@ internal static class SystemBrushes
         return d;
     }
 
+    private static readonly List<(WeakReference<UIElement> Part, double Opacity)> Dims = new();
+
+    /// <summary>
+    /// A part that is less than opaque, and in high contrast wholly opaque: there a part of a color is not the system's.
+    /// The parts come and go with the pages, so they are not held.
+    /// </summary>
+    public static T Dim<T>(this T part, double opacity)
+        where T : FrameworkElement
+    {
+        Dims.RemoveAll(d => !d.Part.TryGetTarget(out _));
+        Dims.Add((new WeakReference<UIElement>(part), opacity));
+        part.Opacity = IsHighContrast ? 1 : opacity;
+        return part;
+    }
+
     /// <summary>Paints now, and whenever high contrast or its colors change.</summary>
     public static void Follow(Action<bool> paint)
     {
@@ -146,8 +162,9 @@ internal static class SystemBrushes
             foreach (var c in colors.Where(c => c.A > 0 && !system.Contains((c.R, c.G, c.B))).Take(1)) strays.Add($"{part} #{c.R:X2}{c.G:X2}{c.B:X2}");
         }
 
-        void Walk(DependencyObject part, string path)
+        void Walk(DependencyObject part, string path, double opacity = 1)
         {
+            opacity *= (part as UIElement)?.Opacity ?? 1;
             // The dimming under a dialog is the framework's
             if (part is FrameworkElement { Name: "SmokeLayerBackground" } or UIElement { Visibility: Visibility.Collapsed } or UIElement { Opacity: 0 }) return;
             var here = part is FrameworkElement { Name.Length: > 0 } named ? path + "/" + named.Name : path + "/" + part.GetType().Name;
@@ -161,8 +178,14 @@ internal static class SystemBrushes
                     Look(here + " fill", border.Background);
                     if (border.BorderThickness != default) Look(here + " edge", border.BorderBrush);
                     break;
-                case TextBlock text when text.Text.Length > 0: Look(here + " text '" + text.Text + "'", text.Foreground); break;
-                case FontIcon icon: Look(here + " icon", icon.Foreground); break;
+                case TextBlock text when text.Text.Length > 0:
+                    Look(here + " text '" + text.Text + "'", text.Foreground);
+                    if (opacity < 0.99) strays.Add($"{here} text '{text.Text}' opacity");
+                    break;
+                case FontIcon icon:
+                    Look(here + " icon", icon.Foreground);
+                    if (opacity < 0.99) strays.Add(here + " icon opacity");
+                    break;
                 case Grid grid:
                     Look(here + " fill", grid.Background);
                     if (grid.BorderThickness != default) Look(here + " edge", grid.BorderBrush);
@@ -178,7 +201,7 @@ internal static class SystemBrushes
                     break;
             }
 
-            for (var i = 0; i < VisualTreeHelper.GetChildrenCount(part); i++) Walk(VisualTreeHelper.GetChild(part, i), here);
+            for (var i = 0; i < VisualTreeHelper.GetChildrenCount(part); i++) Walk(VisualTreeHelper.GetChild(part, i), here, opacity);
         }
 
         Walk(root, "");

@@ -1,3 +1,4 @@
+using AlUmmahNow.Contrast;
 using AlUmmahNow.App.Theme;
 using System.Globalization;
 using AlUmmahNow.App.I18n;
@@ -37,7 +38,7 @@ internal sealed class UploadPage
     private readonly StackPanel _stagedActions = new() { Orientation = Orientation.Horizontal, Spacing = 8 };
     private readonly TextBlock _queueEmpty;
     private readonly InfoBar _error = new() { Severity = InfoBarSeverity.Error, IsClosable = true };
-    private readonly TextBlock _watching = new() { Opacity = 0.8, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap };
+    private readonly TextBlock _watching = new TextBlock { VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap }.Dim(0.8);
     private readonly Button _stopWatching;
     private readonly StackPanel _playlists = new() { Spacing = 2 };
     private readonly StackPanel _scheduleRow = new() { Spacing = 6, Visibility = Visibility.Collapsed };
@@ -135,7 +136,7 @@ internal sealed class UploadPage
         AutomationProperties.SetHeadingLevel(queueTitle, AutomationHeadingLevel.Level2);
         var queueBody = new StackPanel { Spacing = 10 };
         queueBody.Children.Add(queueTitle);
-        _queueEmpty = new TextBlock { Text = l["studio.upload.queueEmpty"], Opacity = 0.8, TextWrapping = TextWrapping.Wrap };
+        _queueEmpty = new TextBlock { Text = l["studio.upload.queueEmpty"], TextWrapping = TextWrapping.Wrap }.Dim(0.8);
         queueBody.Children.Add(_queueEmpty);
         queueBody.Children.Add(_queue);
         var queueFooter = new StackPanel { Orientation = Orientation.Horizontal };
@@ -428,10 +429,9 @@ internal sealed class UploadPage
             var meta = new TextBlock
             {
                 Text = _l.JoinWrapped(Localizer.Isolate(file), _l.Bytes(plan.Size, 2), plan.PublishAt is { } at ? _l.Format("studio.upload.publishesAt", _l.DateTime(at)) : null),
-                Opacity = 0.8,
                 VerticalAlignment = VerticalAlignment.Center,
                 TextTrimming = TextTrimming.CharacterEllipsis,
-            };
+            }.Dim(0.8);
             var text = new StackPanel { Spacing = 4 };
             text.Children.Add(title);
             text.Children.Add(meta);
@@ -492,7 +492,7 @@ internal sealed class UploadPage
         private readonly UploadPage _page;
         private readonly string _id;
         private readonly TextBlock _title = new() { TextTrimming = TextTrimming.CharacterEllipsis };
-        private readonly TextBlock _status = new() { Opacity = 0.8 };
+        private readonly TextBlock _status = new TextBlock().Dim(0.8);
         private readonly ProgressBar _bar = new() { Minimum = 0, Maximum = 1, VerticalAlignment = VerticalAlignment.Center };
         private readonly StackPanel _buttons = new() { Orientation = Orientation.Horizontal, Spacing = 4 };
         private UploadPhase? _phase;

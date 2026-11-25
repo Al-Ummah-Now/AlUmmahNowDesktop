@@ -1,3 +1,4 @@
+using AlUmmahNow.Contrast;
 using AlUmmahNow.App.Theme;
 using System.Globalization;
 using AlUmmahNow.App.I18n;
@@ -37,7 +38,7 @@ internal sealed class VideosPage
     {
         Layout = new UniformGridLayout { MinItemWidth = 250, MinColumnSpacing = 16, MinRowSpacing = 16, ItemsStretch = UniformGridLayoutItemsStretch.Fill },
     };
-    private readonly TextBlock _empty = new() { Opacity = 0.8 };
+    private readonly TextBlock _empty = new TextBlock().Dim(0.8);
     private readonly InfoBar _error = new() { Severity = InfoBarSeverity.Error, IsClosable = true };
     private readonly InfoBar _notice = new() { Severity = InfoBarSeverity.Success, IsClosable = true };
     private readonly Button _more;
@@ -454,9 +455,8 @@ internal sealed class VideosPage
                 Text = d.CanRestore
                     ? _l.Format("studio.videos.deletedOn", _l.Date(d.DeletedAt), _l.Date(d.PurgeAfter ?? d.DeletedAt.AddDays(VideosViewModel.RestoreDays)))
                     : _l["studio.videos.queuedForDeletion"],
-                Opacity = 0.75,
                 FontSize = 12,
-            });
+            }.Dim(0.75));
             row.Children.Add(text);
             if (d.CanRestore)
             {
