@@ -16,6 +16,7 @@ for png in "$icons"/*/apps/"$appid".png; do
   install -Dm644 "$png" "$root/usr/share/icons/hicolor/$px/apps/$appid.png"
 done
 size=$(du -sk "$root" | cut -f1)
+# The file keeps the "-": GitHub renames a release file with a "~", and the manifest's address of it would lead nowhere.
 # Debian versions sort "~" before release, so 0.1.0-preview.1 becomes 0.1.0~preview.1.
 debversion=${version/-/\~}
 cat > "$root/DEBIAN/control" <<CONTROL
@@ -32,5 +33,5 @@ Homepage: https://alummahnow.net
 Description: $description
 CONTROL
 mkdir -p "$out"
-dpkg-deb --root-owner-group --build "$root" "$out/${package}_${debversion}_amd64.deb"
+dpkg-deb --root-owner-group --build "$root" "$out/${package}_${version}_amd64.deb"
 rm -rf "$root"

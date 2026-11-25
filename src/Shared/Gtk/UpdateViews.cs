@@ -357,6 +357,17 @@ public sealed class UpdateViews : IUpdateViews, IDisposable
     public string BarText => _barText.GetText();
     public bool IsCloseShown => _close.GetMapped();
     public bool IsDownloadShown => _barDownload.GetMapped();
+
+    // Nothing is installed in place on Linux: the button opens the page, and there is nothing to choose
+    public string ButtonText => (IsForcedShown ? _forcedDownload : _barDownload).Label ?? "";
+    public bool IsButtonEnabled => (IsForcedShown ? _forcedDownload : _barDownload).Sensitive;
+    public bool IsAutoShown => false;
+    public bool IsAutoOn => false;
+
+    public void PressAuto()
+    {
+    }
+
     public bool IsNotesShown => _barNotes.GetMapped();
     public string OpenNotes => _openNotes;
     public bool IsForcedShown => Forced.GetMapped() && Forced.GetHeight() > 0;

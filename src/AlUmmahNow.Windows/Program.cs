@@ -103,11 +103,9 @@ public sealed partial class App : Application
         bool IsBusy() => shown?.IsLivePlaying == true;
         var updateScene = UpdateScene.FromEnvironment(localizer, UpdateInstall.Msix, IsBusy);
         var updateStore = new UpdateStore(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AlUmmahNow", "updates.json"));
-        var updates = updateScene?.Service ?? new UpdateService(
-            new CoreUpdateChecker(environment.VideosApi, "viewer", "windows", version, "AlUmmahNowWindows/" + version, updateStore.Load().Core),
-            updateStore, Environment.GetEnvironmentVariable("AUN_DEMO") == "1" ? UpdateInstall.Development : WindowsInstall.Detect(), version,
-            IsBusy, new DownloadPageDelivery(new ShellBrowserLauncher()));
-        var shell = shown = new Shell(catalog, localizer, navigator, player, session, settings, store, auth, live, environment.ShortLinkHost, updates, Exit);
+        var updates = updateScene?.Service ?? WindowsInstall.Service("viewer", environment.VideosApi, version, "AlUmmahNowWindows/" + version,
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AlUmmahNow"), updateStore, Environment.GetEnvironmentVariable("AUN_DEMO") == "1", IsBusy, () => _window?.Close());
+        var shell = shown = new Shell(catalog, localizer, navigator, player, session, settings, store, auth, live, environment.ShortLinkHost, updates, () => _window?.Close());
         var closing = new CancellationTokenSource();
 
         _window = new Window { Title = localizer["app.name"], Content = shell.Root };
@@ -127,6 +125,8 @@ public sealed partial class App : Application
         if (_window.AppWindow.Presenter is OverlappedPresenter presenter) presenter.Maximize();
         _window.Closed += (_, _) =>
         {
+            // While the player still says whether a live stream is on
+            updates.OnExit();
             closing.Cancel();
             player.Stop();
             shell.Close();

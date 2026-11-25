@@ -1,0 +1,87 @@
+name: Update test
+# A real self-update, N to N+1, of both Windows apps (wiki AUN-APP-UPDATES §13), with test builds, keys made for the run and a
+# local server: nothing is published and no secret is used. Linux has no self-update; its notice is covered by the unit tests.
+on:
+  pull_request:
+    paths:
+      - .github/workflows/update-test.yml
+      - .github/workflows/release.yml
+      - scripts/update-test.mjs
+      - scripts/app-release.mjs
+      - scripts/no-test-hooks.mjs
+      - scripts/vpk-pack.sh
+      - src/AlUmmahNow.App/Updates/**
+      - src/AlUmmahNow.CoreBridge/ISelfUpdate.cs
+      - src/AlUmmahNow.CoreBridge/IUpdateChecker.cs
+      - src/AlUmmahNow.CoreBridge.Native/CoreUpdateChecker.cs
+      - src/AlUmmahNow.CoreBridge.Native/SelfUpdate/**
+      - src/Shared/WinUI/**
+      - src/AlUmmahNow.Windows/Program.cs
+      - src/AlUmmahNow.Windows/EntryPoint.cs
+      - src/AlUmmahNow.Studio.Windows/App.xaml.cs
+      - src/AlUmmahNow.Studio.Windows/EntryPoint.cs
+      - Directory.Packages.props
+  workflow_dispatch:
+concurrency:
+  group: update-test-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - app: viewer
+            project: AlUmmahNow.Windows
+            exe: AlUmmahNow.exe
+            id: AlUmmahNow.Viewer
+            cases: tampered bad-signature foreign-host planted swapped yanked twice
+          - app: studio
+            project: AlUmmahNow.Studio.Windows
+            exe: AlUmmahNowStudio.exe
+            id: AlUmmahNow.Studio
+            # Its own work can be started without a live stream
+            cases: tampered bad-signature foreign-host planted swapped yanked twice working
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Fetch AlUmmahNow.Core
+        run: ./scripts/fetch-core.sh
+      - name: Build and pack 1.0.1, 1.0.2 and 1.0.3
+        run: |
+          for n in 1 2 3; do
+            # As release.yml publishes it, with the test's hooks
+            dotnet publish src/${{ matrix.project }} -c Release -r win-x64 --self-contained -p:Platform=x64 -p:WindowsPackageType=None -p:WindowsAppSDKSelfContained=true -p:AunProd=false -p:UpdateTest=true -p:Version=1.0.$n -p:InformationalVersion=1.0.$n -o "out/publish$n"
+            node scripts/no-test-hooks.mjs "out/publish$n" --expect
+            scripts/vpk-pack.sh ${{ matrix.app }} "1.0.$n" "out/publish$n"
+            mkdir -p "keep/$n"; cp out/vpk/*-Setup.exe out/vpk/*-full.nupkg "keep/$n/"
+            rm -rf "out/publish$n"
+          done
+      - name: Install 1.0.1 for this user
+        run: |
+          powershell -Command "Start-Process (Resolve-Path keep/1/*-Setup.exe).Path -ArgumentList '--silent' -Wait"
+          test -f "$LOCALAPPDATA/${{ matrix.id }}/current/${{ matrix.exe }}"
+      - name: What must not be installed changes nothing
+        run: |
+          for c in ${{ matrix.cases }}; do
+            node scripts/update-test.mjs --app ${{ matrix.app }} --exe "$LOCALAPPDATA/${{ matrix.id }}/current/${{ matrix.exe }}" --package keep/2/*-full.nupkg --packages "$LOCALAPPDATA/${{ matrix.id }}/packages" --package-name ${{ matrix.id }}-1.0.2-full.nupkg --state "$LOCALAPPDATA/AlUmmahNow/updates.json" --from 1.0.1 --to 1.0.2 --case $c
+          done
+      - name: 1.0.1 becomes 1.0.2 as it closes
+        run: node scripts/update-test.mjs --app ${{ matrix.app }} --exe "$LOCALAPPDATA/${{ matrix.id }}/current/${{ matrix.exe }}" --package keep/2/*-full.nupkg --packages "$LOCALAPPDATA/${{ matrix.id }}/packages" --package-name ${{ matrix.id }}-1.0.2-full.nupkg --state "$LOCALAPPDATA/AlUmmahNow/updates.json" --from 1.0.1 --to 1.0.2
+      - name: 1.0.2 becomes 1.0.3 with Restart now
+        run: node scripts/update-test.mjs --app ${{ matrix.app }} --exe "$LOCALAPPDATA/${{ matrix.id }}/current/${{ matrix.exe }}" --package keep/3/*-full.nupkg --packages "$LOCALAPPDATA/${{ matrix.id }}/packages" --package-name ${{ matrix.id }}-1.0.3-full.nupkg --state "$LOCALAPPDATA/AlUmmahNow/updates.json" --from 1.0.2 --to 1.0.3 --case restart
+      - name: Velopack log
+        if: always()
+        run: tail -n 80 "$LOCALAPPDATA/${{ matrix.id }}"/*.log "$LOCALAPPDATA"/velopack/*.log "$TEMP"/velopack*.log 2>/dev/null || true

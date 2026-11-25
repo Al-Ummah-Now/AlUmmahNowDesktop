@@ -8,7 +8,7 @@ print(f"""## Al Ummah Now desktop {version}{' (pre-release)' if prerelease else 
 
 > [!WARNING]
 > **These packages are not code-signed.** Windows SmartScreen shows "Windows protected your PC": choose
-> *More info* then *Run anyway*, and the installer asks for administrator rights. Check the download
+> *More info* then *Run anyway*, and the MSI asks for administrator rights. Check the download
 > against `SHA256SUMS.txt` before installing. Signed builds follow once the project has a code-signing
 > certificate.
 
@@ -18,7 +18,8 @@ Environment: {env}.
 ### Studio
 | Platform | File | Install |
 |---|---|---|
-| Windows 10 (19041+) / 11, x64 | `AlUmmahNow-Studio-Windows-{version}-x64-unsigned.msi` | Run the MSI; Start menu → Al Ummah Now Studio |
+| Windows 10 (19041+) / 11, x64 | `AlUmmahNow-Studio-Windows-{version}-x64-Setup-unsigned.exe` | Run it; Start menu → Studio. For you alone, no administrator rights; it installs its updates itself |
+| Windows, for all users | `AlUmmahNow-Studio-Windows-{version}-x64-unsigned.msi` | Run the MSI (administrator rights); Start menu → Studio |
 | Windows, no install | `AlUmmahNow-Studio-Windows-{version}-x64-portable-unsigned.zip` | Unzip and run `AlUmmahNowStudio.exe` |
 | Ubuntu 24.04+ / Debian-based, x86-64 | `alummahnow-studio_*_amd64.deb` | `sudo apt install ./alummahnow-studio_*_amd64.deb` |
 | Any Linux with Flatpak | `AlUmmahNow-Studio-Linux-{version}-x86_64.flatpak` | `flatpak install --user ./AlUmmahNow-Studio-Linux-{version}-x86_64.flatpak` |
@@ -35,4 +36,5 @@ The viewer apps (`AlUmmahNow-Windows-*`, `alummahnow_*.deb`, `AlUmmahNow-Linux-*
 TV package (`AlUmmahNow-Tizen-*-unsigned.tpk`, needs Samsung certificates to install) are included too.
 A signed `.msix` for each Windows app and a Samsung-signed `AlUmmahNow-Tizen-{version}.tpk` are attached only
 when the project's certificates are configured; the `.msix` installs with a double-click.
+`AlUmmahNow-*-x64-update.nupkg` and `app-release.json` are for the apps' own updates: nothing to download by hand.
 """)

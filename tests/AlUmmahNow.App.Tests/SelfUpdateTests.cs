@@ -45,6 +45,7 @@ public sealed class SelfUpdateTests
         }
 
         public void Discard() => Discarded++;
+        public bool IsOpenElsewhere { get; set; }
         public void ApplyOnExit() => OnExit++;
 
         public void ApplyAndRestart()
@@ -163,6 +164,28 @@ public sealed class SelfUpdateTests
         Assert.True(service.View.CanBegin);
         _busy = true;
         TimePasses();
+        Assert.False(service.View.CanBegin);
+        service.OnExit();
+        Assert.Equal(0, _self.OnExit + _self.Restarts);
+    }
+
+    /// <summary>Velopack's updater ends every process of the folder: a second window may be uploading.</summary>
+    [Fact]
+    public async Task Nothing_is_installed_while_the_app_is_open_a_second_time()
+    {
+        Offers();
+        _self.IsOpenElsewhere = true;
+        var service = Service();
+        await service.CheckAsync();
+        Assert.Equal("Update ready. Close the app's other window to install it.", Text(service).Bar(service.View));
+        Assert.False(service.View.CanBegin);
+        service.Begin();
+        _self.IsOpenElsewhere = false;
+        TimePasses();
+        Assert.True(service.View.CanBegin);
+        // Opened after the bar was painted
+        _self.IsOpenElsewhere = true;
+        service.Begin();
         Assert.False(service.View.CanBegin);
         service.OnExit();
         Assert.Equal(0, _self.OnExit + _self.Restarts);

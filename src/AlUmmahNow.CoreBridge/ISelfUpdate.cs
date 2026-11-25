@@ -52,6 +52,9 @@ namespace AlUmmahNow.CoreBridge
         /// <summary>What is staged is not installed, now or later.</summary>
         void Discard();
 
+        /// <summary>The app is open a second time. The updater would end that one too, whatever it is doing.</summary>
+        bool IsOpenElsewhere { get; }
+
         /// <summary>The app is closing: what is staged is installed once it has closed. Only right after <see cref="VerifyStaged"/>.</summary>
         void ApplyOnExit();
 

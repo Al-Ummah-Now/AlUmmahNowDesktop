@@ -181,7 +181,7 @@ jobs:
           $env:AUN_DEMO_THUMBS = (Resolve-Path tests/fixtures/viewer-thumbs).Path
           $env:AUN_FIXTURE_MEDIA = (Resolve-Path tests/fixtures/watch).Path
           $failed = @()
-          foreach ($scene in "bar","notes","dismissed","forced","waiting","required","settings","uptodate","offline","off") { foreach ($lang in "en","ar") { foreach ($theme in "dark","light") {
+          foreach ($scene in "bar","notes","dismissed","forced","waiting","required","settings","uptodate","offline","off","update","downloading","failed","ready","readybusy","forcedupdate","forcedready","settingsupdate") { foreach ($lang in "en","ar") { foreach ($theme in "dark","light") {
             $name = "windows-viewer-update-$scene-$lang-$theme"
             $env:AUN_DEMO_UPDATE = $scene
             # It waits for a stream that is on air and playing
@@ -191,7 +191,7 @@ jobs:
           # High contrast, and off again: the bar and the screen are the system's colors.
           $contrast = ./scripts/high-contrast.ps1 on
           if ("$contrast" -notmatch "on=True") { $failed += "high contrast was not turned on: $contrast" }
-          foreach ($scene in "bar","forced","settings") { foreach ($lang in "en","ar") {
+          foreach ($scene in "bar","forced","settings","update","readybusy","forcedready","settingsupdate") { foreach ($lang in "en","ar") {
             $name = "windows-viewer-update-$scene-$lang-highcontrast"
             $env:AUN_DEMO_UPDATE = $scene
             ./scripts/windows-scenario.ps1 $exe $lang dark home $name $out 13 17

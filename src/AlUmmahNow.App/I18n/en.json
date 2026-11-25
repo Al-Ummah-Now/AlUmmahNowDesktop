@@ -66,6 +66,7 @@
   "updates.readyForced": "Update ready. Restart to install it.",
   "updates.readyBusy.viewer": "Update ready. You can restart when the live stream ends or you leave it.",
   "updates.readyBusy.studio": "Update ready. Finish or pause your uploads and encodes first.",
+  "updates.readyOther": "Update ready. Close the app's other window to install it.",
   "updates.notDownloaded": "Couldn't download the update. Try again later.",
   "updates.auto": "Install updates automatically",
   "updates.autoHint": "Updates download in the background and install when you close the app, never while work is running.",

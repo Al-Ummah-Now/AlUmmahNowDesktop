@@ -32,11 +32,21 @@ public sealed class UpdateSceneTests
         public bool IsNotesShown => Fault == "notes" || Fault != "no-notes" && V.CanDownload && _text.Notes(V).Length > 0;
         public string OpenNotes => _notes && Fault != "no-dialog" ? _text.Notes(S.Found) : "";
         public bool IsForcedShown => Fault switch { "forced" => true, "no-forced" => false, _ => V.Stage == UpdateStage.Forced };
-        public string ForcedText => Fault == "mute" ? "" : _text.ForcedBody(V) + _text.Message(V);
+        public string ForcedText => Fault == "mute" ? "" : _text.ForcedBody(V) + _text.Message(V) + _text.Step(V);
         public bool IsForcedWhole => IsForcedShown && Fault != "part";
         public bool IsForcedFocused => Fault != "elsewhere";
         public bool IsSectionShown => Fault switch { "section" => true, "no-section" => false, _ => S.IsSectionVisible && _scene.IsInSettings };
-        public string SectionText => Fault == "mute" ? "" : _text.Version + _text.LastChecked + _text.Result;
+        public string SectionText => Fault == "mute" ? "" : _text.Version + _text.LastChecked + _text.Result + _text.Step(S.Found);
+
+        public string ButtonText => Fault == "other-button" ? _text["updates.download"] : _text.Button(V);
+        public bool IsButtonEnabled => Fault switch { "enabled" => true, "disabled" => false, _ => V.CanBegin };
+        public bool IsAutoShown => Fault != "no-auto" && S.CanInstall;
+        public bool IsAutoOn => Fault != "auto-off" && S.InstallsAutomatically;
+
+        public void PressAuto()
+        {
+            if (Fault != "dead") S.InstallsAutomatically = !S.InstallsAutomatically;
+        }
 
         public void PressClose()
         {
@@ -66,7 +76,7 @@ public sealed class UpdateSceneTests
         return scene.Wrong(window);
     }
 
-    public static IEnumerable<object[]> Scenes() => from scene in UpdateScene.All from language in new[] { "en", "ar" } select new object[] { scene, language };
+    public static IEnumerable<object[]> Scenes() => from scene in UpdateScene.All.Concat(UpdateScene.Installing) from language in new[] { "en", "ar" } select new object[] { scene, language };
 
     [Theory]
     [MemberData(nameof(Scenes))]
@@ -83,6 +93,14 @@ public sealed class UpdateSceneTests
     [InlineData("uptodate", "no-section mute bar")]
     [InlineData("offline", "no-section mute bar dead")]
     [InlineData("off", "section bar forced")]
+    [InlineData("update", "no-bar mute other-button disabled no-close no-notes")]
+    [InlineData("downloading", "no-bar mute other-button enabled close dead")]
+    [InlineData("failed", "no-bar mute other-button disabled dead")]
+    [InlineData("ready", "no-bar mute other-button no-close dead")]
+    [InlineData("readybusy", "no-bar mute other-button enabled")]
+    [InlineData("forcedupdate", "no-forced part elsewhere other-button disabled bar")]
+    [InlineData("forcedready", "no-forced mute other-button dead")]
+    [InlineData("settingsupdate", "no-section mute no-auto auto-off other-button dead")]
     public async Task A_window_with_a_fault_does_not(string scene, string faults)
     {
         foreach (var fault in faults.Split(' ')) Assert.True(await RunAsync(scene, "ar", fault) != null, scene + " passes with " + fault);
@@ -97,7 +115,7 @@ public sealed class UpdateSceneTests
     {
         // These ask the same of the server, and differ in what a person does
         var same = new[] { "bar", "notes", "dismissed", "settings" };
-        return from scene in UpdateScene.All from answer in UpdateScene.All
+        return from scene in UpdateScene.All.Concat(UpdateScene.Installing) from answer in UpdateScene.All
                where scene != answer && !(same.Contains(scene) && same.Contains(answer))
                select new object[] { scene, answer };
     }

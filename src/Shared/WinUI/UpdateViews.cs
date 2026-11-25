@@ -30,6 +30,10 @@ internal sealed class UpdateViews : IUpdateViews, IDisposable
     private readonly TextBlock _forcedBody, _forcedMessage, _version, _lastChecked, _result;
     private readonly FrameworkElement _sectionHow;
     private readonly DispatcherQueue _ui = DispatcherQueue.GetForCurrentThread();
+    private readonly TextBlock _forcedStep, _sectionStep;
+    private readonly FrameworkElement _forcedHow, _forcedPage, _auto;
+    private readonly CheckBox _autoBox;
+    private bool _isRendering;
     private FrameworkElement? _section;
     private string _openNotes = "";
 
@@ -61,7 +65,6 @@ internal sealed class UpdateViews : IUpdateViews, IDisposable
         _barDownload = Part<Button>(bar, "Download");
         _close = Part<Button>(bar, "Close");
         _barNotes.Content = text["updates.whatsNew"];
-        _barDownload.Content = text["updates.download"];
         AutomationProperties.SetName(_close, text["updates.close"]);
         ToolTipService.SetToolTip(_close, text["updates.close"]);
 
@@ -75,6 +78,7 @@ internal sealed class UpdateViews : IUpdateViews, IDisposable
                     <TextBlock x:Name="Title" FontSize="22" FontWeight="Bold" TextWrapping="Wrap" TextAlignment="Center" Foreground="{ThemeResource AunUpdateTextBrush}" AutomationProperties.HeadingLevel="Level1" />
                     <TextBlock x:Name="Body" TextWrapping="Wrap" TextAlignment="Center" Foreground="{ThemeResource AunUpdateTextBrush}" AutomationProperties.AutomationId="UpdateForcedBody" />
                     <TextBlock x:Name="Message" TextWrapping="Wrap" TextAlignment="Center" Foreground="{ThemeResource AunUpdateTextBrush}" />
+                    <TextBlock x:Name="Step" TextWrapping="Wrap" TextAlignment="Center" FontWeight="SemiBold" Foreground="{ThemeResource AunUpdateTextBrush}" AutomationProperties.AutomationId="UpdateForcedStep" />
                     <TextBlock x:Name="How" TextWrapping="Wrap" TextAlignment="Center" Foreground="{ThemeResource AunUpdateDimBrush}" />
                     <TextBlock x:Name="Page" TextWrapping="Wrap" TextAlignment="Center" IsTextSelectionEnabled="True" IsTabStop="False" Foreground="{ThemeResource AunUpdateDimBrush}" />
                     <StackPanel Orientation="Horizontal" Spacing="10" HorizontalAlignment="Center" Margin="0,8,0,0">
@@ -94,14 +98,16 @@ internal sealed class UpdateViews : IUpdateViews, IDisposable
         Part<TextBlock>(forced, "Title").Text = text["updates.forced.title"];
         _forcedBody = Part<TextBlock>(forced, "Body");
         _forcedMessage = Part<TextBlock>(forced, "Message");
-        Part<TextBlock>(forced, "How").Text = text.How;
-        Part<TextBlock>(forced, "Page").Text = text.Page;
+        _forcedStep = Part<TextBlock>(forced, "Step");
+        var forcedHow = Part<TextBlock>(forced, "How");
+        forcedHow.Text = text.How;
+        _forcedHow = forcedHow;
+        var forcedPage = Part<TextBlock>(forced, "Page");
+        forcedPage.Text = text.Page;
+        _forcedPage = forcedPage;
         var quitButton = Part<Button>(forced, "Quit");
         quitButton.Content = text["updates.quit"];
         _forcedDownload = Part<Button>(forced, "Download");
-        _forcedDownload.Content = text["updates.download"];
-        // A named button, not its version: the screen's own words say what it is for
-        AutomationProperties.SetName(_forcedDownload, text["updates.download"]);
 
         var body = Load<StackPanel>("""
             <StackPanel x:Name="Root" HighContrastAdjustment="None" Spacing="6" AutomationProperties.AutomationId="UpdateSection">
@@ -109,7 +115,14 @@ internal sealed class UpdateViews : IUpdateViews, IDisposable
               <TextBlock x:Name="Version" TextWrapping="Wrap" Foreground="{ThemeResource AunUpdateTextBrush}" AutomationProperties.AutomationId="UpdateVersion" />
               <TextBlock x:Name="LastChecked" TextWrapping="Wrap" Foreground="{ThemeResource AunUpdateDimBrush}" AutomationProperties.AutomationId="UpdateLastChecked" />
               <TextBlock x:Name="Result" TextWrapping="Wrap" Foreground="{ThemeResource AunUpdateTextBrush}" AutomationProperties.AutomationId="UpdateResult" />
+              <TextBlock x:Name="Step" TextWrapping="Wrap" Foreground="{ThemeResource AunUpdateTextBrush}" AutomationProperties.AutomationId="UpdateSectionStep" />
               <TextBlock x:Name="How" TextWrapping="Wrap" Foreground="{ThemeResource AunUpdateDimBrush}" />
+              <StackPanel x:Name="Auto" Spacing="2" Margin="0,6,0,0">
+                <CheckBox x:Name="AutoBox" AutomationProperties.AutomationId="UpdateAuto">
+                  <TextBlock x:Name="AutoText" TextWrapping="Wrap" Foreground="{ThemeResource AunUpdateTextBrush}" />
+                </CheckBox>
+                <TextBlock x:Name="AutoHint" TextWrapping="Wrap" Foreground="{ThemeResource AunUpdateDimBrush}" />
+              </StackPanel>
             </StackPanel>
             """);
         Part<TextBlock>(body, "Title").Text = text["updates.title"];
@@ -119,6 +132,13 @@ internal sealed class UpdateViews : IUpdateViews, IDisposable
         var how = Part<TextBlock>(body, "How");
         how.Text = text.How;
         _sectionHow = how;
+        _sectionStep = Part<TextBlock>(body, "Step");
+        _auto = Part<StackPanel>(body, "Auto");
+        _autoBox = Part<CheckBox>(body, "AutoBox");
+        Part<TextBlock>(body, "AutoText").Text = text["updates.auto"];
+        Part<TextBlock>(body, "AutoHint").Text = text["updates.autoHint"];
+        AutomationProperties.SetName(_autoBox, text["updates.auto"]);
+        AutomationProperties.SetHelpText(_autoBox, text["updates.autoHint"]);
         SectionBody = body;
         var actions = Load<StackPanel>("""
             <StackPanel x:Name="Root" HighContrastAdjustment="None" Orientation="Horizontal" Spacing="8">
@@ -130,7 +150,6 @@ internal sealed class UpdateViews : IUpdateViews, IDisposable
         _sectionNotes = Part<HyperlinkButton>(actions, "Notes");
         _sectionNotes.Content = text["updates.whatsNew"];
         _sectionDownload = Part<Button>(actions, "Download");
-        _sectionDownload.Content = text["updates.download"];
         _checkNow = Part<Button>(actions, "CheckNow");
         _checkNow.Content = text["updates.checkNow"];
         SectionActions = actions;
@@ -139,6 +158,13 @@ internal sealed class UpdateViews : IUpdateViews, IDisposable
         _barNotes.Click += (_, _) => _ = ShowNotesAsync();
         _sectionNotes.Click += (_, _) => _ = ShowNotesAsync();
         foreach (var b in new[] { _barDownload, _forcedDownload, _sectionDownload }) b.Click += (_, _) => service.Begin();
+        // Not Click: a screen reader toggles it without one
+        RoutedEventHandler chosen = (_, _) =>
+        {
+            if (!_isRendering) service.InstallsAutomatically = _autoBox.IsChecked == true;
+        };
+        _autoBox.Checked += chosen;
+        _autoBox.Unchecked += chosen;
         _checkNow.Click += (_, _) => _ = service.CheckAsync(isAsked: true);
         quitButton.Click += (_, _) => quit();
         service.PropertyChanged += OnChanged;
@@ -202,6 +228,7 @@ internal sealed class UpdateViews : IUpdateViews, IDisposable
         // What is new in a version that is there to update to
         _barNotes.Visibility = When(v.CanDownload && _text.Notes(v).Length > 0);
         _barDownload.Visibility = When(v.CanDownload);
+        SetButton(_barDownload, v);
         _close.Visibility = When(v.CanClose);
 
         Forced.Visibility = When(IsForced);
@@ -209,22 +236,49 @@ internal sealed class UpdateViews : IUpdateViews, IDisposable
         _forcedMessage.Text = _text.Message(v);
         _forcedMessage.Visibility = When(_forcedMessage.Text.Length > 0);
 
+        _forcedStep.Text = _text.Step(v);
+        _forcedStep.Visibility = When(_forcedStep.Text.Length > 0);
+        // The way to the download page is not how this copy is updated
+        _forcedHow.Visibility = _forcedPage.Visibility = When(!v.Installs);
+        SetButton(_forcedDownload, v);
+
         var found = _service.Result == UpdateResult.Found;
+        var offered = _service.Found;
         if (_section != null) _section.Visibility = When(_service.IsSectionVisible);
         _version.Text = _text.Version;
         _lastChecked.Text = _text.LastChecked;
         var told = _result.Text;
         _result.Text = _text.Result;
         _result.Visibility = When(_result.Text.Length > 0);
-        _sectionHow.Visibility = When(found);
+        _sectionHow.Visibility = When(found && !offered.Installs);
+        _sectionStep.Text = found ? _text.Step(offered) : "";
+        _sectionStep.Visibility = When(_sectionStep.Text.Length > 0);
         _sectionDownload.Visibility = When(found);
-        _sectionNotes.Visibility = When(found && _text.Notes(_service.Found).Length > 0);
+        SetButton(_sectionDownload, offered);
+        _auto.Visibility = When(_service.CanInstall);
+        _isRendering = true;
+        _autoBox.IsChecked = _service.InstallsAutomatically;
+        _isRendering = false;
+        _sectionNotes.Visibility = When(found && _text.Notes(offered).Length > 0);
         _checkNow.IsEnabled = _service.Result != UpdateResult.Checking;
 
-        if (v.IsBar) Announce(v.Stage + ":" + v.Version, _barText, _barText.Text);
-        else if (IsForced) Announce("forced", _forcedBody, _text["updates.forced.title"] + " " + _forcedBody.Text);
+        if (v.IsBar) Announce(v.Stage + ":" + v.Version + ":" + v.Step + (v.IsBusy ? ":busy" : ""), _barText, _barText.Text);
+        else if (IsForced) Announce("forced" + v.Step, _forcedBody, v.Step == UpdateStep.None ? _text["updates.forced.title"] + " " + _forcedBody.Text : _forcedStep.Text);
         // What Check now came to, for a person who cannot see it change
         if (_service.IsCheckAsked && _result.Text != told && _result.Text.Length > 0) Speak(_result, _result.Text);
+    }
+
+    /// <summary>A named button: its words alone say what it does.</summary>
+    private void SetButton(Button button, UpdateView v)
+    {
+        var words = _text.Button(v);
+        if (button.Content as string != words)
+        {
+            button.Content = words;
+            AutomationProperties.SetName(button, words);
+        }
+
+        button.IsEnabled = v.CanBegin;
     }
 
     /// <summary>
@@ -355,7 +409,8 @@ internal sealed class UpdateViews : IUpdateViews, IDisposable
     {
         var all = Brush("AccentButtonBackground", Hex(f, "Primary")) + Brush("AccentButtonBackgroundPointerOver", Hex(f, "PrimaryHover")) + Brush("AccentButtonBackgroundPressed", Hex(f, "PrimaryPressed"));
         foreach (var state in new[] { "", "PointerOver", "Pressed" })
-            all += Brush("AccentButtonForeground" + state, Hex(f, "OnPrimary")) + Brush("AccentButtonBorderBrush" + state, Hex(f, "PrimaryEdge")) + Brush("HyperlinkButtonForeground" + state, Hex(f, "Link"));
+            all += Brush("CheckBoxCheckBackgroundFillChecked" + state, Hex(f, "Primary")) + Brush("CheckBoxCheckBackgroundStrokeChecked" + state, Hex(f, "PrimaryEdge")) + Brush("CheckBoxCheckGlyphForegroundChecked" + state, Hex(f, "OnPrimary"))
+                + Brush("AccentButtonForeground" + state, Hex(f, "OnPrimary")) + Brush("AccentButtonBorderBrush" + state, Hex(f, "PrimaryEdge")) + Brush("HyperlinkButtonForeground" + state, Hex(f, "Link"));
         return all;
     }
 
@@ -428,6 +483,8 @@ internal sealed class UpdateViews : IUpdateViews, IDisposable
                 (_sectionNotes, _sectionNotes.Foreground, global::Windows.UI.ViewManagement.UIElementType.Hotlight),
                 (_sectionDownload, _sectionDownload.Background, global::Windows.UI.ViewManagement.UIElementType.Highlight),
                 (_sectionDownload, _sectionDownload.Foreground, global::Windows.UI.ViewManagement.UIElementType.HighlightText),
+                (_forcedStep, _forcedStep.Foreground, global::Windows.UI.ViewManagement.UIElementType.WindowText),
+                (_sectionStep, _sectionStep.Foreground, global::Windows.UI.ViewManagement.UIElementType.WindowText),
             };
             var shown = parts.Where(p => IsShown(p.Part)).ToList();
             return shown.Count > 0 && shown.All(p => p.Brush is Microsoft.UI.Xaml.Media.SolidColorBrush b && b.Color == system.UIElementColor(p.Color));
@@ -441,7 +498,7 @@ internal sealed class UpdateViews : IUpdateViews, IDisposable
     public bool IsNotesShown => IsShown(_barNotes);
     public string OpenNotes => _openNotes;
     public bool IsForcedShown => IsShown(Forced);
-    public string ForcedText => _forcedBody.Text + "\n" + _forcedMessage.Text;
+    public string ForcedText => _forcedBody.Text + "\n" + _forcedMessage.Text + "\n" + _forcedStep.Text;
 
     public bool IsForcedWhole
     {
@@ -458,10 +515,24 @@ internal sealed class UpdateViews : IUpdateViews, IDisposable
     public bool IsForcedFocused => Forced.XamlRoot is { } root && ReferenceEquals(FocusManager.GetFocusedElement(root), _forcedDownload);
 
     public bool IsSectionShown => IsShown(SectionBody);
-    public string SectionText => string.Join("\n", _version.Text, _lastChecked.Text, _result.Text);
+    public string SectionText => string.Join("\n", _version.Text, _lastChecked.Text, _result.Text, _sectionStep.Text);
+    private Button Shown => IsForcedShown ? _forcedDownload : IsSectionShown ? _sectionDownload : _barDownload;
+    public string ButtonText => Shown.Content as string ?? "";
+    public bool IsButtonEnabled => Shown.IsEnabled;
+    public bool IsAutoShown => IsShown(_auto);
+    public bool IsAutoOn => _autoBox.IsChecked == true;
     public void PressClose() => Press(_close);
     public void PressNotes() => ((Microsoft.UI.Xaml.Automation.Provider.IInvokeProvider)new HyperlinkButtonAutomationPeer(_barNotes)).Invoke();
     public void PressDownload() => Press(IsForcedShown ? _forcedDownload : _barDownload);
     public void PressCheckNow() => Press(_checkNow);
-    private static void Press(Button button) => ((Microsoft.UI.Xaml.Automation.Provider.IInvokeProvider)new ButtonAutomationPeer(button)).Invoke();
+
+    // Through the box's own toggle, as a press does
+    public void PressAuto() => ((Microsoft.UI.Xaml.Automation.Provider.IToggleProvider)new CheckBoxAutomationPeer(_autoBox)).Toggle();
+
+
+    // A disabled button's peer throws; a person's press does nothing
+    private static void Press(Button button)
+    {
+        if (button.IsEnabled) ((Microsoft.UI.Xaml.Automation.Provider.IInvokeProvider)new ButtonAutomationPeer(button)).Invoke();
+    }
 }

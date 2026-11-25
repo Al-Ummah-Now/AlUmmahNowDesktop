@@ -34,4 +34,5 @@
     <ProjectReference Include="..\AlUmmahNow.CoreBridge.Native\AlUmmahNow.CoreBridge.Native.csproj" />
     <ProjectReference Include="..\AlUmmahNow.Platform.Windows\AlUmmahNow.Platform.Windows.csproj" />
   </ItemGroup>
+  <Import Project="..\Shared\WinUI\SelfUpdate.props" />
 </Project>

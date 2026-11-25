@@ -66,6 +66,7 @@ public sealed class SelfUpdaterTests : IDisposable
             Staged = null;
         }
 
+        public bool IsOpenElsewhere => false;
         public void ApplyOnExit() => Exits++;
         public void ApplyAndRestart() => Restarts++;
     }
