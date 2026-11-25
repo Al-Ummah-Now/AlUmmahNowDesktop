@@ -112,6 +112,7 @@ public sealed partial class MainWindow
         _window.SetDirection(direction);
         _window.SetTitle(_localizer["app.name"]);
 
+        _liveTitles.Clear();
         var root = Gtk.Box.New(Gtk.Orientation.Vertical, 0);
         root.Append(BuildHeader());
 
@@ -299,7 +300,7 @@ public sealed partial class MainWindow
 
     /// <summary>Line boxes for the rail heading and a card's title and meta lines: above the natural line height of both
     /// Latin and Arabic (with any fallback glyph), so a card and a rail are the same height in either language.</summary>
-    private const int RailHeadingLine = 36, TitleLine = 32, MetaLine = 26;
+    private const int RailHeadingLine = 36, TitleLine = 32, TitleTextLine = 24, MetaLine = 26;
 
     private Gtk.Widget BuildCard(VideoCardViewModel card)
     {

@@ -118,7 +118,8 @@ app.OnActivate += async (_, _) =>
                 : AlUmmahNow.App.Demo.LiveAutomation.Passed(automation, window.LiveList, window.LiveWatch, auth, furthest) is { } asAsked
                 ? asAsked
                 : window.Home.Rails.Count > 0;
-            Log.For("automation").Info($"AUTOMATION {automation} core={coreVersion} rails={window.Home.Rails.Count} furthest={furthest:F1} caption={sawCaption} RESULT {(pass ? "PASS" : "FAIL")}");
+            pass = pass && window.LiveTitlesAreWhole;
+            Log.For("automation").Info($"AUTOMATION {automation} core={coreVersion} rails={window.Home.Rails.Count} furthest={furthest:F1} caption={sawCaption} titlesWhole={window.LiveTitlesAreWhole} RESULT {(pass ? "PASS" : "FAIL")}");
             exitCode = pass ? 0 : 3;
             app.Quit();
             return false;

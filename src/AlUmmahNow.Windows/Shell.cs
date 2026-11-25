@@ -101,6 +101,7 @@ public sealed partial class Shell
         _root.RequestedTheme = IsDark ? ElementTheme.Dark : ElementTheme.Light;
         _root.Background = new SolidColorBrush(IsDark ? Night : Parchment);
         _root.Children.Clear();
+        _liveTitles.Clear();
         _root.RowDefinitions.Clear();
         _root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         _root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
