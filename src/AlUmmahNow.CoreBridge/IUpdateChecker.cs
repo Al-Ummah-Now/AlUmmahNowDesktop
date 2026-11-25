@@ -48,6 +48,15 @@ namespace AlUmmahNow.CoreBridge
         public string? MessageAr { get; set; }
 
         public int CheckHours { get; set; } = 6;
+
+        /// <summary>The server offers it to be installed in place, to a copy that can (<see cref="ISelfUpdate"/>).</summary>
+        public bool CanInstall { get; set; }
+
+        /// <summary>The release's tag: what the app itself looks up, on the one host it may (no link is taken from the answer).</summary>
+        public string? Tag { get; set; }
+
+        /// <summary>The admins' default for "Install updates automatically".</summary>
+        public bool InstallsByDefault { get; set; } = true;
     }
 
     /// <summary>The server could not be reached, or its answer could not be read.</summary>

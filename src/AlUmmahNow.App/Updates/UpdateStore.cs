@@ -19,6 +19,12 @@ namespace AlUmmahNow.App.Updates
         /// </summary>
         public List<string>? Dismissed { get; set; }
 
+        /// <summary>"Install updates automatically": the person's own choice; null follows the admins' default.</summary>
+        public bool? InstallsAutomatically { get; set; }
+
+        /// <summary>The admins' default at the last check.</summary>
+        public bool InstallsByDefault { get; set; } = true;
+
         /// <summary>The core's own state (opaque).</summary>
         public string? Core { get; set; }
     }
