@@ -253,8 +253,8 @@ namespace AlUmmahNow.TizenTv
                 switch (name)
                 {
                     case "Return": case "XF86PlayBack": case "XF86AudioPlay": case "XF86AudioPause": _watch.TogglePlay(); break;
-                    case "Right": if (_localizer.IsRtl) _watch.SkipBack(); else _watch.SkipForward(); break;
-                    case "Left": if (_localizer.IsRtl) _watch.SkipForward(); else _watch.SkipBack(); break;
+                    case "Right": _watch.SkipByArrow(right: true); break;
+                    case "Left": _watch.SkipByArrow(right: false); break;
                     case "XF86Back": case "Escape": _navigator.Back(); break;
                 }
 

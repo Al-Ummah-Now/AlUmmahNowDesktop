@@ -158,8 +158,8 @@ namespace AlUmmahNow.TizenTv
                 case "XF86Back": case "Escape": _navigator.Back(); break;
                 case "Return" when vm.IsBehind: vm.ReturnToLive(); break;
                 case "Return": case "XF86PlayBack": case "XF86AudioPlay": case "XF86AudioPause": vm.Watch?.TogglePlay(); break;
-                case "Right": if (_localizer.IsRtl) vm.Watch?.SkipBack(); else vm.Watch?.SkipForward(); break;
-                case "Left": if (_localizer.IsRtl) vm.Watch?.SkipForward(); else vm.Watch?.SkipBack(); break;
+                case "Right": vm.Watch?.SkipByArrow(right: true); break;
+                case "Left": vm.Watch?.SkipByArrow(right: false); break;
             }
         }
     }

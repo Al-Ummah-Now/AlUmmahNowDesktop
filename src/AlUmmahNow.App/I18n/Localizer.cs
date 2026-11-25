@@ -195,10 +195,13 @@ namespace AlUmmahNow.App.I18n
         public string DateTime(DateTimeOffset value)
         {
             var at = Local(value);
-            var time = Digits(at.ToString("h:mm", CultureInfo.InvariantCulture));
-            return Isolate(_language == "ar"
-                ? Day(at) + "، " + time + (at.Hour < 12 ? " ص" : " م")
-                : Day(at) + ", " + time + (at.Hour < 12 ? " AM" : " PM"));
+            return Isolate(Day(at) + (_language == "ar" ? "، " : ", ") + ShortTime(at.Hour, at.Minute));
+        }
+
+        private string ShortTime(int hour, int minute)
+        {
+            var time = Digits(((hour + 11) % 12 + 1).ToString(CultureInfo.InvariantCulture) + ":" + minute.ToString("00", CultureInfo.InvariantCulture));
+            return time + (_language == "ar" ? (hour < 12 ? " ص" : " م") : (hour < 12 ? " AM" : " PM"));
         }
 
         private DateTimeOffset Local(DateTimeOffset value) => TimeZoneInfo.ConvertTime(value, _zone ?? TimeZoneInfo.Local);
@@ -236,13 +239,11 @@ namespace AlUmmahNow.App.I18n
             : count > 9 ? Digits("9") + "+"
             : Digits(count.ToString(CultureInfo.InvariantCulture));
 
-        /// <summary>Formats minutes from midnight (0..1439) as 24h HH:mm in the active language's digits, isolated.</summary>
+        /// <summary>Minutes from midnight (0..1439) as the short time of the dates: "10:00 PM" / «١٠:٠٠ م», isolated.</summary>
         public string MinuteOfDay(int minute)
         {
             var clamped = ((minute % 1440) + 1440) % 1440;
-            var h = (clamped / 60).ToString("00", CultureInfo.InvariantCulture);
-            var m = (clamped % 60).ToString("00", CultureInfo.InvariantCulture);
-            return Isolate(Digits(h + ":" + m));
+            return Isolate(ShortTime(clamped / 60, clamped % 60));
         }
 
         /// <summary>A playback speed: "1.5x" / "١٫٥x".</summary>
