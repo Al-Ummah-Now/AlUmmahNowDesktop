@@ -214,7 +214,10 @@ internal sealed class UpdateViews : IUpdateViews, IDisposable
     private void OnChanged(object? sender, PropertyChangedEventArgs e)
     {
         var was = Forced.Visibility;
+        var could = _forcedDownload.IsEnabled;
         Render();
+        // A button that is disabled loses the keyboard: it has it again when there is something to press
+        if (IsForced && !could && _forcedDownload.IsEnabled) FocusForced();
         if (Forced.Visibility != was) ForcedChanged?.Invoke();
     }
 
@@ -408,6 +411,8 @@ internal sealed class UpdateViews : IUpdateViews, IDisposable
     private static string Buttons(Dictionary<string, uint> f)
     {
         var all = Brush("AccentButtonBackground", Hex(f, "Primary")) + Brush("AccentButtonBackgroundPointerOver", Hex(f, "PrimaryHover")) + Brush("AccentButtonBackgroundPressed", Hex(f, "PrimaryPressed"));
+        // A button that waits (for the download, for running work) is read all the same
+        all += Brush("AccentButtonBackgroundDisabled", Hex(f, "PrimaryDisabled")) + Brush("AccentButtonForegroundDisabled", Hex(f, "OnPrimaryDisabled")) + Brush("AccentButtonBorderBrushDisabled", Hex(f, "PrimaryDisabled"));
         foreach (var state in new[] { "", "PointerOver", "Pressed" })
             all += Brush("CheckBoxCheckBackgroundFillChecked" + state, Hex(f, "Primary")) + Brush("CheckBoxCheckBackgroundStrokeChecked" + state, Hex(f, "PrimaryEdge")) + Brush("CheckBoxCheckGlyphForegroundChecked" + state, Hex(f, "OnPrimary"))
                 + Brush("AccentButtonForeground" + state, Hex(f, "OnPrimary")) + Brush("AccentButtonBorderBrush" + state, Hex(f, "PrimaryEdge")) + Brush("HyperlinkButtonForeground" + state, Hex(f, "Link"));
@@ -431,6 +436,7 @@ internal sealed class UpdateViews : IUpdateViews, IDisposable
         + string.Concat(new[] { "", "PointerOver", "Pressed" }.Select(state =>
             Brush("AccentButtonBackground" + state, "{ThemeResource SystemColorHighlightColor}") + Brush("AccentButtonForeground" + state, "{ThemeResource SystemColorHighlightTextColor}")
             + Brush("HyperlinkButtonForeground" + state, "{ThemeResource SystemColorHotlightColor}")))
+        + Brush("AccentButtonBackgroundDisabled", "{ThemeResource SystemColorWindowColor}") + Brush("AccentButtonForegroundDisabled", "{ThemeResource SystemColorGrayTextColor}") + Brush("AccentButtonBorderBrushDisabled", "{ThemeResource SystemColorGrayTextColor}")
         + "</ResourceDictionary>";
 
     /// <summary>The system's colors.</summary>
@@ -468,27 +474,43 @@ internal sealed class UpdateViews : IUpdateViews, IDisposable
         {
             if (!new global::Windows.UI.ViewManagement.AccessibilitySettings().HighContrast) return true;
             var system = new global::Windows.UI.ViewManagement.UISettings();
+            // What a button paints in its state is its template's, not its own brush
+            (FrameworkElement, Microsoft.UI.Xaml.Media.Brush?, global::Windows.UI.ViewManagement.UIElementType)[] Of(Button b)
+            {
+                var painted = Presenter(b);
+                return new (FrameworkElement, Microsoft.UI.Xaml.Media.Brush?, global::Windows.UI.ViewManagement.UIElementType)[]
+                {
+                    (b, painted?.Background, b.IsEnabled ? global::Windows.UI.ViewManagement.UIElementType.Highlight : global::Windows.UI.ViewManagement.UIElementType.Window),
+                    (b, painted?.Foreground, b.IsEnabled ? global::Windows.UI.ViewManagement.UIElementType.HighlightText : global::Windows.UI.ViewManagement.UIElementType.GrayText),
+                };
+            }
+
             var parts = new (FrameworkElement Part, Microsoft.UI.Xaml.Media.Brush? Brush, global::Windows.UI.ViewManagement.UIElementType Color)[]
             {
                 (Bar, ((Grid)Bar).Background, global::Windows.UI.ViewManagement.UIElementType.Window),
                 (_barText, _barText.Foreground, global::Windows.UI.ViewManagement.UIElementType.WindowText),
                 (_barNotes, _barNotes.Foreground, global::Windows.UI.ViewManagement.UIElementType.Hotlight),
-                (_barDownload, _barDownload.Background, global::Windows.UI.ViewManagement.UIElementType.Highlight),
-                (_barDownload, _barDownload.Foreground, global::Windows.UI.ViewManagement.UIElementType.HighlightText),
                 (Forced, ((Grid)Forced).Background, global::Windows.UI.ViewManagement.UIElementType.Window),
                 (_forcedBody, _forcedBody.Foreground, global::Windows.UI.ViewManagement.UIElementType.WindowText),
-                (_forcedDownload, _forcedDownload.Background, global::Windows.UI.ViewManagement.UIElementType.Highlight),
-                (_forcedDownload, _forcedDownload.Foreground, global::Windows.UI.ViewManagement.UIElementType.HighlightText),
                 (_version, _version.Foreground, global::Windows.UI.ViewManagement.UIElementType.WindowText),
                 (_sectionNotes, _sectionNotes.Foreground, global::Windows.UI.ViewManagement.UIElementType.Hotlight),
-                (_sectionDownload, _sectionDownload.Background, global::Windows.UI.ViewManagement.UIElementType.Highlight),
-                (_sectionDownload, _sectionDownload.Foreground, global::Windows.UI.ViewManagement.UIElementType.HighlightText),
                 (_forcedStep, _forcedStep.Foreground, global::Windows.UI.ViewManagement.UIElementType.WindowText),
                 (_sectionStep, _sectionStep.Foreground, global::Windows.UI.ViewManagement.UIElementType.WindowText),
-            };
+            }.Concat(Of(_barDownload)).Concat(Of(_forcedDownload)).Concat(Of(_sectionDownload));
             var shown = parts.Where(p => IsShown(p.Part)).ToList();
             return shown.Count > 0 && shown.All(p => p.Brush is Microsoft.UI.Xaml.Media.SolidColorBrush b && b.Color == system.UIElementColor(p.Color));
         }
+    }
+
+    private static ContentPresenter? Presenter(DependencyObject at)
+    {
+        for (var i = 0; i < Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(at); i++)
+        {
+            var child = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(at, i);
+            if ((child as ContentPresenter ?? Presenter(child)) is { } found) return found;
+        }
+
+        return null;
     }
 
     public bool IsBarShown => IsShown(Bar);

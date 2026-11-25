@@ -23,7 +23,7 @@ namespace AlUmmahNow.App.Demo
             var kind = _scene switch
             {
                 "off" or "uptodate" => UpdatePromptKind.None,
-                "forced" or "waiting" or "forcedupdate" or "forcedready" => UpdatePromptKind.Forced,
+                "forced" or "waiting" or "forcedupdate" or "forceddownloading" or "forcedready" => UpdatePromptKind.Forced,
                 "required" => UpdatePromptKind.RequiredBar,
                 _ => UpdatePromptKind.Notice,
             };
@@ -80,7 +80,7 @@ namespace AlUmmahNow.App.Demo
         public async Task<VerifiedUpdate> StageAsync(string tag, string version, IProgress<double>? progress, CancellationToken cancellationToken = default)
         {
             if (_scene == "failed") throw new UpdateCheckFailedException("offline (demo)");
-            if (_scene == "downloading")
+            if (_scene is "downloading" or "forceddownloading")
             {
                 progress?.Report(Far);
                 await Task.Delay(Timeout.Infinite, cancellationToken);
@@ -163,7 +163,7 @@ namespace AlUmmahNow.App.Demo
         public static readonly IReadOnlyList<string> All = new[] { "bar", "notes", "dismissed", "forced", "waiting", "required", "settings", "uptodate", "offline", "off" };
 
         /// <summary>The scenes of a copy that installs updates itself, on Windows alone.</summary>
-        public static readonly IReadOnlyList<string> Installing = new[] { "update", "downloading", "failed", "ready", "readybusy", "forcedupdate", "forcedready", "settingsupdate" };
+        public static readonly IReadOnlyList<string> Installing = new[] { "update", "downloading", "failed", "ready", "readybusy", "forcedupdate", "forceddownloading", "forcedready", "settingsupdate" };
 
         private readonly Localizer _l;
         private readonly DemoSelfUpdate _self;
@@ -218,6 +218,7 @@ namespace AlUmmahNow.App.Demo
                     views.PressDownload();
                     break;
                 case "downloading":
+                case "forceddownloading":
                 case "failed":
                 case "ready":
                 case "readybusy":
@@ -280,7 +281,9 @@ namespace AlUmmahNow.App.Demo
                 "ready" => Check((v.IsBarShown, "no bar"), (v.BarText == _l["updates.ready"], "it is not told"), (_buttonBefore == _l["updates.restart"] && v.ButtonText == _buttonBefore, "no Restart now"), (v.IsCloseShown, "no close"), (_self.Restarts == 1, "it did not restart"), (_delivery.Begun == 0, "a page was opened")),
                 "readybusy" => Check((v.IsBarShown, "no bar"), (v.BarText == _l["updates.readyBusy.studio"] || v.BarText == _l["updates.readyBusy.viewer"], "it is not told"), (v.ButtonText == _l["updates.restart"], "no Restart now"), (!v.IsButtonEnabled, "it can be restarted"), (_self.Restarts == 0, "it restarted over work")),
                 "forcedupdate" => Check((v.IsForcedShown, "no screen"), (v.IsForcedWhole, "the screen is not the whole window"), (v.IsForcedFocused, "the keyboard is elsewhere"), (v.ButtonText == _l["updates.update"] && v.IsButtonEnabled, "no Update"), (!v.IsBarShown, "a bar")),
-                "forcedready" => Check((v.IsForcedShown, "no screen"), (_buttonBefore == _l["updates.update"], "there was no Update"), (v.ForcedText.Contains(_l["updates.readyForced"]), "it is not told"), (v.ButtonText == _l["updates.restart"], "no Restart now"), (_self.Restarts == 1, "it did not restart"), (_delivery.Begun == 0, "a page was opened")),
+                "forceddownloading" => Check((v.IsForcedShown, "no screen"), (v.IsForcedWhole, "the screen is not the whole window"), (_buttonBefore == _l["updates.update"], "there was no Update"),
+                    (v.ForcedText.Contains(_l.Percent(DemoSelfUpdate.Far)), "it does not say how far"), (!v.IsButtonEnabled, "it can be asked twice"), (!v.IsBarShown, "a bar"), (_delivery.Begun == 0, "a page was opened")),
+                "forcedready" => Check((v.IsForcedShown, "no screen"), (v.IsForcedFocused, "the keyboard is elsewhere"), (_buttonBefore == _l["updates.update"], "there was no Update"), (v.ForcedText.Contains(_l["updates.readyForced"]), "it is not told"), (v.ButtonText == _l["updates.restart"], "no Restart now"), (_self.Restarts == 1, "it did not restart"), (_delivery.Begun == 0, "a page was opened")),
                 "settingsupdate" => Check((v.IsSectionShown, "no section"), (v.SectionText.Contains(installed), "no version"), (v.SectionText.Contains(_l["updates.ready"]), "nothing is ready"), (v.IsAutoShown, "no choice"), (_wasAutoOff, "the choice did nothing"), (v.IsAutoOn && Service.InstallsAutomatically, "the choice is off"), (v.ButtonText == _l["updates.restart"], "no Restart now")),
                 _ => "no such scene",
             };

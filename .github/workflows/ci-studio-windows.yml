@@ -237,7 +237,7 @@ jobs:
             ./scripts/windows-studio-shot.ps1 $exe $lang $theme $size $mode $name $out $tab | Out-Host
             if (-not (Select-String -Quiet "update=${scene}:ok.*RESULT PASS" "$out/$name.txt")) { $script:failed += $name }
           }
-          foreach ($scene in "bar","notes","dismissed","forced","waiting","required","settings","uptodate","offline","off","update","downloading","failed","ready","readybusy","forcedupdate","forcedready","settingsupdate") { foreach ($lang in "en","ar") { foreach ($theme in "dark","light") { Shot $scene $lang $theme "1440x900" } } }
+          foreach ($scene in "bar","notes","dismissed","forced","waiting","required","settings","uptodate","offline","off","update","downloading","failed","ready","readybusy","forcedupdate","forceddownloading","forcedready","settingsupdate") { foreach ($lang in "en","ar") { foreach ($theme in "dark","light") { Shot $scene $lang $theme "1440x900" } } }
           # The smallest window: nothing of the bar or the screen is cut.
           foreach ($scene in "bar","forced","readybusy","forcedready") { foreach ($lang in "en","ar") { Shot $scene $lang "dark" "1024x700" } }
           # Screen readers: the bar's controls have names; behind the screen of an unsupported version nothing is left to reach.
