@@ -60,6 +60,8 @@ jobs:
           $env:AUN_STAGE_DIR = $stage
           ./scripts/windows-studio-scenario.ps1 $exe ar uploads shell upload-staged-ar $out
           ./scripts/windows-studio-scenario.ps1 $exe en uploads shell upload-staged-en $out
+          ./scripts/windows-studio-scenario.ps1 $exe ar uploads shell schedulepick-ar $out "" schedulepick
+          ./scripts/windows-studio-scenario.ps1 $exe en uploads shell schedulepick-en $out "" schedulepick
           $env:AUN_STAGE_DIR = ""
           ./scripts/windows-studio-scenario.ps1 $exe ar videos shell videos-ar $out
           ./scripts/windows-studio-scenario.ps1 $exe en videos shell videos-en $out
@@ -83,7 +85,7 @@ jobs:
           }
           if (-not (Select-String -Quiet -SimpleMatch "page=uploads upload=True analytics=True bulkSchedule=True" "artifacts/studio/shell-en.txt")) { throw "shell-en lost Upload or Analytics" }
           if (-not (Select-String -Quiet -SimpleMatch "`tPage_uploads`t" "artifacts/studio/shell-en.uia.txt")) { throw "shell-en has no Upload tab" }
-          foreach ($n in "features-off-en","features-off-ar","uploads-ar","signin-ar","signin-en","shell-ar","shell-en","accounts-en","channels-en","channels-ar","signout-ar","addpasskey-en","addpasskey-ar","upload-staged-ar","upload-staged-en","videos-ar","videos-en","search-ar","edit-en","bulk-ar","delete-en","analytics-ar","analytics-en","timeline-ar","encode-en") {
+          foreach ($n in "features-off-en","features-off-ar","uploads-ar","signin-ar","signin-en","shell-ar","shell-en","accounts-en","channels-en","channels-ar","signout-ar","addpasskey-en","addpasskey-ar","upload-staged-ar","upload-staged-en","schedulepick-ar","schedulepick-en","videos-ar","videos-en","search-ar","edit-en","bulk-ar","delete-en","analytics-ar","analytics-en","timeline-ar","encode-en") {
             if (-not (Select-String -Quiet "RESULT PASS" "artifacts/studio/$n.txt")) { throw "$n failed" }
             if (Test-Path "artifacts/studio/$n.txt.hang.txt") { throw "$n did not exit" }
           }
@@ -111,6 +113,9 @@ jobs:
           if (-not (Select-String -Quiet "`tVideoSearch`tSearch your videos" artifacts/studio/videos-en.uia.txt)) { throw "video search has no accessible name" }
           if (-not (Select-String -Quiet "Select Seerah" artifacts/studio/videos-en.uia.txt)) { throw "row checkboxes have no accessible names" }
           if (-not (Select-String -Quiet "`tStartUpload`tUpload 3 videos" artifacts/studio/upload-staged-en.uia.txt)) { throw "upload button not exposed" }
+          # The time the first video publishes at, its month and its days are named, in the interface's language and digits.
+          foreach ($t in "`tScheduleStart`tFirst video publishes", "Sunday, November 22, 2026", "Previous month", "`tScheduleDone`tDone") { if (-not (Select-String -Quiet -SimpleMatch $t artifacts/studio/schedulepick-en.uia.txt)) { throw "not in the schedule: $t" } }
+          foreach ($t in "`tScheduleStart`tيُنشر أول مرئي في", "الأحد، ٢٢ نوفمبر ٢٠٢٦", "الشهر السابق", "`tScheduleDone`tتم") { if (-not (Select-String -Quiet -SimpleMatch $t artifacts/studio/schedulepick-ar.uia.txt)) { throw "not in the Arabic schedule: $t" } }
           ffmpeg -hide_banner -i "$source.out.mp4" 2>&1 | Select-String "Video:|Duration" | Tee-Object artifacts/studio/discover.txt
           if (-not (Select-String -Quiet "h264" artifacts/studio/discover.txt)) { throw "output is not H.264" }
           # ffmpeg -i with no output file always exits 1; the checks above are the gate.
@@ -135,7 +140,7 @@ jobs:
           $env:AUN_DEMO_THUMBS = (Resolve-Path tests/fixtures/studio-thumbs).Path
           $failed = @()
           foreach ($lang in "en","ar") { foreach ($theme in "dark","light") {
-            foreach ($shot in @(@("uploads","","1440x900"), @("uploads","channels","1440x900"), @("uploads","","1920x1032"), @("uploads","","1024x700"), @("uploads","scheduled","1440x900"), @("videos","","1440x900"), @("videos","bulk","1440x900"), @("videos","private","1440x900"), @("videos","deleted","1440x900"), @("videos","deleted-open","1440x900"), @("videos","searchfocus","1440x900"), @("videos","searchhover","1440x900"), @("videos","","1920x1032"), @("videos","","1024x700"), @("analytics","","1440x900"), @("analytics","cardhover","1440x900"), @("analytics","","1920x1032"), @("analytics","","1024x700"), @("timeline","","1440x900"), @("encode","","1440x900"), @("encode","active","1440x900"), @("timeline","","1024x700"), @("settings","","1440x900"), @("settings","","1024x700"))) {
+            foreach ($shot in @(@("uploads","","1440x900"), @("uploads","channels","1440x900"), @("uploads","","1920x1032"), @("uploads","","1024x700"), @("uploads","scheduled","1440x900"), @("uploads","schedulepick","1440x900"), @("uploads","schedulesoon","1440x900"), @("uploads","schedulesoonpick","1440x900"), @("uploads","schedulepick","1024x700"), @("videos","","1440x900"), @("videos","bulk","1440x900"), @("videos","private","1440x900"), @("videos","deleted","1440x900"), @("videos","deleted-open","1440x900"), @("videos","searchfocus","1440x900"), @("videos","searchhover","1440x900"), @("videos","","1920x1032"), @("videos","","1024x700"), @("analytics","","1440x900"), @("analytics","cardhover","1440x900"), @("analytics","","1920x1032"), @("analytics","","1024x700"), @("timeline","","1440x900"), @("encode","","1440x900"), @("encode","active","1440x900"), @("timeline","","1024x700"), @("settings","","1440x900"), @("settings","","1024x700"))) {
               $state = if ($shot[1]) { $shot[1] } else { "closed" }
               $name = "windows-$($shot[0])-$state-$lang-$theme-$($shot[2])"
               ./scripts/windows-studio-shot.ps1 $exe $lang $theme $shot[2] $shot[1] $name $out $shot[0]
@@ -175,7 +180,7 @@ jobs:
               if ($tab -eq "videos") { ./scripts/high-contrast.ps1 off }
             }
             # page, scene, demo (0: signed out)
-            $high = @(@("videos","highcontrast","1"), @("timeline","highcontrast","1"), @("analytics","highcontrast","1"), @("uploads","highcontrast","1"), @("settings","highcontrast","1"), @("encode","highcontrast","1"), @("videos","highcontrast-edit","1"), @("videos","highcontrast-delete","1"), @("uploads","highcontrast-channels","1"), @("timeline","highcontrast","0"))
+            $high = @(@("videos","highcontrast","1"), @("timeline","highcontrast","1"), @("analytics","highcontrast","1"), @("uploads","highcontrast","1"), @("settings","highcontrast","1"), @("encode","highcontrast","1"), @("videos","highcontrast-edit","1"), @("videos","highcontrast-delete","1"), @("uploads","highcontrast-channels","1"), @("uploads","highcontrast-schedulepick","1"), @("uploads","highcontrast-schedulesoon","1"), @("timeline","highcontrast","0"))
             foreach ($lang in "en","ar") { foreach ($h in $high) {
               $name = "windows-$(if ($h[2] -eq "0") { "signin" } else { $h[0] })-$($h[1])-$lang-dark-1440x900"
               ./scripts/windows-studio-shot.ps1 $exe $lang dark 1440x900 $h[1] $name $out $h[0] $h[2]

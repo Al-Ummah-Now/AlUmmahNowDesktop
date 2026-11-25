@@ -77,7 +77,10 @@ public sealed partial class UploadsViewModel : ObservableObject, IDisposable
 
     public bool BulkScheduleOn => _shell.Features.IsOn(UserFeatures.BulkSchedule);
 
-    public bool CanStart => Staged.Count > 0 && _service != null && _shell.ActiveChannel != null;
+    public bool CanStart => Staged.Count > 0 && _service != null && _shell.ActiveChannel != null && !ScheduleIsTooSoon;
+
+    /// <summary>The first video's time has no room for the upload: nothing starts until another is chosen.</summary>
+    public bool ScheduleIsTooSoon => Defaults.Visibility == UploadVisibility.Scheduled && Defaults.ScheduleStart is { } at && SchedulePick.IsSoon(at, _now());
 
     /// <summary>Count of uploads still moving (for the window title and the quit warning).</summary>
     public int ActiveCount => Items.Count(i => i.IsActive);
@@ -108,6 +111,14 @@ public sealed partial class UploadsViewModel : ObservableObject, IDisposable
 
     /// <summary>Queues every staged file on the active channel. Returns how many were queued.</summary>
     public int Start()
+    {
+        if (!ScheduleIsTooSoon) return Queue();
+        // The time has come while the page was open
+        OnPropertyChanged(nameof(CanStart));
+        return 0;
+    }
+
+    private int Queue()
     {
         var service = _service;
         var channel = _shell.ActiveChannel;
@@ -323,8 +334,8 @@ public sealed partial class UploadsViewModel : ObservableObject, IDisposable
         var found = _watch.Scan().Select(f => f.Path).ToList();
         if (found.Count == 0) return;
         var keep = Staged;
-        Staged = UploadPlanner.Plan(found, Defaults, _now(), BulkScheduleOn);
-        Start();
+        Staged = UploadPlanner.Plan(found, Defaults, _now(), BulkScheduleOn, movePast: true);
+        Queue();
         Staged = keep;
     }
 

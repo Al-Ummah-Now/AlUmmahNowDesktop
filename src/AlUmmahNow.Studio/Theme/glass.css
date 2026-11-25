@@ -111,6 +111,11 @@ checkbutton check:checked, radiobutton radio:checked { background-color: @fanous
 .card-footer { border-top: 1px solid alpha(@fanous_primary_edge, 0.22); padding: 10px 18px; }
 .card-footer button { min-height: 32px; }
 
+/* The month the first video publishes in: the day that is picked is gold. */
+button.schedule-day { min-width: 36px; min-height: 32px; padding: 0; border-radius: 8px; font-weight: 400; }
+button.schedule-day:checked { background-image: linear-gradient(to bottom, @fanous_primary_hover, @fanous_primary 60%, @fanous_primary_pressed); }
+button.schedule-day:checked label { color: @fanous_on_primary; font-weight: 700; }
+
 /* Upload: the add zone with the lantern, file tiles. */
 .drop-zone {
   border: 1.5px dashed alpha(@fanous_primary_edge, 0.55);

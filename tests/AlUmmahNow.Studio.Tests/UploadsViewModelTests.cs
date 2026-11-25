@@ -102,6 +102,36 @@ public sealed class UploadsViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task NothingStartsAtATimeThatIsTooSoon()
+    {
+        var (_, vm) = await CreateAsync();
+        vm.Defaults.Visibility = UploadVisibility.Scheduled;
+        vm.Defaults.ScheduleStart = vm.Now.AddMinutes(14);
+        vm.AddFiles(new[] { Video("a.mp4") });
+        Assert.True(vm.ScheduleIsTooSoon);
+        Assert.False(vm.CanStart);
+        var said = 0;
+        vm.PropertyChanged += (_, e) => said += e.PropertyName == nameof(UploadsViewModel.CanStart) ? 1 : 0;
+        Assert.Equal(0, vm.Start());
+        Assert.Equal(1, said);
+        Assert.Single(vm.Staged);
+        // What a watched folder finds does not wait for someone to choose
+        var folder = Directory.CreateDirectory(Path.Combine(_dir, "watched")).FullName;
+        File.WriteAllBytes(Path.Combine(folder, "b.mp4"), new byte[10]);
+        vm.Watch(folder);
+        vm.Tick();
+        vm.Tick();
+        Assert.Equal("b", Assert.Single(_services[0].Specs).Title);
+        vm.Defaults.ScheduleStart = vm.Now.AddMinutes(15);
+        vm.ApplyDefaults();
+        Assert.True(vm.CanStart);
+        // Not scheduled: its time is not asked for
+        vm.Defaults.ScheduleStart = vm.Now.AddMinutes(-1);
+        vm.Defaults.Visibility = UploadVisibility.Private;
+        Assert.True(vm.CanStart);
+    }
+
+    [Fact]
     public async Task FinishStepsRunOnceTheVideoExistsAndSurviveARestart()
     {
         var (_, vm) = await CreateAsync();

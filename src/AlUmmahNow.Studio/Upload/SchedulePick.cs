@@ -14,6 +14,9 @@ public sealed class SchedulePick
     /// <summary>As on the web: room for the upload.</summary>
     public static readonly TimeSpan Lead = TimeSpan.FromMinutes(15);
 
+    /// <summary>As on the web too: nothing is planned later than this.</summary>
+    public static readonly TimeSpan Longest = TimeSpan.FromDays(365);
+
     private readonly Localizer _l;
     private readonly Func<DateTimeOffset> _now;
     private readonly TimeZoneInfo _zone;
@@ -26,6 +29,15 @@ public sealed class SchedulePick
         _zone = zone ?? TimeZoneInfo.Local;
         _local = TimeZoneInfo.ConvertTime(value, _zone).DateTime;
         Month = new DateTime(_local.Year, _local.Month, 1);
+        Minutes = Enumerable.Range(0, 12).Select(i => i * 5).Append(_local.Minute).Distinct().OrderBy(m => m).ToList();
+    }
+
+    /// <summary>What a schedule begins with: tomorrow at 9:00.</summary>
+    public static DateTimeOffset TomorrowMorning(DateTimeOffset now, TimeZoneInfo? zone = null)
+    {
+        zone ??= TimeZoneInfo.Local;
+        var at = TimeZoneInfo.ConvertTime(now, zone).Date.AddDays(1).AddHours(9);
+        return new DateTimeOffset(at, zone.GetUtcOffset(at));
     }
 
     public event EventHandler? Changed;
@@ -44,8 +56,10 @@ public sealed class SchedulePick
         }
     }
 
-    /// <summary>Too soon, or past: nothing is planned at it.</summary>
-    public bool IsTooSoon => Value < _now() + Lead;
+    /// <summary>Too soon, or past: no upload starts with it.</summary>
+    public bool IsTooSoon => IsSoon(Value, _now());
+
+    public static bool IsSoon(DateTimeOffset value, DateTimeOffset now) => value < now + Lead;
 
     public string Label => _l.DateTime(Value);
 
@@ -66,7 +80,7 @@ public sealed class SchedulePick
         {
             var today = TimeZoneInfo.ConvertTime(_now() + Lead, _zone).Date;
             return Enumerable.Range(0, DateTime.DaysInMonth(Month.Year, Month.Month)).Select(i => Month.AddDays(i))
-                .Select(d => new PickDay(d, _l.DayOfMonth(d), _l.LongDay(d), d == _local.Date, d >= today)).ToList();
+                .Select(d => new PickDay(d, _l.DayOfMonth(d), _l.LongDay(d), d == _local.Date, d >= today && d <= LastDay)).ToList();
         }
     }
 
@@ -77,7 +91,15 @@ public sealed class SchedulePick
         if (CanGoBack) Show(Month.AddMonths(-1));
     }
 
-    public void Next() => Show(Month.AddMonths(1));
+    public bool CanGoNext => Month.AddMonths(1) <= LastDay;
+
+    /// <summary>The last day whose every time is soon enough.</summary>
+    private DateTime LastDay => TimeZoneInfo.ConvertTime(_now() + Longest, _zone).Date.AddDays(-1);
+
+    public void Next()
+    {
+        if (CanGoNext) Show(Month.AddMonths(1));
+    }
 
     private void Show(DateTime month)
     {
@@ -96,8 +118,8 @@ public sealed class SchedulePick
         set => Set(_local.Date.AddHours((_local.Hour / 12 * 12) + value).AddMinutes(_local.Minute));
     }
 
-    /// <summary>Every five minutes; one of another minute keeps it until it is changed.</summary>
-    public IReadOnlyList<int> Minutes => Enumerable.Range(0, 12).Select(i => i * 5).Append(_local.Minute).Distinct().OrderBy(m => m).ToList();
+    /// <summary>Every five minutes, and the one it began with.</summary>
+    public IReadOnlyList<int> Minutes { get; }
 
     public IReadOnlyList<string> MinuteLabels => Minutes.Select(_l.Minute).ToList();
 

@@ -163,6 +163,10 @@ internal sealed class UploadPage
             switch (e.PropertyName)
             {
                 case nameof(UploadsViewModel.Staged): RenderStaged(); break;
+                case nameof(UploadsViewModel.CanStart):
+                    RenderStaged();
+                    _picker?.Render();
+                    break;
                 case nameof(UploadsViewModel.Items): RenderQueue(); break;
                 case nameof(UploadsViewModel.Playlists): RenderPlaylists(); break;
                 case nameof(UploadsViewModel.ErrorKey): RenderError(); break;
@@ -180,12 +184,31 @@ internal sealed class UploadPage
     public Grid Root { get; }
 
     private ComboBox? _visibility;
+    private SchedulePick? _pick;
+    private SchedulePicker? _picker;
 
     /// <summary>CI screenshots: "scheduled" picks Scheduled, showing the schedule fields.</summary>
     public void RunScene(string scene)
     {
-        if (scene == "scheduled" && _visibility != null) _visibility.SelectedIndex = 2;
+        if (_visibility != null) _visibility.SelectedIndex = 2;
+        // "schedulesoon": today at 12 AM, which is past
+        if (scene.StartsWith("schedulesoon", StringComparison.Ordinal) && _pick != null)
+        {
+            _pick.Pick(_vm.Now.ToLocalTime().Date);
+            _pick.Hour = 0;
+        }
+
+        // Not before the row that the month opens from has its place
+        if (scene.EndsWith("pick", StringComparison.Ordinal)) _scheduleRow.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => _picker?.Open());
     }
+
+    /// <summary>CI's scenarios: what the field shows is what the scene is of.</summary>
+    public bool ScheduleIs(string scene) => scene switch
+    {
+        "schedulepick" => _picker is { IsReadable: true } && _vm.CanStart,
+        "schedulesoon" or "schedulesoonpick" => _pick is { IsTooSoon: true } && !_vm.CanStart && !_start.IsEnabled && (scene == "schedulesoon" || _picker is { IsReadable: true }),
+        _ => true,
+    };
 
     private UploadDefaults D => _vm.Defaults;
 
@@ -289,34 +312,13 @@ internal sealed class UploadPage
         panel.Children.Add(row);
 
         D.TimeZone = Formats.LocalTimeZone();
-        D.ScheduleStart ??= _vm.Now.Date.AddDays(1).AddHours(9);
-        // The field reads left to right in Arabic too, under a heading that does not
-        var start = new TextBox
+        D.ScheduleStart ??= SchedulePick.TomorrowMorning(_vm.Now);
+        _pick = new SchedulePick(_l, D.ScheduleStart.Value, () => _vm.Now);
+        _picker = new SchedulePicker(_l, _pick, () =>
         {
-            Header = new TextBlock { Text = _l["studio.upload.scheduleStart"], FlowDirection = _direction, TextWrapping = TextWrapping.Wrap },
-            Text = _l.InputLeftToRight(Formats.ToLocalInput(D.ScheduleStart.Value)),
-            FlowDirection = FlowDirection.LeftToRight,
-            TextAlignment = _l.IsRtl ? TextAlignment.Right : TextAlignment.Left,
-            MinWidth = 220,
-        };
-        AutomationProperties.SetName(start, _l["studio.upload.scheduleStart"]);
-        start.TextChanged += (_, _) =>
-        {
-            var kept = _l.InputLeftToRight(start.Text);
-            if (kept != start.Text)
-            {
-                var at = start.SelectionStart + kept.Length - start.Text.Length;
-                start.Text = kept;
-                start.SelectionStart = Math.Clamp(at, 0, kept.Length);
-                return;
-            }
-
-            var t = Formats.ParseLocal(Localizer.NormalizeDigits(start.Text));
-            start.Description = t == null ? Hint(_l["studio.upload.scheduleInvalid"]) : null;
-            if (t == null) return;
-            D.ScheduleStart = t;
+            D.ScheduleStart = _pick.Value;
             _vm.ApplyDefaults();
-        };
+        });
         var every = new NumberBox { Header = _l["studio.upload.scheduleEvery"], Value = D.ScheduleInterval.TotalHours, Minimum = 0, Maximum = 24 * 30, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Inline, SmallChange = 1 };
         // The hours in the UI's digits: ٠–٩ in Arabic (the formatter also reads typed ٠–٩ back).
         if (_l.Language == "ar") every.NumberFormatter = new DecimalFormatter { NumeralSystem = "Arab", FractionDigits = 0, IntegerDigits = 1, IsGrouped = false };
@@ -333,9 +335,8 @@ internal sealed class UploadPage
             if (e.PropertyName == nameof(UploadsViewModel.BulkScheduleOn)) every.Visibility = _vm.BulkScheduleOn ? Visibility.Visible : Visibility.Collapsed;
         };
         var scheduleFields = new StackPanel { Spacing = 12 };
-        start.MinWidth = 0;
-        start.HorizontalAlignment = every.HorizontalAlignment = HorizontalAlignment.Stretch;
-        scheduleFields.Children.Add(start);
+        every.HorizontalAlignment = HorizontalAlignment.Stretch;
+        scheduleFields.Children.Add(_picker.Root);
         scheduleFields.Children.Add(every);
         _scheduleRow.Children.Add(scheduleFields);
         panel.Children.Add(_scheduleRow);
@@ -430,7 +431,7 @@ internal sealed class UploadPage
             {
                 Text = _l.JoinWrapped(Localizer.Isolate(file), _l.Bytes(plan.Size, 2), plan.PublishAt is { } at ? _l.Format("studio.upload.publishesAt", _l.DateTime(at)) : null),
                 VerticalAlignment = VerticalAlignment.Center,
-                TextTrimming = TextTrimming.CharacterEllipsis,
+                TextWrapping = TextWrapping.Wrap,
             }.Dim(0.8);
             var text = new StackPanel { Spacing = 4 };
             text.Children.Add(title);

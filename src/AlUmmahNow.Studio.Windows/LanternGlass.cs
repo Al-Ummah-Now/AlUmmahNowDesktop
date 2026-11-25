@@ -54,6 +54,7 @@ internal static class LanternGlass
             {
                 d["HyperlinkButtonForeground" + state] = link;
                 d["AccentButtonForeground" + state] = onGold;
+                d["ToggleButtonForegroundChecked" + state] = onGold;
                 d["CheckBoxCheckGlyphForegroundChecked" + state] = onGold;
                 d["CheckBoxCheckGlyphForegroundIndeterminate" + state] = onGold;
             }

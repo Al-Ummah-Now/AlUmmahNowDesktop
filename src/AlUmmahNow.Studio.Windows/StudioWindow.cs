@@ -828,7 +828,8 @@ internal sealed class StudioWindow
         return style;
     }
 
-    private static Style MenuStyle()
+    /// <summary>A menu in Lantern Glass, as the dialogs.</summary>
+    internal static Style MenuStyle()
     {
         var style = new Style(typeof(FlyoutPresenter));
         style.Setters.Add(new Setter(Control.BackgroundProperty, LanternGlass.Res("StudioMenuBrush")));

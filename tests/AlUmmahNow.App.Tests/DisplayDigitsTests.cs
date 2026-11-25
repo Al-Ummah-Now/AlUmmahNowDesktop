@@ -221,20 +221,6 @@ public class DisplayDigitsTests
         Assert.Equal(expected, Localizer.NormalizeDigits(typed));
 
     [Theory]
-    [InlineData("ar", "\u202D٢٠٢٦-١١-١٧ ٠٩:٠٠")]
-    [InlineData("en", "2026-11-17 09:00")]
-    public void A_left_to_right_field_has_the_ui_digits_in_their_order_and_reads_back(string language, string shown)
-    {
-        var l = new Localizer(language);
-        Assert.Equal(shown, l.InputLeftToRight("2026-11-17 09:00"));
-        // What is in the field stays, also as one types, pastes a mark or deletes the override
-        Assert.Equal(shown, l.InputLeftToRight(shown));
-        Assert.Equal(shown, l.InputLeftToRight("\u200F٢٠٢٦-١١-17 ٠٩:٠٠\u2069"));
-        Assert.Equal("2026-11-17 09:00", Localizer.NormalizeDigits(shown));
-        Assert.Equal(language == "ar" ? "\u202D" : "", l.InputLeftToRight(""));
-    }
-
-    [Theory]
     [InlineData("ar", "1.0.0", "\u2068١.٠.٠\u2069")]
     [InlineData("en", "1.0.0", "\u20681.0.0\u2069")]
     [InlineData("ar", "1.4.2-preview.3", "\u2068\u202A١.٤.٢-preview.٣\u202C\u2069")]
@@ -260,7 +246,6 @@ public class DisplayDigitsTests
         ["src/AlUmmahNow.Studio/Encode/Encoding.cs"] = "GStreamer pipeline",
         ["src/AlUmmahNow.Studio/Encode/RenditionEncoding.cs"] = "GStreamer pipeline",
         ["src/AlUmmahNow.Studio/Engines/CsvWriter.cs"] = "CSV export",
-        ["src/AlUmmahNow.Studio/Upload/Formats.cs"] = "schedule text box value (an input, kept as typed)",
         ["src/AlUmmahNow.Studio/Upload/UploadPlanner.cs"] = "video titles people edit and the server stores",
     };
 

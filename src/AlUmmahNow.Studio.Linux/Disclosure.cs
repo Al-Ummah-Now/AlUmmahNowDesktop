@@ -49,10 +49,7 @@ public sealed class Disclosure
     {
         _label.SetText(title);
         // A button whose child is a box takes no name from a label in it
-        var values = new[] { new GObject.Value(title) };
-        using var handle = GObject.Internal.ValueArray2OwnedHandle.Create(values);
-        Gtk.Internal.Accessible.UpdateProperty(Toggle.Handle.DangerousGetHandle(), 1, new[] { Gtk.AccessibleProperty.Label }, handle);
-        GC.KeepAlive(values);
+        Ui.Say(Toggle, title);
     }
 
     /// <summary>Collapsed or expanded, as a screen reader says it (GTK keeps the state as a number: it may be undefined).</summary>

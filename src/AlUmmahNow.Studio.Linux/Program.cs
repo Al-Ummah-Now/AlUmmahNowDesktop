@@ -210,7 +210,7 @@ app.OnActivate += (_, _) =>
             else if (scene == "channels") window.OpenChannelPicker();
             else if (scene == "signout") window.AskSignOut();
             else if (scene == "searchfocus") window.FocusSearch();
-            else if (scene == "scheduled") uploads.RunScene(scene);
+            else if (scene is "scheduled" or "schedulepick" or "schedulesoon" or "schedulesoonpick") uploads.RunScene(scene);
             else if (scene == "active") AlUmmahNow.Studio.Demo.DemoEncodeBackend.Seed(encode, Path.GetTempPath());
             // The demo's second channel has no videos: the Videos empty state.
             else if (scene == "emptychannel") shell.SelectChannel(shell.Channels.ElementAtOrDefault(1));
@@ -230,11 +230,11 @@ app.OnActivate += (_, _) =>
                 : automation == "shell" ? shell.State == ShellState.Ready && shell.ActiveChannel != null
                 : uploadsDone || tabName != "uploads";
             // The screen of an unsupported version is in place of the sidebar
-            pass = pass && (updateViews.IsForced || window.RailIsCentered) && (scene != "searchfocus" || window.SearchHasFocus) && (!scene.StartsWith("deleted", StringComparison.Ordinal) || videos.DeletedIsShown);
+            pass = pass && uploads.ScheduleIs(scene) && (updateViews.IsForced || window.RailIsCentered) && (scene != "searchfocus" || window.SearchHasFocus) && (!scene.StartsWith("deleted", StringComparison.Ordinal) || videos.DeletedIsShown);
             var updateWrong = updateScene?.Wrong(updateViews);
             pass = pass && updateWrong == null;
             if (updateScene != null) Log.For("automation").Info($"UPDATE {updateScene.Name} {updateWrong ?? "ok"}");
-            Log.For("automation").Info($"AUTOMATION {tabName} page={pages.Current} upload={pages.IsVisible(StudioPages.Uploads)} analytics={pages.IsVisible(StudioPages.Analytics)} bulkSchedule={uploadsVm.BulkScheduleOn} scene={scene} shell={shell.State} channel={shell.ActiveChannel?.Id} accounts={shell.AccountList.Count} uploads={items.Count} uploadsDone={uploadsDone} encode={automationJob?.Status} encoder={automationJob?.UsedEncoder?.Name} error={automationJob?.Error} everyText={uploads.ScheduleEveryText} searchFocused={window.SearchHasFocus} fieldFocused={window.FieldHasFocus} rail={window.IsRail} railCentered={window.RailIsCentered} RESULT {(pass ? "PASS" : "FAIL")}");
+            Log.For("automation").Info($"AUTOMATION {tabName} page={pages.Current} upload={pages.IsVisible(StudioPages.Uploads)} analytics={pages.IsVisible(StudioPages.Analytics)} bulkSchedule={uploadsVm.BulkScheduleOn} scene={scene} shell={shell.State} channel={shell.ActiveChannel?.Id} accounts={shell.AccountList.Count} uploads={items.Count} uploadsDone={uploadsDone} encode={automationJob?.Status} encoder={automationJob?.UsedEncoder?.Name} error={automationJob?.Error} schedule={uploads.ScheduleIs(scene)} everyText={uploads.ScheduleEveryText} searchFocused={window.SearchHasFocus} fieldFocused={window.FieldHasFocus} rail={window.IsRail} railCentered={window.RailIsCentered} RESULT {(pass ? "PASS" : "FAIL")}");
             exitCode = pass ? 0 : 3;
             app.Quit();
             return false;

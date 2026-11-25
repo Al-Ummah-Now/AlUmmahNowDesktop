@@ -342,13 +342,6 @@ namespace AlUmmahNow.App.I18n
         public static string Isolate(string text) => "\u2068" + text + "\u2069";
 
         /// <summary>
-        /// The text of a field that reads left to right in every language ("2026-11-22 09:00" / «٢٠٢٦-١١-٢٢ ٠٩:٠٠»): in
-        /// Arabic with a left-to-right override before it, as the hyphens between Arabic digits put the parts in another
-        /// order in a left-to-right field too. Given what is in the field, typed or not, it is what the field should hold.
-        /// </summary>
-        public string InputLeftToRight(string text) => _language == "ar" ? "\u202D" + Digits(NormalizeDigits(text)) : NormalizeDigits(text);
-
-        /// <summary>
         /// A version for display, isolated: "1.4.2-preview.3" / «١.٤.٢-preview.٣». It is no decimal number, so its dots
         /// stay dots (wiki AUN-APP-UPDATES §12). With letters it is embedded left to right as well: Windows' text does not
         /// know isolates, and put the parts in another order.
