@@ -107,7 +107,7 @@ public sealed class DemoTransport : IApiTransport
                 "hadith_studies", "en", false, 248, 12, 2, 486, Ago(47, "09:20"), new[] { "hadith", "niyyah" }),
             new DemoVideo("قصص الأنبياء: يونس عليه السلام", "Stories of the prophets: Yunus", "قصص الأنبياء: يونس عليه السلام",
                 "islamic_history", "ar", true, 2193, 97, 14, 1462, Ago(53, "19:45"), new[] { "قصص الأنبياء", "يونس" }),
-            new DemoVideo("Q&A: prayer while travelling", "Q&A: prayer while travelling", "سؤال وجواب: الصلاة في السفر",
+            new DemoVideo("Q&A: prayer while traveling", "Q&A: prayer while traveling", "سؤال وجواب: الصلاة في السفر",
                 "fiqh", "en", true, 1608, 73, 22, 903, Ago(61, "11:00"), new[] { "salah", "travel" }),
         };
         _videos = videos.Select((v, i) => new Dictionary<string, object?>

@@ -124,10 +124,13 @@ jobs:
           $exe = (Resolve-Path "src/AlUmmahNow.Studio.Windows/bin/x64/Release/net9.0-windows10.0.22621.0/win-x64/AlUmmahNowStudio.exe").Path
           # Upload with three staged files and two watched ones uploading (simulated), so every card shows.
           $stage = (New-Item -ItemType Directory -Force review-staged).FullName
-          foreach ($n in "درس 1.mp4","درس 2.mp4","lesson 10.mp4") { [IO.File]::WriteAllBytes("$stage/$n", (New-Object byte[] 1500000)) }
-          $watch = (New-Item -ItemType Directory -Force review-watched).FullName
+          foreach ($n in "خطبة 1.mp4","خطبة 2.mp4","khutbah 10.mp4") { [IO.File]::WriteAllBytes("$stage/$n", (New-Object byte[] 1500000)) }
+          # As on someone's own computer: the pages show the folder's path.
+          $watch = (New-Item -ItemType Directory -Force "C:\Videos\New").FullName
           foreach ($n in "friday-khutbah.mp4","seerah-part-4.mov") { [IO.File]::WriteAllBytes("$watch/$n", (New-Object byte[] 2000000)) }
           $env:AUN_STAGE_DIR = $stage; $env:AUN_WATCH_DIR = $watch
+          # Title-card thumbnails in the frame's language, as on Linux.
+          $env:AUN_DEMO_THUMBS = (Resolve-Path tests/fixtures/studio-thumbs).Path
           $failed = @()
           foreach ($lang in "en","ar") { foreach ($theme in "dark","light") {
             foreach ($shot in @(@("uploads","","1440x900"), @("uploads","channels","1440x900"), @("uploads","","1920x1032"), @("uploads","","1024x700"), @("uploads","scheduled","1440x900"), @("videos","","1440x900"), @("videos","bulk","1440x900"), @("videos","private","1440x900"), @("videos","deleted","1440x900"), @("videos","deleted-open","1440x900"), @("videos","searchfocus","1440x900"), @("videos","searchhover","1440x900"), @("videos","","1920x1032"), @("videos","","1024x700"), @("analytics","","1440x900"), @("analytics","cardhover","1440x900"), @("analytics","","1920x1032"), @("analytics","","1024x700"), @("timeline","","1440x900"), @("encode","","1440x900"), @("encode","active","1440x900"), @("timeline","","1024x700"), @("settings","","1440x900"), @("settings","","1024x700"))) {

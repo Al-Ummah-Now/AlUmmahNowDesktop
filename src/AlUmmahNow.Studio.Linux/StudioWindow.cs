@@ -263,7 +263,7 @@ public sealed class StudioWindow
         _searchBox.SetSizeRequest((int)(rail ? FawaneesHeader.SearchNarrowWidth : FawaneesHeader.SearchMaxWidth), (int)FawaneesHeader.SearchHeight);
         _sidebar.SetSizeRequest(rail ? RailWidth : SidebarWidth, -1);
 
-        foreach (var p in _pageInfo.Values) p.Label.SetVisible(!rail);
+        foreach (var p in _pageInfo.Values) ShowLabel(p.Label);
         _identityButton.SetMarginStart(rail ? 8 : 10);
         _identityButton.SetMarginEnd(rail ? 8 : 10);
         RenderIdentity();
@@ -279,12 +279,19 @@ public sealed class StudioWindow
         box.Append(Gtk.Image.NewFromIconName(icon));
         var label = Gtk.Label.New(title);
         label.SetXalign(0);
-        label.SetVisible(!_rail);
         box.Append(label);
+        ShowLabel(label);
         row.SetChild(box);
         row.SetTooltipText(title);
         (name == StudioPages.Settings ? _navFooter : _nav).Append(row);
         _pageInfo[name] = (title, row, label);
+    }
+
+    /// <summary>A page's name beside its icon; in the rail the icon is alone, in the middle of its row.</summary>
+    private void ShowLabel(Gtk.Label label)
+    {
+        label.SetVisible(!_rail);
+        label.GetParent()!.SetHalign(_rail ? Gtk.Align.Center : Gtk.Align.Fill);
     }
 
     private string? SelectedPage => _nav.GetSelectedRow()?.GetName() ?? _navFooter.GetSelectedRow()?.GetName();
