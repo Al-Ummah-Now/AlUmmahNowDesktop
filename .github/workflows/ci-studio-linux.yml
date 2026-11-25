@@ -3,7 +3,7 @@ on:
   push:
   workflow_dispatch:
 concurrency:
-  group: ci-studio-linux-${{ github.ref }}
+  group: ci-studio-linux-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 permissions:
   contents: read
