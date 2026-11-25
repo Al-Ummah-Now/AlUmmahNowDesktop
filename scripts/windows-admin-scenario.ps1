@@ -23,5 +23,4 @@ $lines = foreach ($w in $root.FindAll([System.Windows.Automation.TreeScope]::Chi
 }
 $lines | Set-Content -Encoding utf8 (Join-Path $Out "$Name.uia.txt")
 if (-not $p.WaitForExit(30000)) { $p.Kill(); "EXIT HANG" | Add-Content "$env:AUN_RESULT.hang.txt" }
-if (Test-Path "$env:AUN_RESULT.crash.txt") { Get-Content "$env:AUN_RESULT.crash.txt" }
-if (Test-Path $env:AUN_RESULT) { Get-Content $env:AUN_RESULT } else { "NO RESULT FILE" }
+& "$PSScriptRoot/windows-result.ps1" $env:AUN_RESULT

@@ -45,9 +45,8 @@ public sealed partial class Shell
     /// <summary>The window is closing.</summary>
     public void Close() => LiveWatch?.Close(TimeSpan.FromSeconds(2));
 
-    // Set on the parts themselves: the app's accent does not reach the framework's own styles (see the slider)
-    private static SolidColorBrush Gold => new(Lantern);
-    private static SolidColorBrush OnGold => new(Night);
+    private SolidColorBrush Gold => ViewerTheme.Brush("Primary", IsDark);
+    private SolidColorBrush OnGold => ViewerTheme.Brush("OnPrimary", IsDark);
 
     private SolidColorBrush CardFill => new(IsDark ? global::Windows.UI.Color.FromArgb(255, 14, 43, 61) : Colors.White);
 
@@ -138,14 +137,14 @@ public sealed partial class Shell
         return button;
     }
 
-    private static FrameworkElement Badges(IReadOnlyList<LiveBadge> badges)
+    private FrameworkElement Badges(IReadOnlyList<LiveBadge> badges)
     {
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Visibility = badges.Count > 0 ? Visibility.Visible : Visibility.Collapsed };
         foreach (var badge in badges) row.Children.Add(Badge(badge.Text, badge.IsOnAir));
         return row;
     }
 
-    private static Border Badge(string text, bool isOnAir)
+    private Border Badge(string text, bool isOnAir)
     {
         var label = new TextBlock { Text = text, FontSize = 12, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold };
         if (isOnAir) label.Foreground = OnGold;
@@ -225,13 +224,7 @@ public sealed partial class Shell
         row.Children.Add(text);
 
         var actions = new StackPanel { Spacing = 4, MaxWidth = 240 };
-        var back = new Button { Content = _localizer["live.return"], HorizontalAlignment = HorizontalAlignment.Right, Background = Gold, Foreground = OnGold };
-        foreach (var state in new[] { "", "PointerOver", "Pressed" })
-        {
-            back.Resources["ButtonBackground" + state] = Gold;
-            back.Resources["ButtonForeground" + state] = OnGold;
-        }
-
+        var back = new Button { Content = _localizer["live.return"], HorizontalAlignment = HorizontalAlignment.Right, Style = ViewerTheme.AccentButton };
         back.Click += (_, _) => vm.ReturnToLive();
         actions.Children.Add(back);
         var remind = new Button { HorizontalAlignment = HorizontalAlignment.Right };
