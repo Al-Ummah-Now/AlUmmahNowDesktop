@@ -1,4 +1,5 @@
 using System.Numerics;
+using AlUmmahNow.App.Theme;
 using AlUmmahNow.Studio.Shell;
 using Microsoft.UI;
 using Microsoft.UI.Composition;
@@ -290,7 +291,7 @@ internal static class LanternGlass
 
     private static Color Over(Color color, Color surface, double alpha)
     {
-        var v = StudioTheme.Over(Argb(color), Argb(surface), alpha);
+        var v = ColorMath.Over(Argb(color), Argb(surface), alpha);
         return Color.FromArgb(0xFF, (byte)(v >> 16), (byte)(v >> 8), (byte)v);
     }
 
@@ -309,7 +310,7 @@ internal static class LanternGlass
             _ => Array.Empty<Color>(),
         };
         return text is SolidColorBrush { Color.A: 255 } ink && colors.Length > 0
-            && colors.All(c => c.A == 255 && StudioTheme.Contrast(Argb(ink.Color), Argb(c)) >= 4.5);
+            && colors.All(c => c.A == 255 && ColorMath.Contrast(Argb(ink.Color), Argb(c)) >= 4.5);
     }
 
     private static LinearGradientBrush Gradient(Color top, Color bottom) => new()

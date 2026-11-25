@@ -17,7 +17,9 @@ Gst.Functions.Init(ref gstArgs);
 
 const string Css = """
     .caption-overlay { background-color: rgba(9,48,65,0.82); color: #f7f1e8; padding: 6px 14px; border-radius: 6px; font-size: 20px; }
-    scale > trough > slider { background-color: @fanous_primary; }
+    /* Not gold in light mode, where it is under 3:1 on the page: the registry's accent is darker there. */
+    scale > trough { background-color: alpha(currentColor, 0.55); }
+    scale > trough > highlight, scale > trough > slider { background-color: @fanous_accent; }
     /* The toolkit dims with 55% opacity, under 4.5:1 in light mode: the theme's own second color instead. */
     .dim-label { opacity: 1; color: @fanous_text_secondary; }
     /* The header is dark in both modes. */

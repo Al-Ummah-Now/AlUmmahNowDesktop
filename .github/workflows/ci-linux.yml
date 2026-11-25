@@ -53,6 +53,9 @@ jobs:
           test "$(cat artifacts/linux/*.log | grep -cE 'core=[0-9]+\.[0-9]+\.[0-9]+')" = 4
           grep -q "MPRIS before: ('<'Playing'>',)\|MPRIS before: (<'Playing'>,)" artifacts/linux/watch-ar-dark.log
           grep -q "MPRIS after: (<'Paused'>,)" artifacts/linux/watch-ar-dark.log
+          # The seek bar, played and not, is seen on the page: 3:1 as drawn.
+          python3 scripts/contrast-at.py artifacts/linux/watch-en-light.png 3 250,735:250,712 850,735:850,712
+          python3 scripts/contrast-at.py artifacts/linux/watch-ar-dark.png 3 420,735:420,712 1080,735:1080,712
       - name: Review frames (demo catalog with title cards; the watch frames from the fixture runs)
         env:
           AUN_DEMO_TODAY: "2026-11-21"  # one demo "today" for every frame (DemoClock)

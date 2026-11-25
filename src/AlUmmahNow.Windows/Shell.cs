@@ -64,7 +64,7 @@ public sealed partial class Shell
         AddKey(VirtualKey.Right, () => Watch?.SkipByArrow(right: true));
     }
 
-    public FrameworkElement Root => _root;
+    public Panel Root => _root;
     public HomeViewModel Home { get; }
     public WatchViewModel? Watch => _watch ?? LiveWatch?.Watch;
 
