@@ -245,6 +245,10 @@ internal static class LanternGlass
             },
         };
         t["StudioSelectedTextBrush"] = B(dark ? Color.FromArgb(0xFF, 0xFF, 0xC4, 0x6B) : Color.FromArgb(0xFF, 0x6B, 0x3B, 0x00));
+        // The picked card is opaque: its glow is behind it and would show through, under its text
+        t["StudioPickedCardBrush"] = Gradient(Over(primary, surface, StudioTheme.PickedTop), Over(primary, surface, StudioTheme.PickedBottom));
+        t["StudioPickedEdgeBrush"] = B(Gold);
+        t["StudioTextBrush"] = B(text);
         t["StudioMutedBrush"] = B(muted);
         // The app's own name: under the framework's the merged WinUI dictionary answers first, with the accent's shade
         t["StudioLinkBrush"] = B(link);
@@ -280,6 +284,31 @@ internal static class LanternGlass
         t["FlyoutPresenterBackground"] = t["StudioMenuBrush"];
         t["ContentDialogBackground"] = t["StudioMenuBrush"];
         t["ContentDialogBorderBrush"] = t["StudioEdgeStrongBrush"];
+    }
+
+    private static uint Argb(Color c) => ((uint)c.A << 24) | ((uint)c.R << 16) | ((uint)c.G << 8) | c.B;
+
+    private static Color Over(Color color, Color surface, double alpha)
+    {
+        var v = StudioTheme.Over(Argb(color), Argb(surface), alpha);
+        return Color.FromArgb(0xFF, (byte)(v >> 16), (byte)(v >> 8), (byte)v);
+    }
+
+    /// <summary>
+    /// Whether text of one brush can be read on the other, everywhere on it (CI's scenarios ask). Not where something
+    /// behind it shows through, or where it is not known what is drawn.
+    /// </summary>
+    public static bool IsReadable(Brush? text, Brush? on)
+    {
+        var colors = on switch
+        {
+            SolidColorBrush solid => new[] { solid.Color },
+            AcrylicBrush acrylic => new[] { acrylic.FallbackColor },
+            GradientBrush gradient => gradient.GradientStops.Select(s => s.Color).ToArray(),
+            _ => Array.Empty<Color>(),
+        };
+        return text is SolidColorBrush { Color.A: 255 } ink && colors.Length > 0
+            && colors.All(c => c.A == 255 && StudioTheme.Contrast(Argb(ink.Color), Argb(c)) >= 4.5);
     }
 
     private static LinearGradientBrush Gradient(Color top, Color bottom) => new()
@@ -353,7 +382,7 @@ internal static class LanternGlass
         _ => null,
     };
 
-    private static ContentPresenter? Presenter(Button button) => Find<ContentPresenter>(button, "ContentPresenter");
+    public static ContentPresenter? Presenter(Button button) => Find<ContentPresenter>(button, "ContentPresenter");
 
     private static T? Find<T>(DependencyObject root, string name)
         where T : FrameworkElement

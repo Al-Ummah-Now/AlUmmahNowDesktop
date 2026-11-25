@@ -44,12 +44,52 @@ public sealed class StudioThemeTests
         Assert.Contains("headerbar.night", css);
     }
 
-    private static double Contrast(uint a, uint b)
+    private static double Contrast(uint a, uint b) => StudioTheme.Contrast(a, b);
+
+    [Fact]
+    public void ContrastIsWcags()
     {
-        static double Channel(uint v) => v / 255.0 <= 0.03928 ? v / 255.0 / 12.92 : Math.Pow(((v / 255.0) + 0.055) / 1.055, 2.4);
-        static double Light(uint c) => (0.2126 * Channel((c >> 16) & 255)) + (0.7152 * Channel((c >> 8) & 255)) + (0.0722 * Channel(c & 255));
-        var (x, y) = (Light(a), Light(b));
-        return (Math.Max(x, y) + 0.05) / (Math.Min(x, y) + 0.05);
+        Assert.Equal(21, Contrast(0x000000, 0xFFFFFF), 3);
+        Assert.Equal(1, Contrast(0xF4AE3A, 0xF4AE3A), 3);
+        Assert.Equal(4.48, Contrast(0x777777, 0xFFFFFF), 2);
+    }
+
+    [Fact]
+    public void OverIsOneOpaqueColor()
+    {
+        Assert.Equal(0xFFFF8000u, StudioTheme.Over(0xFFFF8000, 0xFF123456, 1));
+        Assert.Equal(0xFF123456u, StudioTheme.Over(0xFFFF8000, 0xFF123456, 0));
+        Assert.Equal(0xFF7F7F7Fu, StudioTheme.Over(0xFFFEFEFE, 0xFF000000, 0.5));
+    }
+
+    /// <summary>The picked card of Analytics, on Windows and Linux: its label and its value, at its top and bottom.</summary>
+    [Theory]
+    [InlineData("Default")]
+    [InlineData("Light")]
+    public void ThePickedCardIsReadable(string theme)
+    {
+        var c = StudioTheme.ReadXamlColors(StudioTheme.Fanous("Fanous.Colors.xaml"))[theme];
+        foreach (var text in new[] { "TextPrimary", "TextMuted" })
+        {
+            foreach (var alpha in new[] { StudioTheme.PickedTop, StudioTheme.PickedBottom })
+            {
+                var on = StudioTheme.Over(c["FanousPrimaryColor"], c["FanousSurfaceColor"], alpha);
+                Assert.True(Contrast(c["Fanous" + text + "Color"], on) >= 4.5, theme + ": " + text + " on the picked card");
+            }
+        }
+
+        Assert.Contains(FormattableString.Invariant($"linear-gradient(to bottom, alpha(@fanous_primary, {StudioTheme.PickedTop}), alpha(@fanous_primary, {StudioTheme.PickedBottom}))"), StudioTheme.Studio("glass.css"));
+    }
+
+    /// <summary>The white initials of an account, on every color of the circle.</summary>
+    [Fact]
+    public void AnAccountsInitialsAreReadable()
+    {
+        var person = System.Text.RegularExpressions.Regex.Match(StudioTheme.Studio("glass.css"), @"\.studio-avatar\.person \{\s*background-image: radial-gradient\(([^;]+)\);\s*color: white;");
+        Assert.True(person.Success);
+        var stops = System.Text.RegularExpressions.Regex.Matches(person.Groups[1].Value, "#([0-9a-f]{6})");
+        Assert.Equal(3, stops.Count);
+        Assert.All(stops, s => Assert.True(Contrast(0xFFFFFF, Convert.ToUInt32(s.Groups[1].Value, 16)) >= 4.5, s.Value));
     }
 
     [Theory]
@@ -110,7 +150,7 @@ public sealed class StudioThemeTests
         Assert.Contains("FollowHighContrast(app, app.RequestedTheme == ApplicationTheme.Dark);", glass);
         Assert.Contains("        Paint();\n        Settings.ColorValuesChanged += (_, _) => ui.TryEnqueue(Paint);", glass.Replace("\r\n", "\n"));
         // Text is never the color of what it is on
-        foreach (var (on, text) in new[] { ("StudioCardBrush", "StudioMutedBrush"), ("StudioCardBrush", "StudioLinkBrush"), ("StudioMenuBrush", "StudioDangerBrush"), ("StudioDangerFillBrush", "StudioOnDangerFillBrush"), ("StudioSidebarBrush", "StudioSelectedTextBrush") })
+        foreach (var (on, text) in new[] { ("StudioCardBrush", "StudioMutedBrush"), ("StudioCardBrush", "StudioLinkBrush"), ("StudioMenuBrush", "StudioDangerBrush"), ("StudioDangerFillBrush", "StudioOnDangerFillBrush"), ("StudioSidebarBrush", "StudioSelectedTextBrush"), ("StudioPickedCardBrush", "StudioTextBrush"), ("StudioPickedCardBrush", "StudioMutedBrush"), ("StudioPickedCardBrush", "StudioPickedEdgeBrush") })
         {
             Assert.NotEqual(HighContrast.Roles[on], HighContrast.Roles[text]);
             Assert.NotEqual(HighContrastRole.None, HighContrast.Roles[text]);

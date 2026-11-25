@@ -130,7 +130,7 @@ jobs:
           $env:AUN_STAGE_DIR = $stage; $env:AUN_WATCH_DIR = $watch
           $failed = @()
           foreach ($lang in "en","ar") { foreach ($theme in "dark","light") {
-            foreach ($shot in @(@("uploads","","1440x900"), @("uploads","channels","1440x900"), @("uploads","","1920x1032"), @("uploads","","1024x700"), @("uploads","scheduled","1440x900"), @("videos","","1440x900"), @("videos","bulk","1440x900"), @("videos","private","1440x900"), @("videos","deleted","1440x900"), @("videos","deleted-open","1440x900"), @("videos","searchfocus","1440x900"), @("videos","searchhover","1440x900"), @("videos","","1920x1032"), @("videos","","1024x700"), @("analytics","","1440x900"), @("analytics","","1920x1032"), @("analytics","","1024x700"), @("timeline","","1440x900"), @("encode","","1440x900"), @("encode","active","1440x900"), @("timeline","","1024x700"), @("settings","","1440x900"), @("settings","","1024x700"))) {
+            foreach ($shot in @(@("uploads","","1440x900"), @("uploads","channels","1440x900"), @("uploads","","1920x1032"), @("uploads","","1024x700"), @("uploads","scheduled","1440x900"), @("videos","","1440x900"), @("videos","bulk","1440x900"), @("videos","private","1440x900"), @("videos","deleted","1440x900"), @("videos","deleted-open","1440x900"), @("videos","searchfocus","1440x900"), @("videos","searchhover","1440x900"), @("videos","","1920x1032"), @("videos","","1024x700"), @("analytics","","1440x900"), @("analytics","cardhover","1440x900"), @("analytics","","1920x1032"), @("analytics","","1024x700"), @("timeline","","1440x900"), @("encode","","1440x900"), @("encode","active","1440x900"), @("timeline","","1024x700"), @("settings","","1440x900"), @("settings","","1024x700"))) {
               $state = if ($shot[1]) { $shot[1] } else { "closed" }
               $name = "windows-$($shot[0])-$state-$lang-$theme-$($shot[2])"
               ./scripts/windows-studio-shot.ps1 $exe $lang $theme $shot[2] $shot[1] $name $out $shot[0]
@@ -159,7 +159,7 @@ jobs:
           ./scripts/windows-studio-shot.ps1 $exe en dark 1440x900 highcontrastswitch $name $out videos
           if (Select-String -Quiet "on=True" "$out/high-contrast.txt") {
             if (-not (Select-String -Quiet "RESULT PASS" "$out/$name.txt")) { $failed += $name }
-            foreach ($lang in "en","ar") { foreach ($tab in "videos","timeline") {
+            foreach ($lang in "en","ar") { foreach ($tab in "videos","timeline","analytics") {
               $name = "windows-$tab-highcontrast-$lang-dark-1440x900"
               ./scripts/windows-studio-shot.ps1 $exe $lang dark 1440x900 highcontrast $name $out $tab
               if (-not (Select-String -Quiet "RESULT PASS" "$out/$name.txt")) { $failed += $name }

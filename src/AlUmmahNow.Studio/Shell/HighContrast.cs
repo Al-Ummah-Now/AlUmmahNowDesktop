@@ -18,6 +18,7 @@ public static class HighContrast
 {
     public static readonly IReadOnlyDictionary<string, HighContrastRole> Roles = new Dictionary<string, HighContrastRole>(StringComparer.Ordinal)
     {
+        ["StudioTextBrush"] = HighContrastRole.Text,
         ["StudioMutedBrush"] = HighContrastRole.Text,
         ["StudioDangerBrush"] = HighContrastRole.Text,
         ["StudioSelectedTextBrush"] = HighContrastRole.Text,
@@ -30,6 +31,8 @@ public static class HighContrast
         ["StudioMenuBrush"] = HighContrastRole.Window,
         ["StudioSheenBrush"] = HighContrastRole.None,
         ["StudioSelectedBrush"] = HighContrastRole.None,
+        ["StudioPickedCardBrush"] = HighContrastRole.Window,
+        ["StudioPickedEdgeBrush"] = HighContrastRole.Highlight,
         ["StudioDangerFillBrush"] = HighContrastRole.Highlight,
         ["StudioOnDangerFillBrush"] = HighContrastRole.HighlightText,
         ["StudioOnGoldBrush"] = HighContrastRole.HighlightText,

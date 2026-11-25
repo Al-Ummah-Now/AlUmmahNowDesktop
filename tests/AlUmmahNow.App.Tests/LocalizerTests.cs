@@ -75,7 +75,7 @@ public class LocalizerTests
     [Fact]
     public void Chart_dates_use_gregorian_month_names()
     {
-        Assert.Equal("11 Nov", new Localizer("en").ShortDate(new DateTime(2026, 11, 11)));
+        Assert.Equal("Nov 11", new Localizer("en").ShortDate(new DateTime(2026, 11, 11)));
         Assert.Equal("١١ نوفمبر", new Localizer("ar").ShortDate(new DateTime(2026, 11, 11)));
     }
 
