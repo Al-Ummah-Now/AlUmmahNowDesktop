@@ -87,6 +87,8 @@ jobs:
             if (-not (Select-String -Quiet "RESULT PASS" "artifacts/studio/$n.txt")) { throw "$n failed" }
             if (Test-Path "artifacts/studio/$n.txt.hang.txt") { throw "$n did not exit" }
           }
+          # Days in US order, as on the web.
+          if (-not (Select-String -Quiet -SimpleMatch "from Oct 25 to Nov 21" artifacts/studio/analytics-en.uia.txt)) { throw "the chart's days are not in US order" }
           # Screen readers: the sign-in button and the identity menu (channels and people) are named.
           if (-not (Select-String -Quiet "`tSignIn`t" artifacts/studio/signin-en.uia.txt)) { throw "sign-in button not exposed to UI Automation" }
           # Native passkeys (webauthn.dll): passkey first, the browser sign-in one click away.

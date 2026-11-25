@@ -344,12 +344,7 @@ internal sealed class VideosPage
         });
         if (Uri.TryCreate(v.ThumbnailUrl, UriKind.Absolute, out var url))
         {
-            thumb.Children.Add(new Border
-            {
-                CornerRadius = new CornerRadius(13, 13, 0, 0),
-                FlowDirection = FlowDirection.LeftToRight, // the picture itself never mirrors
-                Background = new Microsoft.UI.Xaml.Media.ImageBrush { ImageSource = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(url) { DecodePixelWidth = 520 }, Stretch = Microsoft.UI.Xaml.Media.Stretch.UniformToFill },
-            });
+            thumb.Children.Add(LanternGlass.Picture(new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(url) { DecodePixelWidth = 520 }, new CornerRadius(13, 13, 0, 0)));
         }
 
         var busy = v.Status is StudioVideoStatus.Processing or StudioVideoStatus.Failed or StudioVideoStatus.Uploading;
