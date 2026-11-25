@@ -535,9 +535,9 @@ internal static class LanternGlass
     private const string AvatarTag = "avatar";
 
     /// <summary>What is on the page of pictures and avatars, and how many are mirrored or have initials that cannot be read (CI's scenarios ask).</summary>
-    public static (int Pictures, int Mirrored, int Avatars, int Unreadable) Look(DependencyObject root)
+    public static (int Pictures, int Mirrored, int Avatars, int AvatarPictures, int Unreadable) Look(DependencyObject root)
     {
-        var (pictures, mirrored, avatars, unreadable) = (0, 0, 0, 0);
+        var (pictures, mirrored, avatars, avatarPictures, unreadable) = (0, 0, 0, 0, 0);
         foreach (var part in Descendants(root))
         {
             if (part is Border { Background: ImageBrush, ActualWidth: > 0 } picture)
@@ -549,11 +549,12 @@ internal static class LanternGlass
             if (part is Grid { Tag: AvatarTag, ActualWidth: > 0 } face)
             {
                 avatars++;
+                if (face.Children.OfType<Border>().Any(b => b.Background is ImageBrush)) avatarPictures++;
                 if (!IsReadable(face.Children.OfType<TextBlock>().FirstOrDefault()?.Foreground, face.Children.OfType<Border>().FirstOrDefault()?.Background)) unreadable++;
             }
         }
 
-        return (pictures, mirrored, avatars, unreadable);
+        return (pictures, mirrored, avatars, avatarPictures, unreadable);
     }
 
     private static IEnumerable<DependencyObject> Descendants(DependencyObject root)
