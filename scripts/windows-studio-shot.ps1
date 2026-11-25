@@ -5,7 +5,18 @@ param([string]$Exe, [string]$Lang, [string]$Theme, [string]$Size, [string]$Scene
 Add-Type -AssemblyName System.Drawing
 Add-Type -Namespace AunShot -Name Win -MemberDefinition @"
 [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
-[DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+[DllImport("user32.dll")] public static extern int GetSystemMetrics(int index);
+[DllImport("user32.dll", SetLastError = true)] public static extern uint SendInput(uint count, INPUT[] input, int size);
+[StructLayout(LayoutKind.Sequential)] public struct MOUSEINPUT { public int X, Y; public uint Data, Flags, Time; public IntPtr Extra; }
+[StructLayout(LayoutKind.Sequential)] public struct INPUT { public uint Type; public MOUSEINPUT Mouse; }
+// A real pointer move: Studio gets no input from SetCursorPos on the runner
+public static bool MoveTo(int x, int y) {
+  var i = new INPUT[1];
+  i[0].Mouse.X = (int)Math.Round(x * 65535.0 / (GetSystemMetrics(0) - 1));
+  i[0].Mouse.Y = (int)Math.Round(y * 65535.0 / (GetSystemMetrics(1) - 1));
+  i[0].Mouse.Flags = 0x8001;
+  return SendInput(1, i, Marshal.SizeOf(typeof(INPUT))) == 1;
+}
 [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
 [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
 [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr h, int attr, out RECT r, int size);
@@ -24,13 +35,14 @@ $h = $p.MainWindowHandle
 [AunShot.Win]::SetForegroundWindow($h) | Out-Null
 Start-Sleep -Seconds 10
 $r = New-Object AunShot.Win+RECT
-# Scene "searchhover": the pointer over the header search. Moved twice, so the window gets a move inside itself.
+# Scene "searchhover": the pointer over the header search, from inside the window.
 if ($Scene -eq "searchhover") {
   [AunShot.Win]::DwmGetWindowAttribute($h, 9, [ref]$r, 16) | Out-Null
   $cx = [int](($r.Left + $r.Right) / 2)
-  if (-not [AunShot.Win]::SetCursorPos($cx - 20, $r.Top + 60)) { throw "the pointer cannot be moved" }
-  Start-Sleep -Milliseconds 300
-  if (-not [AunShot.Win]::SetCursorPos($cx - 20, $r.Top + 24)) { throw "the pointer cannot be moved" }
+  foreach ($d in 200, 60, 4, 0) {
+    if (-not [AunShot.Win]::MoveTo($cx - 20, $r.Top + 24 + $d)) { throw "the pointer cannot be moved" }
+    Start-Sleep -Milliseconds 150
+  }
 }
 # Scene "highcontrastswitch": turned on while Studio runs.
 if ($Scene -eq "highcontrastswitch") { & "$PSScriptRoot/high-contrast.ps1" on | Tee-Object (Join-Path $Out "high-contrast.txt") }
@@ -48,4 +60,4 @@ if (-not $p.WaitForExit(40000)) { $p.Kill(); "EXIT HANG" | Add-Content "$env:AUN
 if (Test-Path "$env:AUN_RESULT.crash.txt") { Get-Content "$env:AUN_RESULT.crash.txt" }
 if (Test-Path $env:AUN_RESULT) { Get-Content $env:AUN_RESULT } else { "NO RESULT FILE" }
 # The pointer stays until Studio has said whether it is over the search.
-if ($Scene -eq "searchhover") { [AunShot.Win]::SetCursorPos($r.Right + 200, $r.Bottom - 60) | Out-Null }
+if ($Scene -eq "searchhover") { [AunShot.Win]::MoveTo($r.Right + 200, $r.Bottom - 60) | Out-Null }
