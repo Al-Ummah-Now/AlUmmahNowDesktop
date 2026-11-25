@@ -174,6 +174,60 @@ public sealed class UploadsViewModelTests : IDisposable
         Assert.False(service.Disposed);
     }
 
+    /// <summary>The app's end, with its message loop blocked by the end itself or gone.</summary>
+    [Fact]
+    public async Task StoppingNeedsNoMessageLoop()
+    {
+        var (vm, service) = await WithUploadAsync();
+        var answer = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _t.Waits = answer.Task;
+        service.Finish("up1", "v1");
+        var loop = DeadLoop.Around(vm.Tick);
+        answer.SetResult();
+        await Task.Run(() => vm.StopAsync());
+        Assert.Equal(0, loop.Posted);
+        Assert.DoesNotContain("up1", SavedSteps);
+        Assert.Equal(1, service.Stopped);
+    }
+
+    /// <summary>What was still on its way when the app had to end does not write into the next start's file.</summary>
+    [Fact]
+    public async Task DetailsThatArriveAfterTheEndChangeNothingOnDisk()
+    {
+        var (vm, service) = await WithUploadAsync();
+        var answer = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _t.Waits = answer.Task;
+        service.Finish("up1", "v1");
+        vm.Tick();
+        await Assert.ThrowsAsync<TimeoutException>(() => vm.StopAsync(detailsLimit: TimeSpan.FromMilliseconds(50)));
+        var saved = SavedSteps;
+        answer.SetResult();
+        await vm.WhenDetailsSentAsync();
+        Assert.Equal(saved, SavedSteps);
+        Assert.Contains("up1", saved);
+    }
+
+    [Fact]
+    public async Task StepsAreSavedFromManyThreadsAtOnce()
+    {
+        var path = Path.Combine(_dir, "finish-many.json");
+        var steps = new FinishSteps(path);
+        await Task.WhenAll(Enumerable.Range(0, 24).Select(i => Task.Run(() =>
+        {
+            for (var n = 0; n < 10; n++)
+            {
+                steps.Add($"{i}-{n}", new FinishStep { ChannelId = "c1" });
+                steps.Save();
+                if (n % 2 == 0) steps.Remove($"{i}-{n}");
+            }
+        })));
+        steps.Close();
+        var again = new FinishSteps(path);
+        Assert.NotNull(again.Get("3-1"));
+        Assert.Null(again.Get("3-2"));
+        Assert.Empty(Directory.GetFiles(_dir, "*.tmp"));
+    }
+
     [Fact]
     public async Task DetailsThatAreNotSentInTimeAreKeptAndTheQueueIsClosedAllTheSame()
     {
@@ -247,7 +301,7 @@ public sealed class UploadsViewModelTests : IDisposable
         Assert.NotNull(again.FinishStepFor("up1"));
         service.Finish("up1", "vid1");
         again.Tick();
-        for (var i = 0; i < 50 && again.FinishStepFor("up1") != null; i++) await Task.Delay(20);
+        await again.WhenDetailsSentAsync();
         Assert.Null(again.FinishStepFor("up1"));
         Assert.Equal("{\"language\":\"ar\"}", Assert.Single(_t.Calls("put_VideoUpdate")).BodyJson);
         Assert.Equal("p1", Assert.Single(_t.Calls("post_PlaylistVideosBulkAdd")).PathParams["id"]);
@@ -264,7 +318,7 @@ public sealed class UploadsViewModelTests : IDisposable
         vm.Start();
         _services[0].Finish("up1", "vid1");
         vm.Tick();
-        for (var i = 0; i < 50 && vm.FinishStepFor("up1")?.Attempts == 0; i++) await Task.Delay(20);
+        await vm.WhenDetailsSentAsync();
         var step = vm.FinishStepFor("up1");
         Assert.NotNull(step);
         Assert.Equal(1, step!.Attempts);

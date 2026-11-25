@@ -8,10 +8,6 @@
     <!-- CI's update test alone; never in a release (scripts/no-test-hooks.mjs). -->
     <DefineConstants Condition="'$(UpdateTest)' == 'true'">$(DefineConstants);UPDATE_TEST</DefineConstants>
   </PropertyGroup>
-  <ItemGroup>
-    <!-- The end of the session (WindowsEnd.cs) -->
-    <PackageReference Include="Microsoft.Win32.SystemEvents" />
-  </ItemGroup>
   <ItemGroup Condition="'$(BuildMsix)' != 'true'">
     <PackageReference Include="Velopack" />
   </ItemGroup>

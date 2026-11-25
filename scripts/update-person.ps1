@@ -39,14 +39,15 @@ public delegate bool Each(System.IntPtr h, System.IntPtr l);
 [DllImport("user32.dll")] public static extern bool EnumWindows(Each each, System.IntPtr l);
 [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(System.IntPtr h, out uint p);
 [DllImport("user32.dll")] public static extern System.IntPtr SendMessageTimeout(System.IntPtr h, uint m, System.IntPtr w, System.IntPtr l, uint f, uint t, out System.IntPtr r);
-public static int End(uint of) {
+public static string Ends(uint of) {
   var all = new System.Collections.Generic.List<System.IntPtr>();
   EnumWindows((h, l) => { uint p; GetWindowThreadProcessId(h, out p); if (p == of) all.Add(h); return true; }, System.IntPtr.Zero);
   System.IntPtr r;
   foreach (var h in all) SendMessageTimeout(h, 0x0011, System.IntPtr.Zero, System.IntPtr.Zero, 2, 5000, out r);
   foreach (var h in all) SendMessageTimeout(h, 0x0016, new System.IntPtr(1), System.IntPtr.Zero, 2, 5000, out r);
-  return all.Count;
+  return all.Count + " windows";
 }
 '@
-  "told $([AunPerson.Session]::End($Id)) windows"
+  $told = [AunPerson.Session]::Ends([uint32]$Id)
+  "told $told"
 } else { throw "no such action: $Action" }
