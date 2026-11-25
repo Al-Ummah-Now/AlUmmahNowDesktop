@@ -28,7 +28,7 @@ internal static class WindowsInstall
         var self = installer == null ? null : new SelfUpdater(checker, installer, SelfUpdater.CreateHandler(), checker.ReportAsync, Path.Combine(folder, "updates"), app, "windows", CoreUpdateChecker.Arch);
         var service = new UpdateService(checker, store, isDemo ? UpdateInstall.Development : Detect(installer != null), version, isBusy, new DownloadPageDelivery(new ShellBrowserLauncher()), self: self);
 #if UPDATE_TEST
-        UpdateTestWatch.Start(service, close);
+        UpdateTestWatch.Start(service);
 #endif
         return service;
     }
