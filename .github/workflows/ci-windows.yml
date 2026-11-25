@@ -181,7 +181,7 @@ jobs:
           $env:AUN_DEMO_THUMBS = (Resolve-Path tests/fixtures/viewer-thumbs).Path
           $env:AUN_FIXTURE_MEDIA = (Resolve-Path tests/fixtures/watch).Path
           $failed = @()
-          foreach ($scene in "bar","notes","dismissed","forced","waiting","required","settings","uptodate","offline","off","update","downloading","failed","ready","readybusy","forcedupdate","forcedready","settingsupdate") { foreach ($lang in "en","ar") { foreach ($theme in "dark","light") {
+          foreach ($scene in "bar","notes","dismissed","forced","waiting","required","settings","uptodate","offline","off","update","downloading","failed","ready","readybusy","forcedupdate","forceddownloading","forcedready","settingsupdate") { foreach ($lang in "en","ar") { foreach ($theme in "dark","light") {
             $name = "windows-viewer-update-$scene-$lang-$theme"
             $env:AUN_DEMO_UPDATE = $scene
             # It waits for a stream that is on air and playing

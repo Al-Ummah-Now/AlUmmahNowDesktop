@@ -99,7 +99,8 @@ public sealed class UpdateSceneTests
     [InlineData("ready", "no-bar mute other-button no-close dead")]
     [InlineData("readybusy", "no-bar mute other-button enabled")]
     [InlineData("forcedupdate", "no-forced part elsewhere other-button disabled bar")]
-    [InlineData("forcedready", "no-forced mute other-button dead")]
+    [InlineData("forceddownloading", "no-forced part mute other-button enabled bar dead")]
+    [InlineData("forcedready", "no-forced elsewhere mute other-button dead")]
     [InlineData("settingsupdate", "no-section mute no-auto auto-off other-button dead")]
     public async Task A_window_with_a_fault_does_not(string scene, string faults)
     {

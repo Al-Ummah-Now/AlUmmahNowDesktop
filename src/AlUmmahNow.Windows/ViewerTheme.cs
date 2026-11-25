@@ -124,8 +124,8 @@ internal static class ViewerTheme
 
             if (part is Button { ActualWidth: > 0 } button && button.Style != null && button.Style == AccentButton)
             {
-                Is("button", Descendants(button).OfType<ContentPresenter>().FirstOrDefault()?.Background, "Primary");
-                Is("button's text", Descendants(button).OfType<ContentPresenter>().FirstOrDefault()?.Foreground, "OnPrimary");
+                Is("button", Descendants(button).OfType<ContentPresenter>().FirstOrDefault()?.Background, button.IsEnabled ? "Primary" : "PrimaryDisabled");
+                Is("button's text", Descendants(button).OfType<ContentPresenter>().FirstOrDefault()?.Foreground, button.IsEnabled ? "OnPrimary" : "OnPrimaryDisabled");
             }
         }
 
