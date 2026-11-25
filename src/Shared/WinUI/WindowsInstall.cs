@@ -24,11 +24,11 @@ internal static class WindowsInstall
 #endif
         IPackageInstaller? installer = null;
 #if !AUN_STORE
-        if (!isDemo && UpdateInstalls.IsReleaseBuild) installer = VelopackInstaller.Find(close);
+        if (!isDemo && UpdateInstalls.IsReleaseBuild) installer = VelopackInstaller.Find();
 #endif
         var checker = new CoreUpdateChecker(videosApi, app, "windows", version, userAgent, store.Load().Core, installs: installer != null);
         var self = installer == null ? null : new SelfUpdater(checker, installer, SelfUpdater.CreateHandler(), checker.ReportAsync, Path.Combine(folder, "updates"), app, "windows", CoreUpdateChecker.Arch);
-        var service = new UpdateService(checker, store, isDemo ? UpdateInstall.Development : Detect(installer != null), version, isBusy, new DownloadPageDelivery(new ShellBrowserLauncher()), self: self);
+        var service = new UpdateService(checker, store, isDemo ? UpdateInstall.Development : Detect(installer != null), version, isBusy, new DownloadPageDelivery(new ShellBrowserLauncher()), self: self, close: close);
 #if UPDATE_TEST
         UpdateTestWatch.Start(service);
 #endif

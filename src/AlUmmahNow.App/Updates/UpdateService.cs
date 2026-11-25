@@ -126,6 +126,8 @@ namespace AlUmmahNow.App.Updates
         private readonly Func<bool> _isBusy;
         private readonly IUpdateDelivery _delivery;
         private readonly ISelfUpdate? _self;
+        private readonly Action? _close;
+        private bool _restarts;
         private readonly Func<DateTimeOffset> _now;
         private readonly Func<TimeSpan, CancellationToken, Task> _delay;
         private UpdateAnswer _answer = UpdateAnswer.Off;
@@ -149,7 +151,7 @@ namespace AlUmmahNow.App.Updates
         /// <param name="wasEnabled">Review frames: the switch was on in an earlier run.</param>
         /// <param name="self">Installs in place, in a copy of our own setup.</param>
         public UpdateService(IUpdateChecker checker, UpdateStore store, UpdateInstall install, string installedVersion, Func<bool> isBusy, IUpdateDelivery delivery,
-            Func<DateTimeOffset>? now = null, Func<TimeSpan, CancellationToken, Task>? delay = null, bool wasEnabled = false, ISelfUpdate? self = null)
+            Func<DateTimeOffset>? now = null, Func<TimeSpan, CancellationToken, Task>? delay = null, bool wasEnabled = false, ISelfUpdate? self = null, Action? close = null)
         {
             _self = install == UpdateInstall.SelfUpdating ? self : null;
             _checker = checker;
@@ -157,6 +159,7 @@ namespace AlUmmahNow.App.Updates
             _memory = store.Load();
             // What the core learns of a manifest is kept before anything else is done with it
             checker.Checked += Keep;
+            _close = close;
             _memory.Enabled |= wasEnabled;
             Install = install;
             InstalledVersion = installedVersion;
@@ -490,7 +493,10 @@ namespace AlUmmahNow.App.Updates
             _self?.Discard();
         }
 
-        /// <summary>The button when it is ready: restarts into the new version, unless work is running.</summary>
+        /// <summary>
+        /// The button when it is ready: closes the app, unless work is running. The window's end is the only one that installs
+        /// (<see cref="OnExit"/>); this one also starts the app again.
+        /// </summary>
         private async Task RestartAsync()
         {
             if (_isApplied) return;
@@ -504,39 +510,41 @@ namespace AlUmmahNow.App.Updates
             _isAsked = true;
             if (await IsStillGoodAsync())
             {
-                _isApplied = true;
-                try
-                {
-                    _self!.ApplyAndRestart();
-                    return;
-                }
-#pragma warning disable CA1031 // It could not be started: the app goes on as it is, and can be asked again.
-                catch (Exception ex)
-#pragma warning restore CA1031
-                {
-                    Logger.Error("the update could not be started", ex);
-                    _isApplied = false;
-                    Drop();
-                    _step = UpdateStep.Failed;
-                }
+                _restarts = true;
+                _close?.Invoke();
             }
-
-            Show();
+            else
+            {
+                Show();
+            }
         }
 
         /// <summary>
-        /// The app is closing: what is ready is checked once more and installed after it has closed. Not with work running: an
-        /// upload is resumed by the same version, and the next start gets the update again.
+        /// The app's window has closed: the work stops first, and only then is what is ready checked once more and handed to the
+        /// updater, which waits for the app to end. Not when work was running as it closed: an upload is resumed by the same
+        /// version, and the next start gets the update again.
         /// </summary>
-        public void OnExit()
+        /// <param name="stopWork">Stops the app's work; nothing is handed over when that fails.</param>
+        public void OnExit(Action? stopWork = null)
         {
-            if (_self == null || _ready == null || _isApplied) return;
+            if (_isApplied) return;
             _isApplied = true;
             try
             {
-                if (MayNotRestart) return;
-                _self.VerifyStaged();
-                _self.ApplyOnExit();
+                // Before it is stopped: stopped work no longer says that it was running
+                bool mayInstall;
+                try
+                {
+                    mayInstall = _self != null && _ready != null && !MayNotRestart;
+                }
+                finally
+                {
+                    stopWork?.Invoke();
+                }
+
+                if (!mayInstall) return;
+                _self!.VerifyStaged();
+                _self.ApplyOnExit(_restarts);
             }
 #pragma warning disable CA1031 // The app closes all the same.
             catch (Exception ex)

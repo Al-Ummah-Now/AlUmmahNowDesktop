@@ -125,11 +125,13 @@ public sealed partial class App : Application
         if (_window.AppWindow.Presenter is OverlappedPresenter presenter) presenter.Maximize();
         _window.Closed += (_, _) =>
         {
-            // While the player still says whether a live stream is on
-            updates.OnExit();
-            closing.Cancel();
-            player.Stop();
-            shell.Close();
+            // The one end of the app: its work stops, then an update may be installed
+            updates.OnExit(() =>
+            {
+                closing.Cancel();
+                player.Stop();
+                shell.Close();
+            });
         };
         _window.VisibilityChanged += (_, e) => shell.SetHidden(!e.Visible);
         _window.Activate();

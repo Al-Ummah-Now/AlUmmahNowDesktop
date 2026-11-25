@@ -55,11 +55,11 @@ namespace AlUmmahNow.CoreBridge
         /// <summary>The app is open a second time. The updater would end that one too, whatever it is doing.</summary>
         bool IsOpenElsewhere { get; }
 
-        /// <summary>The app is closing: what is staged is installed once it has closed. Only right after <see cref="VerifyStaged"/>.</summary>
-        void ApplyOnExit();
-
-        /// <summary>Installs what is staged and starts the app again. Only right after <see cref="VerifyStaged"/>.</summary>
-        void ApplyAndRestart();
+        /// <summary>
+        /// The app is closing and its work has stopped: what is staged is installed once it has ended, and the app then started
+        /// again if asked. Only right after <see cref="VerifyStaged"/>.
+        /// </summary>
+        void ApplyOnExit(bool restart);
 
         /// <summary>Tells the server that an update was refused. Never throws.</summary>
         Task ReportAsync(string tag, string reason, CancellationToken cancellationToken = default);

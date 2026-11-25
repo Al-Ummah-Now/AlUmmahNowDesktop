@@ -151,7 +151,9 @@ screen when theirs is below the minimum an admin set. The screen waits for a run
 - A copy of the per-user setup on Windows installs updates itself. It downloads the manifest of the tag the server names
   (the address is made from the tag, never taken from an answer), has Core check its signature, hosts and version, checks
   the package's SHA-256, and stages it in a folder only this user can write. Everything is checked again right before it is
-  installed: as the app closes, or on Restart now. Never while an upload, an encode or a watched live stream runs, and never
+  installed. The window's close is the one end of the app that installs, also for Restart now: the app asks whether work runs,
+  stops what it has (the upload queue is closed on disk), checks the update again, and only then starts the updater, which
+  waits for the process to end. Any other end (a crash, signing out of Windows) installs nothing. Never while an upload, an encode or a watched live stream runs, and never
   while the app is open a second time (Velopack's updater ends every process of the folder). A refused update installs
   nothing and is reported (`update-failure`). `src/AlUmmahNow.CoreBridge.Native/SelfUpdate`,
   `src/Shared/WinUI/VelopackInstaller.cs`; an MSIX does not even carry the updater (`release.yml` checks).

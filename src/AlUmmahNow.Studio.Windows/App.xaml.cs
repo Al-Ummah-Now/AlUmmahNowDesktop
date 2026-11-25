@@ -188,7 +188,7 @@ public sealed partial class App : Application
         window.AddPage(StudioPages.Encode, localizer["studio.tab.encode"], Symbol.Video, encodePage.Root);
         window.AddPage(StudioPages.Timeline, localizer["studio.tab.timeline"], Symbol.Edit, timeline.Root);
         // The check for a new version: none in a demo, or in a build that is no release.
-        bool IsBusy() => uploadsVm.ActiveCount > 0 || encode.IsBusy;
+        bool IsBusy() => uploadsVm.IsWorking || encode.IsBusy;
         var updateScene = UpdateScene.FromEnvironment(localizer, UpdateInstall.Installer, IsBusy);
         var updateStore = new UpdateStore(Path.Combine(dataRoot, "updates.json"));
         var updates = updateScene?.Service ?? WindowsInstall.Service("studio", environment.VideosApi, version, userAgent, dataRoot, updateStore, demo, IsBusy, () => window.Window.Close());
@@ -208,10 +208,12 @@ public sealed partial class App : Application
         _ = updates.RunAsync(closing.Token);
         window.Window.Closed += (_, _) =>
         {
-            // While the queues still say whether work is running
-            updates.OnExit();
-            closing.Cancel();
-            uploadsVm.Dispose();
+            // The one end of the app: its work stops (the upload queue is closed on disk), then an update may be installed
+            updates.OnExit(() =>
+            {
+                closing.Cancel();
+                uploadsVm.Dispose();
+            });
         };
 
         _refresh = ui.CreateTimer();

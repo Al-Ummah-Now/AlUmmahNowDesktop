@@ -38,6 +38,7 @@ public sealed partial class UploadsViewModel : ObservableObject, IDisposable
     private readonly HashSet<string> _finishing = new();
     private Dictionary<string, FinishStep> _steps = new();
     private IUploadService? _service;
+    private int _sending;
     private int _dirty = 1;
     private FolderWatch? _watch;
 
@@ -84,6 +85,24 @@ public sealed partial class UploadsViewModel : ObservableObject, IDisposable
 
     /// <summary>Count of uploads still moving (for the window title and the quit warning).</summary>
     public int ActiveCount => Items.Count(i => i.IsActive);
+
+    /// <summary>An upload is moving or waits for its turn, as the queue says now, or a finished one's details are being sent.</summary>
+    public bool IsWorking
+    {
+        get
+        {
+            if (Volatile.Read(ref _sending) > 0) return true;
+            try
+            {
+                return _service?.List().Any(i => i.IsActive) == true;
+            }
+            catch (StudioApiException ex)
+            {
+                Logger.Warn("upload list unavailable", ex);
+                return ActiveCount > 0;
+            }
+        }
+    }
 
     public void AddFiles(IEnumerable<string> paths)
     {
@@ -279,6 +298,7 @@ public sealed partial class UploadsViewModel : ObservableObject, IDisposable
     private async Task FinishAsync(string uploadId, string videoId)
     {
         var step = _steps[uploadId];
+        Interlocked.Increment(ref _sending);
         try
         {
             if (step.Language != null) await _api.UpdateVideoAsync(step.ChannelId, videoId, new VideoChanges { Language = step.Language });
@@ -307,6 +327,7 @@ public sealed partial class UploadsViewModel : ObservableObject, IDisposable
         }
         finally
         {
+            Interlocked.Decrement(ref _sending);
             SaveSteps();
             if (_steps.TryGetValue(uploadId, out var left) && left.Attempts < MaxFinishAttempts)
             {

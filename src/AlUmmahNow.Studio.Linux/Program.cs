@@ -148,7 +148,7 @@ app.OnActivate += (_, _) =>
         }
     }
 
-    bool IsBusy() => uploadsVm.ActiveCount > 0 || encode.IsBusy;
+    bool IsBusy() => uploadsVm.IsWorking || encode.IsBusy;
     var updateScene = UpdateScene.FromEnvironment(localizer, UpdateInstall.Deb, IsBusy);
     var updateStore = new UpdateStore(Path.Combine(stateDir, "updates.json"));
     var updates = updateScene?.Service ?? new UpdateService(

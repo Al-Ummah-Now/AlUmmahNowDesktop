@@ -61,18 +61,12 @@ public sealed class SelfUpdateTests
 
         public void Discard() => Discarded++;
         public bool IsOpenElsewhere { get; set; }
-        public void ApplyOnExit()
-        {
-            OnApply?.Invoke();
-            OnExit++;
-        }
-
-
-        public void ApplyAndRestart()
+        public void ApplyOnExit(bool restart)
         {
             OnApply?.Invoke();
             if (ApplyBreaks != null) throw ApplyBreaks;
-            Restarts++;
+            if (restart) Restarts++;
+            else OnExit++;
         }
 
         public Task ReportAsync(string tag, string reason, CancellationToken cancellationToken = default)
@@ -95,13 +89,23 @@ public sealed class SelfUpdateTests
     private readonly string _file = Path.Combine(Path.GetTempPath(), "aun-self-" + Guid.NewGuid().ToString("N"), "updates.json");
     private bool _busy;
 
-    private UpdateService Service(UpdateInstall install = UpdateInstall.SelfUpdating) =>
-        new(_checker, new UpdateStore(_file), install, "1.4.2", () => _busy, _page, () => new DateTimeOffset(2026, 11, 25, 12, 0, 0, TimeSpan.Zero), (_, _) =>
+    private int _closes;
+
+    private UpdateService Service(UpdateInstall install = UpdateInstall.SelfUpdating, Action<UpdateService>? close = null)
+    {
+        UpdateService service = null!;
+        return service = new UpdateService(_checker, new UpdateStore(_file), install, "1.4.2", () => _busy, _page, () => new DateTimeOffset(2026, 11, 25, 12, 0, 0, TimeSpan.Zero), (_, _) =>
         {
             var wait = new TaskCompletionSource();
             _waits.Add(wait);
             return wait.Task;
-        }, self: _self);
+        }, self: _self, close: () =>
+        {
+            _closes++;
+            if (close == null) service.OnExit();
+            else close(service);
+        });
+    }
 
     private void TimePasses()
     {
@@ -560,18 +564,94 @@ public sealed class SelfUpdateTests
     }
 
     [Fact]
-    public async Task An_updater_that_does_not_start_leaves_the_app_as_it_is()
+    public async Task An_updater_that_does_not_start_never_keeps_the_app_from_closing()
     {
         Offers();
         var service = Service();
         await service.CheckAsync();
         _self.ApplyBreaks = new InvalidOperationException("no updater");
+        var stopped = 0;
+        service.OnExit(() => stopped++);
+        Assert.Equal(1, stopped);
+        Assert.Equal(0, _self.OnExit + _self.Restarts);
+    }
+
+    /// <summary>The window's end is the one owner of every end: work stops, the update is checked, and then it is handed over.</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Work_stops_before_the_update_is_checked_and_handed_over(bool restart)
+    {
+        Offers();
+        var order = new List<string>();
+        var service = Service(close: s => s.OnExit(() =>
+        {
+            order.Add("stopped");
+            // Stopped work no longer says that it was running
+            _busy = false;
+        }));
+        await service.CheckAsync();
+        _self.Checks = () => order.Add("checked");
+        _self.OnApply = () => order.Add("handed over");
+        if (restart) service.Begin();
+        else service.OnExit(() => order.Add("stopped"));
+        // Restart now looks first, so that what is refused closes nothing
+        Assert.Equal(restart ? new[] { "checked", "stopped", "checked", "handed over" } : new[] { "stopped", "checked", "handed over" }, order);
+        Assert.Equal((restart ? 1 : 0, restart ? 0 : 1), (_self.Restarts, _self.OnExit));
+        service.OnExit(() => order.Add("again"));
+        Assert.DoesNotContain("again", order);
+    }
+
+    [Fact]
+    public async Task Work_that_ran_as_the_window_closed_is_stopped_and_nothing_is_installed()
+    {
+        Offers();
+        var service = Service();
+        await service.CheckAsync();
+        _busy = true;
+        var stopped = 0;
+        service.OnExit(() =>
+        {
+            stopped++;
+            _busy = false;
+        });
+        Assert.Equal(1, stopped);
+        Assert.Equal(0, _self.OnExit + _self.Restarts);
+    }
+
+    [Fact]
+    public async Task Nothing_is_handed_over_when_the_work_cannot_be_stopped()
+    {
+        Offers();
+        var service = Service();
+        await service.CheckAsync();
+        service.OnExit(() => throw new InvalidOperationException("the queue does not close"));
+        Assert.Equal(0, _self.OnExit + _self.Restarts);
+    }
+
+    [Theory]
+    [InlineData("refused")]
+    [InlineData("busy")]
+    public async Task Restart_now_closes_nothing_when_it_cannot_install(string why)
+    {
+        Offers();
+        var service = Service();
+        await service.CheckAsync();
+        if (why == "refused") _self.StagedBreaks = new UpdateRefusedException("hash");
+        else _busy = true;
         service.Begin();
-        Assert.Equal(UpdateStep.Failed, service.View.Step);
-        _self.ApplyBreaks = null;
-        service.Begin();
-        service.Begin();
-        Assert.Equal(1, _self.Restarts);
+        Assert.Equal(0, _closes);
+    }
+
+    /// <summary>A copy with nothing to install stops its work all the same.</summary>
+    [Theory]
+    [InlineData(UpdateInstall.SelfUpdating)]
+    [InlineData(UpdateInstall.Msix)]
+    public void Work_stops_also_without_an_update(UpdateInstall install)
+    {
+        var stopped = 0;
+        Service(install).OnExit(() => stopped++);
+        Assert.Equal(1, stopped);
     }
 
     private static async Task Until(Func<bool> met)
