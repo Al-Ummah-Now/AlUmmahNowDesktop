@@ -210,7 +210,7 @@ public sealed partial class App : Application
         };
         var closing = new CancellationTokenSource();
         _ = updates.RunAsync(closing.Token);
-        WindowsEnd.Attach(window.Window, updates, closing.Cancel,
+        WindowsEnd.Attach(window.Window, updates, new Action[] { closing.Cancel },
             // Uploads (and the details of finished ones) and encodes, at once and within the end's limit
             stop => Task.WhenAll(uploadsVm.StopAsync(stop), encode.StopAsync(stop)));
 

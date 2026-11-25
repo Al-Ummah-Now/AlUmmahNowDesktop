@@ -161,6 +161,49 @@ public sealed class AppEndTests
         await _exited.Task;
     }
 
+    /// <summary>A message loop that is blocked, or gone: what is posted to it never runs.</summary>
+    private sealed class DeadLoop : SynchronizationContext
+    {
+        public override void Post(SendOrPostCallback d, object? state)
+        {
+        }
+
+        public override void Send(SendOrPostCallback d, object? state) => throw new NotSupportedException();
+    }
+
+    [Theory]
+    [InlineData(EndKind.Session)]
+    [InlineData(EndKind.Process)]
+    [InlineData(EndKind.Asked)]
+    public void The_end_needs_no_message_loop(EndKind kind)
+    {
+        // Awaits as an app's stop does, without a word of contexts
+        _stop = async _ =>
+        {
+            await Task.Yield();
+            await Task.Delay(20);
+        };
+        var end = End();
+        var isIn = false;
+        var ui = new Thread(() =>
+        {
+            SynchronizationContext.SetSynchronizationContext(new DeadLoop());
+            end.EndAndWait(kind, AppEnd.Total);
+            isIn = end.End(EndKind.Process).IsCompleted;
+        });
+        ui.Start();
+        Assert.True(ui.Join(TimeSpan.FromSeconds(AppEnd.StopLimit.TotalSeconds / 2)));
+        Assert.True(isIn);
+        Assert.StartsWith("begin, stop", Done);
+    }
+
+    [Fact]
+    public void Each_part_of_the_beginning_runs_whatever_the_others_do()
+    {
+        AppEnd.Each(() => Add("a"), () => throw new InvalidOperationException("wrong thread"), () => Add("c"))();
+        Assert.Equal("a, c", Done);
+    }
+
     [Fact]
     public void Waiting_for_it_is_bounded()
     {

@@ -85,12 +85,16 @@ jobs:
           test -f "$LOCALAPPDATA/${{ matrix.id }}/current/${{ matrix.exe }}"
       - name: What must not be installed changes nothing
         run: |
+          failed=""
           for c in ${{ matrix.cases }}; do
-            node scripts/update-test.mjs --app ${{ matrix.app }} --exe "$LOCALAPPDATA/${{ matrix.id }}/current/${{ matrix.exe }}" --package keep/2/*-full.nupkg --packages "$LOCALAPPDATA/${{ matrix.id }}/packages" --package-name ${{ matrix.id }}-1.0.2-full.nupkg --from 1.0.1 --to 1.0.2 --media "$(cygpath -w "$PWD/tests/fixtures/watch")" --case $c
+            node scripts/update-test.mjs --app ${{ matrix.app }} --exe "$LOCALAPPDATA/${{ matrix.id }}/current/${{ matrix.exe }}" --package keep/2/*-full.nupkg --packages "$LOCALAPPDATA/${{ matrix.id }}/packages" --package-name ${{ matrix.id }}-1.0.2-full.nupkg --from 1.0.1 --to 1.0.2 --media "$(cygpath -w "$PWD/tests/fixtures/watch")" --case $c || failed="$failed $c"
           done
+          [ -z "$failed" ] || { echo "::error::failed:$failed"; exit 1; }
       - name: 1.0.1 becomes 1.0.2 as it closes
+        if: ${{ !cancelled() }}
         run: node scripts/update-test.mjs --app ${{ matrix.app }} --exe "$LOCALAPPDATA/${{ matrix.id }}/current/${{ matrix.exe }}" --package keep/2/*-full.nupkg --packages "$LOCALAPPDATA/${{ matrix.id }}/packages" --package-name ${{ matrix.id }}-1.0.2-full.nupkg --from 1.0.1 --to 1.0.2
       - name: 1.0.2 becomes 1.0.3 with Restart now
+        if: ${{ !cancelled() }}
         run: node scripts/update-test.mjs --app ${{ matrix.app }} --exe "$LOCALAPPDATA/${{ matrix.id }}/current/${{ matrix.exe }}" --package keep/3/*-full.nupkg --packages "$LOCALAPPDATA/${{ matrix.id }}/packages" --package-name ${{ matrix.id }}-1.0.3-full.nupkg --from 1.0.2 --to 1.0.3 --case restart
       - name: Velopack log
         if: always()

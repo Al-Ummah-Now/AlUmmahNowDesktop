@@ -142,6 +142,8 @@ const start = (more = {}, exe = a.exe) => spawn(exe, [], { env: { ...env, ...mor
 const exited = (p) => new Promise((r) => (p.exitCode !== null || p.signalCode !== null ? r() : p.once('exit', r)));
 function fail(why) {
 	console.error(`::error::update test (${a.app}, ${kase}): ${why}\nlog:\n${lines().join('\n')}\ncalls:\n${calls.join('\n')}\nreported: ${JSON.stringify(reported)}`);
+	// The next case starts with no copy of the app running
+	endAll();
 	process.exit(1);
 }
 async function until(what, ms, test) {

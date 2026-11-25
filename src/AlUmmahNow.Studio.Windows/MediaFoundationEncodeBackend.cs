@@ -16,10 +16,10 @@ public sealed class MediaFoundationEncodeBackend : IEncodeBackend
 
     public async Task EncodeAsync(EncodeRequest request, EncoderChoice encoder, IProgress<double> progress, CancellationToken cancellationToken)
     {
-        var source = await StorageFile.GetFileFromPathAsync(Path.GetFullPath(request.Source));
+        var source = await StorageFile.GetFileFromPathAsync(Path.GetFullPath(request.Source)).AsTask(cancellationToken).ConfigureAwait(false);
         var outputPath = Path.GetFullPath(request.Output);
-        var folder = await StorageFolder.GetFolderFromPathAsync(Path.GetDirectoryName(outputPath)!);
-        var output = await folder.CreateFileAsync(Path.GetFileName(outputPath), CreationCollisionOption.ReplaceExisting);
+        var folder = await StorageFolder.GetFolderFromPathAsync(Path.GetDirectoryName(outputPath)!).AsTask(cancellationToken).ConfigureAwait(false);
+        var output = await folder.CreateFileAsync(Path.GetFileName(outputPath), CreationCollisionOption.ReplaceExisting).AsTask(cancellationToken).ConfigureAwait(false);
 
         MediaEncodingProfile profile;
         if (request.Preset.AudioOnly)
@@ -29,7 +29,7 @@ public sealed class MediaFoundationEncodeBackend : IEncodeBackend
         else
         {
             profile = MediaEncodingProfile.CreateMp4(VideoEncodingQuality.HD1080p);
-            var video = await source.Properties.GetVideoPropertiesAsync();
+            var video = await source.Properties.GetVideoPropertiesAsync().AsTask(cancellationToken).ConfigureAwait(false);
             if (video.Height > 0)
             {
                 // Never upscale: keep the source size, capped at the preset height, on even dimensions.
@@ -44,9 +44,9 @@ public sealed class MediaFoundationEncodeBackend : IEncodeBackend
         profile.Audio.Bitrate = (uint)request.Preset.AudioKbps * 1000;
 
         var transcoder = new MediaTranscoder { HardwareAccelerationEnabled = encoder.Kind == EncoderKind.Hardware };
-        var prepared = await transcoder.PrepareFileTranscodeAsync(source, output, profile);
+        var prepared = await transcoder.PrepareFileTranscodeAsync(source, output, profile).AsTask(cancellationToken).ConfigureAwait(false);
         if (!prepared.CanTranscode) throw new InvalidOperationException("Cannot transcode: " + prepared.FailureReason);
 
-        await prepared.TranscodeAsync().AsTask(cancellationToken, new Progress<double>(p => progress.Report(p / 100)));
+        await prepared.TranscodeAsync().AsTask(cancellationToken, new Progress<double>(p => progress.Report(p / 100))).ConfigureAwait(false);
     }
 }

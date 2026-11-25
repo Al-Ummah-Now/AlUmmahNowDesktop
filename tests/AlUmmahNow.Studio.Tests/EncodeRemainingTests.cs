@@ -11,8 +11,13 @@ public sealed class EncodeRemainingTests
     public async Task TheDemoQueueHasAFinishedJobAndARunningOneWithTimeLeft()
     {
         var queue = new EncodeQueue(new DemoEncodeBackend("vaapih264enc"), DemoEncodeBackend.Clock());
+        var isRunning = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        queue.Changed += (_, _) =>
+        {
+            if (queue.Jobs.Count == 2 && queue.Jobs[1].Remaining != null) isRunning.TrySetResult();
+        };
         DemoEncodeBackend.Seed(queue, Path.GetTempPath());
-        for (var i = 0; i < 100 && queue.Jobs.Count(j => j.Status == EncodeStatus.Running) == 0; i++) await Task.Delay(10);
+        await isRunning.Task.WaitAsync(TimeSpan.FromSeconds(30));
 
         var finished = queue.Jobs[0];
         var running = queue.Jobs[1];

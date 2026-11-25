@@ -90,7 +90,7 @@ public sealed class EncodeQueue
         }
 
         Changed?.Invoke(this, EventArgs.Empty);
-        _ = PumpAsync();
+        Pump();
         return job;
     }
 
@@ -103,7 +103,7 @@ public sealed class EncodeQueue
     public void Resume()
     {
         lock (_gate) _paused = false;
-        _ = PumpAsync();
+        Pump();
     }
 
     public void CancelCurrent() => _current?.Cancel();
@@ -143,18 +143,24 @@ public sealed class EncodeQueue
                 if (!_pumping && (_pending.Count == 0 || _paused)) return;
             }
 
-            await Task.Delay(20, cancellationToken);
+            await Task.Delay(20, cancellationToken).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>On no thread of the app's: its end waits for the running job, with a message loop that may be blocked or gone.</summary>
+    private void Pump()
+    {
+        lock (_gate)
+        {
+            if (_pumping || _paused || _pending.Count == 0) return;
+            _pumping = true;
+        }
+
+        _ = Task.Run(PumpAsync);
     }
 
     private async Task PumpAsync()
     {
-        lock (_gate)
-        {
-            if (_pumping) return;
-            _pumping = true;
-        }
-
         while (true)
         {
             EncodeJob job;

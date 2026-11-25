@@ -6,6 +6,34 @@ using AlUmmahNow.CoreBridge.Studio;
 namespace AlUmmahNow.Studio.Tests;
 
 /// <summary>Answers API calls from a table of operation id → JSON body (or exception).</summary>
+/// <summary>A message loop that is blocked, or gone: what is posted to it never runs.</summary>
+public sealed class DeadLoop : SynchronizationContext
+{
+    public int Posted;
+
+    public override void Post(SendOrPostCallback d, object? state) => Interlocked.Increment(ref Posted);
+
+    public override void Send(SendOrPostCallback d, object? state) => throw new NotSupportedException();
+
+    /// <summary>What the UI thread does, with a loop that then does no more.</summary>
+    public static DeadLoop Around(Action onUi)
+    {
+        var loop = new DeadLoop();
+        var before = Current;
+        SetSynchronizationContext(loop);
+        try
+        {
+            onUi();
+        }
+        finally
+        {
+            SetSynchronizationContext(before);
+        }
+
+        return loop;
+    }
+}
+
 public sealed class FakeTransport : IApiTransport
 {
     public readonly List<ApiRequest> Sent = new();

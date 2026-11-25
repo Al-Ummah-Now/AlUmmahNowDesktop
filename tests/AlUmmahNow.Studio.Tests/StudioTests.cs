@@ -114,6 +114,20 @@ public class EncodeTests
         Assert.Single(b.Tried);
     }
 
+    /// <summary>Added on the UI thread, whose message loop is then blocked by the end, or gone. The backend awaits as one does.</summary>
+    [Fact]
+    public async Task Stopping_needs_no_message_loop()
+    {
+        var b = new Backend { Gate = new TaskCompletionSource() };
+        var q = new EncodeQueue(b);
+        EncodeJob job = null!;
+        var loop = DeadLoop.Around(() => job = q.Add(R));
+        await Task.Run(() => q.StopAsync());
+        Assert.Equal(0, loop.Posted);
+        Assert.Equal(EncodeStatus.Canceled, job.Status);
+        Assert.False(q.IsBusy);
+    }
+
     [Fact]
     public async Task Stopping_an_encoder_that_does_not_let_go_is_bounded()
     {

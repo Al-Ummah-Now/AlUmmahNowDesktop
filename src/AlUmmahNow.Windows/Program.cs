@@ -97,6 +97,10 @@ public sealed partial class App : Application
         var ui = DispatcherQueue.GetForCurrentThread();
         var player = new WindowsMediaPlayer(ui);
         var session = new SmtcSession(player.Player, ui);
+#if UPDATE_TEST
+        // The test's live stream is a short file
+        player.Player.IsLoopingEnabled = true;
+#endif
         // The check for a new version: none in a demo, or in a build that is no release.
         var version = UpdateText.VersionOf(typeof(App).Assembly);
         Shell? shown = null;
@@ -124,12 +128,7 @@ public sealed partial class App : Application
         _window.AppWindow.Resize(new global::Windows.Graphics.SizeInt32(1280, 800));
         if (_window.AppWindow.Presenter is OverlappedPresenter presenter) presenter.Maximize();
         var leaving = Task.CompletedTask;
-        WindowsEnd.Attach(_window, updates, () =>
-        {
-            closing.Cancel();
-            player.Stop();
-            leaving = shell.LeaveLive();
-        }, stop => Task.WhenAny(leaving, Task.Delay(TimeSpan.FromSeconds(2), stop)));
+        WindowsEnd.Attach(_window, updates, new Action[] { closing.Cancel, player.Stop, () => leaving = shell.LeaveLive() }, stop => Task.WhenAny(leaving, Task.Delay(TimeSpan.FromSeconds(2), stop)));
         _window.VisibilityChanged += (_, e) => shell.SetHidden(!e.Visible);
         _window.Activate();
 

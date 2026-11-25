@@ -167,6 +167,12 @@ namespace AlUmmahNow.App.Services
             }
         }
 
+        /// <summary>All of them, whatever one of them does.</summary>
+        public static Action Each(params Action[] parts) => () =>
+        {
+            foreach (var part in parts) Try("a part of the end's beginning", part);
+        };
+
         private static void Try(string what, Action action)
         {
             try
