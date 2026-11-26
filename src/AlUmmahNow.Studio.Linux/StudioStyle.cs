@@ -38,12 +38,25 @@ public static class StudioStyle
         // Without a compositor (X11, no compositing manager) a menu's glow can't be translucent: GTK paints
         // its whole margin as a solid block. Menus there keep their gold edge and drop the outer glow; they are square,
         // as their window is, whose color and gray border were seen around round corners.
-        if (!display.IsComposited())
+        var flat = Gtk.CssProvider.New();
+        flat.LoadFromString("popover.glass > contents, popover.glass > arrow { box-shadow: none; } popover > contents { box-shadow: none; } popover.glass { border: none; } popover.glass > contents { border-radius: 0; }");
+        var flatApplied = false;
+
+        void UpdateMenuStyle()
         {
-            var flat = Gtk.CssProvider.New();
-            flat.LoadFromString("popover.glass > contents, popover.glass > arrow { box-shadow: none; } popover > contents { box-shadow: none; } popover.glass { border: none; } popover.glass > contents { border-radius: 0; }");
-            Gtk.StyleContext.AddProviderForDisplay(display, flat, 603);
+            var needsFlat = !display.IsComposited();
+            if (needsFlat == flatApplied) return;
+
+            if (needsFlat) Gtk.StyleContext.AddProviderForDisplay(display, flat, 603);
+            else Gtk.StyleContext.RemoveProviderForDisplay(display, flat);
+            flatApplied = needsFlat;
         }
+
+        display.OnNotify += (_, e) =>
+        {
+            if (e.Pspec.GetName() == "composited") UpdateMenuStyle();
+        };
+        UpdateMenuStyle();
     }
 
     private static void LoadTokens(bool dark)
