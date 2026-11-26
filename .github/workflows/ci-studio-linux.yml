@@ -66,6 +66,10 @@ jobs:
           AUN_DEMO_FEATURES_OFF=upload,analytics,bulkSchedule run ar uploads shell features-off-ar artifacts/studio
           grep -h AUTOMATION artifacts/studio/*.log
           test "$(cat artifacts/studio/*.log | grep -c 'RESULT PASS')" = 25
+          # Upload defaults are constructed at startup, including when another tab is selected.
+          if grep -HE 'Gtk-CRITICAL.*gtk_grid_(attach|remove):' artifacts/studio/*.log; then
+            exit 1
+          fi
           grep -q "page=uploads upload=True analytics=True bulkSchedule=True" artifacts/studio/shell-en.log
           grep -q "page=videos upload=False analytics=False bulkSchedule=False" artifacts/studio/features-off-en.log
           grep -q "page=videos upload=False analytics=False bulkSchedule=False" artifacts/studio/features-off-ar.log

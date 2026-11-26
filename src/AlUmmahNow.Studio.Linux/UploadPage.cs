@@ -210,10 +210,10 @@ public sealed class UploadPage
         grid.SetMarginTop(8);
         var row = 0;
 
-        void Add(string label, Gtk.Widget control, string? hint = null)
+        void Add(string label, Gtk.Widget control, string? hint = null, Gtk.Widget? mnemonicTarget = null)
         {
             var name = Gtk.Label.NewWithMnemonic(label);
-            name.SetMnemonicWidget(control);
+            name.SetMnemonicWidget(mnemonicTarget ?? control);
             name.SetXalign(0);
             name.SetValign(Gtk.Align.Start);
             // Fixed line boxes: an Arabic line is a few pixels shorter than a Latin one, so the panel ended 25 px higher
@@ -260,9 +260,7 @@ public sealed class UploadPage
         };
         var frame = Gtk.Frame.New(null);
         frame.SetChild(description);
-        Add(_l["studio.upload.description"], description);
-        grid.Remove(description);
-        grid.Attach(frame, 0, row - 1, 1, 1);
+        Add(_l["studio.upload.description"], frame, mnemonicTarget: description);
 
         var categories = new[] { (string?)null }.Concat(StudioCatalog.Categories).ToList();
         var category = Gtk.DropDown.NewFromStrings(categories.Select(c => c == null ? _l["studio.upload.none"] : _l["studio.category." + c]).ToArray());
