@@ -12,7 +12,7 @@ public sealed class CoreApiTransportErrorTests
     public void NotFoundWithTheFeatureOffBodyIsFeatureOff()
     {
         // The core keeps a short body without a message as the detail.
-        var e = Assert.IsType<StudioApiException>(CoreApiTransport.Map(new AunException.NotFound("{\"success\":false,\"code\":\"feature_off\"}"), "get_AnalyticsChannelGet"));
+        var e = Assert.IsType<StudioApiException>(CoreApiTransport.Map(new AunException.NotFound(null, "{\"success\":false,\"code\":\"feature_off\"}"), "get_AnalyticsChannelGet"));
         Assert.Equal(404, e.Status);
         Assert.Equal("feature_off", e.Code);
         Assert.True(e.IsFeatureOff);
@@ -20,9 +20,17 @@ public sealed class CoreApiTransportErrorTests
     }
 
     [Fact]
+    public void NotFoundPreservesStructuredFeatureOffCode()
+    {
+        var e = Assert.IsType<StudioApiException>(CoreApiTransport.Map(
+            new AunException.NotFound("feature_off", "Feature unavailable"), "get_AnalyticsChannelGet"));
+        Assert.True(e.HidesFeature);
+    }
+
+    [Fact]
     public void PlainNotFoundIsNotFeatureOff()
     {
-        var e = Assert.IsType<StudioApiException>(CoreApiTransport.Map(new AunException.NotFound("Video not found"), "get_VideoFetch"));
+        var e = Assert.IsType<StudioApiException>(CoreApiTransport.Map(new AunException.NotFound(null, "Video not found"), "get_VideoFetch"));
         Assert.Equal(404, e.Status);
         Assert.Null(e.Code);
         Assert.False(e.HidesFeature);
@@ -41,7 +49,7 @@ public sealed class CoreApiTransportErrorTests
     [Fact]
     public void ForbiddenStaysForbidden()
     {
-        var e = Assert.IsType<StudioApiException>(CoreApiTransport.Map(new AunException.Forbidden("Only the channel owner"), "get_AnalyticsChannelGet"));
+        var e = Assert.IsType<StudioApiException>(CoreApiTransport.Map(new AunException.Forbidden(null, "Only the channel owner"), "get_AnalyticsChannelGet"));
         Assert.Equal(403, e.Status);
         Assert.False(e.HidesFeature);
     }
