@@ -21,9 +21,10 @@ internal sealed class SettingsPage
     private readonly StudioShellViewModel _shell;
     private readonly UploadsViewModel _uploads;
     private readonly StackPanel _accounts = new() { Spacing = 6 };
-    private readonly TextBlock _watch = new() { TextWrapping = TextWrapping.Wrap };
+    private readonly TextBlock _watch = new() { TextWrapping = TextWrapping.Wrap, TextReadingOrder = TextReadingOrder.UseFlowDirection };
     private readonly Button _stopWatching;
     private readonly InfoBar _restart;
+    private readonly FrameworkElement _updatesCard;
     private readonly FrameworkElement? _passkeyCard;
     private readonly Func<StudioAccount, Task> _signOut;
 
@@ -67,15 +68,10 @@ internal sealed class SettingsPage
             store.Save(settings);
             Changed();
         }));
-        var about = new StackPanel { Spacing = 6 };
-        about.Children.Add(Heading(l["studio.settings.about"]));
-        about.Children.Add(new TextBlock { Text = l["studio.name"] });
-        about.Children.Add(new TextBlock { Text = l.Format("studio.settings.version", l.Version(version)), Foreground = LanternGlass.Res("StudioMutedBrush") });
-        left.Children.Add(LanternGlass.Card(about));
         // Only while the server's switch is on
-        var updatesCard = LanternGlass.Card(updates.SectionBody, updates.SectionActions);
-        left.Children.Add(updatesCard);
-        updates.UseSection(updatesCard);
+        _updatesCard = LanternGlass.Card(updates.SectionBody, updates.SectionActions);
+        left.Children.Add(_updatesCard);
+        updates.UseSection(_updatesCard);
 
         var accountsBody = new StackPanel { Spacing = 8 };
         accountsBody.Children.Add(Heading(l[IdentityMenu.AccountsHeadingKey]));
@@ -115,6 +111,11 @@ internal sealed class SettingsPage
             store.Save(settings);
         };
         right.Children.Add(LanternGlass.Card(watchBody, Footer(_stopWatching, choose)));
+        var about = new StackPanel { Spacing = 6 };
+        about.Children.Add(Heading(l["studio.settings.about"]));
+        about.Children.Add(new TextBlock { Text = l["studio.name"] });
+        about.Children.Add(new TextBlock { Text = l.Format("studio.settings.version", l.Version(version)), Foreground = LanternGlass.Res("StudioMutedBrush") });
+        right.Children.Add(LanternGlass.Card(about));
 
         _shell.PropertyChanged += (_, _) => RenderAccounts();
         _uploads.PropertyChanged += (_, e) =>
@@ -126,6 +127,24 @@ internal sealed class SettingsPage
     }
 
     public StackPanel Root { get; }
+
+    // Capture the card and its footer together if the Settings viewport is short.
+    public void BringUpdatesIntoView() =>
+        _updatesCard.StartBringIntoView(new BringIntoViewOptions { AnimationDesired = false });
+
+    public bool IsUpdateCardInView
+    {
+        get
+        {
+            if (!_updatesCard.IsLoaded || _updatesCard.ActualHeight <= 0) return false;
+            var parent = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(_updatesCard);
+            while (parent is not (null or ScrollViewer)) parent = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(parent);
+            if (parent is not ScrollViewer scroll) return false;
+            var bounds = _updatesCard.TransformToVisual(scroll).TransformBounds(
+                new global::Windows.Foundation.Rect(0, 0, _updatesCard.ActualWidth, _updatesCard.ActualHeight));
+            return bounds.Top >= -1 && bounds.Bottom <= scroll.ViewportHeight + 1;
+        }
+    }
 
     private static TextBlock Heading(string text)
     {
@@ -183,7 +202,7 @@ internal sealed class SettingsPage
 
     private void RenderWatch()
     {
-        _watch.Text = _uploads.WatchFolder is { } f ? _l.Format("studio.upload.watchingFolder", Localizer.Isolate(f)) : _l["studio.settings.noWatch"];
+        _watch.Text = _uploads.WatchFolder is { } f ? _l.Format("studio.upload.watchingFolder", Localizer.IsolateLtr(f)) : _l["studio.settings.noWatch"];
         _stopWatching.Visibility = _uploads.WatchFolder != null ? Visibility.Visible : Visibility.Collapsed;
     }
 }

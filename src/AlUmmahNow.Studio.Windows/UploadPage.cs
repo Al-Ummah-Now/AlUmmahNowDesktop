@@ -38,7 +38,7 @@ internal sealed class UploadPage
     private readonly StackPanel _stagedActions = new() { Orientation = Orientation.Horizontal, Spacing = 8 };
     private readonly TextBlock _queueEmpty;
     private readonly InfoBar _error = new() { Severity = InfoBarSeverity.Error, IsClosable = true };
-    private readonly TextBlock _watching = new TextBlock { VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap }.Dim(0.8);
+    private readonly TextBlock _watching = new TextBlock { VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap, TextReadingOrder = TextReadingOrder.UseFlowDirection }.Dim(0.8);
     private readonly Button _stopWatching;
     private readonly StackPanel _playlists = new() { Spacing = 2 };
     private readonly StackPanel _scheduleRow = new() { Spacing = 6, Visibility = Visibility.Collapsed };
@@ -401,7 +401,7 @@ internal sealed class UploadPage
 
     private void RenderWatching()
     {
-        _watching.Text = _vm.WatchFolder is { } f ? _l.Format("studio.upload.watchingFolder", Localizer.Isolate(f)) : "";
+        _watching.Text = _vm.WatchFolder is { } f ? _l.Format("studio.upload.watchingFolder", Localizer.IsolateLtr(f)) : "";
         _stopWatching.Visibility = _vm.WatchFolder != null ? Visibility.Visible : Visibility.Collapsed;
         _watchRow.Visibility = _stopWatching.Visibility;
     }

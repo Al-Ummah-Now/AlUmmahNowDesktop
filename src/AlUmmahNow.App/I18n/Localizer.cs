@@ -341,6 +341,9 @@ namespace AlUmmahNow.App.I18n
         /// <summary>Wraps text in Unicode first-strong isolates so embedded runs cannot reorder neighbours.</summary>
         public static string Isolate(string text) => "\u2068" + text + "\u2069";
 
+        /// <summary>Keeps left-to-right text such as Windows paths together in either language.</summary>
+        public static string IsolateLtr(string text) => "\u2066" + text + "\u2069";
+
         /// <summary>
         /// A version for display, isolated: "1.4.2-preview.3" / «١.٤.٢-preview.٣». It is no decimal number, so its dots
         /// stay dots (wiki AUN-APP-UPDATES §12). With letters it is embedded left to right as well: Windows' text does not
