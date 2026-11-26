@@ -21,13 +21,15 @@ internal static class WindowsEnd
 
     /// <param name="begin">On the UI thread, before the work stops, each whatever the others do.</param>
     /// <param name="stop">Stops the work. Off the UI thread, and without it: that one may be blocked by the end, or its loop gone.</param>
-    public static void Attach(Window window, UpdateService updates, Action[] begin, Func<CancellationToken, Task> stop)
+    /// <param name="allowRestart">Whether to relaunch if a requested restart is not handled by the updater. Update scenes simulate their own restart.</param>
+    public static void Attach(Window window, UpdateService updates, Action[] begin, Func<CancellationToken, Task> stop, bool allowRestart)
     {
         _window = window;
         var ui = window.DispatcherQueue;
         // First: what stops no longer says that it was running
         var all = AppEnd.Each(begin.Prepend(updates.BeginEnd).ToArray());
-        var end = _current = new AppEnd(() => OnUi(ui, all), stop, updates.HandOver, () => updates.IsRestartAsked, StartAgain, () => ui.TryEnqueue(Application.Current.Exit), Log);
+        var end = _current = new AppEnd(() => OnUi(ui, all), stop, updates.HandOver, () => allowRestart && updates.IsRestartAsked,
+            StartAgain, () => ui.TryEnqueue(Application.Current.Exit), Log);
         window.AppWindow.Closing += (_, e) =>
         {
             e.Cancel = true;

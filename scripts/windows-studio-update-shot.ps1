@@ -17,13 +17,31 @@ if (-not ("AunUpdateShot.Win" -as [type])) {
 }
 
 $processName = [IO.Path]::GetFileNameWithoutExtension($Exe)
-function Stop-Studio {
-  $prior = @(Get-Process -Name $processName -ErrorAction SilentlyContinue)
-  if ($prior.Count -gt 0) {
-    Stop-Process -InputObject $prior -Force -ErrorAction SilentlyContinue
-    Wait-Process -InputObject $prior -Timeout 10
+function Stop-Studio([int]$exitedId = 0) {
+  $cleanup = [Diagnostics.Stopwatch]::StartNew()
+  $relaunched = [Collections.Generic.HashSet[int]]::new()
+  while ($true) {
+    $prior = @(Get-Process -Name $processName -ErrorAction SilentlyContinue)
+    if ($prior.Count -eq 0) {
+      if ($relaunched.Count -gt 0) { throw "Studio relaunched after $Name (PID $($relaunched -join ', '))" }
+      return
+    }
+
+    try {
+      if ($cleanup.Elapsed.TotalSeconds -ge 10) {
+        throw "Studio is still listed after 10 seconds of cleanup for $Name (PID $($prior.Id -join ', '))"
+      }
+      foreach ($process in $prior) {
+        if ($exitedId -ne 0 -and $process.Id -ne $exitedId) { [void]$relaunched.Add($process.Id) }
+      }
+      Stop-Process -InputObject $prior -Force -ErrorAction SilentlyContinue
+      Wait-Process -InputObject $prior -Timeout 1 -ErrorAction SilentlyContinue
+    } finally {
+      foreach ($process in $prior) { $process.Dispose() }
+    }
+    # A terminated process can still be visible by name after its exit handle is signaled.
+    Start-Sleep -Milliseconds 200
   }
-  if (Get-Process -Name $processName -ErrorAction SilentlyContinue) { throw "Studio is still running after cleanup" }
 }
 
 function Assert-Window {
@@ -49,6 +67,7 @@ $env:AUN_EXIT_AFTER = "20"
 $env:AUN_RESULT = Join-Path $Out "$Name.txt"
 $env:AUN_END_FILE = "$env:AUN_RESULT.end"
 $p = $null
+$exitedId = 0
 try {
   foreach ($file in $env:AUN_RESULT, "$env:AUN_RESULT.pending", "$env:AUN_RESULT.crash.txt", $env:AUN_END_FILE, (Join-Path $Out "$Name.png"), (Join-Path $Out "$Name.uia.txt")) {
     if (Test-Path -LiteralPath $file) { Remove-Item -LiteralPath $file }
@@ -123,13 +142,15 @@ try {
   }
   Set-Content -LiteralPath $env:AUN_END_FILE -Value ""
   Wait-Process -InputObject $p -Timeout 15
+  $exitedId = $p.Id
   if (Test-Path -LiteralPath "$env:AUN_RESULT.crash.txt") { throw "Studio crashed after capturing $Name" }
   if ($Update -eq "settingsupdate" -and $Size -eq "1440x900" -and "$result" -match " updatesScrolled=True ") {
     throw "The Updates card needed scrolling at $Size in $Name"
   }
 } finally {
   try {
-    Stop-Studio
+    if ($null -ne $p) { $p.Dispose() }
+    Stop-Studio $exitedId
   } finally {
     if (Test-Path -LiteralPath $env:AUN_END_FILE) { Remove-Item -LiteralPath $env:AUN_END_FILE }
     $env:AUN_END_FILE = ""
