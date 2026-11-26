@@ -80,7 +80,7 @@ public sealed class CoreStudioAccounts : IStudioAccounts, IDisposable
 
     public async Task<StudioAccount> SignInAsync(SignInMode mode, CancellationToken cancellationToken = default)
     {
-        var info = await BrowserSignInAsync(mode == SignInMode.AddAccount ? LoginPrompt.Login : LoginPrompt.Default, cancellationToken).ConfigureAwait(false);
+        var info = await BrowserSignInAsync(mode == SignInMode.AddAccount ? new LoginPrompt.Login() : new LoginPrompt.Default(), cancellationToken).ConfigureAwait(false);
         Reload();
         Raise();
         return ToAccount(info);
@@ -95,7 +95,7 @@ public sealed class CoreStudioAccounts : IStudioAccounts, IDisposable
         try
         {
             // Core keeps the PKCE verifier and state; the passkey's code completes the same login.
-            request = Manager.BeginLoginWithRedirect(LoginPrompt.Default, PasskeyRedirect);
+            request = Manager.BeginLoginWithRedirect(new LoginPrompt.Default(), PasskeyRedirect);
         }
         catch (AunException ex)
         {
@@ -149,7 +149,7 @@ public sealed class CoreStudioAccounts : IStudioAccounts, IDisposable
         AccountInfo info;
         try
         {
-            info = await BrowserSignInAsync(LoginPrompt.Login, cancellationToken).ConfigureAwait(false);
+            info = await BrowserSignInAsync(new LoginPrompt.Login(), cancellationToken).ConfigureAwait(false);
         }
         catch (AuthFailedException ex)
         {

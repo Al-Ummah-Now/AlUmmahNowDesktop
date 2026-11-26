@@ -344,20 +344,24 @@ public sealed class UploadPage
         grid.Attach(_scheduleRow, 0, row++, 1, 1);
 
         var newPlaylist = Gtk.Entry.New();
-        newPlaylist.SetPlaceholderText(_l["studio.upload.newPlaylist"]);
+        newPlaylist.SetPlaceholderText(_l["studio.upload.newPlaylist.en"]);
+        var arabicPlaylist = Gtk.Entry.New();
+        arabicPlaylist.SetPlaceholderText(_l["studio.upload.newPlaylist.ar"]);
         var create = Ui.Button(_l["studio.upload.createPlaylist"], async () =>
         {
-            var p = await _vm.CreatePlaylistAsync(newPlaylist.GetText(), isPublic: true);
+            var p = await _vm.CreatePlaylistAsync(newPlaylist.GetText(), arabicPlaylist.GetText(), isPublic: true);
             if (p == null) return;
             D.PlaylistIds.Add(p.Id);
             newPlaylist.SetText("");
+            arabicPlaylist.SetText("");
             _vm.ApplyDefaults();
             RenderPlaylists();
         });
         var playlistBox = Gtk.Box.New(Gtk.Orientation.Vertical, 6);
         playlistBox.Append(_playlists);
-        var createRow = Gtk.Box.New(Gtk.Orientation.Horizontal, 6);
+        var createRow = Gtk.Box.New(Gtk.Orientation.Vertical, 6);
         createRow.Append(newPlaylist);
+        createRow.Append(arabicPlaylist);
         createRow.Append(create);
         playlistBox.Append(createRow);
         Add(_l["studio.upload.playlists"], playlistBox);
@@ -377,7 +381,7 @@ public sealed class UploadPage
         Ui.Clear(_playlists);
         foreach (var p in _vm.Playlists)
         {
-            var check = Gtk.CheckButton.NewWithLabel(p.Title);
+            var check = Gtk.CheckButton.NewWithLabel(p.TitleFor(_l.Language));
             check.SetActive(D.PlaylistIds.Contains(p.Id));
             check.OnToggled += (_, _) =>
             {

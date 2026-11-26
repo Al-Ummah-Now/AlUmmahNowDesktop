@@ -70,7 +70,7 @@ internal sealed class CoreAdminAuth : IAdminAuth, IDisposable
 
     public async Task SignInAsync(CancellationToken ct = default)
     {
-        await RunAsync(LoginPrompt.Default, stepUp: false, ct).ConfigureAwait(false);
+        await RunAsync(new LoginPrompt.Default(), stepUp: false, ct).ConfigureAwait(false);
     }
 
     public async Task<bool> StepUpAsync(CancellationToken ct = default)
@@ -78,7 +78,7 @@ internal sealed class CoreAdminAuth : IAdminAuth, IDisposable
         var before = UserId;
         try
         {
-            var info = await RunAsync(LoginPrompt.Login, stepUp: true, ct).ConfigureAwait(false);
+            var info = await RunAsync(new LoginPrompt.Login(), stepUp: true, ct).ConfigureAwait(false);
             if (before != null && info.UserId != before)
             {
                 // Someone else signed in at the step-up prompt: that is not a step-up of this reviewer.
@@ -144,7 +144,7 @@ internal sealed class CoreAdminAuth : IAdminAuth, IDisposable
         try
         {
             // Core keeps the PKCE verifier and state; the passkey's code completes the same login.
-            request = Manager.BeginLoginWithRedirect(LoginPrompt.Default, AdminRedirect.Uri);
+            request = Manager.BeginLoginWithRedirect(new LoginPrompt.Default(), AdminRedirect.Uri);
         }
         catch (AunException ex)
         {

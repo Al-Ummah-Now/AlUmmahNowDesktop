@@ -218,18 +218,73 @@ namespace AlUmmahNow.CoreBridge.Studio
             return Array(doc.RootElement, "data").Select(ReadPlaylist).Where(p => p.Id.Length > 0).ToList();
         }
 
-        public async Task<StudioPlaylist> CreatePlaylistAsync(string channelId, string title, bool isPublic, CancellationToken cancellationToken = default)
+        public Task<StudioPlaylist> CreatePlaylistAsync(string channelId, string title, bool isPublic, CancellationToken cancellationToken = default) =>
+            CreatePlaylistAsync(channelId, new Dictionary<string, object> { ["title"] = title }, isPublic, cancellationToken);
+
+        public Task<StudioPlaylist> CreatePlaylistAsync(string channelId, IReadOnlyDictionary<string, string> titles, bool isPublic,
+            IReadOnlyDictionary<string, string>? descriptions = null, CancellationToken cancellationToken = default)
         {
-            var r = new ApiRequest("post_PlaylistCreate")
+            var body = PlaylistText(titles, descriptions);
+            if (!body.ContainsKey("title")) throw new ArgumentException("At least one playlist name is required.", nameof(titles));
+            return CreatePlaylistAsync(channelId, body, isPublic, cancellationToken);
+        }
+
+        private Task<StudioPlaylist> CreatePlaylistAsync(string channelId, Dictionary<string, object> body,
+            bool isPublic, CancellationToken cancellationToken)
+        {
+            body["isPublic"] = isPublic;
+            var request = new ApiRequest("post_PlaylistCreate") { IdempotencyKey = Guid.NewGuid().ToString("N") };
+            return SavePlaylistAsync(request, channelId, body, cancellationToken);
+        }
+
+        public Task<StudioPlaylist> UpdatePlaylistAsync(string channelId, string playlistId, IReadOnlyDictionary<string, string>? titles,
+            IReadOnlyDictionary<string, string>? descriptions, CancellationToken cancellationToken = default)
+        {
+            var request = new ApiRequest("patch_PlaylistUpdate");
+            request.PathParams["id"] = playlistId;
+            return SavePlaylistAsync(request, channelId, PlaylistText(titles, descriptions), cancellationToken);
+        }
+
+        private async Task<StudioPlaylist> SavePlaylistAsync(ApiRequest request, string channelId,
+            Dictionary<string, object> body, CancellationToken cancellationToken)
+        {
+            request.BodyJson = JsonSerializer.Serialize(body);
+            request.Headers["channelId"] = channelId;
+            using var doc = await SendAsync(request, cancellationToken).ConfigureAwait(false);
+            if (Unwrap(doc.RootElement).TryGetProperty("playlist", out var playlist)) return ReadPlaylist(playlist);
+            throw new StudioApiException("The saved playlist was not returned");
+        }
+
+        private static Dictionary<string, object> PlaylistText(IReadOnlyDictionary<string, string>? titles,
+            IReadOnlyDictionary<string, string>? descriptions)
+        {
+            var body = new Dictionary<string, object>();
+            AddPlaylistText(body, "title", titles, 150);
+            AddPlaylistText(body, "description", descriptions, 5000);
+            return body;
+        }
+
+        private static void AddPlaylistText(Dictionary<string, object> body, string field,
+            IReadOnlyDictionary<string, string>? values, int max)
+        {
+            if (values == null) return;
+            var localized = new Dictionary<string, string>();
+            foreach (var language in new[] { "en", "ar" })
             {
-                BodyJson = JsonSerializer.Serialize(new Dictionary<string, object> { ["title"] = title, ["isPublic"] = isPublic }),
-                IdempotencyKey = Guid.NewGuid().ToString("N"),
-            };
-            r.Headers["channelId"] = channelId;
-            using var doc = await SendAsync(r, cancellationToken).ConfigureAwait(false);
-            var root = doc.RootElement;
-            if (root.TryGetProperty("result", out var result) && result.TryGetProperty("playlist", out var p)) return ReadPlaylist(p);
-            throw new StudioApiException("The new playlist was not returned");
+                if (!values.TryGetValue(language, out var value) || string.IsNullOrWhiteSpace(value)) continue;
+                var text = value.Trim();
+                if (text.Length > max)
+                {
+                    var length = char.IsHighSurrogate(text[max - 1]) ? max - 1 : max;
+                    text = text.Substring(0, length).TrimEnd();
+                }
+
+                localized[language] = text;
+            }
+
+            body[field + "Localized"] = localized;
+            if (localized.TryGetValue("en", out var fallback) || localized.TryGetValue("ar", out fallback))
+                body[field] = fallback;
         }
 
         public async Task AddToPlaylistAsync(string channelId, string playlistId, IReadOnlyList<string> videoIds, CancellationToken cancellationToken = default)
@@ -356,7 +411,12 @@ namespace AlUmmahNow.CoreBridge.Studio
         private static StudioPlaylist ReadPlaylist(JsonElement p)
         {
             var count = p.TryGetProperty("videosCount", out var c) && c.ValueKind == JsonValueKind.Number ? c.GetInt32() : Array(p, "videos").Count();
-            return new StudioPlaylist(Str(p, "id") ?? "", Str(p, "title") ?? Str(p, "name") ?? "", count, Bool(p, "isPublic"));
+            return new StudioPlaylist(Str(p, "id") ?? "", Str(p, "title") ?? Str(p, "name") ?? "", count, Bool(p, "isPublic"))
+            {
+                Description = Str(p, "description") ?? "",
+                TitleLocalized = ReadLocalized(p, "titleLocalized"),
+                DescriptionLocalized = ReadLocalized(p, "descriptionLocalized"),
+            };
         }
 
         private static List<string> Tags(IEnumerable<string> tags) =>

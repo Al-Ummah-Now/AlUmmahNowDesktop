@@ -253,13 +253,13 @@ public sealed partial class UploadsViewModel : ObservableObject, IDisposable
         }
     }
 
-    public async Task<StudioPlaylist?> CreatePlaylistAsync(string title, bool isPublic)
+    public async Task<StudioPlaylist?> CreatePlaylistAsync(string englishTitle, string arabicTitle, bool isPublic)
     {
         var channel = _shell.ActiveChannel;
-        if (channel == null || string.IsNullOrWhiteSpace(title)) return null;
+        if (channel == null || (string.IsNullOrWhiteSpace(englishTitle) && string.IsNullOrWhiteSpace(arabicTitle))) return null;
         try
         {
-            var p = await _api.CreatePlaylistAsync(channel.Id, title.Trim(), isPublic);
+            var p = await _api.CreatePlaylistAsync(channel.Id, new Dictionary<string, string> { ["en"] = englishTitle, ["ar"] = arabicTitle }, isPublic);
             Playlists = Playlists.Append(p).ToList();
             return p;
         }

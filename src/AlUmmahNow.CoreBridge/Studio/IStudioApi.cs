@@ -41,6 +41,12 @@ namespace AlUmmahNow.CoreBridge.Studio
 
         Task<StudioPlaylist> CreatePlaylistAsync(string channelId, string title, bool isPublic, CancellationToken cancellationToken = default);
 
+        Task<StudioPlaylist> CreatePlaylistAsync(string channelId, IReadOnlyDictionary<string, string> titles, bool isPublic,
+            IReadOnlyDictionary<string, string>? descriptions = null, CancellationToken cancellationToken = default);
+
+        Task<StudioPlaylist> UpdatePlaylistAsync(string channelId, string playlistId, IReadOnlyDictionary<string, string>? titles,
+            IReadOnlyDictionary<string, string>? descriptions, CancellationToken cancellationToken = default);
+
         Task AddToPlaylistAsync(string channelId, string playlistId, IReadOnlyList<string> videoIds, CancellationToken cancellationToken = default);
 
         Task<ChannelAnalytics> ChannelAnalyticsAsync(string channelId, DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken = default);

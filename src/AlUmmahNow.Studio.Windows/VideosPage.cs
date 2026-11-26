@@ -118,7 +118,7 @@ internal sealed class VideosPage
             _playlistMenu.Items.Clear();
             foreach (var p in _uploads.Playlists)
             {
-                var item = new MenuFlyoutItem { Text = p.Title };
+                var item = new MenuFlyoutItem { Text = p.TitleFor(_l.Language) };
                 item.Click += (_, _) => _ = _vm.AddSelectedToPlaylistAsync(p.Id);
                 _playlistMenu.Items.Add(item);
             }
