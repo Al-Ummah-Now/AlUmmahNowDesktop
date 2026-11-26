@@ -72,14 +72,14 @@ internal sealed class EncodePage
                 EncodeStatus.Canceled => _l["studio.encode.canceled"],
                 _ => _l["studio.status.queued"],
             };
-            var name = _l.Join(Localizer.Isolate(Path.GetFileName(job.Request.Source)), _l["studio.preset." + job.Request.Preset.Key]);
+            var name = _l.JoinFileName(Path.GetFileName(job.Request.Source), _l["studio.preset." + job.Request.Preset.Key]);
             var encoder = job.UsedEncoder is { } e ? _l[e.Kind == EncoderKind.Hardware ? "studio.encode.hardware" : "studio.encode.software"] : null;
             var row = new Grid { ColumnSpacing = 12 };
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             row.Children.Add(Tile.Film(80, 45));
             var text = new StackPanel { Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
-            text.Children.Add(new TextBlock { Text = name, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis });
+            text.Children.Add(new TextBlock { Text = name, TextReadingOrder = TextReadingOrder.UseFlowDirection, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis });
             var bar = new ProgressBar { Minimum = 0, Maximum = 1, Value = job.Progress };
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(bar, name);
             text.Children.Add(bar);

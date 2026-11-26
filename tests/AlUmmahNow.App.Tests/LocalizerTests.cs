@@ -79,6 +79,40 @@ public class LocalizerTests
         Assert.Equal("١١ نوفمبر", new Localizer("ar").ShortDate(new DateTime(2026, 11, 11)));
     }
 
+    public static TheoryData<string, string, string> FileNames
+    {
+        get
+        {
+            var cases = new TheoryData<string, string, string>();
+            foreach (var language in new[] { "en", "ar" })
+            {
+                cases.Add(language, "درس 1.mp4", "درس \u200E1\u200E.mp4");
+                cases.Add(language, "درس.mp4", "درس\u200E.mp4");
+                cases.Add(language, "lecture_01.mp4", "lecture_\u200E01\u200E.mp4");
+                cases.Add(language, "clip درس 12.MP4", "clip درس \u200E12\u200E.MP4");
+                cases.Add(language, "درس 1", "درس \u200E1\u200E");
+            }
+            return cases;
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(FileNames))]
+    public void File_names_keep_the_numeric_suffix_and_extension_together_before_metadata(
+        string language, string fileName, string displayName)
+    {
+        var l = new Localizer(language);
+        var (direction, separator, size, status) = l.IsRtl
+            ? ("\u200F", "، ", "١٫٤٣ م.ب", "قيد الانتظار")
+            : ("\u200E", "\u00A0· ", "1.43 MB", "Queued");
+
+        var expected = direction + "\u2066\u202A" + displayName + "\u202C\u2069";
+        Assert.Equal(expected, l.JoinFileName(fileName));
+        Assert.Equal(expected + separator + "\u2068" + size + "\u2069" + separator + "\u2068" + status + "\u2069",
+            l.JoinFileName(fileName, l.Bytes(1_500_000, 2), null, status));
+        Assert.Equal("\u2068" + status + "\u2069", l.JoinFileName("", status));
+    }
+
     // The website's formatBytes (Intl short units, 1024 steps); the expected text is what the web shows.
     [Theory]
     [InlineData("en", 512, null, "512 byte")]

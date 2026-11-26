@@ -56,7 +56,7 @@ public sealed class EncodePage
             var text = Gtk.Box.New(Gtk.Orientation.Vertical, 6);
             text.SetHexpand(true);
             text.SetValign(Gtk.Align.Center);
-            var name = Ui.Label(_l.Join(Localizer.Isolate(Path.GetFileName(job.Request.Source)), _l["studio.preset." + job.Request.Preset.Key]));
+            var name = Ui.Label(_l.JoinFileName(Path.GetFileName(job.Request.Source), _l["studio.preset." + job.Request.Preset.Key]));
             name.AddCssClass("heading");
             var bar = Gtk.ProgressBar.New();
             bar.SetFraction(job.Progress);

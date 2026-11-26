@@ -429,7 +429,8 @@ internal sealed class UploadPage
             title.TextChanged += (_, _) => _vm.RenameStaged(plan.FilePath, title.Text);
             var meta = new TextBlock
             {
-                Text = _l.JoinWrapped(Localizer.Isolate(file), _l.Bytes(plan.Size, 2), plan.PublishAt is { } at ? _l.Format("studio.upload.publishesAt", _l.DateTime(at)) : null),
+                TextReadingOrder = TextReadingOrder.UseFlowDirection,
+                Text = _l.JoinFileName(file, _l.Bytes(plan.Size, 2), plan.PublishAt is { } at ? _l.Format("studio.upload.publishesAt", _l.DateTime(at)) : null),
                 VerticalAlignment = VerticalAlignment.Center,
                 TextWrapping = TextWrapping.Wrap,
             }.Dim(0.8);

@@ -416,7 +416,7 @@ public sealed class UploadPage
             title.SetHexpand(true);
             Ui.Named(title, _l.Format("studio.upload.titleFor", file));
             title.OnChanged += (_, _) => _vm.RenameStaged(plan.FilePath, title.GetText());
-            var meta = Ui.Label(_l.JoinWrapped(Localizer.Isolate(file), _l.Bytes(plan.Size, 2),
+            var meta = Ui.Label(_l.JoinFileName(file, _l.Bytes(plan.Size, 2),
                 plan.PublishAt is { } at ? _l.Format("studio.upload.publishesAt", _l.DateTime(at)) : null), dim: true);
             meta.AddCssClass("caption");
             var text = Gtk.Box.New(Gtk.Orientation.Vertical, 4);
