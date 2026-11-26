@@ -234,6 +234,7 @@ public sealed partial class App : Application
             job = encode.Add(new EncodeRequest(source, source + ".out.mp4", EncodePreset.Lecture));
         }
 
+        var captureUpdate = demo && updateScene != null && !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("AUN_END_FILE"));
         if (updateScene != null)
         {
             _updateTimer = ui.CreateTimer();
@@ -277,10 +278,28 @@ public sealed partial class App : Application
             _endTimer.Interval = TimeSpan.FromSeconds(exitAfter);
             _endTimer.IsRepeating = false;
             var told = AlUmmahNow.App.Demo.AutomationEnd.FromEnvironment();
+            var resultWritten = false;
+            var triedUpdateScroll = false;
             _endTimer.Tick += (_, _) =>
             {
-                if (told.Waits())
+                if ((!captureUpdate || resultWritten) && told.Waits())
                 {
+                    _endTimer.Interval = TimeSpan.FromMilliseconds(500);
+                    _endTimer.Start();
+                    return;
+                }
+
+                if (resultWritten)
+                {
+                    Exit();
+                    return;
+                }
+
+                if (captureUpdate && updateScene!.IsInSettings && updateViews.IsSectionShown
+                    && !settingsPage.IsUpdateCardInView && !triedUpdateScroll)
+                {
+                    triedUpdateScroll = true;
+                    settingsPage.BringUpdatesIntoView();
                     _endTimer.Interval = TimeSpan.FromMilliseconds(500);
                     _endTimer.Start();
                     return;
@@ -310,9 +329,24 @@ public sealed partial class App : Application
                     && (act is not ("edit" or "bulk" or "delete" or "channels" or "schedulepick" or "schedulesoonpick") || !LanternGlass.IsHighContrast || window.HasPopup);
                 var updateWrong = updateScene?.Wrong(updateViews);
                 if (updateWrong == null && updateScene != null && !updateViews.IsPainted) updateWrong = "not the system's colors";
+                if (updateWrong == null && captureUpdate && updateScene!.IsInSettings && updateViews.IsSectionShown && !settingsPage.IsUpdateCardInView)
+                    updateWrong = "the Settings card is cut off";
                 pass = pass && updateWrong == null;
                 var updateLine = updateScene == null ? "" : $" update={updateScene.Name}:{updateWrong ?? "ok"}";
-                File.WriteAllText(ResultPath, $"AUTOMATION {tabName} page={pages.Current} upload={pages.IsVisible(StudioPages.Uploads)} analytics={pages.IsVisible(StudioPages.Analytics)} bulkSchedule={uploadsVm.BulkScheduleOn} scene={scene}{updateLine} shell={shell.State} channel={shell.ActiveChannel?.Id} accounts={shell.AccountList.Count} uploads={snapshot.Count} uploadsDone={uploadsDone} encode={job?.Status} encoder={job?.UsedEncoder?.Name} error={job?.Error} searchFocused={window.SearchHasFocus} fieldFocused={window.FieldHasFocus} cardsWhole={videos.CardsAreWhole} searchHovered={window.SearchIsHovered} pickedReadable={analytics.PickedIsReadable} pickedHovered={analytics.PickedIsHovered} chartSeen={analytics.ChartIsSeen} schedule={uploads.ScheduleIs(act)} cutOff='{cutOff}' pictures={look.Pictures} mirrored={look.Mirrored} avatars={look.Avatars} avatarPictures={look.AvatarPictures} unreadableInitials={look.Unreadable} looked={looked} strays='{strays}' highContrast={LanternGlass.IsHighContrast} painted={LanternGlass.IsPainted} missing={LanternGlass.Missing} unreadableDialogs={LanternGlass.UnreadableDialogs} checkedDialogs={LanternGlass.CheckedDialogs} deletedShown={videos.DeletedIsShown} RESULT {(pass ? "PASS" : "FAIL")}");
+                var captureLine = captureUpdate ? $" pid={Environment.ProcessId} hwnd={hwnd.ToInt64()} lang={localizer.Language} updatesScrolled={triedUpdateScroll}" : "";
+                var result = $"AUTOMATION {tabName} page={pages.Current} upload={pages.IsVisible(StudioPages.Uploads)} analytics={pages.IsVisible(StudioPages.Analytics)} bulkSchedule={uploadsVm.BulkScheduleOn} scene={scene}{updateLine} shell={shell.State} channel={shell.ActiveChannel?.Id} accounts={shell.AccountList.Count} uploads={snapshot.Count} uploadsDone={uploadsDone} encode={job?.Status} encoder={job?.UsedEncoder?.Name} error={job?.Error} searchFocused={window.SearchHasFocus} fieldFocused={window.FieldHasFocus} cardsWhole={videos.CardsAreWhole} searchHovered={window.SearchIsHovered} pickedReadable={analytics.PickedIsReadable} pickedHovered={analytics.PickedIsHovered} chartSeen={analytics.ChartIsSeen} schedule={uploads.ScheduleIs(act)} cutOff='{cutOff}' pictures={look.Pictures} mirrored={look.Mirrored} avatars={look.Avatars} avatarPictures={look.AvatarPictures} unreadableInitials={look.Unreadable} looked={looked} strays='{strays}' highContrast={LanternGlass.IsHighContrast} painted={LanternGlass.IsPainted} missing={LanternGlass.Missing} unreadableDialogs={LanternGlass.UnreadableDialogs} checkedDialogs={LanternGlass.CheckedDialogs} deletedShown={videos.DeletedIsShown}{captureLine} RESULT {(pass ? "PASS" : "FAIL")}";
+                if (captureUpdate)
+                {
+                    // Publish the completed validation before letting the capture script release the window.
+                    File.WriteAllText(ResultPath + ".pending", result);
+                    File.Move(ResultPath + ".pending", ResultPath, overwrite: true);
+                    resultWritten = true;
+                    _endTimer.Interval = TimeSpan.FromMilliseconds(500);
+                    _endTimer.Start();
+                    return;
+                }
+
+                File.WriteAllText(ResultPath, result);
                 Exit();
             };
             _endTimer.Start();
