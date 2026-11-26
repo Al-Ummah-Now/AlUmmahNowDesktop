@@ -314,12 +314,37 @@ namespace AlUmmahNow.CoreBridge.Temporary
                     throw new CatalogException("HTTP " + (int)resp.StatusCode + " for " + path);
                 }
 
-                var raw = await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
-                return JsonDocument.Parse(string.IsNullOrWhiteSpace(raw) ? "{}" : raw);
+                var raw = await ReadTextAsync(resp.Content).ConfigureAwait(false);
+                return ParseJson(string.IsNullOrWhiteSpace(raw) ? "{}" : raw);
             }
             catch (HttpRequestException ex)
             {
                 throw new CatalogException("Network error", ex);
+            }
+        }
+
+        internal static async Task<string> ReadTextAsync(HttpContent content)
+        {
+            try
+            {
+                return await content.ReadAsStringAsync().ConfigureAwait(false);
+            }
+            catch (InvalidOperationException ex)
+            {
+                // HttpContent reports an unrecognized response charset as InvalidOperationException.
+                throw new CatalogException("Unreadable answer", ex);
+            }
+        }
+
+        internal static JsonDocument ParseJson(string text)
+        {
+            try
+            {
+                return JsonDocument.Parse(text);
+            }
+            catch (JsonException ex)
+            {
+                throw new CatalogException("Unreadable answer", ex);
             }
         }
     }
