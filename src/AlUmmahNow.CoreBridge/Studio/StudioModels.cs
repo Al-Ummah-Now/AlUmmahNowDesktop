@@ -169,6 +169,21 @@ namespace AlUmmahNow.CoreBridge.Studio
 
         public string Id { get; }
         public string Title { get; }
+        public string Description { get; set; } = "";
+        public IReadOnlyDictionary<string, string> TitleLocalized { get; set; } = new Dictionary<string, string>();
+        public IReadOnlyDictionary<string, string> DescriptionLocalized { get; set; } = new Dictionary<string, string>();
+
+        public string TitleFor(string language) => TextFor(Title, TitleLocalized, language);
+        public string DescriptionFor(string language) => TextFor(Description, DescriptionLocalized, language);
+
+        private static string TextFor(string fallback, IReadOnlyDictionary<string, string> localized, string language)
+        {
+            var separator = language.IndexOfAny(new[] { '-', '_' });
+            var key = separator < 0 ? language : language.Substring(0, separator);
+            var text = localized.TryGetValue(key.ToLowerInvariant(), out var value) ? value?.Trim() : null;
+            return string.IsNullOrEmpty(text) ? fallback : text!;
+        }
+
         public int VideoCount { get; }
         public bool IsPublic { get; }
     }

@@ -344,24 +344,23 @@ internal sealed class UploadPage
         var playlistsHeader = new TextBlock { Text = _l["studio.upload.playlists"] };
         panel.Children.Add(playlistsHeader);
         panel.Children.Add(_playlists);
-        var newPlaylist = new TextBox { PlaceholderText = _l["studio.upload.newPlaylist"] };
-        AutomationProperties.SetName(newPlaylist, _l["studio.upload.newPlaylist"]);
+        var newPlaylist = new TextBox { PlaceholderText = _l["studio.upload.newPlaylist.en"] };
+        AutomationProperties.SetName(newPlaylist, _l["studio.upload.newPlaylist.en"]);
+        var arabicPlaylist = new TextBox { PlaceholderText = _l["studio.upload.newPlaylist.ar"], FlowDirection = FlowDirection.RightToLeft };
+        AutomationProperties.SetName(arabicPlaylist, _l["studio.upload.newPlaylist.ar"]);
         var create = Button(_l["studio.upload.createPlaylist"], async () =>
         {
-            var p = await _vm.CreatePlaylistAsync(newPlaylist.Text, isPublic: true);
+            var p = await _vm.CreatePlaylistAsync(newPlaylist.Text, arabicPlaylist.Text, isPublic: true);
             if (p == null) return;
             D.PlaylistIds.Add(p.Id);
             newPlaylist.Text = "";
+            arabicPlaylist.Text = "";
             _vm.ApplyDefaults();
             RenderPlaylists();
         });
-        var createRow = new Grid { ColumnSpacing = 8 };
-        createRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        createRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        Grid.SetColumn(create, 1);
-        createRow.Children.Add(newPlaylist);
-        createRow.Children.Add(create);
-        panel.Children.Add(createRow);
+        panel.Children.Add(newPlaylist);
+        panel.Children.Add(arabicPlaylist);
+        panel.Children.Add(create);
 
         var tags = new TextBox { Header = _l["studio.upload.tags"] };
         tags.TextChanged += (_, _) =>
@@ -378,7 +377,7 @@ internal sealed class UploadPage
         _playlists.Children.Clear();
         foreach (var p in _vm.Playlists)
         {
-            var check = new CheckBox { Content = p.Title, IsChecked = D.PlaylistIds.Contains(p.Id) };
+            var check = new CheckBox { Content = p.TitleFor(_l.Language), IsChecked = D.PlaylistIds.Contains(p.Id) };
             check.Checked += (_, _) =>
             {
                 if (!D.PlaylistIds.Contains(p.Id)) D.PlaylistIds.Add(p.Id);

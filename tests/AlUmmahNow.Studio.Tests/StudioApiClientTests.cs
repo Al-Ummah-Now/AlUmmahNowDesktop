@@ -133,4 +133,71 @@ public sealed class StudioApiClientTests
         await Api.AddToPlaylistAsync("c1", "p2", Enumerable.Range(0, 60).Select(i => "v" + i).ToList());
         Assert.Equal(2, _t.Calls("post_PlaylistVideosBulkAdd").Count);
     }
+
+    [Theory]
+    [InlineData("en", "English", "Original description")]
+    [InlineData("ar", "العربية", "وصف")]
+    [InlineData("ar-SA", "العربية", "وصف")]
+    [InlineData("ar_SA", "العربية", "وصف")]
+    [InlineData("fr", "Original title", "Original description")]
+    public async Task PlaylistTranslationsUseTheActiveLanguage(string language, string title, string description)
+    {
+        _t.Responses["get_PlaylistsList"] = _ => """
+            {"data":[
+              {"id":"p1","title":"Original title","description":"Original description",
+               "titleLocalized":{"en":" English ","ar":" العربية "},
+               "descriptionLocalized":{"en":"  ","ar":" وصف "}},
+              {"id":"p2","title":"Legacy"}
+            ]}
+            """;
+        var playlists = await Api.ListPlaylistsAsync("c1");
+        Assert.Equal(title, playlists[0].TitleFor(language));
+        Assert.Equal(description, playlists[0].DescriptionFor(language));
+        Assert.Equal("Legacy", playlists[1].TitleFor(language));
+        Assert.Equal("", playlists[1].DescriptionFor(language));
+    }
+
+    [Fact]
+    public async Task CreatePlaylistNormalizesTextAndDerivesTitleFromArabic()
+    {
+        _t.Responses["post_PlaylistCreate"] = _ => """
+            {"result":{"playlist":{"id":"p2","title":"العربية","titleLocalized":{"ar":"العربية"}}}}
+            """;
+        var playlist = await Api.CreatePlaylistAsync("c1",
+            new Dictionary<string, string> { ["en"] = "  ", ["ar"] = " العربية ", ["fr"] = "Ignored" },
+            false, new Dictionary<string, string> { ["en"] = " " + new string('a', 5001) + " " });
+        Assert.Equal("العربية", playlist.TitleLocalized["ar"]);
+        var request = Assert.Single(_t.Calls("post_PlaylistCreate"));
+        using var doc = JsonDocument.Parse(request.BodyJson!);
+        var body = doc.RootElement;
+        Assert.Equal("العربية", body.GetProperty("title").GetString());
+        Assert.Single(body.GetProperty("titleLocalized").EnumerateObject());
+        Assert.Equal(5000, body.GetProperty("descriptionLocalized").GetProperty("en").GetString()!.Length);
+        Assert.Throws<ArgumentException>(() =>
+        {
+            _ = Api.CreatePlaylistAsync("c1", new Dictionary<string, string> { ["en"] = " ", ["fr"] = "Ignored" }, true);
+        });
+    }
+
+    [Fact]
+    public async Task UpdatePlaylistReplacesMapsAndOmitsUnchangedFields()
+    {
+        _t.Responses["patch_PlaylistUpdate"] = _ => """
+            {"result":{"playlist":{"id":"p1","title":"Original"}}}
+            """;
+        await Api.UpdatePlaylistAsync("c1", "p1", new Dictionary<string, string>(), null);
+        var request = Assert.Single(_t.Calls("patch_PlaylistUpdate"));
+        Assert.Equal("p1", request.PathParams["id"]);
+        using var doc = JsonDocument.Parse(request.BodyJson!);
+        Assert.Empty(doc.RootElement.GetProperty("titleLocalized").EnumerateObject());
+        Assert.Single(doc.RootElement.EnumerateObject());
+
+        await Api.UpdatePlaylistAsync("c1", "p1",
+            new Dictionary<string, string> { ["en"] = new string('a', 151), ["ar"] = " العربية " },
+            new Dictionary<string, string>());
+        using var updated = JsonDocument.Parse(_t.Calls("patch_PlaylistUpdate")[1].BodyJson!);
+        Assert.Equal(new string('a', 150), updated.RootElement.GetProperty("title").GetString());
+        Assert.Equal("العربية", updated.RootElement.GetProperty("titleLocalized").GetProperty("ar").GetString());
+        Assert.Empty(updated.RootElement.GetProperty("descriptionLocalized").EnumerateObject());
+    }
 }

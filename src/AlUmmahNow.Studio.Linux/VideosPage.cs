@@ -124,7 +124,7 @@ public sealed class VideosPage
             Ui.Clear(playlistMenu);
             foreach (var p in _uploads.Playlists)
             {
-                var b = Gtk.Button.NewWithLabel(p.Title);
+                var b = Gtk.Button.NewWithLabel(p.TitleFor(_l.Language));
                 b.AddCssClass("flat");
                 b.OnClicked += (_, _) =>
                 {

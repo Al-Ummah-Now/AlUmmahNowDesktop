@@ -87,6 +87,23 @@ public sealed class UploadsViewModelTests : IDisposable
         return p;
     }
 
+    [Theory]
+    [InlineData("en", "English")]
+    [InlineData("ar", "العربية")]
+    public async Task PlaylistCreatedFromBothNamesIsAvailableToThePicker(string language, string expected)
+    {
+        _t.Responses["post_PlaylistCreate"] = _ => """
+            {"result":{"playlist":{"id":"p1","title":"English","titleLocalized":{"en":"English","ar":"العربية"}}}}
+            """;
+        var (_, vm) = await CreateAsync();
+        Assert.Null(await vm.CreatePlaylistAsync(" ", "", isPublic: true));
+        Assert.Empty(_t.Calls("post_PlaylistCreate"));
+        var created = await vm.CreatePlaylistAsync(" English ", " العربية ", isPublic: true);
+        var playlist = Assert.Single(vm.Playlists);
+        Assert.Same(created, playlist);
+        Assert.Equal(expected, playlist.TitleFor(language));
+    }
+
     [Fact]
     public async Task StagesAppliesDefaultsAndQueuesOnTheActiveChannel()
     {
