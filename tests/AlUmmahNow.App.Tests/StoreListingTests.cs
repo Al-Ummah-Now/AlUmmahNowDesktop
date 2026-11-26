@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Xunit;
 
@@ -104,6 +105,18 @@ public class StoreListingTests
             var text = Read(app, lang, file);
             foreach (var word in lang == "en-us" ? BannedEnglish : BannedArabic)
                 Assert.False(text.Contains(word, StringComparison.OrdinalIgnoreCase), $"{app}/{lang}/{file} uses \"{word}\" (CLAUDE.md copy tone)");
+        }
+    }
+
+    [Fact]
+    public void ArabicAppStringsFollowCopyTone()
+    {
+        using var strings = JsonDocument.Parse(File.ReadAllText(Path.Combine(Root, "src", "AlUmmahNow.App", "I18n", "ar.json")));
+        foreach (var entry in strings.RootElement.EnumerateObject())
+        {
+            var value = entry.Value.GetString()!;
+            foreach (var word in BannedArabic)
+                Assert.False(value.Contains(word, StringComparison.Ordinal), $"ar.json: {entry.Name} uses «{word}»");
         }
     }
 
