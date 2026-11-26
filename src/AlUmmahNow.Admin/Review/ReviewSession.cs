@@ -57,7 +57,9 @@ public sealed class ReviewSession : ObservableObject, IDisposable
     private readonly string _installId;
     private ITimer? _renew;
     private ReviewDetail? _detail;
+    private int _openVersion;
     private bool _isLoading;
+    private bool _isGone;
     private bool _isBusy;
     private ReviewException? _claimError;
     private ReviewException? _loadError;
@@ -84,6 +86,12 @@ public sealed class ReviewSession : ObservableObject, IDisposable
     {
         get => _isLoading;
         private set => SetProperty(ref _isLoading, value);
+    }
+
+    public bool IsGone
+    {
+        get => _isGone;
+        private set => SetProperty(ref _isGone, value);
     }
 
     /// <summary>A decision is in flight: the buttons wait, so a double press is one decision.</summary>
@@ -119,22 +127,32 @@ public sealed class ReviewSession : ObservableObject, IDisposable
     public async Task OpenAsync(string id, CancellationToken ct = default)
     {
         Close();
+        var version = _openVersion;
         IsLoading = true;
-        LoadError = null;
         try
         {
-            Detail = await _service.DetailAsync(id, ct).ConfigureAwait(true);
+            var detail = await _service.DetailAsync(id, ct).ConfigureAwait(true);
+            if (version != _openVersion) return;
+            Detail = detail;
             _reveal.Enter(id);
-            if (Detail.Item.IsOpen) await ClaimAsync(ct).ConfigureAwait(true);
+            if (detail.Item.IsOpen) await ClaimAsync(ct).ConfigureAwait(true);
+        }
+        catch (ReviewApiException ex) when (ex.Status == 404)
+        {
+            _queue?.Remove(id);
+            if (version == _openVersion) IsGone = true;
         }
         catch (ReviewException ex)
         {
-            LoadError = ex;
+            if (version == _openVersion) LoadError = ex;
         }
         finally
         {
-            IsLoading = false;
-            OnPropertyChanged(nameof(CanDecide));
+            if (version == _openVersion)
+            {
+                IsLoading = false;
+                OnPropertyChanged(nameof(CanDecide));
+            }
         }
     }
 
@@ -305,10 +323,14 @@ public sealed class ReviewSession : ObservableObject, IDisposable
     /// <summary>Leaves the item: claim renewal stops, the stream URL is dropped, everything re-blurs.</summary>
     public void Close()
     {
+        _openVersion++;
         Stop();
         if (Detail != null) _reveal.Leave();
         Detail = null;
         ClaimError = null;
+        LoadError = null;
+        IsGone = false;
+        IsLoading = false;
         OnPropertyChanged(nameof(CanDecide));
     }
 
