@@ -347,17 +347,28 @@ namespace AlUmmahNow.App.I18n
         public static string IsolateLtr(string text) => "\u2066" + text + "\u2069";
 
         /// <summary>Joins a filename and wrapped row metadata in the current UI direction.</summary>
-        public string JoinFileName(string fileName, params string?[] details)
+        public string JoinFileName(string? fileName, params string?[] details)
         {
-            if (fileName.Length == 0) return JoinWrapped(details);
+            var metadata = JoinWrapped(details);
+            // GTK can infer the paragraph direction from its text.
+            var direction = IsRtl ? "\u200F" : "\u200E";
+            if (fileName == null || string.IsNullOrWhiteSpace(fileName))
+                return metadata.Length == 0 ? "" : direction + metadata;
 
             // An LTR embedding keeps the extension on the right even in Windows text renderers
             // that ignore isolates. The LTR isolate keeps the field independent of its neighbours.
             var extensionStart = fileName.LastIndexOf('.');
             int suffixStart = extensionStart > 0 ? extensionStart : fileName.Length;
             int digitsStart = suffixStart;
-            while (digitsStart > 0 && fileName[digitsStart - 1] >= '0' && fileName[digitsStart - 1] <= '9')
+            while (digitsStart > 0 && IsAsciiDigit(fileName[digitsStart - 1]))
+            {
                 digitsStart--;
+                // Keep digit groups in dates and versions together, but leave a stem
+                // separator such as the first underscore in درس_01_02 outside the suffix.
+                if (digitsStart >= 2 && IsAsciiDigit(fileName[digitsStart - 2])
+                    && fileName[digitsStart - 1] is '-' or '.' or '_')
+                    digitsStart--;
+            }
 
             // A strong LTR mark before a numeric suffix prevents the preceding Arabic letters
             // from turning its digits into an RTL number run. A second mark anchors the dot.
@@ -366,11 +377,11 @@ namespace AlUmmahNow.App.I18n
                 displayName = displayName.Insert(digitsStart, "\u200E");
 
             var name = IsolateLtr("\u202A" + displayName + "\u202C");
-            var metadata = JoinWrapped(details);
-            // GTK can infer the paragraph direction from its text.
-            var direction = IsRtl ? "\u200F" : "\u200E";
-            return direction + name + (metadata.Length == 0 ? "" : WrappedSeparator + metadata);
+            // Anchor the separator to the UI direction even when the renderer ignores isolates.
+            return direction + name + (metadata.Length == 0 ? "" : direction + WrappedSeparator + metadata);
         }
+
+        private static bool IsAsciiDigit(char value) => value is >= '0' and <= '9';
 
         /// <summary>
         /// A version for display, isolated: "1.4.2-preview.3" / «١.٤.٢-preview.٣». It is no decimal number, so its dots
