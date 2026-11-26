@@ -135,7 +135,15 @@ public class LocalizerTests
 
     // The website's formatBytes (Intl short units, 1024 steps); the expected text is what the web shows.
     [Theory]
-    [InlineData("en", 512, null, "512 byte")]
+    [InlineData("en", 0, null, "0 bytes")]
+    [InlineData("en", 1, null, "1 byte")]
+    [InlineData("en", 1, 2, "1.00 bytes")]
+    [InlineData("en", 2, null, "2 bytes")]
+    [InlineData("en", 512, null, "512 bytes")]
+    [InlineData("ar", 0, null, "٠ بايت")]
+    [InlineData("ar", 1, null, "١ بايت")]
+    [InlineData("ar", 2, null, "٢ بايت")]
+    [InlineData("ar", 512, null, "٥١٢ بايت")]
     [InlineData("en", 1536, null, "1.5 kB")]
     [InlineData("en", 2 * 1024 * 1024, null, "2 MB")]
     [InlineData("en", 1_500_000, 2, "1.43 MB")]

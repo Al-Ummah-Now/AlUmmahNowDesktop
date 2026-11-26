@@ -299,7 +299,8 @@ namespace AlUmmahNow.App.I18n
             }
 
             var format = decimals is { } d && d > 0 ? "#,0." + new string('0', d) : decimals != null || u == 0 ? "#,0" : "#,0.#";
-            return Format(units[u], Figure(v.ToString(format, CultureInfo.InvariantCulture)));
+            var unit = u == 0 && (v != 1 || decimals > 0) ? "unit.b.plural" : units[u];
+            return Format(unit, Figure(v.ToString(format, CultureInfo.InvariantCulture)));
         }
 
         /// <summary>
