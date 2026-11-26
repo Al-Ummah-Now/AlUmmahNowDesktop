@@ -34,6 +34,7 @@ namespace AlUmmahNow.App.ViewModels
         private readonly IMediaSession _session;
         private readonly Localizer _localizer;
         private IReadOnlyList<Cue> _cues = Array.Empty<Cue>();
+        private Cue? _activeCue;
         private int _subtitleRequest;
         private bool _isDisposed;
 
@@ -42,6 +43,7 @@ namespace AlUmmahNow.App.ViewModels
         [ObservableProperty] private QualityOption? _quality;
         [ObservableProperty] private SubtitleTrack? _subtitle;
         [ObservableProperty] private string _caption = "";
+        [ObservableProperty] private QuranCaptionCredit? _captionCredit;
         [ObservableProperty] private Chapter? _currentChapter;
         [ObservableProperty] private double _position;
         [ObservableProperty] private double _duration;
@@ -62,6 +64,16 @@ namespace AlUmmahNow.App.ViewModels
 
         public ObservableCollection<QualityOption> Qualities { get; } = new();
         public ObservableCollection<SubtitleTrack> SubtitleTracks { get; } = new();
+
+        public string PlainCaption => _activeCue?.Text ?? "";
+        public string? CaptionCreditAccessibleName => CaptionCredit?.Language is { } language
+            ? _localizer.Bundle(language)["player.caption.quranCredit.browser"]
+            : null;
+
+        public void OpenCaptionCredit(IBrowserLauncher browser)
+        {
+            if (CaptionCredit != null) browser.Open(QuranCaptionCredit.Url);
+        }
 
         public string Title => Video?.Title.For(_localizer.Language) ?? "";
         public string Description => Video?.Description.For(_localizer.Language) ?? "";
@@ -173,7 +185,7 @@ namespace AlUmmahNow.App.ViewModels
             var request = ++_subtitleRequest;
             Subtitle = track;
             _cues = Array.Empty<Cue>();
-            Caption = "";
+            SetActiveCue(null);
             if (track == null) return;
             try
             {
@@ -279,8 +291,18 @@ namespace AlUmmahNow.App.ViewModels
 
         private void UpdateTimedText(double position)
         {
-            Caption = WebVtt.At(_cues, position)?.Text ?? "";
+            SetActiveCue(WebVtt.At(_cues, position));
             CurrentChapter = Video?.Chapters.FirstOrDefault(c => position >= c.Start && position < c.End);
+        }
+
+        private void SetActiveCue(Cue? cue)
+        {
+            if (ReferenceEquals(_activeCue, cue)) return;
+            _activeCue = cue;
+            var result = QuranCaptionCredit.SplitQuranCredit(PlainCaption);
+            Caption = result.Text;
+            CaptionCredit = result.Credited ? result : null;
+            OnPropertyChanged(nameof(PlainCaption));
         }
 
         private void OnSessionCommand(object? sender, MediaCommand command)

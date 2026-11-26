@@ -6,6 +6,7 @@ using AlUmmahNow.App.Services;
 using AlUmmahNow.App.Updates;
 using AlUmmahNow.App.ViewModels;
 using AlUmmahNow.CoreBridge;
+using AlUmmahNow.CoreBridge.Native;
 using AlUmmahNow.Updates.Views;
 
 namespace AlUmmahNow.Linux;
@@ -104,7 +105,7 @@ public sealed partial class MainWindow
 
     private bool OnKey(uint key)
     {
-        if (Watch is not { } watch) return false;
+        if (Watch is not { } watch || _window.GetFocus()?.HasCssClass("caption-credit") == true) return false;
         if (key == KeySpace) watch.TogglePlay();
         else if (key is KeyLeft or KeyRight) watch.SkipByArrow(right: key == KeyRight);
         else return false;
@@ -472,13 +473,21 @@ public sealed partial class MainWindow
         overlay.SetChild(picture);
 
         var caption = Gtk.Label.New(vm.Caption);
-        caption.SetValign(Gtk.Align.End);
-        caption.SetHalign(Gtk.Align.Center);
-        caption.SetMarginBottom(24);
         caption.SetWrap(true);
         caption.SetJustify(Gtk.Justification.Center);
-        caption.AddCssClass("caption-overlay");
-        overlay.AddOverlay(caption);
+        var credit = Gtk.Button.New();
+        credit.AccessibleRole = Gtk.AccessibleRole.Link;
+        credit.AddCssClass("caption-credit");
+        credit.OnClicked += (_, _) => vm.OpenCaptionCredit(new ShellBrowserLauncher());
+
+        var captionBox = Gtk.Box.New(Gtk.Orientation.Vertical, 2);
+        captionBox.SetValign(Gtk.Align.End);
+        captionBox.SetHalign(Gtk.Align.Center);
+        captionBox.SetMarginBottom(24);
+        captionBox.AddCssClass("caption-overlay");
+        captionBox.Append(caption);
+        captionBox.Append(credit);
+        overlay.AddOverlay(captionBox);
         column.Append(overlay);
 
         if (heading != null)
@@ -556,6 +565,25 @@ public sealed partial class MainWindow
         {
             caption.SetText(vm.Caption);
             caption.SetVisible(vm.Caption.Length > 0);
+            if (e.PropertyName is null or nameof(WatchViewModel.CaptionCredit))
+            {
+                var attribution = vm.CaptionCredit;
+                credit.SetVisible(attribution != null);
+                if (attribution != null)
+                {
+                    var direction = attribution.Language == "ar" ? Gtk.TextDirection.Rtl : Gtk.TextDirection.Ltr;
+                    captionBox.SetDirection(direction);
+                    credit.SetDirection(direction);
+                    credit.SetHalign(Gtk.Align.End);
+                    credit.SetLabel(attribution.DisplayLabel!);
+                    var values = new[] { new GObject.Value(vm.CaptionCreditAccessibleName!) };
+                    using var handle = GObject.Internal.ValueArray2OwnedHandle.Create(values);
+                    Gtk.Internal.Accessible.UpdateProperty(credit.Handle.DangerousGetHandle(), 1, new[] { Gtk.AccessibleProperty.Label }, handle);
+                    GC.KeepAlive(values);
+                }
+                else captionBox.SetDirection(Gtk.TextDirection.None);
+            }
+            captionBox.SetVisible(vm.Caption.Length > 0 || vm.CaptionCredit != null);
             chapter.SetText(vm.CurrentChapter?.Title.For(_localizer.Language) ?? "");
             time.SetText(_localizer.Duration(vm.Position) + " / " + _localizer.Duration(vm.Duration));
             play.SetIconName(vm.IsPlaying ? "media-playback-pause-symbolic" : "media-playback-start-symbolic");
