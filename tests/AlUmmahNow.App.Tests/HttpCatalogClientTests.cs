@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text.Json;
 using AlUmmahNow.CoreBridge;
 using AlUmmahNow.CoreBridge.Temporary;
 using Xunit;
@@ -12,11 +13,14 @@ public class HttpCatalogClientTests
         public string Body = "{}";
         public HttpStatusCode Status = HttpStatusCode.OK;
         public Uri? Last;
+        public string Charset = "utf-8";
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage r, CancellationToken ct)
         {
             Last = r.RequestUri;
-            return Task.FromResult(new HttpResponseMessage(Status) { Content = new StringContent(Body) });
+            var content = new StringContent(Body);
+            content.Headers.ContentType!.CharSet = Charset;
+            return Task.FromResult(new HttpResponseMessage(Status) { Content = content });
         }
     }
 
@@ -69,5 +73,24 @@ public class HttpCatalogClientTests
         var (c, h) = Make("x");
         h.Status = HttpStatusCode.InternalServerError;
         await Assert.ThrowsAsync<CatalogException>(() => c.GetVideoAsync("v"));
+    }
+
+    [Fact]
+    public async Task Unknown_charset_is_a_catalog_read_error()
+    {
+        var (c, h) = Make("WEBVTT");
+        h.Charset = "unknown-charset";
+
+        var error = await Assert.ThrowsAsync<CatalogException>(() => c.GetTextAsync("https://api.test/captions.vtt"));
+        Assert.IsType<InvalidOperationException>(error.InnerException);
+    }
+
+    [Fact]
+    public async Task Malformed_json_is_a_catalog_read_error()
+    {
+        var (c, _) = Make("{");
+
+        var error = await Assert.ThrowsAsync<CatalogException>(() => c.ListVideosAsync(new VideoQuery()));
+        Assert.IsAssignableFrom<JsonException>(error.InnerException);
     }
 }

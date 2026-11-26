@@ -228,6 +228,18 @@ public class NotificationsSharingEventsTests
         Assert.True(vm.QuietHours.Enabled);
     }
 
+    [Theory]
+    [InlineData("{}", "unknown-charset", typeof(InvalidOperationException))]
+    [InlineData("{", "utf-8", typeof(System.Text.Json.JsonException))]
+    public async Task Notifications_maps_unreadable_answers_to_catalog_read_errors(string body, string charset, Type cause)
+    {
+        using var http = new HttpClient(new StubHandler(_ => body, charset));
+        var client = new HttpNotificationsClient(http, new Uri("https://api.test"), _ => Task.FromResult<string?>("tok"));
+
+        var error = await Assert.ThrowsAsync<CatalogException>(() => client.GetBadgeAsync());
+        Assert.IsAssignableFrom(cause, error.InnerException);
+    }
+
     private sealed class StatusStubHandler : HttpMessageHandler
     {
         private readonly Func<HttpRequestMessage, (HttpStatusCode Status, string Body)> _respond;
@@ -246,12 +258,19 @@ public class NotificationsSharingEventsTests
     private sealed class StubHandler : HttpMessageHandler
     {
         private readonly Func<HttpRequestMessage, string> _respond;
-        public StubHandler(Func<HttpRequestMessage, string> respond) => _respond = respond;
+        private readonly string _charset;
 
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
-            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent(_respond(request), Encoding.UTF8, "application/json"),
-            });
+        public StubHandler(Func<HttpRequestMessage, string> respond, string charset = "utf-8")
+        {
+            _respond = respond;
+            _charset = charset;
+        }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var content = new StringContent(_respond(request), Encoding.UTF8, "application/json");
+            content.Headers.ContentType!.CharSet = _charset;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content });
+        }
     }
 }

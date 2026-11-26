@@ -30,7 +30,7 @@ namespace AlUmmahNow.CoreBridge.Temporary
             if (!string.IsNullOrEmpty(query.Category)) url += "&category=" + Uri.EscapeDataString(query.Category);
             if (!string.IsNullOrEmpty(query.Cursor)) url += "&cursor=" + Uri.EscapeDataString(query.Cursor);
 
-            using var doc = JsonDocument.Parse(await GetTextAsync(new Uri(_baseUri, url).ToString(), cancellationToken).ConfigureAwait(false));
+            using var doc = await GetJsonAsync(new Uri(_baseUri, url).ToString(), cancellationToken).ConfigureAwait(false);
             var items = new List<Video>();
             if (doc.RootElement.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Array)
             {
@@ -43,7 +43,7 @@ namespace AlUmmahNow.CoreBridge.Temporary
         public async Task<Video> GetVideoAsync(string id, CancellationToken cancellationToken = default)
         {
             var url = new Uri(_baseUri, "/api/videos/" + Uri.EscapeDataString(id)).ToString();
-            using var doc = JsonDocument.Parse(await GetTextAsync(url, cancellationToken).ConfigureAwait(false));
+            using var doc = await GetJsonAsync(url, cancellationToken).ConfigureAwait(false);
             var root = doc.RootElement;
             if (root.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Object) root = data;
             return ParseVideo(root);
@@ -52,7 +52,7 @@ namespace AlUmmahNow.CoreBridge.Temporary
         public async Task<IReadOnlyList<SubtitleTrack>> GetSubtitleTracksAsync(string videoId, CancellationToken cancellationToken = default)
         {
             var url = new Uri(_baseUri, "/api/videos/" + Uri.EscapeDataString(videoId) + "/subtitles").ToString();
-            using var doc = JsonDocument.Parse(await GetTextAsync(url, cancellationToken).ConfigureAwait(false));
+            using var doc = await GetJsonAsync(url, cancellationToken).ConfigureAwait(false);
             var result = new List<SubtitleTrack>();
             if (doc.RootElement.TryGetProperty("data", out var data)
                 && data.ValueKind == JsonValueKind.Object
@@ -81,13 +81,16 @@ namespace AlUmmahNow.CoreBridge.Temporary
                     throw new CatalogException("HTTP " + (int)response.StatusCode + " for " + new Uri(url).AbsolutePath, isNotFound: response.StatusCode == System.Net.HttpStatusCode.NotFound);
                 }
 
-                return await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                return await SharedHttpHelper.ReadTextAsync(response.Content).ConfigureAwait(false);
             }
             catch (HttpRequestException ex)
             {
                 throw new CatalogException("Network error", ex);
             }
         }
+
+        private async Task<JsonDocument> GetJsonAsync(string url, CancellationToken cancellationToken) =>
+            SharedHttpHelper.ParseJson(await GetTextAsync(url, cancellationToken).ConfigureAwait(false));
 
         private static Video ParseVideo(JsonElement e)
         {
