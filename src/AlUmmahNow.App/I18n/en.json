@@ -489,6 +489,7 @@
   "passkey.stepUp.body": "For your security, sign in again before adding a passkey. Sign-in opens in your browser.",
   "passkey.stepUp.continue": "Sign in again",
   "unit.b": "{0} byte",
+  "unit.b.plural": "{0} bytes",
   "unit.kb": "{0} kB",
   "unit.mb": "{0} MB",
   "unit.gb": "{0} GB",
