@@ -105,6 +105,48 @@ public class ReviewSessionTests
     }
 
     [Fact]
+    public async Task Opening_a_missing_review_marks_it_gone_and_removes_the_cached_row()
+    {
+        var service = new FlakyService(new DemoReviewService());
+        var (session, queue, _, _) = Make(wrap: service);
+        await queue.RefreshAsync();
+        Assert.NotNull(queue.Find("rev-001"));
+        var other = queue.Items.First(i => i.Id != "rev-001");
+        service.DetailError = new ReviewApiException(404, "not_found");
+
+        await session.OpenAsync("rev-001");
+
+        Assert.True(session.IsGone);
+        Assert.False(session.IsLoading);
+        Assert.False(session.CanDecide);
+        Assert.Null(session.Detail);
+        Assert.Null(session.LoadError);
+        Assert.Null(queue.Find("rev-001"));
+        Assert.DoesNotContain(queue.Items, i => i.Id == "rev-001");
+        Assert.Contains(other, queue.Items);
+
+        service.DetailError = null;
+        await session.OpenAsync(other.Id);
+
+        Assert.False(session.IsGone);
+        Assert.Equal(other.Id, session.Detail?.Item.Id);
+    }
+
+    [Fact]
+    public async Task Other_detail_errors_keep_the_review_in_the_queue()
+    {
+        var service = new FlakyService(new DemoReviewService()) { DetailError = new ReviewApiException(500, null) };
+        var (session, queue, _, _) = Make(wrap: service);
+        await queue.RefreshAsync();
+
+        await session.OpenAsync("rev-001");
+
+        Assert.False(session.IsGone);
+        Assert.Same(service.DetailError, session.LoadError);
+        Assert.Contains(queue.Items, i => i.Id == "rev-001");
+    }
+
+    [Fact]
     public async Task Opening_claims_and_renews_while_open()
     {
         var (session, _, service, time) = Make();
@@ -287,6 +329,7 @@ internal sealed class FlakyService : IReviewService
     public bool Offline { get; set; }
     public bool StepUpOnce { get; set; }
     public bool FailReveal { get; set; }
+    public ReviewException? DetailError { get; set; }
     public int Decisions { get; private set; }
 
     private void Check()
@@ -296,7 +339,12 @@ internal sealed class FlakyService : IReviewService
 
     public Task<StaffProfile> ProfileAsync(CancellationToken ct = default) { Check(); return _inner.ProfileAsync(ct); }
     public Task<ReviewPage> QueueAsync(ReviewTab tab, string? query, string? cursor, CancellationToken ct = default) { Check(); return _inner.QueueAsync(tab, query, cursor, ct); }
-    public Task<ReviewDetail> DetailAsync(string id, CancellationToken ct = default) { Check(); return _inner.DetailAsync(id, ct); }
+    public Task<ReviewDetail> DetailAsync(string id, CancellationToken ct = default)
+    {
+        Check();
+        if (DetailError != null) throw DetailError;
+        return _inner.DetailAsync(id, ct);
+    }
     public Task ClaimAsync(string id, CancellationToken ct = default) { Check(); return _inner.ClaimAsync(id, ct); }
 
     public Task RevealAsync(string id, string target, string installId, CancellationToken ct = default)

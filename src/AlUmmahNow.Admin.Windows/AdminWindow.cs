@@ -650,6 +650,7 @@ internal sealed class AdminWindow
         {
             case nameof(ReviewSession.Detail):
             case nameof(ReviewSession.IsLoading):
+            case nameof(ReviewSession.IsGone):
             case nameof(ReviewSession.LoadError):
                 RenderDetail();
                 break;
@@ -771,6 +772,12 @@ internal sealed class AdminWindow
         {
             _detail.Children.Add(new ProgressRing { IsActive = true, Width = 32, Height = 32, HorizontalAlignment = HorizontalAlignment.Center });
             _detail.Children.Add(new TextBlock { Text = L["admin.detail.loading"], HorizontalAlignment = HorizontalAlignment.Center });
+            return;
+        }
+
+        if (_session.IsGone)
+        {
+            _detail.Children.Add(new InfoBar { IsOpen = true, IsClosable = false, Severity = InfoBarSeverity.Informational, Message = L["admin.detail.gone"] });
             return;
         }
 

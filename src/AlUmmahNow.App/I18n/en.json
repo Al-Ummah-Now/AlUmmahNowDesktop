@@ -387,6 +387,7 @@
   "admin.cause.check_failed": "Automatic check failed",
   "admin.detail.empty": "Choose a video from the queue.",
   "admin.detail.loading": "Loading the review…",
+  "admin.detail.gone": "This item is no longer in the queue.",
   "admin.detail.findings": "Why it was held",
   "admin.detail.frames": "Frames (flagged first)",
   "admin.detail.metadata": "Title, description and tags",

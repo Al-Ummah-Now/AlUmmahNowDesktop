@@ -387,6 +387,7 @@
   "admin.cause.check_failed": "فشل الفحص التلقائي",
   "admin.detail.empty": "اختر مرئيًا من القائمة.",
   "admin.detail.loading": "جارٍ تحميل المراجعة…",
+  "admin.detail.gone": "لم يعد هذا العنصر في القائمة.",
   "admin.detail.findings": "سبب الإيقاف",
   "admin.detail.frames": "الإطارات (المُعلَّمة أولًا)",
   "admin.detail.metadata": "العنوان والوصف والوسوم",

@@ -205,4 +205,19 @@ public sealed class ReviewQueue : ObservableObject
     }
 
     public ReviewItem? Find(string id) => _byTab.Values.SelectMany(v => v).FirstOrDefault(i => i.Id == id);
+
+    /// <summary>Drop a review that the server can no longer return.</summary>
+    internal void Remove(string id)
+    {
+        foreach (var tab in _byTab.Keys.ToArray())
+        {
+            _byTab[tab] = _byTab[tab].Where(i => i.Id != id).ToList();
+        }
+
+        if (Items.Any(i => i.Id == id))
+        {
+            Items = Items.Where(i => i.Id != id).ToList();
+            OnPropertyChanged(nameof(OverdueCount));
+        }
+    }
 }
