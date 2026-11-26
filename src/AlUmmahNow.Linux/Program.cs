@@ -18,6 +18,7 @@ var gstArgs = Array.Empty<string>();
 Gst.Functions.Init(ref gstArgs);
 
 const string Css = """
+    .caption-credit { color: #f7f1e8; background: #093041; font-size: 14px; text-decoration: underline; padding: 1px 4px; min-height: 0; }
     .caption-overlay { background-color: rgba(9,48,65,0.82); color: #f7f1e8; padding: 6px 14px; border-radius: 6px; font-size: 20px; }
     /* Not gold in light mode, where it is under 3:1 on the page: the registry's accent is darker there. */
     scale > trough { background-color: alpha(currentColor, 0.55); }

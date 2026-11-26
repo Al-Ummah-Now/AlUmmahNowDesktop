@@ -9,6 +9,7 @@ using AlUmmahNow.App.Services;
 using AlUmmahNow.App.Updates;
 using AlUmmahNow.App.ViewModels;
 using AlUmmahNow.CoreBridge;
+using AlUmmahNow.CoreBridge.Native;
 using AlUmmahNow.Updates.Views;
 using Microsoft.UI;
 using Microsoft.UI.Xaml;
@@ -104,6 +105,7 @@ public sealed partial class Shell
         var accelerator = new KeyboardAccelerator { Key = key };
         accelerator.Invoked += (_, a) =>
         {
+            if (FocusManager.GetFocusedElement(_root.XamlRoot) is HyperlinkButton { Name: "QuranCaptionCreditLink" }) return;
             action();
             a.Handled = true;
         };
@@ -384,9 +386,21 @@ public sealed partial class Shell
         element.FlowDirection = FlowDirection.LeftToRight;
         surface.Children.Add(element);
         var caption = new TextBlock { FontSize = 20, Foreground = SystemBrushes.Brush(Parchment, HighContrastRole.Text), TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center };
+        var credit = new HyperlinkButton
+        {
+            Name = "QuranCaptionCreditLink",
+            FontSize = 14,
+            Foreground = SystemBrushes.Brush(Parchment, HighContrastRole.Text),
+            Padding = new Thickness(0),
+            MinHeight = 0,
+        };
+        credit.Click += (_, _) => vm.OpenCaptionCredit(new ShellBrowserLauncher());
+        var captionRows = new StackPanel { Spacing = 2 };
+        captionRows.Children.Add(caption);
+        captionRows.Children.Add(credit);
         var captionBox = new Border
         {
-            Child = caption,
+            Child = captionRows,
             Background = SystemBrushes.Brush(global::Windows.UI.Color.FromArgb(210, 9, 48, 65), HighContrastRole.Window),
             Padding = new Thickness(14, 6, 14, 6),
             CornerRadius = new CornerRadius(6),
@@ -462,7 +476,26 @@ public sealed partial class Shell
         void Sync(object? s, PropertyChangedEventArgs e)
         {
             caption.Text = vm.Caption;
-            captionBox.Visibility = vm.Caption.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+            if (e.PropertyName is null or nameof(WatchViewModel.CaptionCredit))
+            {
+                var attribution = vm.CaptionCredit;
+                credit.Visibility = attribution != null ? Visibility.Visible : Visibility.Collapsed;
+                if (attribution != null)
+                {
+                    var rtl = attribution.Language == "ar";
+                    captionRows.FlowDirection = FlowDirection.LeftToRight;
+                    caption.FlowDirection = credit.FlowDirection = rtl ? FlowDirection.RightToLeft : FlowDirection.LeftToRight;
+                    credit.HorizontalAlignment = rtl ? HorizontalAlignment.Left : HorizontalAlignment.Right;
+                    credit.Content = attribution.DisplayLabel;
+                    AutomationName(credit, vm.CaptionCreditAccessibleName!);
+                }
+                else
+                {
+                    captionRows.ClearValue(FrameworkElement.FlowDirectionProperty);
+                    caption.ClearValue(FrameworkElement.FlowDirectionProperty);
+                }
+            }
+            captionBox.Visibility = vm.Caption.Length > 0 || vm.CaptionCredit != null ? Visibility.Visible : Visibility.Collapsed;
             chapter.Text = vm.CurrentChapter?.Title.For(_localizer.Language) ?? "";
             time.Text = _localizer.Duration(vm.Position) + " / " + _localizer.Duration(vm.Duration);
             ((FontIcon)play.Content).Glyph = vm.IsPlaying ? "" : "";

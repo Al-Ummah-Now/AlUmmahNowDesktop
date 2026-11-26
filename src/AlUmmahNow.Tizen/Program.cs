@@ -228,7 +228,7 @@ namespace AlUmmahNow.TizenTv
         {
             var watch = _watch ?? LiveWatch?.Watch;
             if (watch == null || _caption == null || _time == null) return;
-            _caption.Text = watch.Caption;
+            _caption.Text = watch.PlainCaption;
             _time.Text = watch.IsLive ? "" : _localizer.Duration(watch.Position) + " / " + _localizer.Duration(watch.Duration);
         }
 

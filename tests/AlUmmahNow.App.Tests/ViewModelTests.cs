@@ -159,6 +159,49 @@ public class WatchViewModelTests
         Assert.Equal("", vm.Caption);
     }
 
+    [Theory]
+    [InlineData("en", "ar", "\u200fالمصدر: مؤسسة القرآن", "المصدر: مؤسسة القرآن، يُفتح في المتصفح")]
+    [InlineData("ar", "en", "Source: Quran Foundation", "Source: Quran Foundation, opens in browser")]
+    public async Task Caption_credit_follows_the_active_cue_and_opens_without_changing_playback(
+        string uiLanguage, string trackLanguage, string creditLine, string accessibleName)
+    {
+        var (vm, player, _, catalog) = Make(uiLanguage);
+        var track = catalog.Tracks.Single(t => t.Language == trackLanguage);
+        catalog.Texts[track.Url] = $"WEBVTT\n\n00:01.000 --> 00:05.000\nVerse\n{creditLine}\n\n00:05.000 --> 00:08.000\nOther";
+        var browser = new CaptionBrowser();
+
+        await vm.LoadAsync("v");
+        await vm.SelectSubtitleAsync(track);
+        Assert.Null(vm.CaptionCredit);
+        vm.OpenCaptionCredit(browser);
+        Assert.Empty(browser.Opened);
+
+        player.Tick(2);
+        Assert.Equal("Verse", vm.Caption);
+        Assert.Equal($"Verse\n{creditLine}", vm.PlainCaption);
+        Assert.Equal(trackLanguage, vm.CaptionCredit?.Language);
+        Assert.Equal(accessibleName, vm.CaptionCreditAccessibleName);
+        vm.OpenCaptionCredit(browser);
+        Assert.Equal(new Uri("https://quran.foundation/"), Assert.Single(browser.Opened));
+        Assert.Equal(PlayerState.Playing, player.State);
+        Assert.Equal(2, player.Position);
+
+        player.Tick(5);
+        Assert.Equal("Other", vm.Caption);
+        Assert.Null(vm.CaptionCredit);
+        player.Tick(2);
+        Assert.NotNull(vm.CaptionCredit);
+        await vm.SelectSubtitleAsync(null);
+        Assert.Null(vm.CaptionCredit);
+        Assert.Empty(vm.PlainCaption);
+    }
+
+    private sealed class CaptionBrowser : IBrowserLauncher
+    {
+        public List<Uri> Opened { get; } = new();
+        public void Open(Uri uri) => Opened.Add(uri);
+    }
+
     [Fact]
     public async Task Subtitles_off_clears_caption()
     {
