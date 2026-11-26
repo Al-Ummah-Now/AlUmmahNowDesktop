@@ -212,7 +212,7 @@ public sealed partial class App : Application
         _ = updates.RunAsync(closing.Token);
         WindowsEnd.Attach(window.Window, updates, new Action[] { closing.Cancel },
             // Uploads (and the details of finished ones) and encodes, at once and within the end's limit
-            stop => Task.WhenAll(uploadsVm.StopAsync(stop), encode.StopAsync(stop)));
+            stop => Task.WhenAll(uploadsVm.StopAsync(stop), encode.StopAsync(stop)), allowRestart: updateScene == null);
 
         _refresh = ui.CreateTimer();
         _refresh.Interval = TimeSpan.FromMilliseconds(300);
