@@ -336,13 +336,41 @@ namespace AlUmmahNow.App.I18n
 
         /// <summary>The same for text that may take more than one line: a line never begins with the separator.</summary>
         public string JoinWrapped(params string?[] parts) =>
-            string.Join(_language == "ar" ? Separator : "\u00A0\u00B7 ", parts.Where(p => !string.IsNullOrEmpty(p)).Select(p => Isolate(p!)));
+            string.Join(WrappedSeparator, parts.Where(p => !string.IsNullOrEmpty(p)).Select(p => Isolate(p!)));
+
+        private string WrappedSeparator => IsRtl ? Separator : "\u00A0\u00B7 ";
 
         /// <summary>Wraps text in Unicode first-strong isolates so embedded runs cannot reorder neighbours.</summary>
         public static string Isolate(string text) => "\u2068" + text + "\u2069";
 
         /// <summary>Keeps left-to-right text such as Windows paths together in either language.</summary>
         public static string IsolateLtr(string text) => "\u2066" + text + "\u2069";
+
+        /// <summary>Joins a filename and wrapped row metadata in the current UI direction.</summary>
+        public string JoinFileName(string fileName, params string?[] details)
+        {
+            if (fileName.Length == 0) return JoinWrapped(details);
+
+            // An LTR embedding keeps the extension on the right even in Windows text renderers
+            // that ignore isolates. The LTR isolate keeps the field independent of its neighbours.
+            var extensionStart = fileName.LastIndexOf('.');
+            int suffixStart = extensionStart > 0 ? extensionStart : fileName.Length;
+            int digitsStart = suffixStart;
+            while (digitsStart > 0 && fileName[digitsStart - 1] >= '0' && fileName[digitsStart - 1] <= '9')
+                digitsStart--;
+
+            // A strong LTR mark before a numeric suffix prevents the preceding Arabic letters
+            // from turning its digits into an RTL number run. A second mark anchors the dot.
+            var displayName = fileName.Insert(suffixStart, "\u200E");
+            if (digitsStart < suffixStart)
+                displayName = displayName.Insert(digitsStart, "\u200E");
+
+            var name = IsolateLtr("\u202A" + displayName + "\u202C");
+            var metadata = JoinWrapped(details);
+            // GTK can infer the paragraph direction from its text.
+            var direction = IsRtl ? "\u200F" : "\u200E";
+            return direction + name + (metadata.Length == 0 ? "" : WrappedSeparator + metadata);
+        }
 
         /// <summary>
         /// A version for display, isolated: "1.4.2-preview.3" / «١.٤.٢-preview.٣». It is no decimal number, so its dots
