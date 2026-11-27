@@ -347,19 +347,25 @@ public class CoreTelemetryServiceTests
 
             otherInstance.Track("screen_view", new Dictionary<string, object> { ["screen"] = "home" });
             otherInstance.Persist();
+            var siblingTmp = Path.Combine(dir, ".telemetry-buffer.json.4242.tmp");
+            File.WriteAllText(siblingTmp, "stale");
             Assert.True(File.Exists(bufferPath));
+            Assert.True(File.Exists(siblingTmp));
 
             // Simulate another running instance turning diagnostics off in shared settings.
             Volatile.Write(ref sharedEnabled, false);
 
-            // Crash, persist, and flush on this instance must all revoke instead of writing or sending.
+            // Crash, persist, and flush on this instance must all revoke instead of writing or sending,
+            // and clean up both the buffer and any sibling temp files.
             otherInstance.ReportCrash("IOException", "boom", "at Foo.Bar()");
             otherInstance.Persist();
             await otherInstance.FlushAsync();
 
             Assert.Equal(TelemetryConsent.Off, otherInstance.Consent);
+            Assert.False(otherInstance.LastPurgeFailed);
             Assert.Equal(0, otherInstance.PendingCount);
             Assert.False(File.Exists(bufferPath));
+            Assert.False(File.Exists(siblingTmp));
         }
         finally
         {
@@ -440,10 +446,10 @@ public class CoreTelemetryServiceTests
                 bufferPath: bufferPath,
                 initialEnabled: true);
 
-            service.AddBreadcrumb("io", "Opened /workspace/E\u0301lodie/Very Secret Client Project Name.mov; /workspace/alice/O'Brien.mov; \"/Users/O'Brien/Final.mov\"");
+            service.AddBreadcrumb("io", "Opened /workspace/E\u0301lodie/Very Secret Client Project Name.mov\nFailed '/data/user/0/O'Brien.mov'\nRead \"/Users/O'Brien/Final.mov\"");
             service.ReportCrash(
                 "IOException",
-                "Failed reading /Private (Client).mov; /Client Files/Private.mov; /workspace/alice/Private (Confidential).mov; \"C:\\Users\\Alice Smith\\Private Draft.mp4\"",
+                "Failed reading /Private (Client).mov\n/Private Client\n/private-key\n/Client Files/Private.mov\n/workspace/alice/Project;Acquisition.mov\n\"C:\\Users\\Alice Smith\\Private Draft.mp4\"",
                 "at Foo.Open() in /workspace/Élodie/src/App.cs:line 42\nat Bar.Run() in \\\\fileserver\\share\\secret.mp4\n~/private/key.pem");
 
             Assert.True(File.Exists(bufferPath));
@@ -452,9 +458,10 @@ public class CoreTelemetryServiceTests
             Assert.DoesNotContain("smith", json, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("lodie", json, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("brien", json, StringComparison.OrdinalIgnoreCase);
-            Assert.DoesNotContain("client files", json, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("private", json, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("client", json, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("acquisition", json, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("name.mov", json, StringComparison.OrdinalIgnoreCase);
-            Assert.DoesNotContain("confidential", json, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("draft.mp4", json, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("workspace", json, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain(@"C:\Users", json, StringComparison.OrdinalIgnoreCase);
@@ -478,9 +485,12 @@ public class CoreTelemetryServiceTests
         var bufferPath = Path.Combine(dir, "telemetry-buffer.json");
         try
         {
-            // Place a non-empty directory at bufferPath so native SetConsent(Analytics) fails on load/persist.
+            // Place a non-empty directory at bufferPath so native SetConsent(Analytics) fails on load/persist,
+            // plus a sibling temp file to confirm rollback cleans up sibling temps as well.
             Directory.CreateDirectory(bufferPath);
             File.WriteAllText(Path.Combine(bufferPath, "keep.txt"), "x");
+            var siblingTmp = Path.Combine(dir, ".telemetry-buffer.json.7777.tmp");
+            File.WriteAllText(siblingTmp, "stale");
 
             using var service = new CoreTelemetryService(
                 platform: "linux",
@@ -495,6 +505,7 @@ public class CoreTelemetryServiceTests
             Assert.Equal(TelemetryConsent.Off, service.Consent);
             Assert.Equal(AlUmmahNow.Core.TelemetryConsentState.Denied, service.NativeConsentForTesting);
             Assert.Equal(0, service.PendingCount);
+            Assert.False(File.Exists(siblingTmp));
         }
         finally
         {

@@ -13,11 +13,10 @@ namespace AlUmmahNow.CoreBridge.Native;
 /// </summary>
 public sealed class CoreTelemetryService : ITelemetryService
 {
-    private static readonly Regex DoubleQuotedPathRegex = new(@"""(?:file://|(?:[A-Za-z]:[\\/]|\\\\)|~/(?!\s)|/[^""\r\n/]+)[^""\r\n]*""", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex SingleQuotedPathRegex = new(@"'(?:file://|(?:[A-Za-z]:[\\/]|\\\\)|~/(?!\s)|/[^'\r\n/]+)[^'\r\n]*'", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex FileUriRegex = new(@"file://[^\r\n""<>|;]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex WindowsPathRegex = new(@"(?:[A-Za-z]:[\\/]|\\\\)[^\r\n""<>|;]+?(?=(?::line\b|:\d+\b|[\r\n""<>|;]|$))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex UnixPathRegex = new(@"(?<![\p{L}\p{M}\p{N}._:/-])(?:~/|/[^\r\n/""<>|;:]+/|/[^\r\n/""<>|;:]+\.[\p{L}\p{N}]{1,10})[^\r\n""<>|;]*?(?=(?::line\b|:\d+\b|[\r\n""<>|;]|$))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex DoubleQuotedPathRegex = new(@"""(?:file://|(?:[A-Za-z]:[\\/]|\\\\)|~/(?!\s)|/(?=[\p{L}\p{M}\p{N}._~]))[^""\r\n]*""", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex FileUriRegex = new(@"file://[^\r\n""<>|]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex WindowsPathRegex = new(@"(?:[A-Za-z]:[\\/]|\\\\)[^\r\n""<>|]+?(?=(?::line\b|:\d+\b|[\r\n""<>|]|$))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex UnixPathRegex = new(@"(?<![\p{L}\p{M}\p{N}._:/-])(?:~/|/(?=[\p{L}\p{M}\p{N}._~]))[^\r\n""<>|]+?(?=(?::line\b|:\d+\b|[\r\n""<>|]|$))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private readonly TelemetryClient _client;
     private readonly string? _bufferPath;
@@ -133,7 +132,6 @@ public sealed class CoreTelemetryService : ITelemetryService
     {
         if (string.IsNullOrEmpty(text)) return text;
         var scrubbed = DoubleQuotedPathRegex.Replace(text, "[redacted-path]");
-        scrubbed = SingleQuotedPathRegex.Replace(scrubbed, "[redacted-path]");
         scrubbed = FileUriRegex.Replace(scrubbed, "[redacted-path]");
         scrubbed = WindowsPathRegex.Replace(scrubbed, "[redacted-path]");
         scrubbed = UnixPathRegex.Replace(scrubbed, "[redacted-path]");
@@ -181,35 +179,13 @@ public sealed class CoreTelemetryService : ITelemetryService
         bool result;
         lock (_gate)
         {
-            if (_disposeRequested || _clientDisposed)
-            {
-                if (consent == TelemetryConsent.Off)
-                {
-                    _revoked = true;
-                    _lastPurgeFailed = !TryDeleteBufferFallback();
-                    return !_lastPurgeFailed;
-                }
-                return false;
-            }
-
             if (consent == TelemetryConsent.Off)
             {
-                // Always deny collection in the wrapper immediately, even if native disk purge fails.
-                _consent = TelemetryConsent.Off;
-                _revoked = true;
-                toCancel = _flushCts;
-                _flushCts = new CancellationTokenSource();
-                try
-                {
-                    _client.SetConsent(TelemetryConsentState.Denied);
-                    _lastPurgeFailed = !TryDeleteSiblingTempFiles();
-                }
-                catch (AunException ex)
-                {
-                    _lastPurgeFailed = !TryDeleteBufferFallback();
-                    Log.For("telemetry").Error("telemetry disk purge failed on opt-out: " + ex.Message);
-                }
-                result = !_lastPurgeFailed;
+                result = RevokeLocked(out toCancel, "telemetry disk purge failed on opt-out: ");
+            }
+            else if (_disposeRequested || _clientDisposed)
+            {
+                return false;
             }
             else
             {
@@ -225,18 +201,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                 {
                     // Fail closed in BOTH managed and native state so an earlier native consent update
                     // (before an I/O failure) cannot leave native telemetry enabled for a queued flush.
-                    _consent = TelemetryConsent.Off;
-                    _revoked = true;
-                    toCancel = _flushCts;
-                    _flushCts = new CancellationTokenSource();
-                    try
-                    {
-                        _client.SetConsent(TelemetryConsentState.Denied);
-                    }
-                    catch (AunException)
-                    {
-                        _lastPurgeFailed = !TryDeleteBufferFallback();
-                    }
+                    RevokeLocked(out toCancel, "telemetry rollback purge failed: ");
                     Log.For("telemetry").Warn("failed to update telemetry consent; failing closed to Off: " + ex.Message);
                     result = false;
                 }
@@ -485,21 +450,36 @@ public sealed class CoreTelemetryService : ITelemetryService
         }
         if (stillEnabled) return true;
 
+        RevokeLocked(out toCancel, "telemetry disk purge failed after cross-instance opt-out: ");
+        return false;
+    }
+
+    /// <summary>
+    /// Revokes managed and native consent (unless already disposed) and cleans up both the buffer
+    /// file and sibling atomic-persist temp files. Must be called while holding <see cref="_gate"/>.
+    /// </summary>
+    private bool RevokeLocked(out CancellationTokenSource? toCancel, string failureLogPrefix)
+    {
         _consent = TelemetryConsent.Off;
         _revoked = true;
         toCancel = _flushCts;
         _flushCts = new CancellationTokenSource();
+        if (_clientDisposed)
+        {
+            _lastPurgeFailed = !TryDeleteBufferFallback();
+            return !_lastPurgeFailed;
+        }
         try
         {
             _client.SetConsent(TelemetryConsentState.Denied);
-            _lastPurgeFailed = false;
+            _lastPurgeFailed = !TryDeleteSiblingTempFiles();
         }
         catch (AunException ex)
         {
             _lastPurgeFailed = !TryDeleteBufferFallback();
-            Log.For("telemetry").Error("telemetry disk purge failed after cross-instance opt-out: " + ex.Message);
+            Log.For("telemetry").Error(failureLogPrefix + ex.Message);
         }
-        return false;
+        return !_lastPurgeFailed;
     }
 
     private void ReleaseInFlightFlush()
