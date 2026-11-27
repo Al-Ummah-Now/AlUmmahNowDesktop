@@ -26,7 +26,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     private static readonly Regex QuotedSpacedRootPathRegex = new(@"[""']/[ \t]+[^\r\n\u001E\s""][^\r\n\u001E]*", RegexOptions.Compiled);
     private static readonly Regex UnixPathRegex = new(@"(?<![\p{L}\p{M}\p{N}._/-])(?:~/(?=[^\S\r\n]*[^\s""])|//+(?=[^\S\r\n]*[^\s/""])|/(?=[^\S\r\n]*[^\s/""]))[^\S\r\n]*[^\r\n\u001E\s](?:[^\r\n\u001E]*[^\r\n\u001E\s])?", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex RelativeSlashPathRegex = new(@"(^|[\s(\[{)\]}<>""'=,:;\u001F])(?!(?<!['""])(?:HTTP|TLS|SSL)/\d)(?!(?<!['""])\d+/\d+(?:$|[\s)\]},;:!?]|\.(?![A-Za-z0-9])))[^\s/\\""'<>()\[\]{}:,;=\u001E\u001F]+/[^\r\n\u001E\u001F\s""](?:[^\r\n\u001E\u001F]*[^\r\n\u001E\u001F\s])?", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex KeywordQuotedPathRegex = new(@"(\b(?:file|path|directory|folder|document)[^\S\r\n]+)([""'])(?!\u001E)[^'""\r\n]+\2", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex KeywordQuotedPathRegex = new(@"(\b(?:file|path|directory|folder|document)[^\S\r\n]+)(?:""(?!\u001E)[^""\r\n\u001E\u001F]+""|'(?!\u001E)[^'\r\n\u001E\u001F]+(?:(?<=[\p{L}\p{N}])'(?=[\p{L}])[^'\r\n\u001E\u001F]+)*')", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex KeywordFilenamePrefixRegex = new(@"\b(?:open|opening|read|reading|write|writing|delete|deleting|remove|removing|rename|stat|create|creating|load|loading|save|saving|access|accessing|unlink|file|path|directory|folder|document|filename|filepath)\b(?:[^\S\r\n]*[:=][^\S\r\n]*|[^\S\r\n]+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly HashSet<string> SourceLineExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -254,10 +254,139 @@ public sealed class CoreTelemetryService : ITelemetryService
         return hadSentinels ? UnescapeSentinels(scrubbed) : scrubbed;
     }
 
+    private const string EscVaultPrefix = "\u001EAUNESC";
+
     private static string VaultNonFileUrls(string text, string prefix, out List<string> vaultedUrls)
     {
         vaultedUrls = new List<string>();
-        return VaultNonFileUrlsInto(text, prefix, vaultedUrls);
+        var scrubbed = VaultNonFileUrlsInto(text, prefix, vaultedUrls);
+        return VaultJsonEscapedUrlsInBalancedQuotes(scrubbed, prefix, vaultedUrls);
+    }
+
+    private static string VaultJsonEscapedUrlsInBalancedQuotes(string text, string prefix, List<string> vaultedUrls)
+    {
+        if (text.IndexOf('"') < 0 ||
+            (!text.Contains("\\/", StringComparison.Ordinal) && !text.Contains("\\u", StringComparison.Ordinal)))
+        {
+            return text;
+        }
+        var spans = CollectBalancedDoubleQuoteSpans(text);
+        if (spans.Count == 0) return text;
+        StringBuilder? sb = null;
+        var copied = 0;
+        foreach (var (open, close) in spans)
+        {
+            var innerStart = open + 1;
+            if (innerStart >= close || !ContainsSlashOrUnicodeEscape(text, innerStart, close)) continue;
+            var norm = DecodeUrlEscapesForVault(text, innerStart, close);
+            if (norm.IndexOf("://", StringComparison.Ordinal) < 0) continue;
+            var innerVaulted = new List<string>();
+            var wrapped = "\"" + norm + "\"";
+            var innerResult = VaultNonFileUrlsInto(wrapped, EscVaultPrefix, innerVaulted);
+            if (innerVaulted.Count == 0) continue;
+            sb ??= new StringBuilder(text.Length);
+            sb.Append(text, copied, innerStart - copied);
+            if (innerVaulted.Count == 1 &&
+                innerResult == "\"" + EscVaultPrefix + "0\u001F\"" &&
+                string.Equals(innerVaulted[0], norm, StringComparison.Ordinal))
+            {
+                var idx = vaultedUrls.Count;
+                vaultedUrls.Add(text.Substring(innerStart, close - innerStart));
+                sb.Append(prefix).Append(idx).Append('\u001F');
+            }
+            else
+            {
+                AppendRemappedEscapedVault(sb, innerResult, 1, innerResult.Length - 1, prefix, vaultedUrls, innerVaulted);
+            }
+            copied = close;
+        }
+        if (sb == null) return text;
+        return sb.Append(text, copied, text.Length - copied).ToString();
+    }
+
+    private static void AppendRemappedEscapedVault(
+        StringBuilder sb, string text, int start, int end, string prefix, List<string> vaultedUrls, List<string> innerVaulted)
+    {
+        var pos = start;
+        while (pos < end)
+        {
+            var found = text.IndexOf(EscVaultPrefix, pos, end - pos, StringComparison.Ordinal);
+            if (found < 0)
+            {
+                sb.Append(text, pos, end - pos);
+                break;
+            }
+            sb.Append(text, pos, found - pos);
+            var numStart = found + EscVaultPrefix.Length;
+            var numEnd = text.IndexOf('\u001F', numStart, end - numStart);
+            if (numEnd > numStart &&
+                int.TryParse(text.AsSpan(numStart, numEnd - numStart), out var innerIdx) &&
+                innerIdx >= 0 && innerIdx < innerVaulted.Count)
+            {
+                var globalIdx = vaultedUrls.Count;
+                vaultedUrls.Add(innerVaulted[innerIdx]);
+                sb.Append(prefix).Append(globalIdx).Append('\u001F');
+                pos = numEnd + 1;
+            }
+            else
+            {
+                sb.Append(EscVaultPrefix);
+                pos = numStart;
+            }
+        }
+    }
+
+    private static bool ContainsSlashOrUnicodeEscape(string text, int start, int end)
+    {
+        for (var i = start; i < end; i++)
+        {
+            if (text[i] == '\\' && i + 1 < end)
+            {
+                var next = text[i + 1];
+                if (next == '/' || (next == 'u' && i + 5 < end)) return true;
+                i++;
+            }
+        }
+        return false;
+    }
+
+    private static bool IsUrlStructuralEscape(char ch) =>
+        ch is ':' or '/' or '?' or '#' or '&' or '=' or '@';
+
+    private static string DecodeUrlEscapesForVault(string text, int start, int end)
+    {
+        var sb = new StringBuilder(end - start);
+        var pos = start;
+        while (pos < end)
+        {
+            var ch = text[pos];
+            if (ch == '\\' && pos + 1 < end)
+            {
+                var next = text[pos + 1];
+                if (next == '/')
+                {
+                    sb.Append('/');
+                    pos += 2;
+                    continue;
+                }
+                if (next == 'u' && pos + 5 < end && TryParseHex4(text, pos + 2, out var code))
+                {
+                    var decoded = (char)code;
+                    if (IsUrlStructuralEscape(decoded))
+                    {
+                        sb.Append(decoded);
+                        pos += 6;
+                        continue;
+                    }
+                }
+                sb.Append(ch).Append(next);
+                pos += 2;
+                continue;
+            }
+            sb.Append(ch);
+            pos++;
+        }
+        return sb.ToString();
     }
 
     private static string VaultNonFileUrlsInto(string text, string prefix, List<string> vaultedUrls)
@@ -1409,7 +1538,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         while (p < end)
         {
             var len0 = DecodeJsonCharAt(text, p, end, out var c0);
-            if (((c0 >= 'A' && c0 <= 'Z') || (c0 >= 'a' && c0 <= 'z')) && p + len0 < end)
+            if (tokenStart < 0 && ((c0 >= 'A' && c0 <= 'Z') || (c0 >= 'a' && c0 <= 'z')) && p + len0 < end)
             {
                 var p1 = p + len0;
                 var len1 = DecodeJsonCharAt(text, p1, end, out var c1);
@@ -1426,6 +1555,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                         continue;
                     }
                 }
+                if ((c0 == 'f' || c0 == 'F') && MatchDecodedFileScheme(text, p, end)) return p;
             }
             if (c0 == '/' || (c0 == '\\' && (tokenStart >= 0 || len0 > 1)))
             {
@@ -1465,6 +1595,20 @@ public sealed class CoreTelemetryService : ITelemetryService
             p += len0;
         }
         return -1;
+    }
+
+    private static bool MatchDecodedFileScheme(string text, int pos, int end)
+    {
+        const string target = "file://";
+        var p = pos;
+        for (var i = 0; i < target.Length; i++)
+        {
+            if (p >= end) return false;
+            var len = DecodeJsonCharAt(text, p, end, out var c);
+            if (char.ToLowerInvariant(c) != target[i]) return false;
+            p += len;
+        }
+        return true;
     }
 
     private static int ScanCharRunEnd(string text, int pos, int end, char runChar, out char stopChar)
@@ -3599,6 +3743,8 @@ public sealed class CoreTelemetryService : ITelemetryService
     private static string RedactFileUris(string text, string vaultPrefix)
     {
         if (text.Length < 7) return text;
+        List<(int Open, int Close)>? quoteSpans = null;
+        var spanIdx = 0;
         StringBuilder? sb = null;
         var copyStart = 0;
         var pos = 0;
@@ -3609,7 +3755,17 @@ public sealed class CoreTelemetryService : ITelemetryService
                 // Double-quoted file:// URIs terminate at the next unescaped '"'. Unquoted and
                 // single-quoted file:// URIs fail closed to the next vaulted URL or line break so
                 // unescaped apostrophes inside filenames (e.g. "O' Connor") can never leak suffixes.
-                var isDoubleQuoted = pos > 0 && text[pos - 1] == '"';
+                if (quoteSpans == null && text.IndexOf('"') >= 0)
+                {
+                    quoteSpans = CollectBalancedDoubleQuoteSpans(text);
+                }
+                if (quoteSpans != null)
+                {
+                    while (spanIdx < quoteSpans.Count && quoteSpans[spanIdx].Close <= pos) spanIdx++;
+                }
+                var inBalancedQuote = quoteSpans != null && spanIdx < quoteSpans.Count &&
+                    quoteSpans[spanIdx].Open < pos && pos < quoteSpans[spanIdx].Close;
+                var isDoubleQuoted = inBalancedQuote || (pos > 0 && text[pos - 1] == '"');
                 var schemeEnd = pos + 7;
                 var rawEnd = schemeEnd;
                 var stoppedAtVault = false;

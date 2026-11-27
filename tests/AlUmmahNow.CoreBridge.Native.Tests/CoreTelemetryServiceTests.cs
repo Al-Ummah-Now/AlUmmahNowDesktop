@@ -1444,6 +1444,22 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("[\"\\u0022Secret.custom\\u0022 pending\"]"));
             Assert.Equal("[\"[redacted-path]\"]",
                 CoreTelemetryService.SanitizeLocalPaths("[\"Secret\\\"file.custom\"]"));
+            Assert.Equal("[\"file [redacted-path]\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"file \\\"O'Brien Acquisition\\\"\"]"));
+            Assert.Equal("[\"file [redacted-path]\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"file \\\"Acquisition's Plan\\\"\"]"));
+            Assert.Equal("[\"file [redacted-path]\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"file 'Acquisition\\u0027s Plan'\"]"));
+            Assert.Equal("{\"message\":\"open [redacted-path]\",\"status\":\"public\"}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"message\":\"open file:///Users/Alice/Secret.mov\",\"status\":\"public\"}"));
+            Assert.Equal("{\"message\":\"open [redacted-path]\",\"status\":\"public\"}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"message\":\"open file:\\/\\/\\/Users\\/Alice\\/Secret.mov\",\"status\":\"public\"}"));
+            Assert.Equal("[\"https:\\/\\/example.com\\/public\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"https:\\/\\/example.com\\/public\"]"));
+            Assert.Equal("[\"https://example.com/api?[redacted]\",\"public\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"https:\\/\\/example.com\\/api?token=opaqueSecret123\",\"public\"]"));
+            Assert.Equal("[\"https://example.com/api?[redacted]\",\"public\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"https:\\/\\/example.com\\/api\\u003ftoken=opaqueSecret123\",\"public\"]"));
             var manyPublic = "[" + string.Join(",", Enumerable.Repeat("\"public\"", 2000)) + "]";
             Assert.Equal(manyPublic, CoreTelemetryService.SanitizeLocalPaths(manyPublic));
             var manyNewlines = "[" + string.Join(",", Enumerable.Repeat("\"hello\\nworld\"", 2000)) + "]";
