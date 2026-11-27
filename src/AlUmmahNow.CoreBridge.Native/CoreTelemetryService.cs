@@ -627,6 +627,10 @@ public sealed class CoreTelemetryService : ITelemetryService
             {
                 localStart--;
             }
+            while (localStart < i && text[localStart] is '\'' or '{' or '}')
+            {
+                localStart++;
+            }
             var domStart = i + atLen;
             var domEnd = localStart < i ? FindEmailDomainEnd(text, domStart) : -1;
             if (domEnd > 0)
@@ -686,12 +690,25 @@ public sealed class CoreTelemetryService : ITelemetryService
             or System.Globalization.UnicodeCategory.SpacingCombiningMark
             or System.Globalization.UnicodeCategory.EnclosingMark;
 
+    private static bool IsNonAsciiEmailLocalChar(char ch)
+    {
+        if (ch < 0x80) return false;
+        if (char.IsSurrogate(ch)) return true;
+        if (char.IsWhiteSpace(ch) || char.IsControl(ch)) return false;
+        if (ch is '\u3001' or '\u3002' or '\uFF0C' or '\uFF1B' or '\uFF1A' or '\u060C' or '\u061B') return false;
+        return char.GetUnicodeCategory(ch) is not (
+            System.Globalization.UnicodeCategory.OpenPunctuation or
+            System.Globalization.UnicodeCategory.ClosePunctuation or
+            System.Globalization.UnicodeCategory.InitialQuotePunctuation or
+            System.Globalization.UnicodeCategory.FinalQuotePunctuation);
+    }
+
     private static bool IsEmailLocalChar(string text, int pos)
     {
         var ch = text[pos];
-        if (char.IsLetterOrDigit(ch) ||
-            ch is '.' or '_' or '+' or '-' or '!' or '#' or '$' or '&' or '*' or '^' or '`' or '|' or '~' ||
-            IsUnicodeCombiningMark(ch) || char.IsSurrogate(ch))
+        if (IsAsciiAlphaNum(ch) ||
+            ch is '.' or '_' or '+' or '-' or '!' or '#' or '$' or '&' or '\'' or '*' or '^' or '`' or '{' or '|' or '}' or '~' ||
+            IsNonAsciiEmailLocalChar(ch))
         {
             return true;
         }
