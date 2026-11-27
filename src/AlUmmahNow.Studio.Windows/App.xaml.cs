@@ -107,7 +107,8 @@ public sealed partial class App : Application
             bufferPath: Path.Combine(dataRoot, "telemetry-buffer.json"),
             initialEnabled: settings.TelemetryEnabled,
             demo: demo,
-            externalConsentToken: () => settingsStore.LoadTelemetryConsentToken());
+            externalConsentToken: () => settingsStore.LoadTelemetryConsentToken(),
+            acquireExternalConsentLock: () => settingsStore.TryAcquireTelemetryConsentLock());
 
         // The passkey sheet is modal to the Studio window; its handle is filled in once it exists.
         var hwnd = IntPtr.Zero;

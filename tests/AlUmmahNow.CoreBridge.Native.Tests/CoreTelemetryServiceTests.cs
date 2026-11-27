@@ -790,6 +790,16 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("progress 1/2."));
             Assert.Equal("progress (1/2.)",
                 CoreTelemetryService.SanitizeLocalPaths("progress (1/2.)"));
+            Assert.Equal("progress (1/2 )",
+                CoreTelemetryService.SanitizeLocalPaths("progress (1/2 )"));
+            Assert.Equal("progress (1/2...) (https://example.com/api)",
+                CoreTelemetryService.SanitizeLocalPaths("progress (1/2...) (https://example.com/api)"));
+            Assert.Equal("https://example.com/a(b/c)",
+                CoreTelemetryService.SanitizeLocalPaths("https://example.com/a(b/c)"));
+            Assert.Equal("'[redacted-path]'",
+                CoreTelemetryService.SanitizeLocalPaths("'file:///tmp/O'Brien Secret'"));
+            Assert.Equal("[redacted-path]",
+                CoreTelemetryService.SanitizeLocalPaths("'Studio 2's Acquisition.qzx'"));
             Assert.Equal("progress 1/2. (https://example.com/api)",
                 CoreTelemetryService.SanitizeLocalPaths("progress 1/2. (https://example.com/api)"));
             Assert.Equal("opening [redacted-path]",
@@ -825,6 +835,10 @@ public class CoreTelemetryServiceTests
             Assert.Equal(repeatedKeywords, CoreTelemetryService.SanitizeLocalPaths(repeatedKeywords));
             var repeatedQuotes = string.Concat(Enumerable.Repeat("'a ", 20_000)) + ".";
             Assert.Equal(repeatedQuotes, CoreTelemetryService.SanitizeLocalPaths(repeatedQuotes));
+            var repeatedEquals = new string('=', 50_000);
+            Assert.Equal(repeatedEquals, CoreTelemetryService.SanitizeLocalPaths(repeatedEquals));
+            var leadingSpaces = new string(' ', 50_000) + "x.qzx";
+            Assert.Equal(leadingSpaces, CoreTelemetryService.SanitizeLocalPaths(leadingSpaces));
             Assert.Equal("\"[redacted-path]\" (https://example.com/api)",
                 CoreTelemetryService.SanitizeLocalPaths("\"file:///a.mov\" (https://example.com/api)"));
             Assert.Equal("[redacted-path]",

@@ -198,6 +198,14 @@ namespace AlUmmahNow.App.Services
             }
         }
 
+        /// <summary>
+        /// Acquires the cross-process telemetry consent lock without creating the config directory.
+        /// Returns <c>null</c> if the lock cannot be acquired (or the directory does not exist); callers
+        /// must fail closed and skip dispatching telemetry flushes when <c>null</c> is returned.
+        /// </summary>
+        public IDisposable? TryAcquireTelemetryConsentLock() =>
+            TryAcquireConsentLock(createDirectory: false, out _);
+
         private IDisposable? TryAcquireConsentLock(bool createDirectory, out bool directoryMissing)
         {
             directoryMissing = false;

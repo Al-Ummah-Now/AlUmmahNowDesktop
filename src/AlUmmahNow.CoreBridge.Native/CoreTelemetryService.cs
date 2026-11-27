@@ -19,24 +19,24 @@ namespace AlUmmahNow.CoreBridge.Native;
 /// </summary>
 public sealed class CoreTelemetryService : ITelemetryService
 {
-    private static readonly Regex UrlVaultRegex = new(@"(?<![A-Za-z0-9+.-/\\])([A-Za-z][A-Za-z0-9+.-]+://(?:\[([^\]\s""'<>\\{}\r\n]+)\]|(?:[A-Za-z0-9._~!$&'*+;=-]|%[0-9A-Fa-f]{2})+)(?::\d+)?(?:/(?:(?!(?:file://|[A-Za-z]:[\\/]))(?:[^\s""<>\\{},()\[\]?#\r\n]|\([^\s""<>\\{},()\[\]/:\\?#]+\)|\[[^\s""<>\\{},()\[\]/:\\?#]+\]))*)?)([?#][^\s""<>\r\n]*)?(?=$|[\s""'<>\\{},;()\[\]]|file://|[A-Za-z]:[\\/])", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex UrlVaultRegex = new(@"(?<![A-Za-z0-9+.-/\\])([A-Za-z][A-Za-z0-9+.-]+://(?:\[([^\]\s""'<>\\{}\r\n]+)\]|(?:[A-Za-z0-9._~!$&'*+;=-]|%[0-9A-Fa-f]{2})+)(?::\d+)?(?:/(?:(?!(?:file://|[A-Za-z]:[\\/]))(?:[^\s""<>\\{},()\[\]?#\r\n]|\([^\s""<>\\{},()\[\]:\\?#]+\)|\[[^\s""<>\\{},()\[\]:\\?#]+\]))*)?)([?#][^\s""<>\r\n]*)?(?=$|[\s""'<>\\{},;()\[\]]|file://|[A-Za-z]:[\\/])", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex ParenPathRegex = new(@"(\()(?:/|~/|[A-Za-z]:[\\/]|\\\\)[^()\r\n\u001E]+(\))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex ParenRelativeSlashPathRegex = new(@"(\()(?!(?:HTTP|TLS|SSL)/\d)(?!\d+/\d+[.,;:!?]?\))[^\s/\\""'<>()\[\]{}:,;\u001E\u001F]+/[^()\r\n\u001E]+(\))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex ParenRelativeSlashPathRegex = new(@"(\()(?![ \t]*(?:HTTP|TLS|SSL)/\d)(?![ \t]*\d+/\d+[.,;:!?\s]*\))[^\s/\\""'<>()\[\]{}:,;=\u001E\u001F]+/[^()\r\n\u001E]+(\))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex WindowsPathRegex = new(@"(?:[A-Za-z]:[\\/]|\\\\)[^\S\r\n]*[^\r\n\u001E\s]+(?:[^\S\r\n]+[^\r\n\u001E\s]+)*", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex RelativeBackslashPathRegex = new(@"(^|[\s(\[{""'=,:;\u001F])[^\s\\/""'<>(),;\u001E\u001F]+\\[^\r\n\u001E\u001F\s]+(?:[^\S\r\n]+[^\r\n\u001E\u001F\s]+)*", RegexOptions.Compiled);
+    private static readonly Regex RelativeBackslashPathRegex = new(@"(^|[\s(\[{""'=,:;\u001F])[^\s\\/""'<>()\[\]{}:,;=\u001E\u001F]+\\[^\r\n\u001E\u001F\s]+(?:[^\S\r\n]+[^\r\n\u001E\u001F\s]+)*", RegexOptions.Compiled);
     private static readonly Regex QuotedSpacedRootPathRegex = new(@"[""']/[ \t]+[^\r\n\u001E]+", RegexOptions.Compiled);
     private static readonly Regex UnixPathRegex = new(@"(?<![\p{L}\p{M}\p{N}._/-])(?:~/|//+(?=[ \t]*[^\s/])|/(?=[ \t]*[^\s/]))[^\S\r\n]*[^\r\n\u001E\s]+(?:[^\S\r\n]+[^\r\n\u001E\s]+)*", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex RelativeSlashPathRegex = new(@"(^|[\s(\[{""'=,:;\u001F])(?!(?<!['""])(?:HTTP|TLS|SSL)/\d)(?!(?<!['""])\d+/\d+(?:$|[\s)\]},;:!?]|\.(?![A-Za-z0-9])))[^\s/\\""'<>()\[\]{}:,;\u001E\u001F]+/[^\r\n\u001E\u001F\s]+(?:[^\S\r\n]+[^\r\n\u001E\u001F\s]+)*", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex RelativeSlashPathRegex = new(@"(^|[\s(\[{""'=,:;\u001F])(?!(?<!['""])(?:HTTP|TLS|SSL)/\d)(?!(?<!['""])\d+/\d+(?:$|[\s)\]},;:!?]|\.(?![A-Za-z0-9])))[^\s/\\""'<>()\[\]{}:,;=\u001E\u001F]+/[^\r\n\u001E\u001F\s]+(?:[^\S\r\n]+[^\r\n\u001E\u001F\s]+)*", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex DoubleQuotedFilenameRegex = new(@"""[^""\r\n/\\]*\.[A-Za-z0-9]{1,16}""", RegexOptions.Compiled);
-    private static readonly Regex SingleQuotedFilenameRegex = new(@"(?<!\p{L})'(?:[^'\r\n/\\]|(?<=\p{L})'(?=\p{L}))*\.[A-Za-z0-9]{1,16}'", RegexOptions.Compiled);
-    private static readonly Regex KeywordQuotedPathRegex = new(@"(\b(?:file|path|directory|folder|document)\s+)([""'])(?!\u001E)[^'""\r\n]+\2", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex SingleQuotedFilenameRegex = new(@"(?<![\p{L}\p{N}])'(?:[^'\r\n/\\]|(?<=[\p{L}\p{N}])'(?=\p{L}))*\.[A-Za-z0-9]{1,16}'", RegexOptions.Compiled);
+    private static readonly Regex KeywordQuotedPathRegex = new(@"(\b(?:file|path|directory|folder|document)[^\S\r\n]+)([""'])(?!\u001E)[^'""\r\n]+\2", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex KeywordFilenamePrefixRegex = new(@"\b(?:open|opening|read|reading|write|writing|delete|deleting|remove|removing|rename|stat|create|creating|load|loading|save|saving|access|accessing|unlink|file|path|directory|folder|document|filename|filepath)\b(?:[^\S\r\n]*[:=][^\S\r\n]*|[^\S\r\n]+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly HashSet<string> SourceLineExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
         "kt", "java", "swift", "cs", "cpp", "cc", "c", "h", "hpp", "rs", "py", "js", "ts", "go", "rb", "m", "mm"
     };
     private static readonly Regex KeywordAssignedPathRegex = new(@"(\b(?:file|path|filename|filepath)\s*[:=]\s*)(?!\u001E)[^\r\n\u001E\u001F]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex BareFilenameRegex = new(@"(^|[\r\n:=;\u001F])([ \t]*)[^\r\n:=;\u001E\u001F]*\.(?!ts:\d+)(?:mov|mp4|m4v|mkv|webm|avi|ts|m3u8|mpd|mp3|m4a|wav|aac|flac|ogg|opus|jpg|jpeg|png|gif|webp|heic|svg|pdf|txt|md|rtf|doc|docx|xls|xlsx|ppt|pptx|csv|json|xml|yaml|yml|toml|ini|cfg|conf|log|srt|vtt|ass|ssa|zip|tar|gz|tgz|bz2|xz|7z|rar|dmg|pkg|msi|exe|apk|aab|ipa|pem|key|crt|cer|p12|pfx|jks|keystore|db|sqlite|sqlite3|bin|dat|tmp|bak|proj|aun)\b(?!\()", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex BareFilenameRegex = new(@"(^|[\r\n:=;\u001F])([ \t]*)(?=[^\r\n:=;\u001E\u001F \t])[^\r\n:=;\u001E\u001F]*\.(?!ts:\d+)(?:mov|mp4|m4v|mkv|webm|avi|ts|m3u8|mpd|mp3|m4a|wav|aac|flac|ogg|opus|jpg|jpeg|png|gif|webp|heic|svg|pdf|txt|md|rtf|doc|docx|xls|xlsx|ppt|pptx|csv|json|xml|yaml|yml|toml|ini|cfg|conf|log|srt|vtt|ass|ssa|zip|tar|gz|tgz|bz2|xz|7z|rar|dmg|pkg|msi|exe|apk|aab|ipa|pem|key|crt|cer|p12|pfx|jks|keystore|db|sqlite|sqlite3|bin|dat|tmp|bak|proj|aun)\b(?!\()", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex BearerTokenRegex = new(@"\bBearer\s+\S+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private readonly TelemetryAppInfo _app;
@@ -45,6 +45,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     private readonly string _clientHeader;
     private readonly string? _bufferPath;
     private readonly Func<string?>? _externalConsentToken;
+    private readonly Func<IDisposable?>? _acquireExternalConsentLock;
     private readonly object _gate = new();
     private TelemetryClient _client;
     private string? _activeBufferPath;
@@ -89,10 +90,12 @@ public sealed class CoreTelemetryService : ITelemetryService
         string userAgent,
         string? bufferPath,
         bool initialEnabled = false,
-        Func<string?>? externalConsentToken = null)
+        Func<string?>? externalConsentToken = null,
+        Func<IDisposable?>? acquireExternalConsentLock = null)
     {
         _bufferPath = bufferPath;
         _externalConsentToken = externalConsentToken;
+        _acquireExternalConsentLock = acquireExternalConsentLock;
         var os = AunClient.CurrentOs();
         _app = new TelemetryAppInfo(
             platform,
@@ -176,12 +179,15 @@ public sealed class CoreTelemetryService : ITelemetryService
         string? bufferPath,
         bool initialEnabled,
         bool demo = false,
-        Func<string?>? externalConsentToken = null)
+        Func<string?>? externalConsentToken = null,
+        Func<IDisposable?>? acquireExternalConsentLock = null)
     {
         if (demo) return NullTelemetryService.Instance;
         try
         {
-            return new CoreTelemetryService(platform, appVersion, locale, videosApiBaseUrl, userAgent, bufferPath, initialEnabled, externalConsentToken);
+            return new CoreTelemetryService(
+                platform, appVersion, locale, videosApiBaseUrl, userAgent, bufferPath,
+                initialEnabled, externalConsentToken, acquireExternalConsentLock);
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException or AunException)
         {
@@ -630,7 +636,7 @@ public sealed class CoreTelemetryService : ITelemetryService
 
         private static bool IsInnerApostrophe(string text, int pos, char ch) =>
             ch == '\'' && pos > 0 && pos + 1 < text.Length &&
-            char.IsLetter(text[pos - 1]) && char.IsLetter(text[pos + 1]);
+            char.IsLetterOrDigit(text[pos - 1]) && char.IsLetter(text[pos + 1]);
     }
 
     private static bool StartsLocalPathAt(string text, int pos, bool atTokenStart)
@@ -706,7 +712,10 @@ public sealed class CoreTelemetryService : ITelemetryService
                 while (rawEnd < text.Length)
                 {
                     var ch = text[rawEnd];
-                    if (ch is '\r' or '\n' || (quote != '\0' && ch == quote && !escapedBackslash)) break;
+                    var isInnerApostrophe =
+                        ch == '\'' && rawEnd > schemeEnd && rawEnd + 1 < text.Length &&
+                        char.IsLetterOrDigit(text[rawEnd - 1]) && char.IsLetter(text[rawEnd + 1]);
+                    if (ch is '\r' or '\n' || (quote != '\0' && ch == quote && !escapedBackslash && !isInnerApostrophe)) break;
                     if (ch == '\u001E' &&
                         rawEnd + vaultPrefix.Length <= text.Length &&
                         text.AsSpan(rawEnd, vaultPrefix.Length).Equals(vaultPrefix, StringComparison.Ordinal))
@@ -1132,40 +1141,61 @@ public sealed class CoreTelemetryService : ITelemetryService
         Task? nativeFlush = null;
         CancellationTokenSource? monitorCts = null;
         var flushOverride = FlushOverrideForTesting;
-        lock (_gate)
+        IDisposable? externalConsentLock = null;
+        if (_acquireExternalConsentLock != null)
         {
-            if (!EnsureExternalConsentLocked(out toCancel))
+            externalConsentLock = _acquireExternalConsentLock();
+            if (externalConsentLock == null)
             {
-                if (toCancel != null) goto CancelAndReturn;
-                return;
-            }
-            if (cancellationToken.IsCancellationRequested || _disposeRequested || _clientDisposed || _consent == TelemetryConsent.Off)
-            {
-                return;
-            }
-            revokeToken = _flushCts.Token;
-            if (revokeToken.IsCancellationRequested) return;
-            flushEpoch = _consentEpoch;
-            flushBufferPath = _activeBufferPath;
-            _inFlightFlushes++;
-            if (_externalConsentToken != null)
-            {
-                monitorCts = new CancellationTokenSource();
-                _ = MonitorExternalConsentWhileFlushingAsync(monitorCts.Token);
-            }
-            try
-            {
-                // Dispatch immediately under `_gate` right after checking external consent so no
-                // revocation can interleave between consent verification and native flush dispatch.
-                nativeFlush = flushOverride != null ? flushOverride() : _client.Flush();
-            }
-            catch (Exception ex) when (ex is AunException or ObjectDisposedException or OperationCanceledException)
-            {
-                if (!cancellationToken.IsCancellationRequested && !revokeToken.IsCancellationRequested)
+                lock (_gate)
                 {
-                    Log.For("telemetry").Warn("telemetry flush skipped: " + ex.Message);
+                    EnsureExternalConsentLocked(out toCancel);
+                }
+                if (toCancel != null) CancelQuietly(toCancel);
+                return;
+            }
+        }
+        try
+        {
+            lock (_gate)
+            {
+                if (!EnsureExternalConsentLocked(out toCancel))
+                {
+                    if (toCancel != null) goto CancelAndReturn;
+                    return;
+                }
+                if (cancellationToken.IsCancellationRequested || _disposeRequested || _clientDisposed || _consent == TelemetryConsent.Off)
+                {
+                    return;
+                }
+                revokeToken = _flushCts.Token;
+                if (revokeToken.IsCancellationRequested) return;
+                flushEpoch = _consentEpoch;
+                flushBufferPath = _activeBufferPath;
+                _inFlightFlushes++;
+                if (_externalConsentToken != null)
+                {
+                    monitorCts = new CancellationTokenSource();
+                    _ = MonitorExternalConsentWhileFlushingAsync(monitorCts.Token);
+                }
+                try
+                {
+                    // Dispatch immediately under the cross-process consent lock and `_gate` right after
+                    // verifying external consent so another process cannot persist opt-out before dispatch.
+                    nativeFlush = flushOverride != null ? flushOverride() : _client.Flush();
+                }
+                catch (Exception ex) when (ex is AunException or ObjectDisposedException or OperationCanceledException)
+                {
+                    if (!cancellationToken.IsCancellationRequested && !revokeToken.IsCancellationRequested)
+                    {
+                        Log.For("telemetry").Warn("telemetry flush skipped: " + ex.Message);
+                    }
                 }
             }
+        }
+        finally
+        {
+            externalConsentLock?.Dispose();
         }
 
         if (nativeFlush == null)
