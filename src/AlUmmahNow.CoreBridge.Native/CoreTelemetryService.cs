@@ -380,7 +380,10 @@ public sealed class CoreTelemetryService : ITelemetryService
 
         private void ProcessLineChar(string text, char ch)
         {
-            var closedQuote = _pathQuote != '\0' && ch == _pathQuote && !_escapedBackslash;
+            var closedQuote =
+                !_escapedBackslash &&
+                ((_pathQuote != '\0' && ch == _pathQuote) ||
+                 (!_inWrapperRun && _tokenStart > 0 && ch is '"' or '\'' && text[_tokenStart - 1] == ch));
             if (closedQuote)
             {
                 ResetLineState();
@@ -460,7 +463,8 @@ public sealed class CoreTelemetryService : ITelemetryService
         {
             return true;
         }
-        return IsAllAsciiDigits(before) && IsAllAsciiDigits(after);
+        var quoted = start > 0 && text[start - 1] is '"' or '\'';
+        return !quoted && IsAllAsciiDigits(before) && IsAllAsciiDigits(after);
     }
 
     private static bool IsAllAsciiDigits(ReadOnlySpan<char> span)

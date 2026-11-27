@@ -786,6 +786,10 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("\"relative/My Clip.mov\" and (https://example.com/api)"));
             Assert.Contains("https://example.com/api",
                 CoreTelemetryService.SanitizeLocalPaths("progress 1/2 (https://example.com/api)"));
+            Assert.Contains("https://example.com/api",
+                CoreTelemetryService.SanitizeLocalPaths("progress \"1/2\" (https://example.com/api)"));
+            Assert.DoesNotContain("private.example",
+                CoreTelemetryService.SanitizeLocalPaths("opening \"1/2 (https://private.example/Acquisition.mov)\""));
             Assert.Equal("\"[redacted-path]\" (https://example.com/api)",
                 CoreTelemetryService.SanitizeLocalPaths("\"file:///a.mov\" (https://example.com/api)"));
             Assert.Equal("[redacted-path]",
