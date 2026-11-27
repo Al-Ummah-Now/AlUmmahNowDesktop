@@ -21,6 +21,14 @@ public sealed class CoreTelemetryService : ITelemetryService
     private bool _disposeRequested;
     private bool _clientDisposed;
     private bool _lastPurgeFailed;
+    internal Func<Task>? FlushOverrideForTesting { get; set; }
+    internal bool IsClientDisposedForTesting
+    {
+        get
+        {
+            lock (_gate) return _clientDisposed;
+        }
+    }
 
     public CoreTelemetryService(
         string platform,
@@ -132,9 +140,18 @@ public sealed class CoreTelemetryService : ITelemetryService
         };
 
         CancellationTokenSource? toCancel = null;
+        bool result;
         lock (_gate)
         {
-            if (_disposeRequested || _clientDisposed) return consent == TelemetryConsent.Off;
+            if (_disposeRequested || _clientDisposed)
+            {
+                if (consent == TelemetryConsent.Off)
+                {
+                    _lastPurgeFailed = !TryDeleteBufferFallback();
+                    return !_lastPurgeFailed;
+                }
+                return false;
+            }
 
             if (consent == TelemetryConsent.Off)
             {
@@ -152,23 +169,30 @@ public sealed class CoreTelemetryService : ITelemetryService
                     _lastPurgeFailed = !TryDeleteBufferFallback();
                     Log.For("telemetry").Error("telemetry disk purge failed on opt-out: " + ex.Message);
                 }
-                if (toCancel != null) CancelQuietly(toCancel);
-                return !_lastPurgeFailed;
+                result = !_lastPurgeFailed;
             }
-
-            try
+            else
             {
-                _client.SetConsent(state);
-                _consent = consent;
-                _lastPurgeFailed = false;
-                return true;
-            }
-            catch (AunException ex)
-            {
-                Log.For("telemetry").Warn("failed to enable telemetry consent: " + ex.Message);
-                return false;
+                try
+                {
+                    _client.SetConsent(state);
+                    _consent = consent;
+                    _lastPurgeFailed = false;
+                    result = true;
+                }
+                catch (AunException ex)
+                {
+                    // Fail closed so a failed consent change (including Full -> CrashOnly) never leaves collection active.
+                    _consent = TelemetryConsent.Off;
+                    toCancel = _flushCts;
+                    _flushCts = new CancellationTokenSource();
+                    Log.For("telemetry").Warn("failed to update telemetry consent; failing closed to Off: " + ex.Message);
+                    result = false;
+                }
             }
         }
+        if (toCancel != null) CancelQuietly(toCancel);
+        return result;
     }
 
     public void Track(string name, IReadOnlyDictionary<string, object>? properties = null)
@@ -276,13 +300,28 @@ public sealed class CoreTelemetryService : ITelemetryService
             _inFlightFlushes++;
         }
 
+        Task? nativeFlush = null;
         try
         {
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, revokeToken);
             if (linked.IsCancellationRequested) return;
 
-            var flushTask = _client.Flush();
-            await WaitWithCancellationAsync(flushTask, linked.Token).ConfigureAwait(false);
+            var flushOverride = FlushOverrideForTesting;
+            nativeFlush = flushOverride != null ? flushOverride() : _client.Flush();
+            // Defer decrementing `_inFlightFlushes` (and any pending native `_client.Dispose()`) until
+            // `nativeFlush` actually finishes, even if `WaitWithCancellationAsync` returns early on cancel/revoke.
+            _ = nativeFlush.ContinueWith(
+                static (t, state) =>
+                {
+                    _ = t.Exception;
+                    ((CoreTelemetryService)state!).ReleaseInFlightFlush();
+                },
+                this,
+                CancellationToken.None,
+                TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+
+            await WaitWithCancellationAsync(nativeFlush, linked.Token).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is AunException or ObjectDisposedException or OperationCanceledException)
         {
@@ -293,14 +332,31 @@ public sealed class CoreTelemetryService : ITelemetryService
         }
         finally
         {
-            lock (_gate)
+            if (nativeFlush == null)
             {
-                _inFlightFlushes--;
-                if (_disposeRequested && _inFlightFlushes == 0 && !_clientDisposed)
+                ReleaseInFlightFlush();
+            }
+        }
+    }
+
+    private void ReleaseInFlightFlush()
+    {
+        lock (_gate)
+        {
+            _inFlightFlushes--;
+            if (_consent == TelemetryConsent.Off && !string.IsNullOrWhiteSpace(_bufferPath))
+            {
+                // A flush already in flight when consent was revoked may finish its final
+                // persist rename after SetConsent(Denied) deleted the file; remove any remnant.
+                if (!TryDeleteBufferFallback())
                 {
-                    _clientDisposed = true;
-                    _client.Dispose();
+                    _lastPurgeFailed = true;
                 }
+            }
+            if (_disposeRequested && _inFlightFlushes == 0 && !_clientDisposed)
+            {
+                _clientDisposed = true;
+                _client.Dispose();
             }
         }
     }

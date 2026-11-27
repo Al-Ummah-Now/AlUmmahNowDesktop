@@ -100,7 +100,16 @@ public class CoreTelemetryServiceTests
 
                 var flushTask = Task.Run(() => service.FlushAsync());
                 var revokeTask = Task.Run(() => service.SetConsent(TelemetryConsent.Off));
-                await Task.WhenAll(flushTask, revokeTask);
+                var disposeTask = Task.Run(() => service.Dispose());
+                await Task.WhenAll(flushTask, revokeTask, disposeTask);
+
+                // Wait for any cancelled-mid-flight native flush to settle and trigger deferred cleanup/dispose.
+                var deadline = DateTime.UtcNow.AddSeconds(2);
+                while (!service.IsClientDisposedForTesting && DateTime.UtcNow < deadline)
+                {
+                    await Task.Delay(5);
+                }
+                Assert.True(service.IsClientDisposedForTesting);
 
                 Assert.Equal(TelemetryConsent.Off, service.Consent);
                 Assert.Equal(0, service.PendingCount);
@@ -110,7 +119,6 @@ public class CoreTelemetryServiceTests
                 using var cts = new CancellationTokenSource();
                 cts.Cancel();
                 await service.FlushAsync(cts.Token);
-                service.Dispose();
                 await service.FlushAsync();
             }
         }
@@ -118,6 +126,47 @@ public class CoreTelemetryServiceTests
         {
             if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
         }
+    }
+
+    [Fact]
+    public async Task Dispose_waits_for_abandoned_native_flush_completion_after_revoke_cancellation()
+    {
+        var nativeStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var nativeRelease = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var service = new CoreTelemetryService(
+            platform: "linux",
+            appVersion: "1.0.0",
+            locale: "en",
+            videosApiBaseUrl: null,
+            userAgent: "AlUmmahNowLinux/1.0.0",
+            bufferPath: null,
+            initialEnabled: true)
+        {
+            FlushOverrideForTesting = () =>
+            {
+                nativeStarted.TrySetResult(true);
+                return nativeRelease.Task;
+            }
+        };
+
+        var flushTask = service.FlushAsync();
+        await nativeStarted.Task;
+
+        // Revoke cancels the awaiter in FlushAsync, and Dispose is called while nativeFlush is still active.
+        Assert.True(service.SetConsent(TelemetryConsent.Off));
+        await flushTask;
+        service.Dispose();
+
+        // Native handle must stay alive until the in-flight native flush actually finishes.
+        Assert.False(service.IsClientDisposedForTesting);
+
+        nativeRelease.TrySetResult(true);
+        var deadline = DateTime.UtcNow.AddSeconds(2);
+        while (!service.IsClientDisposedForTesting && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(10);
+        }
+        Assert.True(service.IsClientDisposedForTesting);
     }
 
     [Fact]
