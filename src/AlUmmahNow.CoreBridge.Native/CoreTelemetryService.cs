@@ -319,7 +319,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             hasFileUriOnLine = false;
             return $"{prefix}{idx}\u001F{tail}";
         });
-        scrubbed = RedactFileUris(scrubbed);
+        scrubbed = RedactFileUris(scrubbed, prefix);
         scrubbed = ParenPathRegex.Replace(scrubbed, "$1[redacted-path]$2");
         scrubbed = ParenRelativeSlashPathRegex.Replace(scrubbed, "$1[redacted-path]$2");
         scrubbed = WindowsPathRegex.Replace(scrubbed, "[redacted-path]");
@@ -349,9 +349,9 @@ public sealed class CoreTelemetryService : ITelemetryService
         (pos == 0 || !IsUrlSchemeChar(text[pos - 1])) &&
         text.AsSpan(pos, 7).Equals("file://", StringComparison.OrdinalIgnoreCase);
 
-    private static string RedactFileUris(string text)
+    private static string RedactFileUris(string text, string vaultPrefix)
     {
-        if (text.Length <= 7) return text;
+        if (text.Length < 7) return text;
         StringBuilder? sb = null;
         var copyStart = 0;
         var pos = 0;
@@ -361,28 +361,35 @@ public sealed class CoreTelemetryService : ITelemetryService
             {
                 var schemeEnd = pos + 7;
                 var rawEnd = schemeEnd;
-                while (rawEnd < text.Length && text[rawEnd] is not ('\r' or '\n' or '\u001E'))
+                var stoppedAtVault = false;
+                while (rawEnd < text.Length)
                 {
+                    var ch = text[rawEnd];
+                    if (ch is '\r' or '\n') break;
+                    if (ch == '\u001E' &&
+                        rawEnd + vaultPrefix.Length <= text.Length &&
+                        text.AsSpan(rawEnd, vaultPrefix.Length).Equals(vaultPrefix, StringComparison.Ordinal))
+                    {
+                        stoppedAtVault = true;
+                        break;
+                    }
                     rawEnd++;
                 }
                 var trimmedEnd = rawEnd;
-                if (rawEnd < text.Length && text[rawEnd] == '\u001E')
+                if (stoppedAtVault)
                 {
                     while (trimmedEnd > schemeEnd && (IsOpeningWrapper(text[trimmedEnd - 1]) || char.IsWhiteSpace(text[trimmedEnd - 1])))
                     {
                         trimmedEnd--;
                     }
                 }
-                if (trimmedEnd > schemeEnd)
-                {
-                    sb ??= new StringBuilder(text.Length);
-                    sb.Append(text, copyStart, pos - copyStart);
-                    sb.Append("[redacted-path]");
-                    sb.Append(text, trimmedEnd, rawEnd - trimmedEnd);
-                    copyStart = rawEnd;
-                    pos = rawEnd;
-                    continue;
-                }
+                sb ??= new StringBuilder(text.Length);
+                sb.Append(text, copyStart, pos - copyStart);
+                sb.Append("[redacted-path]");
+                sb.Append(text, trimmedEnd, rawEnd - trimmedEnd);
+                copyStart = rawEnd;
+                pos = rawEnd;
+                continue;
             }
             pos++;
         }
