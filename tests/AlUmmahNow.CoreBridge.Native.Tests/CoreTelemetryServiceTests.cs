@@ -1406,6 +1406,26 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("[\"\\u005CSecret\",\"public\"]"));
             Assert.Equal("[\"\\\\\",\"public\"]",
                 CoreTelemetryService.SanitizeLocalPaths("[\"\\\\\",\"public\"]"));
+            Assert.Equal("[\"path=[redacted-path]\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"path=Project\\u005EAcquisition\"]"));
+            Assert.Equal("[\"path=[redacted-path]\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"path=alpha\\u001fAcquisition\"]"));
+            Assert.Equal("[\"path=[redacted-path]\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"path=alpha\\u001eAcquisition\"]"));
+            Assert.Equal("{\"file \":\"Acquisition\"}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"file \":\"Acquisition\"}"));
+            Assert.Equal("{\"path \":\"public\"}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"path \":\"public\"}"));
+            Assert.Equal("[\"file [redacted-path]\",\"public\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"file 'Secret'\",\"public\"]"));
+            Assert.Equal("read [redacted-path]",
+                CoreTelemetryService.SanitizeLocalPaths("read 'Top \"Secret\" file.pdf'"));
+            Assert.Equal("[\"[redacted-path] pending\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"secret\\u002epdf pending\"]"));
+            Assert.Equal("[\"[redacted-path]\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"secret\\u002epdf\"]"));
+            Assert.Equal("[\"read [redacted-path] pending\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"read Private\\\"Merger.custom pending\"]"));
             var manyPublic = "[" + string.Join(",", Enumerable.Repeat("\"public\"", 2000)) + "]";
             Assert.Equal(manyPublic, CoreTelemetryService.SanitizeLocalPaths(manyPublic));
             var manyNewlines = "[" + string.Join(",", Enumerable.Repeat("\"hello\\nworld\"", 2000)) + "]";

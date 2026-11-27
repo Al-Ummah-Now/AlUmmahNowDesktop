@@ -238,13 +238,13 @@ public sealed class CoreTelemetryService : ITelemetryService
         scrubbed = ReplaceUnquotedParenPaths(scrubbed, ParenRelativeSlashPathRegex);
         scrubbed = ReplacePreKeywordPathRules(scrubbed);
         scrubbed = RedactQuotedFilenames(scrubbed);
-        scrubbed = KeywordQuotedPathRegex.Replace(scrubbed, "$1[redacted-path]");
-        scrubbed = RedactKeywordUnquotedFilenames(scrubbed);
+        scrubbed = ReplaceKeywordQuotedPaths(scrubbed);
+        scrubbed = RedactKeywordUnquotedFilenamesRespectingQuotes(scrubbed);
         scrubbed = ReplaceKeywordAssignedPaths(scrubbed);
         scrubbed = RedactEmails(scrubbed);
-        if (scrubbed.Contains('.'))
+        if (scrubbed.Contains('.') || scrubbed.Contains("\\u", StringComparison.Ordinal))
         {
-            scrubbed = BareFilenameRegex.Replace(scrubbed, "$1$2[redacted-path]");
+            scrubbed = ReplaceBareFilenames(scrubbed);
         }
         scrubbed = RestoreVaultedUrls(scrubbed, VaultPrefix, vaultedUrls);
         if (vaultedUrls.Count > 0)
@@ -1185,11 +1185,114 @@ public sealed class CoreTelemetryService : ITelemetryService
         {
             offsets[count] = pos;
             var step = DecodeJsonCharAt(text, pos, end, out var decoded);
+            if (step > 1 && decoded is '\u001E' or '\u001F') decoded = '_';
             chars[count++] = decoded;
             pos += step;
         }
         offsets[count] = end;
         return (new string(chars, 0, count), offsets);
+    }
+
+    private static bool ContainsDotOrUnicodeEscape(string text, int start, int end)
+    {
+        for (var i = start; i < end; i++)
+        {
+            var ch = text[i];
+            if (ch == '.' || (ch == '\\' && i + 5 < end && text[i + 1] == 'u')) return true;
+        }
+        return false;
+    }
+
+    private static string ReplaceKeywordQuotedPaths(string text)
+    {
+        if (text.IndexOf('"') < 0) return KeywordQuotedPathRegex.Replace(text, "$1[redacted-path]");
+        var spans = CollectBalancedDoubleQuoteSpans(text);
+        if (spans.Count == 0) return KeywordQuotedPathRegex.Replace(text, "$1[redacted-path]");
+        var masked = BuildMaskedDoubleQuotes(text, spans);
+        var current = ApplyMaskedPathRegex(text, masked, KeywordQuotedPathRegex, hasPrefix: true);
+        if (!ReferenceEquals(current, text))
+        {
+            if (current.IndexOf('"') < 0) return current;
+            spans = CollectBalancedDoubleQuoteSpans(current);
+        }
+        StringBuilder? sb = null;
+        var copied = 0;
+        foreach (var (open, close) in spans)
+        {
+            var innerStart = open + 1;
+            if (innerStart >= close || current.IndexOf('\'', innerStart, close - innerStart) < 0) continue;
+            var inner = current.Substring(innerStart, close - innerStart);
+            var scrubbed = KeywordQuotedPathRegex.Replace(inner, "$1[redacted-path]");
+            if (scrubbed == inner) continue;
+            sb ??= new StringBuilder(current.Length);
+            sb.Append(current, copied, innerStart - copied).Append(scrubbed);
+            copied = close;
+        }
+        if (sb == null) return current;
+        return sb.Append(current, copied, current.Length - copied).ToString();
+    }
+
+    private static string ReplaceBareFilenames(string text)
+    {
+        if (text.IndexOf('"') < 0) return BareFilenameRegex.Replace(text, "$1$2[redacted-path]");
+        var spans = CollectBalancedDoubleQuoteSpans(text);
+        if (spans.Count == 0) return BareFilenameRegex.Replace(text, "$1$2[redacted-path]");
+        var masked = BuildMaskedDoubleQuotes(text, spans);
+        var current = ApplyMaskedBareFilenameRegex(text, masked);
+        if (!ReferenceEquals(current, text))
+        {
+            if (current.IndexOf('"') < 0) return current;
+            spans = CollectBalancedDoubleQuoteSpans(current);
+        }
+        StringBuilder? sb = null;
+        var copied = 0;
+        foreach (var (open, close) in spans)
+        {
+            var innerStart = open + 1;
+            if (innerStart >= close || !ContainsDotOrUnicodeEscape(current, innerStart, close)) continue;
+            var (decoded, rawOffsets) = DecodeQuotedSpanWithOffsets(current, innerStart, close);
+            if (!decoded.Contains('.')) continue;
+            var hasVaultOrSep = decoded.IndexOfAny(new[] { '\u001E', '\u001F', '/', '\\', '\r', '\n', '"' }) >= 0;
+            var followedByAt = close + 1 < current.Length && EmailAtLength(current, close + 1) > 0;
+            if (!hasVaultOrSep && !followedByAt && EndsWithFilenameExt(decoded, 0, decoded.Length))
+            {
+                sb ??= new StringBuilder(current.Length);
+                sb.Append(current, copied, innerStart - copied).Append("[redacted-path]");
+                copied = close;
+                continue;
+            }
+            var match = BareFilenameRegex.Match(decoded);
+            while (match.Success)
+            {
+                var g2 = match.Groups[2];
+                var rawPrefixEnd = rawOffsets[g2.Index + g2.Length];
+                var rawEnd = rawOffsets[match.Index + match.Length];
+                sb ??= new StringBuilder(current.Length);
+                sb.Append(current, copied, rawPrefixEnd - copied).Append("[redacted-path]");
+                copied = rawEnd;
+                match = match.NextMatch();
+            }
+        }
+        if (sb == null) return current;
+        return sb.Append(current, copied, current.Length - copied).ToString();
+    }
+
+    private static string ApplyMaskedBareFilenameRegex(string text, string masked)
+    {
+        var match = BareFilenameRegex.Match(masked);
+        if (!match.Success) return text;
+        var sb = new StringBuilder(text.Length);
+        var copied = 0;
+        while (match.Success)
+        {
+            var g2 = match.Groups[2];
+            var prefixEnd = g2.Index + g2.Length;
+            var end = match.Index + match.Length;
+            sb.Append(text, copied, prefixEnd - copied).Append("[redacted-path]");
+            copied = end;
+            match = match.NextMatch();
+        }
+        return sb.Append(text, copied, text.Length - copied).ToString();
     }
 
     private static int FindDoubleQuotedPathEnd(string text, int start, out bool hasVault, out int stopPos)
@@ -1368,9 +1471,9 @@ public sealed class CoreTelemetryService : ITelemetryService
 
     private static string RedactQuotedFilenames(string text)
     {
-        if (!text.Contains('.')) return text;
-        var result = text.Contains('"') ? RedactDoubleQuotedFilenames(text) : text;
-        return result.Contains('\'') ? RedactSingleQuotedFilenames(result) : result;
+        if (!text.Contains('.') && !text.Contains("\\u", StringComparison.Ordinal)) return text;
+        var result = text.Contains('"') && text.Contains('.') ? RedactDoubleQuotedFilenames(text) : text;
+        return result.Contains('\'') ? RedactSingleQuotedFilenamesRespectingQuotes(result) : result;
     }
 
     private static string RedactDoubleQuotedFilenames(string text)
@@ -1401,22 +1504,51 @@ public sealed class CoreTelemetryService : ITelemetryService
         return sb.Append(text, copied, text.Length - copied).ToString();
     }
 
-    private static string RedactSingleQuotedFilenames(string text)
+    private static string RedactSingleQuotedFilenamesRespectingQuotes(string text)
     {
-        var hasAt = HasEmailAt(text);
+        if (text.IndexOf('"') < 0) return RedactSingleQuotedFilenamesOnSource(text, text);
+        var spans = CollectBalancedDoubleQuoteSpans(text);
+        if (spans.Count == 0) return RedactSingleQuotedFilenamesOnSource(text, text);
+        var masked = BuildMaskedDoubleQuotes(text, spans);
+        var current = RedactSingleQuotedFilenamesOnSource(text, masked);
+        if (!ReferenceEquals(current, text))
+        {
+            if (current.IndexOf('"') < 0) return current;
+            spans = CollectBalancedDoubleQuoteSpans(current);
+        }
+        StringBuilder? sb = null;
+        var copied = 0;
+        foreach (var (open, close) in spans)
+        {
+            var innerStart = open + 1;
+            if (innerStart >= close || current.IndexOf('\'', innerStart, close - innerStart) < 0 ||
+                !ContainsDotOrUnicodeEscape(current, innerStart, close))
+            {
+                continue;
+            }
+            var (decoded, rawOffsets) = DecodeQuotedSpanWithOffsets(current, innerStart, close);
+            ApplySingleQuotedSpans(current, decoded, rawOffsets, ref sb, ref copied);
+        }
+        if (sb == null) return current;
+        return sb.Append(current, copied, current.Length - copied).ToString();
+    }
+
+    private static string RedactSingleQuotedFilenamesOnSource(string text, string scanSource)
+    {
+        var hasAt = HasEmailAt(scanSource);
         StringBuilder? sb = null;
         var copied = 0;
         var segStart = 0;
-        while (segStart < text.Length)
+        while (segStart < scanSource.Length)
         {
             var segEnd = segStart;
-            while (segEnd < text.Length && text[segEnd] is not ('\r' or '\n' or '/' or '\\' or '\u001E' or '\u001F' or '"')) segEnd++;
+            while (segEnd < scanSource.Length && scanSource[segEnd] is not ('\r' or '\n' or '/' or '\\' or '\u001E' or '\u001F')) segEnd++;
             var open = -1;
             var candidateClose = -1;
             for (var p = segStart; p < segEnd; p++)
             {
-                if (p < copied || text[p] != '\'') continue;
-                var isOpener = p == segStart || !char.IsLetterOrDigit(text[p - 1]);
+                if (p < copied || scanSource[p] != '\'') continue;
+                var isOpener = p == segStart || !char.IsLetterOrDigit(scanSource[p - 1]);
                 if (isOpener)
                 {
                     if (open < 0 || candidateClose >= 0)
@@ -1425,11 +1557,11 @@ public sealed class CoreTelemetryService : ITelemetryService
                         candidateClose = -1;
                     }
                 }
-                else if (open >= 0 && (p + 1 == segEnd || !char.IsLetterOrDigit(text[p + 1])))
+                else if (open >= 0 && (p + 1 == segEnd || !char.IsLetterOrDigit(scanSource[p + 1])))
                 {
-                    if (EndsWithFilenameExt(text, open + 1, p))
+                    if (EndsWithFilenameExt(scanSource, open + 1, p))
                     {
-                        var emailEnd = hasAt ? FindEmailTailEnd(text, p + 1) : -1;
+                        var emailEnd = hasAt ? FindEmailTailEnd(scanSource, p + 1) : -1;
                         sb ??= new StringBuilder(text.Length);
                         sb.Append(text, copied, open - copied).Append("[redacted-path]");
                         copied = emailEnd > p + 1 ? emailEnd : p + 1;
@@ -1448,6 +1580,53 @@ public sealed class CoreTelemetryService : ITelemetryService
         return sb.Append(text, copied, text.Length - copied).ToString();
     }
 
+    private static void ApplySingleQuotedSpans(
+        string text, string decoded, int[] rawOffsets, ref StringBuilder? sb, ref int copied)
+    {
+        var hasAt = HasEmailAt(decoded);
+        var decCopied = 0;
+        var segStart = 0;
+        while (segStart < decoded.Length)
+        {
+            var segEnd = segStart;
+            while (segEnd < decoded.Length && decoded[segEnd] is not ('\r' or '\n' or '/' or '\\' or '\u001E' or '\u001F')) segEnd++;
+            var open = -1;
+            var candidateClose = -1;
+            for (var p = segStart; p < segEnd; p++)
+            {
+                if (p < decCopied || decoded[p] != '\'') continue;
+                var isOpener = p == segStart || !char.IsLetterOrDigit(decoded[p - 1]);
+                if (isOpener)
+                {
+                    if (open < 0 || candidateClose >= 0)
+                    {
+                        open = p;
+                        candidateClose = -1;
+                    }
+                }
+                else if (open >= 0 && (p + 1 == segEnd || !char.IsLetterOrDigit(decoded[p + 1])))
+                {
+                    if (EndsWithFilenameExt(decoded, open + 1, p))
+                    {
+                        var emailEnd = hasAt ? FindEmailTailEnd(decoded, p + 1) : -1;
+                        var endPos = emailEnd > p + 1 ? emailEnd : p + 1;
+                        sb ??= new StringBuilder(text.Length);
+                        sb.Append(text, copied, rawOffsets[open] - copied).Append("[redacted-path]");
+                        copied = rawOffsets[endPos];
+                        decCopied = endPos;
+                        open = -1;
+                        candidateClose = -1;
+                    }
+                    else
+                    {
+                        candidateClose = p;
+                    }
+                }
+            }
+            segStart = Math.Max(segEnd + 1, decCopied);
+        }
+    }
+
     private static bool EndsWithFilenameExt(string text, int start, int end)
     {
         var extStart = end;
@@ -1456,29 +1635,56 @@ public sealed class CoreTelemetryService : ITelemetryService
         return extLen >= 1 && extLen <= 16 && extStart > start && text[extStart - 1] == '.';
     }
 
-    private static string RedactKeywordUnquotedFilenames(string text)
+    private static string RedactKeywordUnquotedFilenamesRespectingQuotes(string text)
     {
-        if (!text.Contains('.')) return text;
-        var hasAt = HasEmailAt(text);
+        if (!text.Contains('.') && !text.Contains("\\u", StringComparison.Ordinal)) return text;
+        if (text.IndexOf('"') < 0) return RedactKeywordUnquotedFilenamesOnSource(text, text);
+        var spans = CollectBalancedDoubleQuoteSpans(text);
+        if (spans.Count == 0) return RedactKeywordUnquotedFilenamesOnSource(text, text);
+        var masked = BuildMaskedDoubleQuotes(text, spans);
+        var current = RedactKeywordUnquotedFilenamesOnSource(text, masked);
+        if (!ReferenceEquals(current, text))
+        {
+            if (current.IndexOf('"') < 0) return current;
+            spans = CollectBalancedDoubleQuoteSpans(current);
+        }
+        StringBuilder? sb = null;
+        var copied = 0;
+        foreach (var (open, close) in spans)
+        {
+            var innerStart = open + 1;
+            if (innerStart >= close || !ContainsDotOrUnicodeEscape(current, innerStart, close)) continue;
+            var (decoded, rawOffsets) = DecodeQuotedSpanWithOffsets(current, innerStart, close);
+            if (!decoded.Contains('.')) continue;
+            ApplyKeywordUnquotedSpans(current, decoded, rawOffsets, ref sb, ref copied);
+        }
+        if (sb == null) return current;
+        return sb.Append(current, copied, current.Length - copied).ToString();
+    }
+
+    private static string RedactKeywordUnquotedFilenamesOnSource(string text, string scanSource)
+    {
+        if (!scanSource.Contains('.')) return text;
+        var hasAt = HasEmailAt(scanSource);
         StringBuilder? sb = null;
         var copied = 0;
         var segStart = 0;
-        while (segStart < text.Length)
+        while (segStart < scanSource.Length)
         {
             var segEnd = segStart;
-            while (segEnd < text.Length && text[segEnd] is not ('\r' or '\n' or '\u001E' or '\u001F' or '"'))
+            while (segEnd < scanSource.Length && scanSource[segEnd] is not ('\r' or '\n' or '\u001E' or '\u001F'))
             {
                 segEnd++;
             }
-            var (lastDot, lastExtEnd) = FindLastUnquotedFilenameExt(text, segStart, segEnd);
+            var (lastDot, lastExtEnd) = FindLastUnquotedFilenameExt(scanSource, segStart, segEnd);
             if (lastDot >= 0)
             {
-                var kwMatch = KeywordFilenamePrefixRegex.Match(text, segStart, lastDot - segStart);
+                var kwMatch = KeywordFilenamePrefixRegex.Match(scanSource, segStart, lastDot - segStart);
                 if (kwMatch.Success)
                 {
                     var kwEnd = kwMatch.Index + kwMatch.Length;
-                    var emailEnd = hasAt ? FindEmailTailEnd(text, lastExtEnd) : -1;
-                    if (emailEnd > 0 && !ContainsWhitespace(text, kwEnd, lastDot))
+                    var emailEnd = hasAt ? FindEmailTailEnd(scanSource, lastExtEnd) : -1;
+                    if (emailEnd > 0 && !ContainsWhitespace(scanSource, kwEnd, lastDot))
                     {
                         segStart = segEnd + 1;
                         continue;
@@ -1494,6 +1700,40 @@ public sealed class CoreTelemetryService : ITelemetryService
         if (sb == null) return text;
         sb.Append(text, copied, text.Length - copied);
         return sb.ToString();
+    }
+
+    private static void ApplyKeywordUnquotedSpans(
+        string text, string decoded, int[] rawOffsets, ref StringBuilder? sb, ref int copied)
+    {
+        var hasAt = HasEmailAt(decoded);
+        var decCopied = 0;
+        var segStart = 0;
+        while (segStart < decoded.Length)
+        {
+            var segEnd = segStart;
+            while (segEnd < decoded.Length && decoded[segEnd] is not ('\r' or '\n' or '\u001E' or '\u001F')) segEnd++;
+            var (lastDot, lastExtEnd) = FindLastUnquotedFilenameExt(decoded, segStart, segEnd);
+            if (lastDot >= 0)
+            {
+                var kwMatch = KeywordFilenamePrefixRegex.Match(decoded, segStart, lastDot - segStart);
+                if (kwMatch.Success)
+                {
+                    var kwEnd = kwMatch.Index + kwMatch.Length;
+                    var emailEnd = hasAt ? FindEmailTailEnd(decoded, lastExtEnd) : -1;
+                    if (emailEnd > 0 && !ContainsWhitespace(decoded, kwEnd, lastDot))
+                    {
+                        segStart = segEnd + 1;
+                        continue;
+                    }
+                    var endPos = emailEnd > lastExtEnd ? emailEnd : lastExtEnd;
+                    sb ??= new StringBuilder(text.Length);
+                    sb.Append(text, copied, rawOffsets[kwEnd] - copied).Append("[redacted-path]");
+                    copied = rawOffsets[endPos];
+                    decCopied = endPos;
+                }
+            }
+            segStart = Math.Max(segEnd + 1, decCopied);
+        }
     }
 
     private static string RedactAuthCredentials(string text)
