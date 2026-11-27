@@ -724,10 +724,22 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("https://example.com/users/alice@example.com"));
             Assert.Equal("https://example.com/users/[redacted-email]",
                 CoreTelemetryService.SanitizeLocalPaths("https://example.com/users/alice%40example.com"));
+            Assert.Equal("https://example.com/users/[redacted-email]",
+                CoreTelemetryService.SanitizeLocalPaths("https://example.com/users/alice%team@example.com"));
+            Assert.Equal("[redacted-email]",
+                CoreTelemetryService.SanitizeLocalPaths("alice%notes@example.com"));
             Assert.Equal("https://example.com/?[redacted]",
                 CoreTelemetryService.SanitizeLocalPaths("https://example.com/?token=abc{Secret}xyz"));
+            Assert.Equal("(https://example.com/?[redacted]).",
+                CoreTelemetryService.SanitizeLocalPaths("(https://example.com/?q=secret)."));
             Assert.Equal("[redacted-path]",
                 CoreTelemetryService.SanitizeLocalPaths("file:///private/(https://Secret/Acquisition.mov)"));
+            Assert.Equal("[redacted-path]",
+                CoreTelemetryService.SanitizeLocalPaths("file:///private/My Folder/(https://Secret/Acquisition.mov)"));
+            Assert.Equal("[redacted-path]",
+                CoreTelemetryService.SanitizeLocalPaths("/private/My Folder/(https://Secret/Acquisition.mov)"));
+            var repeated = string.Concat(Enumerable.Repeat("(https://example.com)", 500));
+            Assert.Equal(repeated, CoreTelemetryService.SanitizeLocalPaths(repeated));
             Assert.Equal("([redacted-path] https://example.com/api)",
                 CoreTelemetryService.SanitizeLocalPaths("(relative/Secret.mov and https://example.com/api)"));
             Assert.Equal("Failed for [redacted-email] with Bearer [redacted] and Bearer [redacted]",
@@ -943,6 +955,70 @@ public class CoreTelemetryServiceTests
             Assert.Equal(AlUmmahNow.Core.TelemetryConsentState.Denied, service.NativeConsentForTesting);
             Assert.Equal(0, service.PendingCount);
             Assert.False(File.Exists(siblingTmp));
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Revoked_flush_still_deletes_late_buffer_when_LastPurgeFailed_was_already_true()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var dir = Path.Combine(Path.GetTempPath(), "aun-tel-revoked-after-fail-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var bufferPath = Path.Combine(dir, "telemetry-buffer.json");
+        var siblingTmp = Path.Combine(dir, ".telemetry-buffer.json.7777.tmp");
+        try
+        {
+            var nativeStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var nativeRelease = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            using var service = new CoreTelemetryService(
+                platform: "linux",
+                appVersion: "1.0.0",
+                locale: "en",
+                videosApiBaseUrl: null,
+                userAgent: "AlUmmahNowLinux/1.0.0",
+                bufferPath: bufferPath,
+                initialEnabled: true)
+            {
+                FlushOverrideForTesting = () =>
+                {
+                    nativeStarted.TrySetResult(true);
+                    return nativeRelease.Task;
+                }
+            };
+
+            var flushTask = service.FlushAsync();
+            await nativeStarted.Task;
+
+            // Plant a sibling temp file and make dir read-only so initial opt-out sets LastPurgeFailed = true.
+            File.WriteAllText(siblingTmp, "stale");
+            File.SetUnixFileMode(dir, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+            try
+            {
+                Assert.False(service.SetConsent(TelemetryConsent.Off));
+                Assert.True(service.LastPurgeFailed);
+                await flushTask;
+            }
+            finally
+            {
+                File.SetUnixFileMode(dir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            }
+
+            // Plant the late buffer written by the in-flight flush and release it; ReleaseInFlightFlush
+            // must still delete the buffer AND preserve the prior LastPurgeFailed = true flag.
+            File.WriteAllText(bufferPath, "{\"late\":true}");
+            nativeRelease.TrySetResult(true);
+
+            var deadline = DateTime.UtcNow.AddSeconds(2);
+            while (File.Exists(bufferPath) && DateTime.UtcNow < deadline)
+            {
+                await Task.Delay(10);
+            }
+            Assert.False(File.Exists(bufferPath));
+            Assert.True(service.LastPurgeFailed);
         }
         finally
         {

@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using AlUmmahNow.Core;
@@ -30,7 +31,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     private static readonly Regex KeywordUnquotedFilenameRegex = new(@"(\b(?:open|opening|read|reading|write|writing|delete|deleting|remove|removing|rename|stat|create|creating|load|loading|save|saving|access|accessing|unlink|file|path|directory|folder|document|filename|filepath)\b(?:\s*[:=]\s*|\s+))(?!\u001E)[^\r\n\u001E\u001F]*\.(?!(?:kt|java|swift|cs|cpp|cc|c|h|hpp|rs|py|js|ts|go|rb|m|mm):\d+)[A-Za-z0-9]{1,16}\b(?!\()", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex KeywordAssignedPathRegex = new(@"(\b(?:file|path|filename|filepath)\s*[:=]\s*)(?!\u001E)[^\r\n\u001E\u001F]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex BareFilenameRegex = new(@"(^|[\r\n:=;\u001F])([ \t]*)[^\r\n:=;\u001E\u001F]*\.(?!ts:\d+)(?:mov|mp4|m4v|mkv|webm|avi|ts|m3u8|mpd|mp3|m4a|wav|aac|flac|ogg|opus|jpg|jpeg|png|gif|webp|heic|svg|pdf|txt|md|rtf|doc|docx|xls|xlsx|ppt|pptx|csv|json|xml|yaml|yml|toml|ini|cfg|conf|log|srt|vtt|ass|ssa|zip|tar|gz|tgz|bz2|xz|7z|rar|dmg|pkg|msi|exe|apk|aab|ipa|pem|key|crt|cer|p12|pfx|jks|keystore|db|sqlite|sqlite3|bin|dat|tmp|bak|proj|aun)\b(?!\()", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex EmailRegex = new(@"(?:[A-Za-z0-9._+-]|%(?!40)[0-9A-Fa-f]{2})+(?:@|%40)[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex EmailRegex = new(@"(?:[A-Za-z0-9._+-]|%(?!40))+(?:@|%40)[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex BearerTokenRegex = new(@"\bBearer\s+\S+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private readonly TelemetryAppInfo _app;
@@ -132,13 +133,13 @@ public sealed class CoreTelemetryService : ITelemetryService
             {
                 if (crossProcessLock != null)
                 {
-                    _lastPurgeFailed = !TryDeleteBufferFallback(ResolveForeignKeepPathLocked());
+                    TryDeleteBufferFallback(ResolveForeignKeepPathLocked());
                 }
                 else
                 {
                     TryDeleteSingleBufferAndTemps(_activeBufferPath);
-                    _lastPurgeFailed = true;
                 }
+                _lastPurgeFailed = true;
                 Log.For("telemetry").Error("telemetry disk purge failed on startup opt-out: " + ex.Message);
             }
         }
@@ -213,10 +214,49 @@ public sealed class CoreTelemetryService : ITelemetryService
             prefix += "X";
         }
         var vaultedUrls = new List<string>();
+        var scanCursor = 0;
+        var hasFileUriOnLine = false;
+        var lastNonWsChar = '\0';
+        var lastNonWrapperChar = '\0';
         var scrubbed = UrlVaultRegex.Replace(text, match =>
         {
+            while (scanCursor < match.Index)
+            {
+                var ch = text[scanCursor];
+                if (ch is '\r' or '\n')
+                {
+                    hasFileUriOnLine = false;
+                    lastNonWsChar = '\0';
+                    lastNonWrapperChar = '\0';
+                }
+                else
+                {
+                    if (!hasFileUriOnLine &&
+                        (ch == 'f' || ch == 'F') &&
+                        scanCursor + 7 <= text.Length &&
+                        text.AsSpan(scanCursor, 7).Equals("file://", StringComparison.OrdinalIgnoreCase) &&
+                        (scanCursor == 0 || !IsUrlSchemeChar(text[scanCursor - 1])))
+                    {
+                        hasFileUriOnLine = true;
+                    }
+                    if (!char.IsWhiteSpace(ch))
+                    {
+                        lastNonWsChar = ch;
+                    }
+                    if (ch is not ('(' or '[' or '{' or '"' or '\''))
+                    {
+                        lastNonWrapperChar = ch;
+                    }
+                }
+                scanCursor++;
+            }
+
             var raw = match.Value;
-            if (raw.StartsWith("file://", StringComparison.OrdinalIgnoreCase) || IsInsideFileUriToken(text, match.Index))
+            var precededByWs = match.Index > 0 && char.IsWhiteSpace(text[match.Index - 1]);
+            var embeddedInPath =
+                (hasFileUriOnLine && (!precededByWs || lastNonWsChar is '/' or '\\')) ||
+                lastNonWrapperChar is '/' or '\\';
+            if (raw.StartsWith("file://", StringComparison.OrdinalIgnoreCase) || embeddedInPath)
             {
                 return raw;
             }
@@ -265,24 +305,45 @@ public sealed class CoreTelemetryService : ITelemetryService
         scrubbed = KeywordUnquotedFilenameRegex.Replace(scrubbed, "$1[redacted-path]");
         scrubbed = KeywordAssignedPathRegex.Replace(scrubbed, "$1[redacted-path]");
         scrubbed = BareFilenameRegex.Replace(scrubbed, "$1$2[redacted-path]");
-        for (var i = 0; i < vaultedUrls.Count; i++)
-        {
-            scrubbed = scrubbed.Replace($"{prefix}{i}\u001F", vaultedUrls[i], StringComparison.Ordinal);
-        }
+        scrubbed = RestoreVaultedUrls(scrubbed, prefix, vaultedUrls);
         scrubbed = EmailRegex.Replace(scrubbed, "[redacted-email]");
         scrubbed = BearerTokenRegex.Replace(scrubbed, "Bearer [redacted]");
         return scrubbed;
     }
 
-    private static bool IsInsideFileUriToken(string text, int matchStart)
+    private static bool IsUrlSchemeChar(char ch) =>
+        (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch is '+' or '.' or '-';
+
+    private static string RestoreVaultedUrls(string text, string prefix, List<string> vaultedUrls)
     {
-        var tokenStart = matchStart;
-        while (tokenStart > 0 && !char.IsWhiteSpace(text[tokenStart - 1]))
+        if (vaultedUrls.Count == 0) return text;
+        var sb = new StringBuilder(text.Length);
+        var pos = 0;
+        while (pos < text.Length)
         {
-            tokenStart--;
+            var idx = text.IndexOf(prefix, pos, StringComparison.Ordinal);
+            if (idx < 0)
+            {
+                sb.Append(text, pos, text.Length - pos);
+                break;
+            }
+            sb.Append(text, pos, idx - pos);
+            var numStart = idx + prefix.Length;
+            var numEnd = text.IndexOf('\u001F', numStart);
+            if (numEnd > numStart &&
+                int.TryParse(text.AsSpan(numStart, numEnd - numStart), out var urlIndex) &&
+                (uint)urlIndex < (uint)vaultedUrls.Count)
+            {
+                sb.Append(vaultedUrls[urlIndex]);
+                pos = numEnd + 1;
+            }
+            else
+            {
+                sb.Append(prefix);
+                pos = numStart;
+            }
         }
-        return tokenStart < matchStart &&
-            text.AsSpan(tokenStart, matchStart - tokenStart).IndexOf("file://", StringComparison.OrdinalIgnoreCase) >= 0;
+        return sb.ToString();
     }
 
     private static string TrimQueryOrFragmentDelimiters(string qf, string fullText, int matchStart, out string tail)
@@ -310,7 +371,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         while (end > 1)
         {
             var last = qf[end - 1];
-            if (last is ';' or ',')
+            if (last is '.' or ';' or ',')
             {
                 end--;
             }
@@ -822,10 +883,10 @@ public sealed class CoreTelemetryService : ITelemetryService
         }
         catch (AunException ex)
         {
-            var fallbackOk = ownBufferOnly
+            _ = ownBufferOnly
                 ? TryDeleteSingleBufferAndTemps(_activeBufferPath)
                 : TryDeleteBufferFallback(keepForeignGenerationPath);
-            UpdatePurgeFailedLocked(!fallbackOk, ref purgeNotify, ref purgeNotifyValue);
+            UpdatePurgeFailedLocked(true, ref purgeNotify, ref purgeNotifyValue);
             Log.For("telemetry").Error(failureLogPrefix + ex.Message);
         }
         return !_lastPurgeFailed;
@@ -939,8 +1000,10 @@ public sealed class CoreTelemetryService : ITelemetryService
                     // persist rename after SetConsent(Denied) deleted the file; remove only the
                     // revoked flush's own generation buffer and sibling temps so a concurrently
                     // enabled newer generation in another process can never be touched.
+                    // Evaluate deletion unconditionally so a prior purge failure never skips cleanup.
+                    var deleteSucceeded = TryDeleteSingleBufferAndTemps(flushBufferPath);
                     UpdatePurgeFailedLocked(
-                        _lastPurgeFailed || !TryDeleteSingleBufferAndTemps(flushBufferPath),
+                        _lastPurgeFailed || !deleteSucceeded,
                         ref purgeNotify,
                         ref purgeNotifyValue);
                 }
