@@ -788,10 +788,14 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("progress 1/2 (https://example.com/api)"));
             Assert.Equal("progress 1/2.",
                 CoreTelemetryService.SanitizeLocalPaths("progress 1/2."));
+            Assert.Equal("progress (1/2.)",
+                CoreTelemetryService.SanitizeLocalPaths("progress (1/2.)"));
             Assert.Equal("progress 1/2. (https://example.com/api)",
                 CoreTelemetryService.SanitizeLocalPaths("progress 1/2. (https://example.com/api)"));
             Assert.Equal("opening [redacted-path]",
                 CoreTelemetryService.SanitizeLocalPaths("opening 1/2.mov"));
+            Assert.Equal("opening\u00A0[redacted-path]",
+                CoreTelemetryService.SanitizeLocalPaths("opening\u00A0Acquisition.qzx"));
             Assert.Contains("https://example.com/api",
                 CoreTelemetryService.SanitizeLocalPaths("progress \"1/2\" (https://example.com/api)"));
             Assert.DoesNotContain("private.example",
@@ -819,6 +823,8 @@ public class CoreTelemetryServiceTests
             Assert.Equal(longAlpha, CoreTelemetryService.SanitizeLocalPaths(longAlpha));
             var repeatedKeywords = string.Concat(Enumerable.Repeat("open ", 20_000)) + ".";
             Assert.Equal(repeatedKeywords, CoreTelemetryService.SanitizeLocalPaths(repeatedKeywords));
+            var repeatedQuotes = string.Concat(Enumerable.Repeat("'a ", 20_000)) + ".";
+            Assert.Equal(repeatedQuotes, CoreTelemetryService.SanitizeLocalPaths(repeatedQuotes));
             Assert.Equal("\"[redacted-path]\" (https://example.com/api)",
                 CoreTelemetryService.SanitizeLocalPaths("\"file:///a.mov\" (https://example.com/api)"));
             Assert.Equal("[redacted-path]",
