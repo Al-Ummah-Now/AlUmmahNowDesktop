@@ -758,6 +758,13 @@ public sealed class CoreTelemetryService : ITelemetryService
                 copied = objEnd;
                 return RedactTrailingPlainAuthContinuation(text, objEnd, isJsonMember, ref sb, ref copied);
             }
+            if (isJsonMember)
+            {
+                sb ??= new StringBuilder(text.Length);
+                sb.Append(text, copied, valStart - copied).Append("\"[redacted]\"");
+                copied = text.Length;
+                return text.Length;
+            }
         }
         if (isJsonMember && TryRedactJsonPrimitiveAuthValue(text, valStart, ref sb, ref copied, out var afterPrim))
         {
@@ -862,12 +869,41 @@ public sealed class CoreTelemetryService : ITelemetryService
     {
         var p = pos - 1;
         while (p >= 0 && text[p] is ' ' or '\t' or '\r' or '\n') p--;
-        return p >= 0 && text[p] is '{' or ',';
+        if (p < 0) return false;
+        if (text[p] == '{') return true;
+        if (text[p] != ',') return false;
+        var prev = p - 1;
+        while (prev >= 0 && text[prev] is ' ' or '\t' or '\r' or '\n') prev--;
+        if (prev < 0) return false;
+        var ch = text[prev];
+        if (ch is '"' or '}' or ']') return true;
+        if (ch >= '0' && ch <= '9')
+        {
+            var s = prev;
+            while (s >= 0 && text[s] is not (' ' or '\t' or '\r' or '\n' or ':' or ',' or '[')) s--;
+            return IsJsonNumberSpan(text.AsSpan(s + 1, prev - s));
+        }
+        return MatchesJsonKeywordEndingAt(text, prev, "true") ||
+            MatchesJsonKeywordEndingAt(text, prev, "false") ||
+            MatchesJsonKeywordEndingAt(text, prev, "null");
+    }
+
+    private static bool MatchesJsonKeywordEndingAt(string text, int endIdx, string keyword)
+    {
+        var start = endIdx - keyword.Length + 1;
+        if (start < 0 || !text.AsSpan(start, keyword.Length).Equals(keyword.AsSpan(), StringComparison.Ordinal))
+        {
+            return false;
+        }
+        return start == 0 || text[start - 1] is ' ' or '\t' or '\r' or '\n' or ':' or ',' or '[';
     }
 
     private static bool IsJsonMemberContinuationDelimiter(string text, int pos)
     {
-        if (text[pos] == '}') return true;
+        if (text[pos] == '}')
+        {
+            return pos + 1 >= text.Length || text[pos + 1] is ' ' or '\t' or '\r' or '\n' or ',' or '}' or ']' or ')' or ';';
+        }
         if (text[pos] != ',') return false;
         var next = SkipAuthWhitespace(text, pos + 1, allowNewlines: true);
         return next < text.Length && text[next] == '"';
@@ -876,40 +912,45 @@ public sealed class CoreTelemetryService : ITelemetryService
     private static int FindBalancedJsonObjectEnd(string text, int bracePos, ref Dictionary<int, int>? braceMap)
     {
         if (bracePos >= text.Length || text[bracePos] != '{') return -1;
-        braceMap ??= BuildJsonBraceMatchMap(text);
-        return braceMap.TryGetValue(bracePos, out var endPos) ? endPos : -1;
+        braceMap ??= new Dictionary<int, int>();
+        if (braceMap.TryGetValue(bracePos, out var cached)) return cached;
+        return ScanAndMemoizeBracesFrom(text, bracePos, braceMap);
     }
 
-    private static Dictionary<int, int> BuildJsonBraceMatchMap(string text)
+    private static int ScanAndMemoizeBracesFrom(string text, int bracePos, Dictionary<int, int> braceMap)
     {
-        var map = new Dictionary<int, int>();
         var stack = new Stack<int>();
         var noCloseQuoteBefore = -1;
-        var i = 0;
+        var i = bracePos;
         while (i < text.Length)
         {
             var c = text[i];
             if (c == '"' && i >= noCloseQuoteBefore)
             {
                 var strEnd = ScanJsonStringEnd(text, i + 1);
-                if (strEnd > 0)
-                {
-                    i = strEnd;
-                    continue;
-                }
+                if (strEnd > 0) { i = strEnd; continue; }
                 noCloseQuoteBefore = -strEnd - 1;
             }
             else if (c == '{')
             {
+                if (braceMap.TryGetValue(i, out var known))
+                {
+                    if (known > i) { i = known; continue; }
+                    while (stack.Count > 0) braceMap[stack.Pop()] = -1;
+                    return -1;
+                }
                 stack.Push(i);
             }
             else if (c == '}' && stack.Count > 0)
             {
-                map[stack.Pop()] = i + 1;
+                var open = stack.Pop();
+                braceMap[open] = i + 1;
+                if (stack.Count == 0) return i + 1;
             }
             i++;
         }
-        return map;
+        while (stack.Count > 0) braceMap[stack.Pop()] = -1;
+        return -1;
     }
 
     private static int ScanJsonStringEnd(string text, int start)
@@ -971,6 +1012,13 @@ public sealed class CoreTelemetryService : ITelemetryService
                     copied = objEnd;
                     k = objEnd;
                     continue;
+                }
+                if (isJsonMember)
+                {
+                    sb ??= new StringBuilder(text.Length);
+                    sb.Append(text, copied, k - copied).Append("\"[redacted]\"");
+                    copied = text.Length;
+                    return text.Length;
                 }
             }
             if (c is ' ' or '\t' or ',') { k++; continue; }

@@ -1029,6 +1029,14 @@ public class CoreTelemetryServiceTests
             var scrubbedPadded = CoreTelemetryService.SanitizeLocalPaths(paddedUnmatched);
             Assert.DoesNotContain("opaqueSecret123", scrubbedPadded);
             Assert.EndsWith("{\"Authorization\":\"[redacted]\",\"status\":\"safe\"}", scrubbedPadded);
+            Assert.Equal("note \" {\"Authorization\":\"[redacted]\",\"status\":\"safe\"}",
+                CoreTelemetryService.SanitizeLocalPaths("note \" {\"Authorization\":{\"token\":\n\"opaqueSecret123\"\n},\"status\":\"safe\"}"));
+            Assert.Equal("{\"Authorization\":\"[redacted]\"",
+                CoreTelemetryService.SanitizeLocalPaths("{\"Authorization\":{\n\"token\":\"opaqueSecret123\"\n"));
+            Assert.Equal("prefix, \"Authorization\": \"[redacted]\" [redacted]",
+                CoreTelemetryService.SanitizeLocalPaths("prefix, \"Authorization\": \"firstValue\" }opaqueSecret123"));
+            Assert.Equal("{\"status\":401,\"Authorization\":\"[redacted]\"}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"status\":401,\"Authorization\":\"opaqueSecret123\"}"));
             Assert.Equal("Authorization: [[redacted]]\r\nNextHeader: safe",
                 CoreTelemetryService.SanitizeLocalPaths("Authorization: [firstValue]\r\nNextHeader: safe"));
             Assert.Equal("{\n  \"Authorization\": \"[redacted]\"\n  }",
