@@ -17,7 +17,7 @@ namespace AlUmmahNow.CoreBridge.Native;
 public sealed class CoreTelemetryService : ITelemetryService
 {
     private static readonly Regex UrlVaultRegex = new(@"(?<![A-Za-z0-9+.-/\\])([A-Za-z][A-Za-z0-9+.-]+://(?:\[([^\]\s""'<>\\{}\r\n]+)\]|(?:[A-Za-z0-9._~!$&'*+;=-]|%[0-9A-Fa-f]{2})+)(?::\d+)?(?:/(?:(?!(?:file://|[A-Za-z]:[\\/]))(?:[^\s""<>\\{},()\[\]?#\r\n]|\([^\s""<>\\{},()\[\]/:\\?#]+\)|\[[^\s""<>\\{},()\[\]/:\\?#]+\]))*)?)([?#][^\s""<>\r\n]*)?(?=$|[\s""'<>\\{},;()\[\]]|file://|[A-Za-z]:[\\/])", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex FileUriRegex = new(@"(?<![A-Za-z0-9+.-])file://[^\s\r\n\u001E]+(?:(?>[ \t]+)(?![\(\[\{""']{0,2}\u001E)[^\s\r\n\u001E]+)*", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex FileUriRegex = new(@"(?<![A-Za-z0-9+.-])file://(?>[^\s\r\n\u001E]+)(?:(?>[^\S\r\n]+)(?!(?:[\(\[\{""'](?>[^\S\r\n]*)){0,2}\u001E)(?>[^\s\r\n\u001E]+))*", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex ParenPathRegex = new(@"(\()(?:/|~/|[A-Za-z]:[\\/]|\\\\)[^()\r\n\u001E]+(\))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex ParenRelativeSlashPathRegex = new(@"(\()(?!HTTP/\d)(?!TLS/\d)(?!SSL/\d)[^\s/\\""'<>()\[\]{}:,;\u001E\u001F]+/[^()\r\n\u001E]+(\))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex WindowsPathRegex = new(@"(?:[A-Za-z]:[\\/]|\\\\)(?:(?!\s+\u001E)[^\r\n\u001E])+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -280,7 +280,10 @@ public sealed class CoreTelemetryService : ITelemetryService
 
             var raw = match.Value;
             var afterPathSep = lastNonWsOrWrapperChar is '/' or '\\';
-            var embeddedInPath = fileUriQuote != '\0' || (!wsBeforeRun && (hasFileUriOnLine || afterPathSep));
+            var embeddedInPath =
+                fileUriQuote != '\0' ||
+                (!wsBeforeRun && (hasFileUriOnLine || afterPathSep)) ||
+                (hasFileUriOnLine && inWrapperRun && afterPathSep);
             if (raw.StartsWith("file://", StringComparison.OrdinalIgnoreCase) || embeddedInPath)
             {
                 return raw;
