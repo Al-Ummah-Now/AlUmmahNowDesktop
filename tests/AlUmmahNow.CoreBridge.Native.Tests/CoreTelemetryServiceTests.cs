@@ -1590,6 +1590,28 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("{\"m\":\"\\\"Bearer opaqueSecret123\\\"tail\",\"next\":1}"));
             Assert.Equal("{\"m\":\"Bearer [redacted]\\nX-Public: ok\"}",
                 CoreTelemetryService.SanitizeLocalPaths("{\"m\":\"Bearer secret\\nX-Public: ok\"}"));
+            Assert.Equal("{\"Cookie \":\"[redacted]\"}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"Cookie \":\"session=opaqueSecret123\"}"));
+            Assert.Equal("[[\"Cookie\",\"[redacted]\"]]",
+                CoreTelemetryService.SanitizeLocalPaths("[[\"Cookie\",\"session=opaqueSecret123\"]]"));
+            Assert.Equal("[[\"Authorization\",\"[redacted]\"]]",
+                CoreTelemetryService.SanitizeLocalPaths("[[\"Authorization\",\"opaqueSecret123\"]]"));
+            Assert.Equal("{\"m\":\"[[\\\"Cookie\\\",\\\"[redacted]\\\"]]\"}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"m\":\"[[\\\"Cookie\\\",\\\"opaqueSecret123\\\"]]\"}"));
+            Assert.Equal("[\"Authorization\",\"Cookie\",\"Accept\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"Authorization\",\"Cookie\",\"Accept\"]"));
+            Assert.Equal("{\\\"Authorization\\\":\\\"[redacted]\\\"}",
+                CoreTelemetryService.SanitizeLocalPaths("{\\\"Authorization\\\":\\\"opaqueSecret123\\\"}"));
+            Assert.Equal("{\\\"Cookie\\\":\\\"[redacted]\\\"}",
+                CoreTelemetryService.SanitizeLocalPaths("{\\\"Cookie\\\":\\\"opaqueSecret123\\\"}"));
+            Assert.Equal("{\"m\":\"auth = {\\\"a\\\":1,\\\"Cookie\\\":\\\"[redacted]\\\"}; next\",\"next\":1}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"m\":\"auth = {\\\"a\\\":1,\\\"Cookie\\\":\\\"opaqueSecret123\\\"}; next\",\"next\":1}"));
+            Assert.Equal("{\"m\":\"Bearer \\\"[redacted]\\\"tail\",\"next\":1}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"m\":\"Bearer \\\"opaqueSecret123\\\"tail\",\"next\":1}"));
+            Assert.Equal("{\"a\":\"Bearer \",\"b\":\"safe\"}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"a\":\"Bearer \",\"b\":\"safe\"}"));
+            Assert.Equal("{\"m\":\"literal=\\\"[redacted-path]\\\"tail\",\"next\":1}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"m\":\"literal=\\\"file:///tmp/private.mov\\\"tail\",\"next\":1}"));
             Assert.Equal("Bearer [redacted]",
                 CoreTelemetryService.SanitizeLocalPaths("Bearer " + new string('A', 10000)));
             Assert.Equal("{\"m\":\"literal=\\\"[redacted-path]\\\"tail\",\"next\":1}",
