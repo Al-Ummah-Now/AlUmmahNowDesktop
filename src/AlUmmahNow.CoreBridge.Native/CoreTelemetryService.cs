@@ -627,9 +627,14 @@ public sealed class CoreTelemetryService : ITelemetryService
             {
                 localStart--;
             }
-            while (localStart < i && text[localStart] is '\'' or '{' or '}')
+            var trimmedStart = localStart;
+            while (trimmedStart < i && IsEmailLeadingWrapper(text[trimmedStart]))
             {
-                localStart++;
+                trimmedStart++;
+            }
+            if (trimmedStart < i)
+            {
+                localStart = trimmedStart;
             }
             var domStart = i + atLen;
             var domEnd = localStart < i ? FindEmailDomainEnd(text, domStart) : -1;
@@ -690,17 +695,20 @@ public sealed class CoreTelemetryService : ITelemetryService
             or System.Globalization.UnicodeCategory.SpacingCombiningMark
             or System.Globalization.UnicodeCategory.EnclosingMark;
 
+    private static bool IsEmailLeadingWrapper(char ch)
+    {
+        if (ch is '\'' or '{' or '}') return true;
+        if (ch < 0x80 || char.IsSurrogate(ch)) return false;
+        return char.GetUnicodeCategory(ch) is
+            System.Globalization.UnicodeCategory.OpenPunctuation or
+            System.Globalization.UnicodeCategory.InitialQuotePunctuation;
+    }
+
     private static bool IsNonAsciiEmailLocalChar(char ch)
     {
         if (ch < 0x80) return false;
         if (char.IsSurrogate(ch)) return true;
-        if (char.IsWhiteSpace(ch) || char.IsControl(ch)) return false;
-        if (ch is '\u3001' or '\u3002' or '\uFF0C' or '\uFF1B' or '\uFF1A' or '\u060C' or '\u061B') return false;
-        return char.GetUnicodeCategory(ch) is not (
-            System.Globalization.UnicodeCategory.OpenPunctuation or
-            System.Globalization.UnicodeCategory.ClosePunctuation or
-            System.Globalization.UnicodeCategory.InitialQuotePunctuation or
-            System.Globalization.UnicodeCategory.FinalQuotePunctuation);
+        return !char.IsWhiteSpace(ch) && !char.IsControl(ch);
     }
 
     private static bool IsEmailLocalChar(string text, int pos)
