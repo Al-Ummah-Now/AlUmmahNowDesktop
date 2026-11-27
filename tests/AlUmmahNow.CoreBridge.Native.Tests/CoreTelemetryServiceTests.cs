@@ -1265,6 +1265,36 @@ public class CoreTelemetryServiceTests
             Assert.Equal("'https://example.test/webhook/[redacted]",
                 CoreTelemetryService.SanitizeLocalPaths(
                     "'https://example.test/webhook/fakeToken('unclosed opaqueSecret123"));
+            Assert.Equal("[\"https://example.test/webhook/[redacted]\",123,\")public\"]",
+                CoreTelemetryService.SanitizeLocalPaths(
+                    "[\"https://example.test/webhook/fakeToken('open\",123,\")public\"]"));
+            Assert.Equal("[\"https://example.test/webhook/[redacted]\",\")public-text\"]",
+                CoreTelemetryService.SanitizeLocalPaths(
+                    "[\"https://example.test/webhook/fakeToken('a\",\")public-text\"]"));
+            Assert.Equal("[\"see https://example.test/webhook/[redacted]\",123,\")public\"]",
+                CoreTelemetryService.SanitizeLocalPaths(
+                    "[\"see https://example.test/webhook/fakeToken('open\",123,\")public\"]"));
+            Assert.Equal("[\"see https://example.test/webhook/[redacted]\"]",
+                CoreTelemetryService.SanitizeLocalPaths(
+                    "[\"see https://example.test/webhook/fakeToken('a)first opaqueSecret123')\"]"));
+            Assert.Equal("[\"https://example.test/webhook/[redacted]\"]",
+                CoreTelemetryService.SanitizeLocalPaths(
+                    "[\"https://example.test/webhook/fakeToken(\\\"opaqueSecret123)\"]"));
+            Assert.Equal("[\"https://example.test/webhook/[redacted]\"]",
+                CoreTelemetryService.SanitizeLocalPaths(
+                    "[\"https://example.test/webhook/fakeToken(\\\"opaqueSecret123\\\")\"]"));
+            Assert.Equal("[\"https://example.test/webhook/[redacted]\",\"public\"]",
+                CoreTelemetryService.SanitizeLocalPaths(
+                    "[\"https://example.test/webhook/fakeToken(\\\"first opaqueSecret123\\\")\",\"public\"]"));
+            Assert.Equal("[\"https://example.test/webhook/[redacted]\"]",
+                CoreTelemetryService.SanitizeLocalPaths(
+                    "[\"https://example.test/webhook/fakeToken\\\"opaqueSecret123\"]"));
+            Assert.Equal("[\"https://example.com/api{1:\\\"see https://other.com/x?[redacted]\\\"}?[redacted]\"]",
+                CoreTelemetryService.SanitizeLocalPaths(
+                    "[\"https://example.com/api{1:\\\"see https://other.com/x?token=opaqueSecret123\\\"}?outer=value\"]"));
+            Assert.Equal("[\"https://example.com/api?[redacted]\"]",
+                CoreTelemetryService.SanitizeLocalPaths(
+                    "[\"https://example.com/api?token=opaqueSecret123\\\"moreSecret\"]"));
             var repeatedEqualsQuotedUrls = string.Join("=", Enumerable.Repeat("https://a.test/x{a:\"https://b.test/x\"}", 500));
             Assert.Equal(repeatedEqualsQuotedUrls, CoreTelemetryService.SanitizeLocalPaths(repeatedEqualsQuotedUrls));
             Assert.Equal("https://example.test/webhook/[redacted]",
