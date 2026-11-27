@@ -308,20 +308,16 @@ public sealed class CoreTelemetryService : ITelemetryService
             }
             var rawUrl = text.Substring(start, baseEnd - start);
             var redactedUrl = RedactUrlPathSecrets(url);
-            if (!hasQf && (tail.Length == 0 || tail == ";") && totalEnd < text.Length)
+            if (!hasQf && (tail.Length == 0 || tail == ";") && totalEnd < text.Length &&
+                text[totalEnd] is ',' or '(' or '[' or ')' or ']')
             {
-                var nextCh = text[totalEnd];
-                var canContinue = nextCh == ','
-                    ? !ShouldStopAtUrlComma(text, totalEnd)
-                    : nextCh is '(' or '[' && !StartsEmbeddedFilesystemPath(text, totalEnd + 1);
-                if (canContinue)
+                var withNext = rawUrl + text[totalEnd];
+                var probe = RedactUrlPathSecrets(withNext);
+                if (probe != withNext && probe.EndsWith("[redacted]", StringComparison.Ordinal) &&
+                    TryExtendRedactedWebhookContinuation(text, probe, start, ref totalEnd, out var extUrl, out var extTail))
                 {
-                    var withNext = rawUrl + nextCh;
-                    var probe = RedactUrlPathSecrets(withNext);
-                    if (probe != withNext && probe.EndsWith("[redacted]", StringComparison.Ordinal))
-                    {
-                        redactedUrl = ExtendRedactedWebhookCommaContinuation(text, probe, start, ref totalEnd, out tail);
-                    }
+                    redactedUrl = extUrl;
+                    tail = extTail;
                 }
             }
             sb ??= new StringBuilder(text.Length);
@@ -338,12 +334,13 @@ public sealed class CoreTelemetryService : ITelemetryService
         return sb.ToString();
     }
 
-    private static string ExtendRedactedWebhookCommaContinuation(
-        string text, string redactedUrl, int urlStart, ref int totalEnd, out string tail)
+    private static bool TryExtendRedactedWebhookContinuation(
+        string text, string probeUrl, int urlStart, ref int totalEnd, out string resultUrl, out string tail)
     {
+        resultUrl = probeUrl;
         tail = string.Empty;
-        var p = ScanUrlPath(text, totalEnd, out var truncated, allowCommas: true);
-        if (!truncated && p < text.Length && text[p] is '?' or '#')
+        var p = ScanWebhookContinuation(text, totalEnd);
+        if (p > totalEnd && p < text.Length && text[p] is '?' or '#')
         {
             var qfStart = p;
             p++;
@@ -353,14 +350,56 @@ public sealed class CoreTelemetryService : ITelemetryService
             }
             var qf = TrimQueryOrFragmentDelimiters(text.Substring(qfStart, p - qfStart), text, urlStart, out tail);
             totalEnd = p;
-            return redactedUrl + qf[0] + "[redacted]";
+            resultUrl = probeUrl + qf[0] + "[redacted]";
+            return true;
         }
-        var end = p;
-        while (end > totalEnd && text[end - 1] is ',' or ';') end--;
-        if (urlStart > 0 && text[urlStart - 1] == '\'' && end > totalEnd && text[end - 1] == '\'') end--;
+        var end = TrimWebhookContinuationEnd(text, urlStart, totalEnd, p);
+        if (end <= totalEnd) return false;
         tail = text.Substring(end, p - end);
         totalEnd = p;
-        return redactedUrl;
+        return true;
+    }
+
+    private static int ScanWebhookContinuation(string text, int start)
+    {
+        var p = start;
+        while (p < text.Length)
+        {
+            if (IsFileSchemeAt(text, p) || IsWindowsDriveAt(text, p)) break;
+            var ch = text[p];
+            if (char.IsWhiteSpace(ch) || ch is '"' or '<' or '>' or '\\' or '{' or '}' or '?' or '#' or '\r' or '\n')
+            {
+                break;
+            }
+            if (ch is '(' or '[' or ',' && p + 1 < text.Length && StartsEmbeddedFilesystemPath(text, p + 1)) break;
+            p++;
+        }
+        return p;
+    }
+
+    private static int TrimWebhookContinuationEnd(string text, int urlStart, int minEnd, int scanEnd)
+    {
+        var excessParens = 0;
+        var excessBrackets = 0;
+        for (var i = urlStart; i < scanEnd; i++)
+        {
+            if (text[i] == '(') excessParens--;
+            else if (text[i] == ')') excessParens++;
+            else if (text[i] == '[') excessBrackets--;
+            else if (text[i] == ']') excessBrackets++;
+        }
+        var precededByQuote = urlStart > 0 && text[urlStart - 1] == '\'';
+        var end = scanEnd;
+        while (end > minEnd)
+        {
+            var c = text[end - 1];
+            if (c is ',' or ';') { end--; continue; }
+            if (c == '\'' && precededByQuote) { end--; continue; }
+            if (c == ')' && excessParens > 0) { excessParens--; end--; continue; }
+            if (c == ']' && excessBrackets > 0) { excessBrackets--; end--; continue; }
+            break;
+        }
+        return end;
     }
 
     private static readonly Regex WebhookPathTokenRegex = new(
@@ -395,6 +434,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         {
             var g1 = m.Groups[1];
             var secretStart = origOffsets[g1.Index + g1.Length];
+            if (secretStart < copied) continue;
             var secretEnd = origOffsets[m.Index + m.Length];
             if (stopAtLiteralSlash)
             {
@@ -403,7 +443,6 @@ public sealed class CoreTelemetryService : ITelemetryService
                     secretEnd++;
                 }
             }
-            if (secretStart < copied) continue;
             sb.Append(url, copied, secretStart - copied).Append("[redacted]");
             copied = secretEnd;
         }
@@ -547,7 +586,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     private static bool IsUrlHostChar(char ch) =>
         IsAsciiAlphaNum(ch) || ch is '.' or '_' or '~' or '!' or '$' or '&' or '\'' or '*' or '+' or ';' or '=' or '-';
 
-    private static int ScanUrlPath(string text, int p, out bool truncated, bool allowCommas = false)
+    private static int ScanUrlPath(string text, int p, out bool truncated)
     {
         truncated = false;
         var openPositions = new List<int>();
@@ -560,17 +599,10 @@ public sealed class CoreTelemetryService : ITelemetryService
             {
                 break;
             }
-            if (ch == ',')
-            {
-                var nextIsQf = p + 1 < text.Length && text[p + 1] is '?' or '#';
-                if (!nextIsQf && (!allowCommas || (openChars.Count == 0 && ShouldStopAtUrlComma(text, p)))) break;
-            }
+            if (ch == ',' && !(p + 1 < text.Length && text[p + 1] is '?' or '#')) break;
             if (ch is '(' or '[')
             {
-                var blocked = allowCommas
-                    ? StartsEmbeddedFilesystemPath(text, p + 1)
-                    : StartsEmbeddedPathInsideGroup(text, p + 1);
-                if (blocked) break;
+                if (StartsEmbeddedPathInsideGroup(text, p + 1)) break;
                 openPositions.Add(p);
                 openChars.Add(ch);
                 p++;
@@ -585,28 +617,15 @@ public sealed class CoreTelemetryService : ITelemetryService
                 p++;
                 continue;
             }
-            if (!allowCommas && openChars.Count > 0 && ch == ':') break;
+            if (openChars.Count > 0 && ch == ':') break;
             p++;
         }
-        if (!allowCommas && openPositions.Count > 0)
+        if (openPositions.Count > 0)
         {
             truncated = true;
             return openPositions[0];
         }
         return p;
-    }
-
-    private static bool ShouldStopAtUrlComma(string text, int commaPos)
-    {
-        var nextPos = commaPos + 1;
-        if (nextPos >= text.Length) return true;
-        var next = text[nextPos];
-        if (char.IsWhiteSpace(next) ||
-            next is '"' or '<' or '>' or '\\' or '{' or '}' or ')' or ']' or '\r' or '\n')
-        {
-            return true;
-        }
-        return StartsEmbeddedFilesystemPath(text, nextPos);
     }
 
     private static bool StartsEmbeddedFilesystemPath(string text, int nextPos)
