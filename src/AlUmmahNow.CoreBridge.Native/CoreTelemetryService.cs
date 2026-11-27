@@ -1198,7 +1198,43 @@ public sealed class CoreTelemetryService : ITelemetryService
         for (var i = start; i < end; i++)
         {
             var ch = text[i];
-            if (ch == '.' || (ch == '\\' && i + 5 < end && text[i + 1] == 'u')) return true;
+            if (ch == '.') return true;
+            if (ch == '\\' && i + 1 < end)
+            {
+                if (text[i + 1] == 'u' && i + 5 < end) return true;
+                i++;
+            }
+        }
+        return false;
+    }
+
+    private static bool ContainsQuoteOrQuoteEscape(string text, int start, int end)
+    {
+        for (var i = start; i < end; i++)
+        {
+            var ch = text[i];
+            if (ch == '\'') return true;
+            if (ch == '\\' && i + 1 < end)
+            {
+                var next = text[i + 1];
+                if (next == '"' || (next == 'u' && i + 5 < end)) return true;
+                i++;
+            }
+        }
+        return false;
+    }
+
+    private static bool ContainsSingleQuoteOrUnicodeEscape(string text, int start, int end)
+    {
+        for (var i = start; i < end; i++)
+        {
+            var ch = text[i];
+            if (ch == '\'') return true;
+            if (ch == '\\' && i + 1 < end)
+            {
+                if (text[i + 1] == 'u' && i + 5 < end) return true;
+                i++;
+            }
         }
         return false;
     }
@@ -1220,13 +1256,20 @@ public sealed class CoreTelemetryService : ITelemetryService
         foreach (var (open, close) in spans)
         {
             var innerStart = open + 1;
-            if (innerStart >= close || current.IndexOf('\'', innerStart, close - innerStart) < 0) continue;
-            var inner = current.Substring(innerStart, close - innerStart);
-            var scrubbed = KeywordQuotedPathRegex.Replace(inner, "$1[redacted-path]");
-            if (scrubbed == inner) continue;
-            sb ??= new StringBuilder(current.Length);
-            sb.Append(current, copied, innerStart - copied).Append(scrubbed);
-            copied = close;
+            if (innerStart >= close || !ContainsQuoteOrQuoteEscape(current, innerStart, close)) continue;
+            var (decoded, rawOffsets) = DecodeQuotedSpanWithOffsets(current, innerStart, close);
+            if (!decoded.Contains('\'') && !decoded.Contains('"')) continue;
+            var match = KeywordQuotedPathRegex.Match(decoded);
+            while (match.Success)
+            {
+                var g1 = match.Groups[1];
+                var rawPrefixEnd = rawOffsets[g1.Index + g1.Length];
+                var rawEnd = rawOffsets[match.Index + match.Length];
+                sb ??= new StringBuilder(current.Length);
+                sb.Append(current, copied, rawPrefixEnd - copied).Append("[redacted-path]");
+                copied = rawEnd;
+                match = match.NextMatch();
+            }
         }
         if (sb == null) return current;
         return sb.Append(current, copied, current.Length - copied).ToString();
@@ -1472,23 +1515,63 @@ public sealed class CoreTelemetryService : ITelemetryService
     private static string RedactQuotedFilenames(string text)
     {
         if (!text.Contains('.') && !text.Contains("\\u", StringComparison.Ordinal)) return text;
-        var result = text.Contains('"') && text.Contains('.') ? RedactDoubleQuotedFilenames(text) : text;
-        return result.Contains('\'') ? RedactSingleQuotedFilenamesRespectingQuotes(result) : result;
+        var result = text.Contains('"') ? RedactDoubleQuotedFilenamesRespectingQuotes(text) : text;
+        return result.Contains('\'') || result.Contains("\\u", StringComparison.Ordinal)
+            ? RedactSingleQuotedFilenamesRespectingQuotes(result)
+            : result;
     }
 
-    private static string RedactDoubleQuotedFilenames(string text)
+    private static string RedactDoubleQuotedFilenamesRespectingQuotes(string text)
     {
+        var spans = CollectBalancedDoubleQuoteSpans(text);
+        if (spans.Count == 0) return RedactDoubleQuotedFilenamesOnSource(text, text);
+        var masked = BuildMaskedDoubleQuotes(text, spans);
+        var current = RedactDoubleQuotedFilenamesOnSource(text, masked);
+        if (!ReferenceEquals(current, text))
+        {
+            if (current.IndexOf('"') < 0) return current;
+            spans = CollectBalancedDoubleQuoteSpans(current);
+        }
+        StringBuilder? sb = null;
+        var copied = 0;
+        foreach (var (open, close) in spans)
+        {
+            var innerStart = open + 1;
+            if (innerStart >= close || !ContainsDotOrUnicodeEscape(current, innerStart, close)) continue;
+            var (decoded, rawOffsets) = DecodeQuotedSpanWithOffsets(current, innerStart, close);
+            if (!decoded.Contains('.')) continue;
+            var hasSegStop = decoded.IndexOfAny(new[] { '\r', '\n', '/', '\\', '\u001E', '\u001F' }) >= 0;
+            var followedByAt = close + 1 < current.Length && EmailAtLength(current, close + 1) > 0;
+            if (!hasSegStop && !followedByAt && EndsWithFilenameExt(decoded, 0, decoded.Length))
+            {
+                sb ??= new StringBuilder(current.Length);
+                sb.Append(current, copied, innerStart - copied).Append("[redacted-path]");
+                copied = close;
+                continue;
+            }
+            if (decoded.Contains('"'))
+            {
+                ApplyDoubleQuotedSpans(current, decoded, rawOffsets, ref sb, ref copied);
+            }
+        }
+        if (sb == null) return current;
+        return sb.Append(current, copied, current.Length - copied).ToString();
+    }
+
+    private static string RedactDoubleQuotedFilenamesOnSource(string text, string scanSource)
+    {
+        if (!scanSource.Contains('.')) return text;
         StringBuilder? sb = null;
         var copied = 0;
         var i = 0;
-        while (i < text.Length)
+        while (i < scanSource.Length)
         {
-            if (text[i] != '"') { i++; continue; }
+            if (scanSource[i] != '"') { i++; continue; }
             var j = i + 1;
-            while (j < text.Length && text[j] is not ('"' or '\r' or '\n' or '/' or '\\' or '\u001E' or '\u001F')) j++;
-            if (j < text.Length && text[j] == '"' &&
-                !(j + 1 < text.Length && EmailAtLength(text, j + 1) > 0) &&
-                EndsWithFilenameExt(text, i + 1, j))
+            while (j < scanSource.Length && scanSource[j] is not ('"' or '\r' or '\n' or '/' or '\\' or '\u001E' or '\u001F')) j++;
+            if (j < scanSource.Length && scanSource[j] == '"' &&
+                !(j + 1 < scanSource.Length && EmailAtLength(scanSource, j + 1) > 0) &&
+                EndsWithFilenameExt(scanSource, i + 1, j))
             {
                 sb ??= new StringBuilder(text.Length);
                 sb.Append(text, copied, i - copied).Append("\"[redacted-path]\"");
@@ -1497,11 +1580,38 @@ public sealed class CoreTelemetryService : ITelemetryService
             }
             else
             {
-                i = j < text.Length && text[j] == '"' ? j : j + 1;
+                i = j < scanSource.Length && scanSource[j] == '"' ? j : j + 1;
             }
         }
         if (sb == null) return text;
         return sb.Append(text, copied, text.Length - copied).ToString();
+    }
+
+    private static void ApplyDoubleQuotedSpans(
+        string text, string decoded, int[] rawOffsets, ref StringBuilder? sb, ref int copied)
+    {
+        var i = 0;
+        while (i < decoded.Length)
+        {
+            if (decoded[i] != '"') { i++; continue; }
+            var j = i + 1;
+            while (j < decoded.Length && decoded[j] is not ('"' or '\r' or '\n' or '/' or '\\' or '\u001E' or '\u001F')) j++;
+            if (j < decoded.Length && decoded[j] == '"' &&
+                !(j + 1 < decoded.Length && EmailAtLength(decoded, j + 1) > 0) &&
+                EndsWithFilenameExt(decoded, i + 1, j))
+            {
+                var rawInnerStart = rawOffsets[i + 1];
+                var rawInnerEnd = rawOffsets[j];
+                sb ??= new StringBuilder(text.Length);
+                sb.Append(text, copied, rawInnerStart - copied).Append("[redacted-path]");
+                copied = rawInnerEnd;
+                i = j + 1;
+            }
+            else
+            {
+                i = j < decoded.Length && decoded[j] == '"' ? j : j + 1;
+            }
+        }
     }
 
     private static string RedactSingleQuotedFilenamesRespectingQuotes(string text)
@@ -1521,12 +1631,13 @@ public sealed class CoreTelemetryService : ITelemetryService
         foreach (var (open, close) in spans)
         {
             var innerStart = open + 1;
-            if (innerStart >= close || current.IndexOf('\'', innerStart, close - innerStart) < 0 ||
+            if (innerStart >= close || !ContainsSingleQuoteOrUnicodeEscape(current, innerStart, close) ||
                 !ContainsDotOrUnicodeEscape(current, innerStart, close))
             {
                 continue;
             }
             var (decoded, rawOffsets) = DecodeQuotedSpanWithOffsets(current, innerStart, close);
+            if (!decoded.Contains('\'') || !decoded.Contains('.')) continue;
             ApplySingleQuotedSpans(current, decoded, rawOffsets, ref sb, ref copied);
         }
         if (sb == null) return current;

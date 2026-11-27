@@ -1426,6 +1426,24 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("[\"secret\\u002epdf\"]"));
             Assert.Equal("[\"read [redacted-path] pending\"]",
                 CoreTelemetryService.SanitizeLocalPaths("[\"read Private\\\"Merger.custom pending\"]"));
+            Assert.Equal("[\"file [redacted-path]\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"file \\u0027Acquisition\\u0027\"]"));
+            Assert.Equal("[\"file [redacted-path]\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"file \\\"Acquisition\\\"\"]"));
+            Assert.Equal("[\"file [redacted-path]\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"file \\u0022Acquisition\\u0022\"]"));
+            Assert.Equal("[\"file [redacted-path]\",\"public\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"file \\\"Acquisition\\\"\",\"public\"]"));
+            Assert.Equal("[\"file [redacted-path] and path [redacted-path]\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"file \\\"Acquisition\\\" and path \\\"Secret\\\"\"]"));
+            Assert.Equal("[\"[redacted-path] pending\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"\\u0027Secret.custom\\u0027 pending\"]"));
+            Assert.Equal("[\"\\\"[redacted-path]\\\" pending\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"\\\"Secret.custom\\\" pending\"]"));
+            Assert.Equal("[\"\\u0022[redacted-path]\\u0022 pending\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"\\u0022Secret.custom\\u0022 pending\"]"));
+            Assert.Equal("[\"[redacted-path]\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"Secret\\\"file.custom\"]"));
             var manyPublic = "[" + string.Join(",", Enumerable.Repeat("\"public\"", 2000)) + "]";
             Assert.Equal(manyPublic, CoreTelemetryService.SanitizeLocalPaths(manyPublic));
             var manyNewlines = "[" + string.Join(",", Enumerable.Repeat("\"hello\\nworld\"", 2000)) + "]";
