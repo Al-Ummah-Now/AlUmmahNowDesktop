@@ -1612,10 +1612,20 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("{\"a\":\"Bearer \",\"b\":\"safe\"}"));
             Assert.Equal("{\"m\":\"literal=\\\"[redacted-path]\\\"tail\",\"next\":1}",
                 CoreTelemetryService.SanitizeLocalPaths("{\"m\":\"literal=\\\"file:///tmp/private.mov\\\"tail\",\"next\":1}"));
-            Assert.Equal("{\"Cookie\":\"[redacted]\"}",
+            Assert.Equal("{\"Cookie\\t\":\"[redacted]\"}",
                 CoreTelemetryService.SanitizeLocalPaths("{\"Cookie\\t\":\"opaqueSecret123\"}"));
-            Assert.Equal("[[\"Cookie\",\"[redacted]\"]]",
+            Assert.Equal("{\"\\tCookie\":\"[redacted]\",\"Cookie\":\"[redacted]\"}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"\\tCookie\":\"opaqueSecret123\",\"Cookie\":\"otherSecret\"}"));
+            Assert.Equal("[[\"Cookie\\t\",\"[redacted]\"]]",
                 CoreTelemetryService.SanitizeLocalPaths("[[\"Cookie\\t\",\"opaqueSecret123\"]]"));
+            Assert.DoesNotContain("opaqueSecret123",
+                CoreTelemetryService.SanitizeLocalPaths("{\"Cookie\t\":\"opaqueSecret123\"}"), StringComparison.Ordinal);
+            Assert.Equal("{\\\"\tCookie\t\\\":\\\"[redacted]\\\"}",
+                CoreTelemetryService.SanitizeLocalPaths("{\\\"\tCookie\t\\\":\\\"opaqueSecret123\\\"}"));
+            Assert.Equal("[[\\\"Authorization\\\",\\\"[redacted]\\\"\\n]]",
+                CoreTelemetryService.SanitizeLocalPaths("[[\\\"Authorization\\\",\\\"opaqueSecret123\\\"\\n]]"));
+            Assert.Equal("{\"m\":\"{\\\"Authorization\\\":\\\"[redacted]\\\"} after\",\"next\":1}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"m\":\"{\\\"Authorization\\\":\\\"opaqueSecret123\\\"} after\",\"next\":1}"));
             Assert.Equal("{\\\"Authorization\\\":[\\\"[redacted]\\\"]}",
                 CoreTelemetryService.SanitizeLocalPaths("{\\\"Authorization\\\":[123456789]}"));
             Assert.Equal("{\\\"Authorization\\\":\\\"[redacted]\\\",\\\"next\\\":1}",
