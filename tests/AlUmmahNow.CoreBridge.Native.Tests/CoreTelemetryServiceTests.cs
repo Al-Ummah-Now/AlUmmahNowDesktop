@@ -449,8 +449,8 @@ public class CoreTelemetryServiceTests
             service.AddBreadcrumb("io", "Opened /workspace/E\u0301lodie/Very Secret Client Project Name.mov\nFailed '/data/user/0/O'Brien.mov'\nRead \"/Users/O'Brien/Final.mov\"");
             service.ReportCrash(
                 "IOException",
-                "Failed reading /Private (Client).mov\n/Private Client\n/private-key\n/Users/alice/Secret<Project>.mov\n/workspace/alice/Project|Acquisition.mov\n/Client Files/Private.mov\n/workspace/alice/Project;Acquisition.mov\n'/workspace/alice/Project:2026;Acquisition.mov'\n/!Acquisition.mov\n\"/!Acquisition.mov\"\n\"C:\\Users\\Alice Smith\\Private Draft.mp4\"",
-                "at Foo.Open() in /workspace/Élodie/src/App.cs:line 42\nfile:///Users/alice/Player.cs:55\nat /Users/alice/Player.cs:77 in open()\nat Bar.Run() in \\\\fileserver\\share\\secret.mp4\n~/private/key.pem");
+                "Failed reading /Private (Client).mov\n/Private Client\n/private-key\n/Users/alice/Secret<Project>.mov\n/Users/alice/Draft:77 in open() Acquisition.mov\n/workspace/alice/Project|Acquisition.mov\nerror 42:/home/alice/private.mov\n/Client Files/Private.mov\n/workspace/alice/Project;Acquisition.mov\n'/workspace/alice/Project:2026;Acquisition.mov'\n/!Acquisition.mov\n\"/!Acquisition.mov\"\n\"C:\\Users\\Alice Smith\\Private Draft.mp4\"",
+                "at Foo.Open() in /workspace/Élodie/src/App.cs:line 42\n\"/home/alice/source.cs:88\"\nfile:///Users/alice/Player.cs:55\nat /Users/alice/Player.cs:77 in open()\nat Bar.Run() in \\\\fileserver\\share\\secret.mp4\n~/private/key.pem");
 
             Assert.True(File.Exists(bufferPath));
             var json = File.ReadAllText(bufferPath);
@@ -462,6 +462,7 @@ public class CoreTelemetryServiceTests
             Assert.DoesNotContain("client", json, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("acquisition", json, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("project>.mov", json, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("source.cs", json, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("name.mov", json, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("draft.mp4", json, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("workspace", json, StringComparison.OrdinalIgnoreCase);
@@ -471,6 +472,7 @@ public class CoreTelemetryServiceTests
             Assert.Contains(":line 42", json, StringComparison.Ordinal);
             Assert.Contains("[redacted-path]:55", json, StringComparison.Ordinal);
             Assert.Contains("[redacted-path]:77 in open()", json, StringComparison.Ordinal);
+            Assert.Contains("[redacted-path]:88", json, StringComparison.Ordinal);
             Assert.Contains("Bar.Run()", json, StringComparison.Ordinal);
             Assert.Contains("[redacted-path]", json, StringComparison.Ordinal);
         }
@@ -531,6 +533,64 @@ public class CoreTelemetryServiceTests
             Assert.False(service.LastPurgeFailed);
             Assert.Contains(false, events);
             Assert.Equal(0, service.PendingCount);
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Reenable_is_blocked_until_pre_revocation_flush_finishes_and_purges()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "aun-tel-reenable-flush-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var bufferPath = Path.Combine(dir, "telemetry-buffer.json");
+        try
+        {
+            var nativeStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var nativeRelease = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            using var service = new CoreTelemetryService(
+                platform: "linux",
+                appVersion: "1.0.0",
+                locale: "en",
+                videosApiBaseUrl: null,
+                userAgent: "AlUmmahNowLinux/1.0.0",
+                bufferPath: bufferPath,
+                initialEnabled: true)
+            {
+                FlushOverrideForTesting = () =>
+                {
+                    nativeStarted.TrySetResult(true);
+                    return nativeRelease.Task;
+                }
+            };
+
+            var flushTask = service.FlushAsync();
+            await nativeStarted.Task;
+
+            // Opt out while the pre-revocation flush is still running.
+            Assert.True(service.SetConsent(TelemetryConsent.Off));
+            await flushTask;
+
+            // Re-enabling must fail closed while the pre-revocation flush could still persist a late rename.
+            Assert.False(service.SetConsent(TelemetryConsent.Full));
+            Assert.Equal(TelemetryConsent.Off, service.Consent);
+
+            // Simulate the late persist rename finishing right before the flush completes.
+            File.WriteAllText(bufferPath, "{\"late\":true}");
+            nativeRelease.TrySetResult(true);
+
+            var deadline = DateTime.UtcNow.AddSeconds(2);
+            while (File.Exists(bufferPath) && DateTime.UtcNow < deadline)
+            {
+                await Task.Delay(10);
+            }
+            Assert.False(File.Exists(bufferPath));
+
+            // Once the pre-revocation flush finishes and cleans up, re-enabling succeeds cleanly.
+            Assert.True(service.SetConsent(TelemetryConsent.Full));
+            Assert.Equal(TelemetryConsent.Full, service.Consent);
         }
         finally
         {

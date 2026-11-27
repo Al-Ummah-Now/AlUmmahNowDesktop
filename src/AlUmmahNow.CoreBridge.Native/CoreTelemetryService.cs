@@ -13,12 +13,16 @@ namespace AlUmmahNow.CoreBridge.Native;
 /// </summary>
 public sealed class CoreTelemetryService : ITelemetryService
 {
-    private const string StackSuffixLookahead = @"(?=(?::line\s+\d+|:\d+(?::\d+)?)(?:[)\]]*(?=\r|\n|$)|\s+in\s+[\p{L}_][\p{L}\p{N}_.$<>]*\()|[\r\n""]|$)";
-    private const string WinStackSuffixLookahead = @"(?=(?::line\s+\d+|:\d+(?::\d+)?)(?:[)\]]*(?=\r|\n|$)|\s+in\s+[\p{L}_][\p{L}\p{N}_.$<>]*\()|[\r\n""<>|]|$)";
+    private const string StackSuffixLookahead = @"(?=(?::line\s+\d+|:\d+(?::\d+)?)(?:[)\]]*|\s+in\s+[\p{L}_][\p{L}\p{N}_.$<>]*\(\))(?=\r|\n|$)|[\r\n""]|$)";
+    private const string WinStackSuffixLookahead = @"(?=(?::line\s+\d+|:\d+(?::\d+)?)(?:[)\]]*|\s+in\s+[\p{L}_][\p{L}\p{N}_.$<>]*\(\))(?=\r|\n|$)|[\r\n""<>|]|$)";
     private static readonly Regex DoubleQuotedPathRegex = new(@"""(?:file://|(?:[A-Za-z]:[\\/]|\\\\)|~/(?!\s)|/(?=[^\s/""]))[^""\r\n]*""", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex FileUriRegex = new(@"file://[^\r\n""]+?" + StackSuffixLookahead, RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex WindowsPathRegex = new(@"(?:[A-Za-z]:[\\/]|\\\\)[^\r\n""<>|]+?" + WinStackSuffixLookahead, RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex UnixPathRegex = new(@"(?<![\p{L}\p{M}\p{N}._:/-])(?:~/|/(?=[^\s/""]))[^\r\n""]+?" + StackSuffixLookahead, RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex DoubleQuotedStackPathRegex = new(@"""(?:file://|(?:[A-Za-z]:[\\/]|\\\\)|~/(?!\s)|/(?=[^\s/""]))[^""\r\n]*?((?::line\s+\d+|:\d+(?::\d+)?)?)""", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex FileUriRegex = new(@"file://[^\r\n""]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex FileUriStackRegex = new(@"file://[^\r\n""]+?" + StackSuffixLookahead, RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex WindowsPathRegex = new(@"(?:[A-Za-z]:[\\/]|\\\\)[^\r\n""<>|]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex WindowsStackPathRegex = new(@"(?:[A-Za-z]:[\\/]|\\\\)[^\r\n""<>|]+?" + WinStackSuffixLookahead, RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex UnixPathRegex = new(@"(?<![\p{L}\p{M}\p{N}._/-])(?:~/|/(?=[^\s/""]))[^\r\n""]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex UnixStackPathRegex = new(@"(?<![\p{L}\p{M}\p{N}._/-])(?:~/|/(?=[^\s/""]))[^\r\n""]+?" + StackSuffixLookahead, RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private readonly TelemetryClient _client;
     private readonly string? _bufferPath;
@@ -27,7 +31,8 @@ public sealed class CoreTelemetryService : ITelemetryService
     private TelemetryConsent _consent = TelemetryConsent.Off;
     private CancellationTokenSource _flushCts = new();
     private int _inFlightFlushes;
-    private bool _revoked;
+    private long _consentEpoch;
+    private int _revokedFlushesRemaining;
     private bool _disposeRequested;
     private bool _clientDisposed;
     private bool _lastPurgeFailed;
@@ -129,10 +134,20 @@ public sealed class CoreTelemetryService : ITelemetryService
 
     /// <summary>
     /// Scrubs local filesystem paths and file:// URIs before crash or breadcrumb text enters telemetry.
+    /// Line numbers are preserved only when <paramref name="preserveStackLocations"/> is <c>true</c>
+    /// (stack traces) and the location terminates the frame line.
     /// </summary>
-    internal static string SanitizeLocalPaths(string text)
+    internal static string SanitizeLocalPaths(string text, bool preserveStackLocations = false)
     {
         if (string.IsNullOrEmpty(text)) return text;
+        if (preserveStackLocations)
+        {
+            var scrubbedStack = DoubleQuotedStackPathRegex.Replace(text, "[redacted-path]$1");
+            scrubbedStack = FileUriStackRegex.Replace(scrubbedStack, "[redacted-path]");
+            scrubbedStack = WindowsStackPathRegex.Replace(scrubbedStack, "[redacted-path]");
+            scrubbedStack = UnixStackPathRegex.Replace(scrubbedStack, "[redacted-path]");
+            return scrubbedStack;
+        }
         var scrubbed = DoubleQuotedPathRegex.Replace(text, "[redacted-path]");
         scrubbed = FileUriRegex.Replace(scrubbed, "[redacted-path]");
         scrubbed = WindowsPathRegex.Replace(scrubbed, "[redacted-path]");
@@ -193,7 +208,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             {
                 return false;
             }
-            else if (_lastPurgeFailed && !TryDeleteBufferFallback())
+            else if (_revokedFlushesRemaining > 0 || (_lastPurgeFailed && !TryDeleteBufferFallback()))
             {
                 return false;
             }
@@ -207,7 +222,6 @@ public sealed class CoreTelemetryService : ITelemetryService
                 {
                     _client.SetConsent(state);
                     _consent = consent;
-                    _revoked = false;
                     UpdatePurgeFailedLocked(false, ref purgeNotify, ref purgeNotifyValue);
                     result = true;
                 }
@@ -297,8 +311,8 @@ public sealed class CoreTelemetryService : ITelemetryService
 
     public void ReportCrash(string kind, string message, string? stack = null, bool fromPreviousSession = false)
     {
-        var safeMessage = string.IsNullOrWhiteSpace(message) ? "Unhandled exception" : SanitizeLocalPaths(message);
-        var safeStack = stack == null ? null : SanitizeLocalPaths(stack);
+        var safeMessage = string.IsNullOrWhiteSpace(message) ? "Unhandled exception" : SanitizeLocalPaths(message, preserveStackLocations: false);
+        var safeStack = stack == null ? null : SanitizeLocalPaths(stack, preserveStackLocations: true);
         var report = new TelemetryCrashReport(
             string.IsNullOrWhiteSpace(kind) ? "UnhandledException" : kind,
             safeMessage,
@@ -352,6 +366,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         if (cancellationToken.IsCancellationRequested) return;
 
         CancellationToken revokeToken;
+        long flushEpoch;
         CancellationTokenSource? toCancel = null;
         lock (_gate)
         {
@@ -362,6 +377,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             }
             if (_disposeRequested || _clientDisposed || _consent == TelemetryConsent.Off) return;
             revokeToken = _flushCts.Token;
+            flushEpoch = _consentEpoch;
             _inFlightFlushes++;
         }
 
@@ -386,11 +402,11 @@ public sealed class CoreTelemetryService : ITelemetryService
                 static (t, state) =>
                 {
                     _ = t.Exception;
-                    var (svc, cts) = ((CoreTelemetryService, CancellationTokenSource?))state!;
+                    var (svc, cts, epoch) = ((CoreTelemetryService, CancellationTokenSource?, long))state!;
                     if (cts != null) CancelQuietly(cts);
-                    svc.ReleaseInFlightFlush();
+                    svc.ReleaseInFlightFlush(epoch);
                 },
-                (this, monitorToStop),
+                (this, monitorToStop, flushEpoch),
                 CancellationToken.None,
                 TaskContinuationOptions.ExecuteSynchronously,
                 TaskScheduler.Default);
@@ -409,7 +425,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             if (nativeFlush == null)
             {
                 if (monitorCts != null) CancelQuietly(monitorCts);
-                ReleaseInFlightFlush();
+                ReleaseInFlightFlush(flushEpoch);
             }
         }
         return;
@@ -488,7 +504,8 @@ public sealed class CoreTelemetryService : ITelemetryService
         ref bool purgeNotifyValue)
     {
         _consent = TelemetryConsent.Off;
-        _revoked = true;
+        _consentEpoch++;
+        _revokedFlushesRemaining = _inFlightFlushes;
         toCancel = _flushCts;
         _flushCts = new CancellationTokenSource();
         if (_clientDisposed)
@@ -530,20 +547,24 @@ public sealed class CoreTelemetryService : ITelemetryService
         }
     }
 
-    private void ReleaseInFlightFlush()
+    private void ReleaseInFlightFlush(long flushEpoch)
     {
         Action<bool>? purgeNotify = null;
         bool purgeNotifyValue = false;
         lock (_gate)
         {
             _inFlightFlushes--;
-            if (_revoked && !string.IsNullOrWhiteSpace(_bufferPath))
+            if (flushEpoch < _consentEpoch)
             {
-                // A flush already in flight when consent was revoked may finish its final
-                // persist rename after SetConsent(Denied) deleted the file; remove any remnant.
-                // Ordinary Dispose() without revocation does NOT set _revoked, so retryable
-                // buffers survive normal shutdown.
-                UpdatePurgeFailedLocked(!TryDeleteBufferFallback(), ref purgeNotify, ref purgeNotifyValue);
+                _revokedFlushesRemaining = Math.Max(0, _revokedFlushesRemaining - 1);
+                if (!string.IsNullOrWhiteSpace(_bufferPath))
+                {
+                    // A flush already in flight when consent was revoked may finish its final
+                    // persist rename after SetConsent(Denied) deleted the file; remove any remnant.
+                    // Ordinary Dispose() without revocation does not advance _consentEpoch, so
+                    // retryable buffers survive normal shutdown.
+                    UpdatePurgeFailedLocked(!TryDeleteBufferFallback(), ref purgeNotify, ref purgeNotifyValue);
+                }
             }
             if (_disposeRequested && _inFlightFlushes == 0 && !_clientDisposed)
             {
