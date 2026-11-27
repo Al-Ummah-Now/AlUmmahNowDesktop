@@ -982,6 +982,22 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("Authorization: Digest username=\"alice\", response=\"deadbeef\""));
             Assert.Equal("{\"Authorization\": \"Basic [redacted]\"}",
                 CoreTelemetryService.SanitizeLocalPaths("{\"Authorization\": \"Basic YWxpY2U6c2VjcmV0\"}"));
+            Assert.Equal("{\"Authorization\":\"[redacted]\"}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"Authorization\":\"opaqueSecret123\"}"));
+            Assert.Equal("{\"Proxy-Authorization\":\"Digest [redacted]\"}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"Proxy-Authorization\":\"Digest username=alice, response=deadbeef\"}"));
+            var escapedDigestJson = CoreTelemetryService.SanitizeLocalPaths(
+                "{\"Authorization\":\"Digest username=\\\"alice\\\", response=\\\"deadbeef\\\"\"}");
+            Assert.StartsWith("{\"Authorization\":\"Digest [redacted]", escapedDigestJson);
+            Assert.DoesNotContain("alice", escapedDigestJson);
+            Assert.DoesNotContain("deadbeef", escapedDigestJson);
+            Assert.Equal("Authorization: [redacted]",
+                CoreTelemetryService.SanitizeLocalPaths("Authorization: opaqueSecret123 nextPart"));
+            Assert.Equal("Authorization: [redacted]",
+                CoreTelemetryService.SanitizeLocalPaths("Authorization: X-Secret secondword"));
+            Assert.Equal("Basic [redacted]", CoreTelemetryService.SanitizeLocalPaths("Basic YTpi"));
+            Assert.Equal("Basic [redacted]", CoreTelemetryService.SanitizeLocalPaths("Basic ajpqampq"));
+            Assert.Equal("BASIC [redacted]", CoreTelemetryService.SanitizeLocalPaths("BASIC YWxpY2U6c2VjcmV0"));
             Assert.Equal("Basic auth failed", CoreTelemetryService.SanitizeLocalPaths("Basic auth failed"));
             var repeatedFilenameEmails = string.Concat(Enumerable.Repeat("alice.txt@example.org ", 5_000));
             Assert.Equal(string.Concat(Enumerable.Repeat("[redacted-email] ", 5_000)),

@@ -34,9 +34,13 @@ public sealed class CoreTelemetryService : ITelemetryService
     };
     private static readonly Regex KeywordAssignedPathRegex = new(@"(\b(?:file|path|filename|filepath)\s*[:=]\s*)(?!\u001E)[^\r\n\u001E\u001F]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex BareFilenameRegex = new(@"(^|[\r\n:=;\u001F])([ \t]*)(?=[^\r\n:=;\u001E\u001F \t])[^\r\n:=;\u001E\u001F]*\.(?!ts:\d+)(?:mov|mp4|m4v|mkv|webm|avi|ts|m3u8|mpd|mp3|m4a|wav|aac|flac|ogg|opus|jpg|jpeg|png|gif|webp|heic|svg|pdf|txt|md|rtf|doc|docx|xls|xlsx|ppt|pptx|csv|json|xml|yaml|yml|toml|ini|cfg|conf|log|srt|vtt|ass|ssa|zip|tar|gz|tgz|bz2|xz|7z|rar|dmg|pkg|msi|exe|apk|aab|ipa|pem|key|crt|cer|p12|pfx|jks|keystore|db|sqlite|sqlite3|bin|dat|tmp|bak|proj|aun)\b(?!\()", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex AuthHeaderRegex = new(@"(\b(?:Proxy-)?Authorization\s*:\s*(?:[A-Za-z0-9._-]+\s+)?)[^\r\n]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private const string KnownAuthSchemes = "Bearer|Basic|Digest|Token|Api-?Key|OAuth|Negotiate|Mutual|HOBA|Vapid|SCRAM-SHA-256|AWS4-HMAC-SHA256";
+    private static readonly Regex AuthHeaderDoubleQuotedRegex = new($@"([""']?\b(?:Proxy-)?Authorization[""']?\s*[:=]\s*""\s*(?:(?:{KnownAuthSchemes})\s+)?)(?:\\.|[^\\""\r\n])+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex AuthHeaderSingleQuotedRegex = new($@"([""']?\b(?:Proxy-)?Authorization[""']?\s*[:=]\s*'\s*(?:(?:{KnownAuthSchemes})\s+)?)(?:\\.|[^\\'\r\n])+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex AuthHeaderPlainRegex = new($@"(\b(?:Proxy-)?Authorization\s*[:=]\s*(?!['""])(?:(?:{KnownAuthSchemes})\s+)?)[^\r\n]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex BearerTokenRegex = new(@"\bBearer\s+\S+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex BasicTokenRegex = new(@"\b[Bb]asic\s+(?=[A-Za-z0-9+/]{8,}={0,2}(?=$|[\s""',;)\]}]))(?=[A-Za-z0-9+/]*[0-9+/A-Z])[A-Za-z0-9+/]+={0,2}", RegexOptions.Compiled);
+    private static readonly Regex BasicTokenRegex = new(@"\b(Basic)\s+([A-Za-z0-9+/_-]{4,}={0,2})(?=$|[\s""',;)\]}])", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly System.Text.UTF8Encoding StrictUtf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
 
     private readonly TelemetryAppInfo _app;
     private readonly string? _ingestUrl;
@@ -245,9 +249,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         {
             scrubbed = RedactEmails(scrubbed);
         }
-        scrubbed = AuthHeaderRegex.Replace(scrubbed, "$1[redacted]");
-        scrubbed = BearerTokenRegex.Replace(scrubbed, "Bearer [redacted]");
-        scrubbed = BasicTokenRegex.Replace(scrubbed, "Basic [redacted]");
+        scrubbed = RedactAuthCredentials(scrubbed);
         return hadSentinels ? UnescapeSentinels(scrubbed) : scrubbed;
     }
 
@@ -594,6 +596,47 @@ public sealed class CoreTelemetryService : ITelemetryService
         if (sb == null) return text;
         sb.Append(text, copied, text.Length - copied);
         return sb.ToString();
+    }
+
+    private static string RedactAuthCredentials(string text)
+    {
+        var result = AuthHeaderDoubleQuotedRegex.Replace(text, "$1[redacted]");
+        result = AuthHeaderSingleQuotedRegex.Replace(result, "$1[redacted]");
+        result = AuthHeaderPlainRegex.Replace(result, "$1[redacted]");
+        result = BearerTokenRegex.Replace(result, "Bearer [redacted]");
+        return BasicTokenRegex.Replace(result, match =>
+            IsBasicCredentialToken(match.Groups[2].Value)
+                ? $"{match.Groups[1].Value} [redacted]"
+                : match.Value);
+    }
+
+    private static bool IsBasicCredentialToken(string token)
+    {
+        if (token.Length >= 8 && token.AsSpan().IndexOfAny('+', '/', '=') >= 0) return true;
+        var normalized = token.Replace('-', '+').Replace('_', '/');
+        var mod = normalized.Length & 3;
+        if (mod == 1) return false;
+        if (mod == 2) normalized += "==";
+        else if (mod == 3) normalized += "=";
+        try
+        {
+            var bytes = Convert.FromBase64String(normalized);
+            if (Array.IndexOf(bytes, (byte)':') < 0) return false;
+            var decoded = StrictUtf8.GetString(bytes);
+            foreach (var ch in decoded)
+            {
+                if ((ch < 0x20 && ch != '\t') || ch == 0x7F) return false;
+            }
+            return true;
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+        catch (System.Text.DecoderFallbackException)
+        {
+            return false;
+        }
     }
 
     private static bool HasEmailAt(string text) =>
