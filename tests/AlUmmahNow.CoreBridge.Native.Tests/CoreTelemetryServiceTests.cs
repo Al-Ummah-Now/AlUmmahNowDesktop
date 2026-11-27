@@ -824,6 +824,10 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("'file:///tmp/Artists' Private 'Collection"));
             Assert.Equal("'[redacted-path]",
                 CoreTelemetryService.SanitizeLocalPaths("'file:///tmp/O' Connor Private (https://private.example/Acquisition.mov)"));
+            Assert.DoesNotContain("private.example",
+                CoreTelemetryService.SanitizeLocalPaths("input'file:///tmp/O' Connor Private https://private.example/Acquisition.mov"));
+            Assert.DoesNotContain("private.example",
+                CoreTelemetryService.SanitizeLocalPaths("input'/tmp/O' Connor Private https://private.example/Acquisition.mov"));
             Assert.Equal("status 'ready' (https://example.com/api)",
                 CoreTelemetryService.SanitizeLocalPaths("status 'ready' (https://example.com/api)"));
             Assert.Equal("[redacted-path]",

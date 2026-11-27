@@ -960,7 +960,8 @@ public sealed class CoreTelemetryService : ITelemetryService
         {
             if (ch == '"') return true;
             if (ch != '\'') return false;
-            return pos == 0 || !char.IsLetterOrDigit(text[pos - 1]);
+            return pos == 0 || !char.IsLetterOrDigit(text[pos - 1]) ||
+                (pos + 1 < text.Length && (IsFileSchemeAt(text, pos + 1) || StartsLocalPathAt(text, pos + 1, atTokenStart: true)));
         }
 
         private static bool IsInnerApostrophe(string text, int pos, char ch) =>
