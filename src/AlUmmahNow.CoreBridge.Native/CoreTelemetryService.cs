@@ -17,7 +17,6 @@ namespace AlUmmahNow.CoreBridge.Native;
 public sealed class CoreTelemetryService : ITelemetryService
 {
     private static readonly Regex UrlVaultRegex = new(@"(?<![A-Za-z0-9+.-/\\])([A-Za-z][A-Za-z0-9+.-]+://(?:\[([^\]\s""'<>\\{}\r\n]+)\]|(?:[A-Za-z0-9._~!$&'*+;=-]|%[0-9A-Fa-f]{2})+)(?::\d+)?(?:/(?:(?!(?:file://|[A-Za-z]:[\\/]))(?:[^\s""<>\\{},()\[\]?#\r\n]|\([^\s""<>\\{},()\[\]/:\\?#]+\)|\[[^\s""<>\\{},()\[\]/:\\?#]+\]))*)?)([?#][^\s""<>\r\n]*)?(?=$|[\s""'<>\\{},;()\[\]]|file://|[A-Za-z]:[\\/])", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex FileUriRegex = new(@"(?<![A-Za-z0-9+.-])file://(?>[^\s\r\n\u001E]+)(?:(?>[^\S\r\n]+)(?!(?:[\(\[\{""'](?>[^\S\r\n]*)){0,2}\u001E)(?>[^\s\r\n\u001E]+))*", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex ParenPathRegex = new(@"(\()(?:/|~/|[A-Za-z]:[\\/]|\\\\)[^()\r\n\u001E]+(\))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex ParenRelativeSlashPathRegex = new(@"(\()(?!HTTP/\d)(?!TLS/\d)(?!SSL/\d)[^\s/\\""'<>()\[\]{}:,;\u001E\u001F]+/[^()\r\n\u001E]+(\))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex WindowsPathRegex = new(@"(?:[A-Za-z]:[\\/]|\\\\)(?:(?!\s+\u001E)[^\r\n\u001E])+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -317,9 +316,10 @@ public sealed class CoreTelemetryService : ITelemetryService
             }
             var idx = vaultedUrls.Count;
             vaultedUrls.Add(url);
+            hasFileUriOnLine = false;
             return $"{prefix}{idx}\u001F{tail}";
         });
-        scrubbed = FileUriRegex.Replace(scrubbed, "[redacted-path]");
+        scrubbed = RedactFileUris(scrubbed);
         scrubbed = ParenPathRegex.Replace(scrubbed, "$1[redacted-path]$2");
         scrubbed = ParenRelativeSlashPathRegex.Replace(scrubbed, "$1[redacted-path]$2");
         scrubbed = WindowsPathRegex.Replace(scrubbed, "[redacted-path]");
@@ -341,6 +341,55 @@ public sealed class CoreTelemetryService : ITelemetryService
 
     private static bool IsUrlSchemeChar(char ch) =>
         (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch is '+' or '.' or '-';
+
+    private static bool IsOpeningWrapper(char ch) => ch is '(' or '[' or '{' or '"' or '\'';
+
+    private static bool IsFileSchemeAt(string text, int pos) =>
+        pos + 7 <= text.Length &&
+        (pos == 0 || !IsUrlSchemeChar(text[pos - 1])) &&
+        text.AsSpan(pos, 7).Equals("file://", StringComparison.OrdinalIgnoreCase);
+
+    private static string RedactFileUris(string text)
+    {
+        if (text.Length <= 7) return text;
+        StringBuilder? sb = null;
+        var copyStart = 0;
+        var pos = 0;
+        while (pos < text.Length)
+        {
+            if (IsFileSchemeAt(text, pos))
+            {
+                var schemeEnd = pos + 7;
+                var rawEnd = schemeEnd;
+                while (rawEnd < text.Length && text[rawEnd] is not ('\r' or '\n' or '\u001E'))
+                {
+                    rawEnd++;
+                }
+                var trimmedEnd = rawEnd;
+                if (rawEnd < text.Length && text[rawEnd] == '\u001E')
+                {
+                    while (trimmedEnd > schemeEnd && (IsOpeningWrapper(text[trimmedEnd - 1]) || char.IsWhiteSpace(text[trimmedEnd - 1])))
+                    {
+                        trimmedEnd--;
+                    }
+                }
+                if (trimmedEnd > schemeEnd)
+                {
+                    sb ??= new StringBuilder(text.Length);
+                    sb.Append(text, copyStart, pos - copyStart);
+                    sb.Append("[redacted-path]");
+                    sb.Append(text, trimmedEnd, rawEnd - trimmedEnd);
+                    copyStart = rawEnd;
+                    pos = rawEnd;
+                    continue;
+                }
+            }
+            pos++;
+        }
+        if (sb == null) return text;
+        sb.Append(text, copyStart, text.Length - copyStart);
+        return sb.ToString();
+    }
 
     private static string RestoreVaultedUrls(string text, string prefix, List<string> vaultedUrls)
     {
