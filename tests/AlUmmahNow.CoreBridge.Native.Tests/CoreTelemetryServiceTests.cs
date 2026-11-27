@@ -1564,6 +1564,31 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("{\"message\":\"see https://example.com/public Why did it fail?\"}"));
             Assert.Equal("{\"message\":\"see https://example.com/public issue #123\"}",
                 CoreTelemetryService.SanitizeLocalPaths("{\"message\":\"see https://example.com/public issue #123\"}"));
+            Assert.Equal("\"Authorization\\u003a [redacted]\"",
+                CoreTelemetryService.SanitizeLocalPaths("\"Authorization\\u003a secret\""));
+            Assert.Equal("\"Authorization\\u003d[redacted]\"",
+                CoreTelemetryService.SanitizeLocalPaths("\"Authorization\\u003dsecret\""));
+            var repeatedUnclosedAngles = string.Concat(Enumerable.Repeat("<https://example.test/webhooks/token ", 500));
+            var expectedUnclosedAngles = string.Concat(Enumerable.Repeat("<https://example.test/webhooks/[redacted] ", 500));
+            Assert.Equal(expectedUnclosedAngles, CoreTelemetryService.SanitizeLocalPaths(repeatedUnclosedAngles));
+            var scrubbedProps = CoreTelemetryService.SerializeProperties(new Dictionary<string, object>
+            {
+                ["detail"] = "Authorization: Bearer secret",
+                ["path"] = "/Users/Alice/Secret.mov",
+                ["Authorization"] = "opaqueSecret123",
+                ["uri"] = new Uri("https://example.com/api?token=secret"),
+                ["count"] = 2,
+                ["ok"] = true
+            });
+            Assert.NotNull(scrubbedProps);
+            Assert.DoesNotContain("secret", scrubbedProps!, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("Alice", scrubbedProps!, StringComparison.Ordinal);
+            Assert.Contains("\"detail\":\"Authorization: Bearer [redacted]\"", scrubbedProps!, StringComparison.Ordinal);
+            Assert.Contains("\"path\":\"[redacted-path]\"", scrubbedProps!, StringComparison.Ordinal);
+            Assert.Contains("\"Authorization\":\"[redacted]\"", scrubbedProps!, StringComparison.Ordinal);
+            Assert.Contains("\"uri\":\"https://example.com/api?[redacted]\"", scrubbedProps!, StringComparison.Ordinal);
+            Assert.Contains("\"count\":2", scrubbedProps!, StringComparison.Ordinal);
+            Assert.Contains("\"ok\":true", scrubbedProps!, StringComparison.Ordinal);
             var manyFileUris = string.Join("\n", Enumerable.Repeat("open file:///Users/Alice/Secret.mov", 2000));
             var expectedFileUris = string.Join("\n", Enumerable.Repeat("open [redacted-path]", 2000));
             Assert.Equal(expectedFileUris, CoreTelemetryService.SanitizeLocalPaths(manyFileUris));

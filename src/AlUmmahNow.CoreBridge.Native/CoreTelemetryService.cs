@@ -412,6 +412,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         var quoteState = 0;
         var failedContMax = 0;
         var failedSpacedContMax = 0;
+        var unclosedAngleLineEnd = 0;
         var unclosedDoubleQuoteEnd = 0;
         var unclosedSingleQuoteEnd = 0;
         while (searchFrom < text.Length)
@@ -483,7 +484,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             {
                 if (!hasQf && totalEnd < text.Length &&
                     TryResolveQuotedSecretUrlTail(text, start, totalEnd, inDoubleQuote, rawUrl, redactedUrl,
-                        out var secretRedacted, out var secretEnd))
+                        ref unclosedAngleLineEnd, out var secretRedacted, out var secretEnd))
                 {
                     redactedUrl = secretRedacted;
                     totalEnd = secretEnd;
@@ -972,12 +973,13 @@ public sealed class CoreTelemetryService : ITelemetryService
 
     private static bool TryResolveQuotedSecretUrlTail(
         string text, int urlStart, int totalEnd, bool inDoubleQuote, string rawUrl, string redactedUrl,
-        out string secretRedacted, out int secretEnd)
+        ref int unclosedAngleLineEnd, out string secretRedacted, out int secretEnd)
     {
         secretRedacted = string.Empty;
         secretEnd = totalEnd;
         var wrappedInAngle = IsAngleWrappedBefore(text, urlStart);
         if (!inDoubleQuote && !wrappedInAngle) return false;
+        if (!inDoubleQuote && totalEnd < unclosedAngleLineEnd) return false;
         var nextCh = text[totalEnd];
         if (nextCh is '\r' or '\n' ||
             (inDoubleQuote && nextCh == '"') ||
@@ -1003,7 +1005,11 @@ public sealed class CoreTelemetryService : ITelemetryService
             escaped = inDoubleQuote && ch == '\\' && !escaped;
             p++;
         }
-        if (!inDoubleQuote && !stoppedAtAngle) return false;
+        if (!inDoubleQuote && !stoppedAtAngle)
+        {
+            if (p > unclosedAngleLineEnd) unclosedAngleLineEnd = p;
+            return false;
+        }
         secretRedacted = resolved;
         secretEnd = p;
         return true;
@@ -2547,9 +2553,14 @@ public sealed class CoreTelemetryService : ITelemetryService
         public int FailedContainerBack = -1;
     }
 
+    private static bool MayContainAuthHeader(string text, int maxDepth) =>
+        text.IndexOf(':') >= 0 ||
+        text.IndexOf('=') >= 0 ||
+        (maxDepth > 0 && text.IndexOf('"') >= 0 && text.Contains("\\u", StringComparison.Ordinal));
+
     private static string RedactAuthHeaders(string text, int maxDepth = 4)
     {
-        if (text.IndexOf(':') < 0 && text.IndexOf('=') < 0) return text;
+        if (!MayContainAuthHeader(text, maxDepth)) return text;
         var writer = new AuthHeaderWriter(text);
         ScanAuthHeaders(text, maxDepth, writer);
         return writer.Finish();
@@ -2557,7 +2568,7 @@ public sealed class CoreTelemetryService : ITelemetryService
 
     private static void ScanAuthHeaders(string text, int maxDepth, AuthHeaderWriter writer)
     {
-        if (text.IndexOf(':') < 0 && text.IndexOf('=') < 0) return;
+        if (!MayContainAuthHeader(text, maxDepth)) return;
         var cache = new AuthJsonScanCache();
         var i = 0;
         while (i < text.Length)
@@ -5670,6 +5681,13 @@ public sealed class CoreTelemetryService : ITelemetryService
         _ = task.ContinueWith(static t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
     }
 
+    private static bool IsAuthHeaderPropertyKey(string key)
+    {
+        var trimmed = key.AsSpan().Trim();
+        return trimmed.Equals("authorization".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+            trimmed.Equals("proxy-authorization".AsSpan(), StringComparison.OrdinalIgnoreCase);
+    }
+
     internal static string? SerializeProperties(IReadOnlyDictionary<string, object>? properties)
     {
         if (properties == null || properties.Count == 0) return null;
@@ -5677,10 +5695,15 @@ public sealed class CoreTelemetryService : ITelemetryService
         foreach (var kv in properties)
         {
             if (string.IsNullOrWhiteSpace(kv.Key) || kv.Value == null) continue;
+            if (IsAuthHeaderPropertyKey(kv.Key))
+            {
+                flat[kv.Key] = "[redacted]";
+                continue;
+            }
             switch (kv.Value)
             {
                 case string s:
-                    flat[kv.Key] = s;
+                    flat[kv.Key] = SanitizeLocalPaths(s);
                     break;
                 case bool b:
                     flat[kv.Key] = b;
@@ -5698,7 +5721,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                     flat[kv.Key] = (double)f;
                     break;
                 default:
-                    flat[kv.Key] = kv.Value.ToString() ?? "";
+                    flat[kv.Key] = SanitizeLocalPaths(kv.Value.ToString() ?? "");
                     break;
             }
         }
