@@ -321,7 +321,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     }
 
     private static readonly Regex WebhookPathTokenRegex = new(
-        @"((?:^|/)webhooks?/[^/\s?#]+/)[^/\s?#]+",
+        @"((?:^|/)webhooks?/)[^\s?#]+",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex SlackWebhookUrlRegex = new(
@@ -639,13 +639,14 @@ public sealed class CoreTelemetryService : ITelemetryService
         var copied = 0;
         Dictionary<int, int>? braceMap = null;
         Dictionary<int, int>? closeToOpenMap = null;
+        Dictionary<int, bool>? memberCommaValid = null;
         var failedBraceBack = -1;
         var failedBracketBack = -1;
         var i = 0;
         while (i < text.Length)
         {
             if (!TryMatchAuthHeaderKey(
-                text, i, ref closeToOpenMap, ref failedBraceBack, ref failedBracketBack,
+                text, i, ref closeToOpenMap, ref memberCommaValid, ref failedBraceBack, ref failedBracketBack,
                 out var keyEnd, out var isJsonCandidate, out var normalizedKey))
             {
                 i++;
@@ -678,7 +679,8 @@ public sealed class CoreTelemetryService : ITelemetryService
     }
 
     private static bool TryMatchAuthHeaderKey(
-        string text, int pos, ref Dictionary<int, int>? closeToOpenMap, ref int failedBraceBack, ref int failedBracketBack,
+        string text, int pos, ref Dictionary<int, int>? closeToOpenMap, ref Dictionary<int, bool>? memberCommaValid,
+        ref int failedBraceBack, ref int failedBracketBack,
         out int keyEnd, out bool allowNewlines, out string? normalizedKey)
     {
         keyEnd = pos;
@@ -688,7 +690,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         if (ch is '"' or '\'')
         {
             return TryMatchQuotedAuthKey(
-                text, pos, ch, ref closeToOpenMap, ref failedBraceBack, ref failedBracketBack,
+                text, pos, ch, ref closeToOpenMap, ref memberCommaValid, ref failedBraceBack, ref failedBracketBack,
                 out keyEnd, out allowNewlines, out normalizedKey);
         }
         if (pos > 0 && IsAuthKeyWordChar(text[pos - 1])) return false;
@@ -708,7 +710,8 @@ public sealed class CoreTelemetryService : ITelemetryService
     }
 
     private static bool TryMatchQuotedAuthKey(
-        string text, int pos, char quote, ref Dictionary<int, int>? closeToOpenMap, ref int failedBraceBack, ref int failedBracketBack,
+        string text, int pos, char quote, ref Dictionary<int, int>? closeToOpenMap, ref Dictionary<int, bool>? memberCommaValid,
+        ref int failedBraceBack, ref int failedBracketBack,
         out int keyEnd, out bool allowNewlines, out string? normalizedKey)
     {
         keyEnd = pos;
@@ -722,7 +725,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         while (j < limit)
         {
             var c = text[j];
-            if (c is '\r' or '\n') return false;
+            if (c < 0x20) return false;
             if (c == quote)
             {
                 ReadOnlySpan<char> span = decoded[..len];
@@ -730,7 +733,8 @@ public sealed class CoreTelemetryService : ITelemetryService
                 {
                     keyEnd = j + 1;
                     allowNewlines = quote == '"' &&
-                        IsPrecededByJsonMemberDelimiter(text, pos, ref closeToOpenMap, ref failedBraceBack, ref failedBracketBack);
+                        IsPrecededByJsonMemberDelimiter(
+                            text, pos, ref closeToOpenMap, ref memberCommaValid, ref failedBraceBack, ref failedBracketBack);
                     normalizedKey = sawEscape ? "Authorization" : null;
                     return true;
                 }
@@ -738,7 +742,8 @@ public sealed class CoreTelemetryService : ITelemetryService
                 {
                     keyEnd = j + 1;
                     allowNewlines = quote == '"' &&
-                        IsPrecededByJsonMemberDelimiter(text, pos, ref closeToOpenMap, ref failedBraceBack, ref failedBracketBack);
+                        IsPrecededByJsonMemberDelimiter(
+                            text, pos, ref closeToOpenMap, ref memberCommaValid, ref failedBraceBack, ref failedBracketBack);
                     normalizedKey = sawEscape ? "Proxy-Authorization" : null;
                     return true;
                 }
@@ -897,56 +902,103 @@ public sealed class CoreTelemetryService : ITelemetryService
     }
 
     private static bool IsPrecededByJsonMemberDelimiter(
-        string text, int pos, ref Dictionary<int, int>? closeToOpenMap, ref int failedBraceBack, ref int failedBracketBack)
+        string text, int pos, ref Dictionary<int, int>? closeToOpenMap, ref Dictionary<int, bool>? memberCommaValid,
+        ref int failedBraceBack, ref int failedBracketBack)
     {
-        var p = pos - 1;
-        while (p >= 0 && text[p] is ' ' or '\t' or '\r' or '\n') p--;
+        var p = SkipJsonWhitespaceBackward(text, pos - 1);
         if (p < 0) return false;
         if (text[p] == '{') return true;
         if (text[p] != ',') return false;
-        var prev = p - 1;
-        while (prev >= 0 && text[prev] is ' ' or '\t' or '\r' or '\n') prev--;
-        if (prev < 0) return false;
+        memberCommaValid ??= new Dictionary<int, bool>();
+        if (memberCommaValid.TryGetValue(p, out var cached)) return cached;
+        var visited = new List<int>();
+        var result = false;
+        while (p >= 0 && text[p] == ',')
+        {
+            if (memberCommaValid.TryGetValue(p, out var known))
+            {
+                result = known;
+                break;
+            }
+            visited.Add(p);
+            var beforeKey = StepBackOverJsonMember(text, p, ref closeToOpenMap, ref failedBraceBack, ref failedBracketBack);
+            if (beforeKey < 0) break;
+            if (text[beforeKey] == '{')
+            {
+                result = true;
+                break;
+            }
+            p = beforeKey;
+        }
+        foreach (var commaPos in visited) memberCommaValid[commaPos] = result;
+        return result;
+    }
+
+    private static int StepBackOverJsonMember(
+        string text, int commaPos, ref Dictionary<int, int>? closeToOpenMap,
+        ref int failedBraceBack, ref int failedBracketBack)
+    {
+        var prev = SkipJsonWhitespaceBackward(text, commaPos - 1);
+        if (prev < 0) return -1;
         var ch = text[prev];
+        int valueStart;
         if (ch == '"')
         {
-            var strStart = ScanJsonStringStartBackward(text, prev);
-            return strStart >= 0 && IsPrecededByColon(text, strStart);
+            valueStart = ScanJsonStringStartBackward(text, prev);
         }
-        if (ch == '}')
+        else if (ch == '}')
         {
-            var objStart = ScanBalancedJsonContainerStartBackward(text, prev, '{', '}', ref closeToOpenMap, ref failedBraceBack);
-            return objStart >= 0 && IsPrecededByColon(text, objStart);
+            valueStart = ScanBalancedJsonContainerStartBackward(text, prev, '{', '}', ref closeToOpenMap, ref failedBraceBack);
         }
-        if (ch == ']')
+        else if (ch == ']')
         {
-            var arrStart = ScanBalancedJsonContainerStartBackward(text, prev, '[', ']', ref closeToOpenMap, ref failedBracketBack);
-            return arrStart >= 0 && IsPrecededByColon(text, arrStart);
+            valueStart = ScanBalancedJsonContainerStartBackward(text, prev, '[', ']', ref closeToOpenMap, ref failedBracketBack);
         }
-        if (ch >= '0' && ch <= '9')
+        else if (ch >= '0' && ch <= '9')
         {
             var s = prev;
             while (s >= 0 && text[s] is not (' ' or '\t' or '\r' or '\n' or ':' or ',' or '[')) s--;
-            return IsJsonNumberSpan(text.AsSpan(s + 1, prev - s)) && IsPrecededByColon(text, s + 1);
+            valueStart = IsJsonNumberSpan(text.AsSpan(s + 1, prev - s)) ? s + 1 : -1;
         }
-        return MatchesJsonKeywordEndingAt(text, prev, "true") ||
-            MatchesJsonKeywordEndingAt(text, prev, "false") ||
-            MatchesJsonKeywordEndingAt(text, prev, "null");
+        else
+        {
+            valueStart = FindJsonKeywordStartEndingAt(text, prev);
+        }
+        if (valueStart <= 0) return -1;
+        return FindDelimiterBeforeJsonMemberKeyColon(text, valueStart);
     }
 
-    private static bool IsPrecededByColon(string text, int valueStart)
+    private static int FindJsonKeywordStartEndingAt(string text, int endIdx)
     {
-        var p = valueStart - 1;
+        if (MatchesKeywordSpan(text, endIdx, "true")) return endIdx - 3;
+        if (MatchesKeywordSpan(text, endIdx, "false")) return endIdx - 4;
+        if (MatchesKeywordSpan(text, endIdx, "null")) return endIdx - 3;
+        return -1;
+    }
+
+    private static bool MatchesKeywordSpan(string text, int endIdx, string keyword)
+    {
+        var start = endIdx - keyword.Length + 1;
+        return start > 0 && text.AsSpan(start, keyword.Length).Equals(keyword.AsSpan(), StringComparison.Ordinal);
+    }
+
+    private static int SkipJsonWhitespaceBackward(string text, int start)
+    {
+        var p = start;
         while (p >= 0 && text[p] is ' ' or '\t' or '\r' or '\n') p--;
-        if (p < 0 || text[p] != ':') return false;
-        var keyEnd = p - 1;
-        while (keyEnd >= 0 && text[keyEnd] is ' ' or '\t' or '\r' or '\n') keyEnd--;
-        if (keyEnd < 0 || text[keyEnd] != '"') return false;
+        return p;
+    }
+
+    private static int FindDelimiterBeforeJsonMemberKeyColon(string text, int valueStart)
+    {
+        var colonPos = SkipJsonWhitespaceBackward(text, valueStart - 1);
+        if (colonPos <= 0 || text[colonPos] != ':') return -1;
+        var keyEnd = SkipJsonWhitespaceBackward(text, colonPos - 1);
+        if (keyEnd <= 0 || text[keyEnd] != '"') return -1;
         var keyStart = ScanJsonStringStartBackward(text, keyEnd);
-        if (keyStart <= 0) return false;
-        var beforeKey = keyStart - 1;
-        while (beforeKey >= 0 && text[beforeKey] is ' ' or '\t' or '\r' or '\n') beforeKey--;
-        return beforeKey >= 0 && text[beforeKey] is '{' or ',';
+        if (keyStart <= 0) return -1;
+        var beforeKey = SkipJsonWhitespaceBackward(text, keyStart - 1);
+        return beforeKey >= 0 && text[beforeKey] is '{' or ',' ? beforeKey : -1;
     }
 
     private static bool IsEscapedQuote(string text, int quotePos)
@@ -961,7 +1013,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         for (var i = closeQuotePos - 1; i >= 0; i--)
         {
             var c = text[i];
-            if (c is '\r' or '\n') return -1;
+            if (c < 0x20) return -1;
             if (c == '"' && !IsEscapedQuote(text, i)) return i;
         }
         return -1;
@@ -1006,16 +1058,6 @@ public sealed class CoreTelemetryService : ITelemetryService
         while (stack.Count > 0) closeToOpenMap[stack.Pop()] = -1;
         failedFloor = Math.Max(failedFloor, closePos);
         return -1;
-    }
-
-    private static bool MatchesJsonKeywordEndingAt(string text, int endIdx, string keyword)
-    {
-        var start = endIdx - keyword.Length + 1;
-        if (start < 0 || !text.AsSpan(start, keyword.Length).Equals(keyword.AsSpan(), StringComparison.Ordinal))
-        {
-            return false;
-        }
-        return IsPrecededByColon(text, start);
     }
 
     private static bool IsJsonMemberContinuationDelimiter(string text, int pos)
@@ -1083,7 +1125,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         for (var i = start; i < text.Length; i++)
         {
             var c = text[i];
-            if (c is '\r' or '\n') return -(i + 1);
+            if (c < 0x20) return -(i + 1);
             if (c == '"' && !escaped) return i + 1;
             escaped = c == '\\' && !escaped;
         }
