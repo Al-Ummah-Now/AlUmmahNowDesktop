@@ -17,7 +17,7 @@ namespace AlUmmahNow.CoreBridge.Native;
 public sealed class CoreTelemetryService : ITelemetryService
 {
     private static readonly Regex UrlVaultRegex = new(@"(?<![A-Za-z0-9+.-/\\])([A-Za-z][A-Za-z0-9+.-]+://(?:\[([^\]\s""'<>\\{}\r\n]+)\]|(?:[A-Za-z0-9._~!$&'*+;=-]|%[0-9A-Fa-f]{2})+)(?::\d+)?(?:/(?:(?!(?:file://|[A-Za-z]:[\\/]))(?:[^\s""<>\\{},()\[\]?#\r\n]|\([^\s""<>\\{},()\[\]/:\\?#]+\)|\[[^\s""<>\\{},()\[\]/:\\?#]+\]))*)?)([?#][^\s""<>\r\n]*)?(?=$|[\s""'<>\\{},;()\[\]]|file://|[A-Za-z]:[\\/])", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex FileUriRegex = new(@"(?<![A-Za-z0-9+.-])file://(?:(?!\s+\u001E)[^\r\n\u001E])+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex FileUriRegex = new(@"(?<![A-Za-z0-9+.-])file://(?:(?!\s+(?:[\(\[\{""']\s*)*\u001E)[^\r\n\u001E])+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex ParenPathRegex = new(@"(\()(?:/|~/|[A-Za-z]:[\\/]|\\\\)[^()\r\n\u001E]+(\))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex ParenRelativeSlashPathRegex = new(@"(\()(?!HTTP/\d)(?!TLS/\d)(?!SSL/\d)[^\s/\\""'<>()\[\]{}:,;\u001E\u001F]+/[^()\r\n\u001E]+(\))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex WindowsPathRegex = new(@"(?:[A-Za-z]:[\\/]|\\\\)(?:(?!\s+\u001E)[^\r\n\u001E])+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -216,8 +216,9 @@ public sealed class CoreTelemetryService : ITelemetryService
         var vaultedUrls = new List<string>();
         var scanCursor = 0;
         var hasFileUriOnLine = false;
-        var lastNonWsChar = '\0';
-        var lastNonWrapperChar = '\0';
+        var lastNonWsOrWrapperChar = '\0';
+        var inWrapperRun = false;
+        var wsBeforeRun = false;
         var scrubbed = UrlVaultRegex.Replace(text, match =>
         {
             while (scanCursor < match.Index)
@@ -226,8 +227,9 @@ public sealed class CoreTelemetryService : ITelemetryService
                 if (ch is '\r' or '\n')
                 {
                     hasFileUriOnLine = false;
-                    lastNonWsChar = '\0';
-                    lastNonWrapperChar = '\0';
+                    lastNonWsOrWrapperChar = '\0';
+                    inWrapperRun = false;
+                    wsBeforeRun = false;
                 }
                 else
                 {
@@ -239,23 +241,30 @@ public sealed class CoreTelemetryService : ITelemetryService
                     {
                         hasFileUriOnLine = true;
                     }
-                    if (!char.IsWhiteSpace(ch))
+                    if (char.IsWhiteSpace(ch))
                     {
-                        lastNonWsChar = ch;
+                        if (!inWrapperRun)
+                        {
+                            wsBeforeRun = true;
+                        }
                     }
-                    if (ch is not ('(' or '[' or '{' or '"' or '\''))
+                    else if (ch is '(' or '[' or '{' or '"' or '\'')
                     {
-                        lastNonWrapperChar = ch;
+                        inWrapperRun = true;
+                    }
+                    else
+                    {
+                        lastNonWsOrWrapperChar = ch;
+                        inWrapperRun = false;
+                        wsBeforeRun = false;
                     }
                 }
                 scanCursor++;
             }
 
             var raw = match.Value;
-            var precededByWs = match.Index > 0 && char.IsWhiteSpace(text[match.Index - 1]);
-            var embeddedInPath =
-                (hasFileUriOnLine && (!precededByWs || lastNonWsChar is '/' or '\\')) ||
-                lastNonWrapperChar is '/' or '\\';
+            var afterPathSep = lastNonWsOrWrapperChar is '/' or '\\';
+            var embeddedInPath = !wsBeforeRun && (hasFileUriOnLine || afterPathSep);
             if (raw.StartsWith("file://", StringComparison.OrdinalIgnoreCase) || embeddedInPath)
             {
                 return raw;

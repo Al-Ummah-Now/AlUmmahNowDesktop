@@ -737,7 +737,17 @@ public class CoreTelemetryServiceTests
             Assert.Equal("[redacted-path]",
                 CoreTelemetryService.SanitizeLocalPaths("file:///private/My Folder/(https://Secret/Acquisition.mov)"));
             Assert.Equal("[redacted-path]",
+                CoreTelemetryService.SanitizeLocalPaths("file:///private/My Folder/( https://Secret/Acquisition.mov)"));
+            Assert.Equal("[redacted-path] (https://example.com/api)",
+                CoreTelemetryService.SanitizeLocalPaths("file:///storage/emulated/0/Secret.mov and (https://example.com/api)"));
+            Assert.Equal("[redacted-path] https://example.com/api",
+                CoreTelemetryService.SanitizeLocalPaths("file:///private/Folder/ https://example.com/api"));
+            Assert.Equal("https://example.com/ (https://other.com/api)",
+                CoreTelemetryService.SanitizeLocalPaths("https://example.com/ (https://other.com/api)"));
+            Assert.Equal("[redacted-path]",
                 CoreTelemetryService.SanitizeLocalPaths("/private/My Folder/(https://Secret/Acquisition.mov)"));
+            Assert.Equal("[redacted-path]",
+                CoreTelemetryService.SanitizeLocalPaths("/private/My Folder/( https://Secret/Acquisition.mov)"));
             var repeated = string.Concat(Enumerable.Repeat("(https://example.com)", 500));
             Assert.Equal(repeated, CoreTelemetryService.SanitizeLocalPaths(repeated));
             Assert.Equal("([redacted-path] https://example.com/api)",
