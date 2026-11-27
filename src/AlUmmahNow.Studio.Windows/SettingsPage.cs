@@ -84,14 +84,30 @@ internal sealed class SettingsPage
         {
             var enabled = telemetryToggle.IsOn;
             if (settings.TelemetryEnabled == enabled) return;
-            var ok = telemetry?.SetConsent(enabled ? TelemetryConsent.Full : TelemetryConsent.Off) ?? true;
-            if (enabled && !ok)
+            if (enabled)
             {
-                telemetryToggle.IsOn = false;
-                return;
+                if (!store.SaveTelemetryEnabled(true) || !(telemetry?.SetConsent(TelemetryConsent.Full) ?? true))
+                {
+                    telemetry?.SetConsent(TelemetryConsent.Off);
+                    store.SaveTelemetryEnabled(false);
+                    settings.TelemetryEnabled = false;
+                    telemetryToggle.IsOn = false;
+                    return;
+                }
+                settings.TelemetryEnabled = true;
             }
-            settings.TelemetryEnabled = enabled;
-            store.SaveTelemetryEnabled(enabled);
+            else
+            {
+                telemetry?.SetConsent(TelemetryConsent.Off);
+                if (!store.SaveTelemetryEnabled(false))
+                {
+                    var persisted = store.LoadTelemetryEnabled();
+                    settings.TelemetryEnabled = persisted;
+                    telemetryToggle.IsOn = persisted;
+                    return;
+                }
+                settings.TelemetryEnabled = false;
+            }
         };
         telemetryBody.Children.Add(telemetryToggle);
         left.Children.Add(LanternGlass.Card(telemetryBody));

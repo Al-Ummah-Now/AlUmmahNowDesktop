@@ -92,8 +92,10 @@ namespace AlUmmahNow.App.Services
 
         /// <summary>
         /// Atomically updates the standalone telemetry consent state without touching <c>settings.json</c>.
+        /// Returns <c>true</c> only when the on-disk state reflects <paramref name="enabled"/>.
+        /// When opting out, falls back to overwriting the sidecar with <c>disabled</c> if deletion fails.
         /// </summary>
-        public void SaveTelemetryEnabled(bool enabled)
+        public bool SaveTelemetryEnabled(bool enabled)
         {
             if (!enabled)
             {
@@ -103,14 +105,33 @@ namespace AlUmmahNow.App.Services
                 }
                 catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
                 {
+                    // Deletion can fail when the file is locked or delete-restricted; overwrite in place so
+                    // LoadTelemetryEnabled() still reads false across all instances and restarts.
+                    try
+                    {
+                        File.WriteAllText(_telemetryConsentPath, "disabled");
+                    }
+                    catch (Exception overwriteEx) when (overwriteEx is IOException || overwriteEx is UnauthorizedAccessException)
+                    {
+                        return !LoadTelemetryEnabled();
+                    }
                 }
-                return;
+                return !LoadTelemetryEnabled();
             }
-            var directory = Path.GetDirectoryName(_telemetryConsentPath);
-            if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
-            var temp = _telemetryConsentPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
-            File.WriteAllText(temp, "enabled");
-            File.Move(temp, _telemetryConsentPath, overwrite: true);
+
+            try
+            {
+                var directory = Path.GetDirectoryName(_telemetryConsentPath);
+                if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
+                var temp = _telemetryConsentPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+                File.WriteAllText(temp, "enabled");
+                File.Move(temp, _telemetryConsentPath, overwrite: true);
+                return true;
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+            {
+                return false;
+            }
         }
     }
 }

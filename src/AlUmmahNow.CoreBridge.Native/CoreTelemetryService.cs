@@ -13,12 +13,14 @@ namespace AlUmmahNow.CoreBridge.Native;
 /// </summary>
 public sealed class CoreTelemetryService : ITelemetryService
 {
+    private const string PathSegment = @"[\p{L}\p{N}._@+()-]+(?: [\p{L}\p{N}._@+()-]+){0,3}";
+    private const string PathTail = @"(?:[\p{L}\p{N}._@+()-]+(?: [\p{L}\p{N}._@+()-]+){0,3}\.[\p{L}\p{N}]{1,10}|[\p{L}\p{N}._@+()-]+)";
     private static readonly Regex QuotedPathRegex = new(@"([""'])(?:file://|(?:[A-Za-z]:[\\/]|\\\\)|~/(?!\s)|/[^""'\r\n/]+/)[^""'\r\n]+\1", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex FileUriRegex = new(@"file://[^\s""'<>|)\]]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex WindowsMultiSegmentPathRegex = new(@"(?:[A-Za-z]:[\\/]|\\\\)(?:[A-Za-z0-9._@+()-]+(?: [A-Za-z0-9._@+()-]+){0,2}[\\/])+[A-Za-z0-9._@+()-]+", RegexOptions.Compiled);
+    private static readonly Regex WindowsMultiSegmentPathRegex = new(@"(?:[A-Za-z]:[\\/]|\\\\)(?:" + PathSegment + @"[\\/])+" + PathTail, RegexOptions.Compiled);
     private static readonly Regex WindowsPathRegex = new(@"(?:[A-Za-z]:[\\/]|\\\\)[^\s""'<>|)\]]+", RegexOptions.Compiled);
-    private static readonly Regex UnixMultiSegmentPathRegex = new(@"(?<![A-Za-z0-9._:/-])(?:~/|/)(?:[A-Za-z0-9._@+()-]+(?: [A-Za-z0-9._@+()-]+){0,2}/)+[A-Za-z0-9._@+()-]+", RegexOptions.Compiled);
-    private static readonly Regex UnixHomePathRegex = new(@"(?<![A-Za-z0-9._:/-])~/[^\s""'<>|,;:)\]]+", RegexOptions.Compiled);
+    private static readonly Regex UnixMultiSegmentPathRegex = new(@"(?<![\p{L}\p{N}._:/-])(?:~/|/)(?:" + PathSegment + @"/)+" + PathTail, RegexOptions.Compiled);
+    private static readonly Regex UnixHomePathRegex = new(@"(?<![\p{L}\p{N}._:/-])~/[^\s""'<>|,;:)\]]+", RegexOptions.Compiled);
 
     private readonly TelemetryClient _client;
     private readonly string? _bufferPath;

@@ -407,16 +407,20 @@ public class CoreTelemetryServiceTests
                 bufferPath: bufferPath,
                 initialEnabled: true);
 
-            service.AddBreadcrumb("io", @"Opened /workspace/alice/private.mov and ""C:\Users\Alice Smith\Private\draft.mov""");
+            service.AddBreadcrumb("io", @"Opened /workspace/Élodie/Private Draft.mov and ""C:\Users\Alice Smith\Private Draft.mov""");
             service.ReportCrash(
                 "IOException",
-                @"Could not read C:\Users\Alice Smith\Private\draft.mp4 or file:///Users/alice/private.txt or /Users/Alice Smith/Docs/note.txt",
-                @"at Foo.Open() in /workspace/alice/src/App.cs:line 42 and \\fileserver\share\secret.mp4 and ~/private/key.pem");
+                @"Could not read C:\Users\Alice Smith\Private Draft.mp4 or file:///Users/alice/private.txt or /Users/Alice Smith/Docs/Final Cut.txt",
+                @"at Foo.Open() in /workspace/Élodie/src/App.cs:line 42 and \\fileserver\share\secret.mp4 and ~/private/key.pem");
 
             Assert.True(File.Exists(bufferPath));
             var json = File.ReadAllText(bufferPath);
             Assert.DoesNotContain("alice", json, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("smith", json, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("élodie", json, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("draft.mov", json, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("draft.mp4", json, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("final cut", json, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("workspace", json, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain(@"C:\Users", json, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("fileserver", json, StringComparison.OrdinalIgnoreCase);

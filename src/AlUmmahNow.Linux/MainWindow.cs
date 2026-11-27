@@ -331,14 +331,30 @@ public sealed partial class MainWindow
         {
             var enabled = telemetryCheck.GetActive();
             if (_settings.TelemetryEnabled == enabled) return;
-            var ok = _telemetry.SetConsent(enabled ? TelemetryConsent.Full : TelemetryConsent.Off);
-            if (enabled && !ok)
+            if (enabled)
             {
-                telemetryCheck.SetActive(false);
-                return;
+                if (!_store.SaveTelemetryEnabled(true) || !_telemetry.SetConsent(TelemetryConsent.Full))
+                {
+                    _telemetry.SetConsent(TelemetryConsent.Off);
+                    _store.SaveTelemetryEnabled(false);
+                    _settings.TelemetryEnabled = false;
+                    telemetryCheck.SetActive(false);
+                    return;
+                }
+                _settings.TelemetryEnabled = true;
             }
-            _settings.TelemetryEnabled = enabled;
-            _store.SaveTelemetryEnabled(enabled);
+            else
+            {
+                _telemetry.SetConsent(TelemetryConsent.Off);
+                if (!_store.SaveTelemetryEnabled(false))
+                {
+                    var persisted = _store.LoadTelemetryEnabled();
+                    _settings.TelemetryEnabled = persisted;
+                    telemetryCheck.SetActive(persisted);
+                    return;
+                }
+                _settings.TelemetryEnabled = false;
+            }
         };
         telemetryCard.Append(telemetryCheck);
         column.Append(telemetryCard);

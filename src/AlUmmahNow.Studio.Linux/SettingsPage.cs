@@ -77,14 +77,30 @@ public sealed class SettingsPage
         {
             var enabled = telemetryCheck.GetActive();
             if (settings.TelemetryEnabled == enabled) return;
-            var ok = telemetry?.SetConsent(enabled ? TelemetryConsent.Full : TelemetryConsent.Off) ?? true;
-            if (enabled && !ok)
+            if (enabled)
             {
-                telemetryCheck.SetActive(false);
-                return;
+                if (!store.SaveTelemetryEnabled(true) || !(telemetry?.SetConsent(TelemetryConsent.Full) ?? true))
+                {
+                    telemetry?.SetConsent(TelemetryConsent.Off);
+                    store.SaveTelemetryEnabled(false);
+                    settings.TelemetryEnabled = false;
+                    telemetryCheck.SetActive(false);
+                    return;
+                }
+                settings.TelemetryEnabled = true;
             }
-            settings.TelemetryEnabled = enabled;
-            store.SaveTelemetryEnabled(enabled);
+            else
+            {
+                telemetry?.SetConsent(TelemetryConsent.Off);
+                if (!store.SaveTelemetryEnabled(false))
+                {
+                    var persisted = store.LoadTelemetryEnabled();
+                    settings.TelemetryEnabled = persisted;
+                    telemetryCheck.SetActive(persisted);
+                    return;
+                }
+                settings.TelemetryEnabled = false;
+            }
         };
         telemetryBody.Append(telemetryCheck);
         left.Append(Ui.Card(telemetryBody));

@@ -320,14 +320,30 @@ public sealed partial class Shell
         {
             var enabled = telemetryToggle.IsOn;
             if (_settings.TelemetryEnabled == enabled) return;
-            var ok = _telemetry.SetConsent(enabled ? TelemetryConsent.Full : TelemetryConsent.Off);
-            if (enabled && !ok)
+            if (enabled)
             {
-                telemetryToggle.IsOn = false;
-                return;
+                if (!_store.SaveTelemetryEnabled(true) || !_telemetry.SetConsent(TelemetryConsent.Full))
+                {
+                    _telemetry.SetConsent(TelemetryConsent.Off);
+                    _store.SaveTelemetryEnabled(false);
+                    _settings.TelemetryEnabled = false;
+                    telemetryToggle.IsOn = false;
+                    return;
+                }
+                _settings.TelemetryEnabled = true;
             }
-            _settings.TelemetryEnabled = enabled;
-            _store.SaveTelemetryEnabled(enabled);
+            else
+            {
+                _telemetry.SetConsent(TelemetryConsent.Off);
+                if (!_store.SaveTelemetryEnabled(false))
+                {
+                    var persisted = _store.LoadTelemetryEnabled();
+                    _settings.TelemetryEnabled = persisted;
+                    telemetryToggle.IsOn = persisted;
+                    return;
+                }
+                _settings.TelemetryEnabled = false;
+            }
         };
         telemetryBody.Children.Add(telemetryToggle);
         var telemetryCard = Updates.Card(telemetryBody);
