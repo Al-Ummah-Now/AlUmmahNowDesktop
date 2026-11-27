@@ -754,6 +754,10 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("file://   https://example.com/api"));
             Assert.Equal("[redacted-path] https://example.com/ (https://other.example/api)",
                 CoreTelemetryService.SanitizeLocalPaths("file:///a.mov; https://example.com/ (https://other.example/api)"));
+            Assert.Equal("[redacted-path] https://example.com/ [redacted-path]",
+                CoreTelemetryService.SanitizeLocalPaths("file:///a.mov; https://example.com/ /private/foo(https://Secret/Acquisition.mov)"));
+            Assert.Equal("[redacted-path]",
+                CoreTelemetryService.SanitizeLocalPaths("/private/foo(https://Secret/Acquisition.mov)"));
             Assert.DoesNotContain("Secret",
                 CoreTelemetryService.SanitizeLocalPaths("\"file:///private/My Folder (https://Secret/Acquisition.mov)\""));
             Assert.Equal("\"[redacted-path]\" (https://example.com/api)",

@@ -217,6 +217,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         var hasFileUriOnLine = false;
         var fileUriQuote = '\0';
         var lastNonWsOrWrapperChar = '\0';
+        var tokenHasPathSep = false;
         var inWrapperRun = false;
         var wsBeforeRun = false;
         var scrubbed = UrlVaultRegex.Replace(text, match =>
@@ -229,6 +230,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                     hasFileUriOnLine = false;
                     fileUriQuote = '\0';
                     lastNonWsOrWrapperChar = '\0';
+                    tokenHasPathSep = false;
                     inWrapperRun = false;
                     wsBeforeRun = false;
                 }
@@ -261,6 +263,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                         if (!inWrapperRun)
                         {
                             wsBeforeRun = true;
+                            tokenHasPathSep = false;
                         }
                     }
                     else if (ch is '(' or '[' or '{' or '"' or '\'')
@@ -270,6 +273,10 @@ public sealed class CoreTelemetryService : ITelemetryService
                     else
                     {
                         lastNonWsOrWrapperChar = ch;
+                        if (ch is '/' or '\\')
+                        {
+                            tokenHasPathSep = true;
+                        }
                         inWrapperRun = false;
                         wsBeforeRun = false;
                     }
@@ -281,7 +288,8 @@ public sealed class CoreTelemetryService : ITelemetryService
             var afterPathSep = lastNonWsOrWrapperChar is '/' or '\\';
             var embeddedInPath =
                 fileUriQuote != '\0' ||
-                (!wsBeforeRun && (hasFileUriOnLine || afterPathSep)) ||
+                tokenHasPathSep ||
+                (!wsBeforeRun && hasFileUriOnLine) ||
                 (hasFileUriOnLine && inWrapperRun && afterPathSep);
             if (raw.StartsWith("file://", StringComparison.OrdinalIgnoreCase) || embeddedInPath)
             {
@@ -316,7 +324,13 @@ public sealed class CoreTelemetryService : ITelemetryService
             }
             var idx = vaultedUrls.Count;
             vaultedUrls.Add(url);
+            scanCursor = match.Index + match.Length;
             hasFileUriOnLine = false;
+            fileUriQuote = '\0';
+            lastNonWsOrWrapperChar = '\0';
+            tokenHasPathSep = false;
+            inWrapperRun = false;
+            wsBeforeRun = false;
             return $"{prefix}{idx}\u001F{tail}";
         });
         scrubbed = RedactFileUris(scrubbed, prefix);
