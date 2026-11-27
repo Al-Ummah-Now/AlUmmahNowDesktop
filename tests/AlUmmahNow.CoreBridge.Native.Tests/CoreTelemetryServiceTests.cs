@@ -1572,6 +1572,18 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("headers=\"Authorization\\u003a opaqueSecret123\""));
             Assert.Equal("headers=\"Authorization\\u003d [redacted]\" status=ok",
                 CoreTelemetryService.SanitizeLocalPaths("headers=\"Authorization\\u003d opaqueSecret123\" status=ok"));
+            Assert.Equal("received (\"Authorization\\u003a [redacted]\")",
+                CoreTelemetryService.SanitizeLocalPaths("received (\"Authorization\\u003a opaqueSecret123\")"));
+            Assert.Equal("[redacted-path]",
+                CoreTelemetryService.SanitizeLocalPaths("Authorization\\u003a opaqueSecret123"));
+            Assert.Equal("{\"msg\":\"Basic [redacted]\"}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"msg\":\"Basic YWI6\\u00632VjcmV0\"}"));
+            Assert.Equal("Bearer [redacted]",
+                CoreTelemetryService.SanitizeLocalPaths("Bearer " + new string('A', 10000)));
+            Assert.Equal("{\"m\":\"literal=\\\"[redacted-path]\\\"tail\",\"next\":1}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"m\":\"literal=\\\"test\\\\stuff\\\"tail\",\"next\":1}"));
+            Assert.Equal("{\"m\":\"{\\\"path\\\":\\\"[redacted-path]\\\"}\",\"next\":1}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"m\":\"{\\\"path\\\":\\\"/Users/Alice/Secret.mov\\\"}\",\"next\":1}"));
             var repeatedUnclosedAngles = string.Concat(Enumerable.Repeat("<https://example.test/webhooks/token ", 500));
             var expectedUnclosedAngles = string.Concat(Enumerable.Repeat("<https://example.test/webhooks/[redacted] ", 500));
             Assert.Equal(expectedUnclosedAngles, CoreTelemetryService.SanitizeLocalPaths(repeatedUnclosedAngles));
@@ -1582,6 +1594,7 @@ public class CoreTelemetryServiceTests
                 ["detail"] = "Authorization: Bearer secret",
                 ["path"] = "/Users/Alice/Secret.mov",
                 ["/Users/Alice/Acquisition.mov"] = 1,
+                ["/Users/Bob/Merger.mov"] = 2,
                 ["Authorization"] = "opaqueSecret123",
                 ["uri"] = new Uri("https://example.com/api?token=secret"),
                 ["count"] = 2,
@@ -1590,8 +1603,11 @@ public class CoreTelemetryServiceTests
             Assert.NotNull(scrubbedProps);
             Assert.DoesNotContain("secret", scrubbedProps!, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("Alice", scrubbedProps!, StringComparison.Ordinal);
+            Assert.DoesNotContain("Bob", scrubbedProps!, StringComparison.Ordinal);
             Assert.DoesNotContain("Acquisition", scrubbedProps!, StringComparison.Ordinal);
+            Assert.DoesNotContain("Merger", scrubbedProps!, StringComparison.Ordinal);
             Assert.Contains("\"[redacted-path]\":1", scrubbedProps!, StringComparison.Ordinal);
+            Assert.Contains("\"[redacted-path]#2\":2", scrubbedProps!, StringComparison.Ordinal);
             Assert.Contains("\"detail\":\"Authorization: Bearer [redacted]\"", scrubbedProps!, StringComparison.Ordinal);
             Assert.Contains("\"path\":\"[redacted-path]\"", scrubbedProps!, StringComparison.Ordinal);
             Assert.Contains("\"Authorization\":\"[redacted]\"", scrubbedProps!, StringComparison.Ordinal);
