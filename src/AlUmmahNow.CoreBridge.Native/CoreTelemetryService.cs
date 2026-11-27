@@ -1,7 +1,5 @@
 using System.Net;
 using System.Net.Sockets;
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using AlUmmahNow.Core;
@@ -17,15 +15,15 @@ namespace AlUmmahNow.CoreBridge.Native;
 /// </summary>
 public sealed class CoreTelemetryService : ITelemetryService
 {
-    private static readonly Regex UrlVaultRegex = new(@"(?<![A-Za-z0-9+.-/\\])([A-Za-z][A-Za-z0-9+.-]+://(?:\[([^\]\s""'<>\\{}\r\n]+)\]|(?:[A-Za-z0-9._~!$&'*+;=-]|%[0-9A-Fa-f]{2})+)(?::\d+)?(?:/(?:(?!(?:file://|[A-Za-z]:[\\/]))(?:[^\s""<>\\{},()\[\]?#\r\n]|\([^\s""<>\\{},()\[\]/:\\?#]+\)|\[[^\s""<>\\{},()\[\]/:\\?#]+\]))*)?)([?#][^\s""<>\\{},()\[\]\r\n]*)?(?=$|[\s""'<>\\{},;()\[\]]|file://|[A-Za-z]:[\\/])", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex UrlVaultRegex = new(@"(?<![A-Za-z0-9+.-/\\])([A-Za-z][A-Za-z0-9+.-]+://(?:\[([^\]\s""'<>\\{}\r\n]+)\]|(?:[A-Za-z0-9._~!$&'*+;=-]|%[0-9A-Fa-f]{2})+)(?::\d+)?(?:/(?:(?!(?:file://|[A-Za-z]:[\\/]))(?:[^\s""<>\\{},()\[\]?#\r\n]|\([^\s""<>\\{},()\[\]/:\\?#]+\)|\[[^\s""<>\\{},()\[\]/:\\?#]+\]))*)?)([?#][^\s""<>\\{}\r\n]*)?(?=$|[\s""'<>\\{},;()\[\]]|file://|[A-Za-z]:[\\/])", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex FileUriRegex = new(@"(?<![A-Za-z0-9+.-])file://(?:(?!\s+\u001E)[^\r\n\u001E])+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex ParenPathRegex = new(@"(\()(?:/|~/|[A-Za-z]:[\\/]|\\\\)[^()\r\n\u001E]+(\))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex ParenRelativeSlashPathRegex = new(@"(\()(?!HTTP/\d)(?!TLS/\d)(?!SSL/\d)[^\s/\\""'<>()\[\]{}:,;\u001E\u001F]+/[^()\r\n\u001E]+(\))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex WindowsPathRegex = new(@"(?:[A-Za-z]:[\\/]|\\\\)(?:(?!\s+\u001E)[^\r\n\u001E])+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex RelativeBackslashPathRegex = new(@"(^|[\s(\[{""'=,:;\u001F])[^\s\\/""'<>(),;\u001E\u001F]+\\[^\r\n\u001E\u001F]+", RegexOptions.Compiled);
+    private static readonly Regex RelativeBackslashPathRegex = new(@"(^|[\s(\[{""'=,:;\u001F])[^\s\\/""'<>(),;\u001E\u001F]+\\(?:(?!\s+\u001E)[^\r\n\u001E\u001F])+", RegexOptions.Compiled);
     private static readonly Regex QuotedSpacedRootPathRegex = new(@"[""']/[ \t]+[^\r\n\u001E]+", RegexOptions.Compiled);
     private static readonly Regex UnixPathRegex = new(@"(?<![\p{L}\p{M}\p{N}._/-])(?:~/|//+(?=[ \t]*[^\s/])|/(?=[ \t]*[^\s/]))(?:(?!\s+\u001E)[^\r\n\u001E])+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex RelativeSlashPathRegex = new(@"(^|[\s(\[{""'=,:;\u001F])(?!HTTP/\d)(?!TLS/\d)(?!SSL/\d)[^\s/\\""'<>()\[\]{}:,;\u001E\u001F]+/[^\r\n\u001E\u001F]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex RelativeSlashPathRegex = new(@"(^|[\s(\[{""'=,:;\u001F])(?!HTTP/\d)(?!TLS/\d)(?!SSL/\d)[^\s/\\""'<>()\[\]{}:,;\u001E\u001F]+/(?:(?!\s+\u001E)[^\r\n\u001E\u001F])+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex DoubleQuotedFilenameRegex = new(@"""[^""\r\n/\\]*\.[A-Za-z0-9]{1,16}""", RegexOptions.Compiled);
     private static readonly Regex SingleQuotedFilenameRegex = new(@"'(?:[^'\r\n/\\]|'(?=\p{L}))*\.[A-Za-z0-9]{1,16}'", RegexOptions.Compiled);
     private static readonly Regex KeywordQuotedPathRegex = new(@"(\b(?:file|path|directory|folder|document)\s+)([""'])(?!\u001E)[^'""\r\n]+\2", RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -33,7 +31,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     private static readonly Regex KeywordAssignedPathRegex = new(@"(\b(?:file|path|filename|filepath)\s*[:=]\s*)(?!\u001E)[^\r\n\u001E\u001F]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex BareFilenameRegex = new(@"(^|[\r\n:=;\u001F])([ \t]*)[^\r\n:=;\u001E\u001F]*\.(?!ts:\d+)(?:mov|mp4|m4v|mkv|webm|avi|ts|m3u8|mpd|mp3|m4a|wav|aac|flac|ogg|opus|jpg|jpeg|png|gif|webp|heic|svg|pdf|txt|md|rtf|doc|docx|xls|xlsx|ppt|pptx|csv|json|xml|yaml|yml|toml|ini|cfg|conf|log|srt|vtt|ass|ssa|zip|tar|gz|tgz|bz2|xz|7z|rar|dmg|pkg|msi|exe|apk|aab|ipa|pem|key|crt|cer|p12|pfx|jks|keystore|db|sqlite|sqlite3|bin|dat|tmp|bak|proj|aun)\b(?!\()", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex EmailRegex = new(@"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", RegexOptions.Compiled);
-    private static readonly Regex BearerTokenRegex = new(@"\bBearer\s+[A-Za-z0-9._~+/=-]{8,}", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex BearerTokenRegex = new(@"\bBearer\s+\S+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private readonly TelemetryAppInfo _app;
     private readonly string? _ingestUrl;
@@ -102,6 +100,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         _clientHeader = AunClient.FromUserAgent(userAgent, os);
         var initialToken = initialEnabled && _externalConsentToken != null ? ReadExternalTokenSafe() : null;
         _activeBufferPath = ResolveBufferPathForToken(initialToken);
+        EnsureBufferLockFileExists();
         _client = CreateClient(_activeBufferPath);
         if (initialEnabled)
         {
@@ -109,18 +108,37 @@ public sealed class CoreTelemetryService : ITelemetryService
         }
         else
         {
-            // Startup with telemetry disabled revokes this instance and removes only its own base
-            // buffer/temps, never sweeping foreign generation buffers owned by another live process.
+            // Startup with telemetry disabled revokes this instance and cleans up any orphaned
+            // buffers under the shared cross-process buffer lock, preserving any active generation
+            // currently recorded in external consent.
             _consent = TelemetryConsent.Off;
             _observedExternalToken = null;
+            using var crossProcessLock = AcquireCrossProcessBufferLock();
             try
             {
                 _client.SetConsent(TelemetryConsentState.Denied);
-                _lastPurgeFailed = !TryDeleteSingleBufferAndTemps(_activeBufferPath);
+                if (crossProcessLock != null || string.IsNullOrWhiteSpace(_bufferPath))
+                {
+                    var keepPath = ResolveForeignKeepPathLocked();
+                    _lastPurgeFailed = !(TryDeleteForeignGenerationBuffers(keepPath) && TryDeleteSiblingTempFiles(keepPath));
+                }
+                else
+                {
+                    TryDeleteSingleBufferAndTemps(_activeBufferPath);
+                    _lastPurgeFailed = true;
+                }
             }
             catch (AunException ex)
             {
-                _lastPurgeFailed = !TryDeleteSingleBufferAndTemps(_activeBufferPath);
+                if (crossProcessLock != null)
+                {
+                    _lastPurgeFailed = !TryDeleteBufferFallback(ResolveForeignKeepPathLocked());
+                }
+                else
+                {
+                    TryDeleteSingleBufferAndTemps(_activeBufferPath);
+                    _lastPurgeFailed = true;
+                }
                 Log.For("telemetry").Error("telemetry disk purge failed on startup opt-out: " + ex.Message);
             }
         }
@@ -212,17 +230,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             string url;
             if (hasQueryOrFragment)
             {
-                var qf = match.Groups[3].Value;
-                if (qf.EndsWith(';'))
-                {
-                    qf = qf[..^1];
-                    tail = ";";
-                }
-                if (match.Index > 0 && text[match.Index - 1] == '\'' && qf.EndsWith('\''))
-                {
-                    qf = qf[..^1];
-                    tail = "'" + tail;
-                }
+                var qf = TrimQueryOrFragmentDelimiters(match.Groups[3].Value, text, match.Index, out tail);
                 url = match.Groups[1].Value + qf[0] + "[redacted]";
             }
             else
@@ -257,13 +265,58 @@ public sealed class CoreTelemetryService : ITelemetryService
         scrubbed = KeywordUnquotedFilenameRegex.Replace(scrubbed, "$1[redacted-path]");
         scrubbed = KeywordAssignedPathRegex.Replace(scrubbed, "$1[redacted-path]");
         scrubbed = BareFilenameRegex.Replace(scrubbed, "$1$2[redacted-path]");
-        scrubbed = EmailRegex.Replace(scrubbed, "[redacted-email]");
-        scrubbed = BearerTokenRegex.Replace(scrubbed, "Bearer [redacted]");
         for (var i = 0; i < vaultedUrls.Count; i++)
         {
             scrubbed = scrubbed.Replace($"{prefix}{i}\u001F", vaultedUrls[i], StringComparison.Ordinal);
         }
+        scrubbed = EmailRegex.Replace(scrubbed, "[redacted-email]");
+        scrubbed = BearerTokenRegex.Replace(scrubbed, "Bearer [redacted]");
         return scrubbed;
+    }
+
+    private static string TrimQueryOrFragmentDelimiters(string qf, string fullText, int matchStart, out string tail)
+    {
+        tail = string.Empty;
+        var s = qf;
+        while (s.Length > 1)
+        {
+            var last = s[^1];
+            if (last is ';' or ',')
+            {
+                s = s[..^1];
+                tail = last + tail;
+            }
+            else if (last == '\'' && matchStart > 0 && fullText[matchStart - 1] == '\'')
+            {
+                s = s[..^1];
+                tail = "'" + tail;
+            }
+            else if (last == ')' && CountChar(s, ')') > CountChar(s, '('))
+            {
+                s = s[..^1];
+                tail = ")" + tail;
+            }
+            else if (last == ']' && CountChar(s, ']') > CountChar(s, '['))
+            {
+                s = s[..^1];
+                tail = "]" + tail;
+            }
+            else
+            {
+                break;
+            }
+        }
+        return s;
+    }
+
+    private static int CountChar(string s, char ch)
+    {
+        var count = 0;
+        foreach (var c in s)
+        {
+            if (c == ch) count++;
+        }
+        return count;
     }
 
     public TelemetryConsent Consent
@@ -323,14 +376,11 @@ public sealed class CoreTelemetryService : ITelemetryService
         Action<TelemetryConsent>? consentNotify = null;
         TelemetryConsent consentNotifyValue = TelemetryConsent.Off;
         bool result;
-        IDisposable? crossProcessLock = null;
-        if (consent != TelemetryConsent.Off && _externalConsentToken != null && !string.IsNullOrWhiteSpace(_bufferPath))
+        var needsBufferLock = !string.IsNullOrWhiteSpace(_bufferPath);
+        IDisposable? crossProcessLock = needsBufferLock ? AcquireCrossProcessBufferLock() : null;
+        if (consent != TelemetryConsent.Off && needsBufferLock && crossProcessLock == null)
         {
-            crossProcessLock = AcquireCrossProcessBufferLock();
-            if (crossProcessLock == null)
-            {
-                return false;
-            }
+            return false;
         }
         using (crossProcessLock)
         {
@@ -339,13 +389,29 @@ public sealed class CoreTelemetryService : ITelemetryService
                 var priorConsent = _consent;
                 if (consent == TelemetryConsent.Off)
                 {
-                    result = RevokeLocked(
-                        out toCancel,
-                        "telemetry disk purge failed on opt-out: ",
-                        ref purgeNotify,
-                        ref purgeNotifyValue,
-                        keepForeignGenerationPath: null,
-                        ownBufferOnly: _externalConsentToken != null);
+                    if (needsBufferLock && crossProcessLock == null)
+                    {
+                        // Lock unavailable during opt-out: revoke local collection and remove our own
+                        // buffer, but never report clean global purge without holding the lock.
+                        RevokeLocked(
+                            out toCancel,
+                            "telemetry disk purge failed on opt-out (lock unavailable): ",
+                            ref purgeNotify,
+                            ref purgeNotifyValue,
+                            keepForeignGenerationPath: null,
+                            ownBufferOnly: true);
+                        UpdatePurgeFailedLocked(true, ref purgeNotify, ref purgeNotifyValue);
+                        result = false;
+                    }
+                    else
+                    {
+                        result = RevokeLocked(
+                            out toCancel,
+                            "telemetry disk purge failed on opt-out: ",
+                            ref purgeNotify,
+                            ref purgeNotifyValue,
+                            ResolveForeignKeepPathLocked());
+                    }
                 }
                 else if (_disposeRequested || _clientDisposed)
                 {
@@ -763,14 +829,45 @@ public sealed class CoreTelemetryService : ITelemetryService
         }
     }
 
-    private IDisposable? AcquireCrossProcessBufferLock()
+    private string? GetBufferLockPath()
     {
         if (string.IsNullOrWhiteSpace(_bufferPath)) return null;
+        var dir = Path.GetDirectoryName(_bufferPath);
+        var stem = Path.GetFileNameWithoutExtension(_bufferPath);
+        if (string.IsNullOrEmpty(stem)) return null;
+        // Keep the lock file in the same shared state directory as the buffer files so processes
+        // with different TMPDIR values coordinate on the exact same lock file.
+        return string.IsNullOrEmpty(dir) ? $".{stem}.lock" : Path.Combine(dir, $".{stem}.lock");
+    }
+
+    private void EnsureBufferLockFileExists()
+    {
+        var lockPath = GetBufferLockPath();
+        if (string.IsNullOrEmpty(lockPath)) return;
         try
         {
-            var fullPath = Path.GetFullPath(_bufferPath);
-            var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(fullPath)))[..16];
-            var lockPath = Path.Combine(Path.GetTempPath(), $"aun-telemetry-{hash}.lock");
+            var dir = Path.GetDirectoryName(lockPath);
+            if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir) && !File.Exists(lockPath))
+            {
+                using var _ = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+        }
+    }
+
+    private IDisposable? AcquireCrossProcessBufferLock()
+    {
+        var lockPath = GetBufferLockPath();
+        if (string.IsNullOrEmpty(lockPath)) return null;
+        try
+        {
+            var dir = Path.GetDirectoryName(lockPath);
+            if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+            {
+                Directory.CreateDirectory(dir);
+            }
             var deadline = DateTime.UtcNow.AddSeconds(2);
             while (true)
             {

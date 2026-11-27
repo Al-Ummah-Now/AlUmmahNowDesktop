@@ -712,6 +712,20 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("https://example.com/api?page=2&sort=asc"));
             Assert.Equal("https://example.com/api?[redacted]",
                 CoreTelemetryService.SanitizeLocalPaths("https://example.com/api?source=%2FUsers%2Falice%2FPrivateProject"));
+            Assert.Equal("https://example.com/api?[redacted]",
+                CoreTelemetryService.SanitizeLocalPaths("https://example.com/api?token=abc[secret]&next=private"));
+            Assert.Equal("https://example.com/api?[redacted]",
+                CoreTelemetryService.SanitizeLocalPaths("https://example.com/api?q=(PrivateProject)"));
+            Assert.Equal("(https://example.com/api?[redacted])",
+                CoreTelemetryService.SanitizeLocalPaths("(https://example.com/api?q=(PrivateProject))"));
+            Assert.Equal("https://example.com/api#[redacted]",
+                CoreTelemetryService.SanitizeLocalPaths("https://example.com/api#first,PrivateProject"));
+            Assert.Equal("https://example.com/users/[redacted-email]",
+                CoreTelemetryService.SanitizeLocalPaths("https://example.com/users/alice@example.com"));
+            Assert.Equal("([redacted-path] https://example.com/api)",
+                CoreTelemetryService.SanitizeLocalPaths("(relative/Secret.mov and https://example.com/api)"));
+            Assert.Equal("Failed for [redacted-email] with Bearer [redacted] and Bearer [redacted]",
+                CoreTelemetryService.SanitizeLocalPaths("Failed for alice@example.com with Bearer eyJhbGciOiJIUzI1NiJ9.payload.sig and Bearer abcdefg"));
             Assert.Equal("https://example.com/?[redacted]",
                 CoreTelemetryService.SanitizeLocalPaths("https://example.com/?path=/Users/alice/Secret.mov"));
             Assert.Equal("https://example.com/api?[redacted]",

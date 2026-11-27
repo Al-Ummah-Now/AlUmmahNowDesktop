@@ -1,8 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading;
@@ -123,8 +121,28 @@ namespace AlUmmahNow.App.Services
         public bool TrySaveTelemetryEnabled(bool enabled, out string? writtenToken)
         {
             writtenToken = null;
-            using var crossProcessLock = TryAcquireConsentLock();
-            if (enabled && crossProcessLock == null)
+            if (!enabled)
+            {
+                var dir = Path.GetDirectoryName(_telemetryConsentPath);
+                if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+                {
+                    try
+                    {
+                        File.Delete(_telemetryConsentPath);
+                        return true;
+                    }
+                    catch (DirectoryNotFoundException)
+                    {
+                        return true;
+                    }
+                    catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+                    {
+                        return false;
+                    }
+                }
+            }
+            using var crossProcessLock = TryAcquireConsentLock(createDirectory: enabled);
+            if (crossProcessLock == null)
             {
                 return false;
             }
@@ -153,11 +171,12 @@ namespace AlUmmahNow.App.Services
         /// <summary>
         /// Rolls back a failed opt-in only if the on-disk consent token still matches <paramref name="expectedToken"/>.
         /// If another process already wrote a newer generation token, leaves the newer opt-in untouched and returns <c>true</c>.
+        /// Returns <c>false</c> when <paramref name="expectedToken"/> is missing or the cross-process lock cannot be acquired.
         /// </summary>
         public bool RollbackTelemetryEnabled(string? expectedToken)
         {
-            if (string.IsNullOrEmpty(expectedToken)) return SaveTelemetryEnabled(false);
-            using var crossProcessLock = TryAcquireConsentLock();
+            if (string.IsNullOrEmpty(expectedToken)) return false;
+            using var crossProcessLock = TryAcquireConsentLock(createDirectory: false);
             if (crossProcessLock == null) return false;
             var current = LoadTelemetryConsentToken();
             if (!string.Equals(current, expectedToken, StringComparison.Ordinal))
@@ -194,13 +213,18 @@ namespace AlUmmahNow.App.Services
             }
         }
 
-        private IDisposable? TryAcquireConsentLock()
+        private IDisposable? TryAcquireConsentLock(bool createDirectory)
         {
             try
             {
-                var fullPath = Path.GetFullPath(_telemetryConsentPath);
-                var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(fullPath)))[..16];
-                var lockPath = Path.Combine(Path.GetTempPath(), $"aun-telemetry-consent-{hash}.lock");
+                var directory = Path.GetDirectoryName(_telemetryConsentPath);
+                if (createDirectory && !string.IsNullOrEmpty(directory))
+                {
+                    Directory.CreateDirectory(directory);
+                }
+                // Keep the lock file in the same shared config directory as the consent sidecar so
+                // processes with different TMPDIR values still coordinate on the exact same lock file.
+                var lockPath = _telemetryConsentPath + ".lock";
                 var deadline = DateTime.UtcNow.AddSeconds(2);
                 while (true)
                 {
