@@ -784,12 +784,18 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("\"file:///private/Client \\\"Internal\\\" Acquisition\""));
             Assert.Contains("https://example.com/api",
                 CoreTelemetryService.SanitizeLocalPaths("\"relative/My Clip.mov\" and (https://example.com/api)"));
-            Assert.Contains("https://example.com/api",
+            Assert.Equal("progress 1/2 (https://example.com/api)",
                 CoreTelemetryService.SanitizeLocalPaths("progress 1/2 (https://example.com/api)"));
             Assert.Contains("https://example.com/api",
                 CoreTelemetryService.SanitizeLocalPaths("progress \"1/2\" (https://example.com/api)"));
             Assert.DoesNotContain("private.example",
                 CoreTelemetryService.SanitizeLocalPaths("opening \"1/2 (https://private.example/Acquisition.mov)\""));
+            Assert.DoesNotContain("private.example",
+                CoreTelemetryService.SanitizeLocalPaths("opening \"HTTP/2 (https://private.example/Acquisition.mov)\""));
+            Assert.DoesNotContain("private.example",
+                CoreTelemetryService.SanitizeLocalPaths("opening \"My Project/Clip https://private.example/Acquisition.mov\""));
+            Assert.DoesNotContain("private.example",
+                CoreTelemetryService.SanitizeLocalPaths("opening \"(relative/My Clip.mov) https://private.example/Acquisition.mov\""));
             Assert.DoesNotContain("private.example",
                 CoreTelemetryService.SanitizeLocalPaths("opening \"/tmp/Project 'draft' (https://private.example/Acquisition.mov)\""));
             Assert.DoesNotContain("private.example",
@@ -800,6 +806,11 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("opening \"relative/My's Clip.mov\" (https://example.com/api)"));
             Assert.DoesNotContain("private.example",
                 CoreTelemetryService.SanitizeLocalPaths("opening relative/My(1) (https://private.example/Acquisition.mov)"));
+            Assert.Equal("can't reach https://example.com/api",
+                CoreTelemetryService.SanitizeLocalPaths("can't reach https://example.com/api"));
+            // Linear scaling regression test: long alphanumeric run without '@'/'%40' must complete rapidly.
+            var longAlpha = new string('a', 100_000);
+            Assert.Equal(longAlpha, CoreTelemetryService.SanitizeLocalPaths(longAlpha));
             Assert.Equal("\"[redacted-path]\" (https://example.com/api)",
                 CoreTelemetryService.SanitizeLocalPaths("\"file:///a.mov\" (https://example.com/api)"));
             Assert.Equal("[redacted-path]",

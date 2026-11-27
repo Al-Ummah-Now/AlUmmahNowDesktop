@@ -10,27 +10,29 @@ namespace AlUmmahNow.CoreBridge.Native;
 
 /// <summary>
 /// Wraps <see cref="TelemetryClient"/> from <c>aun-core</c> behind <see cref="ITelemetryService"/>.
-/// Consent defaults to off; opting out immediately blocks collection in the wrapper, cancels in-flight
-/// flushes, and purges both memory and the disk buffer. Disposal defers releasing the native handle
-/// until any in-flight flush completes without deleting a retryable buffer unless consent was revoked.
+/// Consent defaults to off; opting out immediately blocks collection in the wrapper, revokes native
+/// consent (halting any further native batches and purging memory and disk), cancels the managed
+/// flush wait, and defers re-enabling or native disposal until any already-dispatched native HTTP
+/// request completes and cleans up (the UniFFI <see cref="TelemetryClient.Flush"/> API does not
+/// accept a cancellation handle). Disposal defers releasing the native handle until any in-flight
+/// flush completes without deleting a retryable buffer unless consent was revoked.
 /// </summary>
 public sealed class CoreTelemetryService : ITelemetryService
 {
     private static readonly Regex UrlVaultRegex = new(@"(?<![A-Za-z0-9+.-/\\])([A-Za-z][A-Za-z0-9+.-]+://(?:\[([^\]\s""'<>\\{}\r\n]+)\]|(?:[A-Za-z0-9._~!$&'*+;=-]|%[0-9A-Fa-f]{2})+)(?::\d+)?(?:/(?:(?!(?:file://|[A-Za-z]:[\\/]))(?:[^\s""<>\\{},()\[\]?#\r\n]|\([^\s""<>\\{},()\[\]/:\\?#]+\)|\[[^\s""<>\\{},()\[\]/:\\?#]+\]))*)?)([?#][^\s""<>\r\n]*)?(?=$|[\s""'<>\\{},;()\[\]]|file://|[A-Za-z]:[\\/])", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex ParenPathRegex = new(@"(\()(?:/|~/|[A-Za-z]:[\\/]|\\\\)[^()\r\n\u001E]+(\))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex ParenRelativeSlashPathRegex = new(@"(\()(?!HTTP/\d)(?!TLS/\d)(?!SSL/\d)[^\s/\\""'<>()\[\]{}:,;\u001E\u001F]+/[^()\r\n\u001E]+(\))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex WindowsPathRegex = new(@"(?:[A-Za-z]:[\\/]|\\\\)(?:(?!\s+\u001E)[^\r\n\u001E])+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex RelativeBackslashPathRegex = new(@"(^|[\s(\[{""'=,:;\u001F])[^\s\\/""'<>(),;\u001E\u001F]+\\(?:(?!\s+\u001E)[^\r\n\u001E\u001F])+", RegexOptions.Compiled);
+    private static readonly Regex ParenRelativeSlashPathRegex = new(@"(\()(?!(?:HTTP|TLS|SSL)/\d)(?!\d+/\d+\))[^\s/\\""'<>()\[\]{}:,;\u001E\u001F]+/[^()\r\n\u001E]+(\))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex WindowsPathRegex = new(@"(?:[A-Za-z]:[\\/]|\\\\)[^\S\r\n]*[^\r\n\u001E\s]+(?:[^\S\r\n]+[^\r\n\u001E\s]+)*", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex RelativeBackslashPathRegex = new(@"(^|[\s(\[{""'=,:;\u001F])[^\s\\/""'<>(),;\u001E\u001F]+\\[^\r\n\u001E\u001F\s]+(?:[^\S\r\n]+[^\r\n\u001E\u001F\s]+)*", RegexOptions.Compiled);
     private static readonly Regex QuotedSpacedRootPathRegex = new(@"[""']/[ \t]+[^\r\n\u001E]+", RegexOptions.Compiled);
-    private static readonly Regex UnixPathRegex = new(@"(?<![\p{L}\p{M}\p{N}._/-])(?:~/|//+(?=[ \t]*[^\s/])|/(?=[ \t]*[^\s/]))(?:(?!\s+\u001E)[^\r\n\u001E])+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex RelativeSlashPathRegex = new(@"(^|[\s(\[{""'=,:;\u001F])(?!HTTP/\d)(?!TLS/\d)(?!SSL/\d)[^\s/\\""'<>()\[\]{}:,;\u001E\u001F]+/(?:(?!\s+\u001E)[^\r\n\u001E\u001F])+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex UnixPathRegex = new(@"(?<![\p{L}\p{M}\p{N}._/-])(?:~/|//+(?=[ \t]*[^\s/])|/(?=[ \t]*[^\s/]))[^\S\r\n]*[^\r\n\u001E\s]+(?:[^\S\r\n]+[^\r\n\u001E\s]+)*", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex RelativeSlashPathRegex = new(@"(^|[\s(\[{""'=,:;\u001F])(?!(?<!['""])(?:HTTP|TLS|SSL)/\d)(?!(?<!['""])\d+/\d+(?:$|[\s)\]},;]))[^\s/\\""'<>()\[\]{}:,;\u001E\u001F]+/[^\r\n\u001E\u001F\s]+(?:[^\S\r\n]+[^\r\n\u001E\u001F\s]+)*", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex DoubleQuotedFilenameRegex = new(@"""[^""\r\n/\\]*\.[A-Za-z0-9]{1,16}""", RegexOptions.Compiled);
-    private static readonly Regex SingleQuotedFilenameRegex = new(@"'(?:[^'\r\n/\\]|'(?=\p{L}))*\.[A-Za-z0-9]{1,16}'", RegexOptions.Compiled);
+    private static readonly Regex SingleQuotedFilenameRegex = new(@"(?<!\p{L})'(?:[^'\r\n/\\]|'(?=\p{L}))*\.[A-Za-z0-9]{1,16}'", RegexOptions.Compiled);
     private static readonly Regex KeywordQuotedPathRegex = new(@"(\b(?:file|path|directory|folder|document)\s+)([""'])(?!\u001E)[^'""\r\n]+\2", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex KeywordUnquotedFilenameRegex = new(@"(\b(?:open|opening|read|reading|write|writing|delete|deleting|remove|removing|rename|stat|create|creating|load|loading|save|saving|access|accessing|unlink|file|path|directory|folder|document|filename|filepath)\b(?:\s*[:=]\s*|\s+))(?!\u001E)[^\r\n\u001E\u001F]*\.(?!(?:kt|java|swift|cs|cpp|cc|c|h|hpp|rs|py|js|ts|go|rb|m|mm):\d+)[A-Za-z0-9]{1,16}\b(?!\()", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex KeywordAssignedPathRegex = new(@"(\b(?:file|path|filename|filepath)\s*[:=]\s*)(?!\u001E)[^\r\n\u001E\u001F]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex BareFilenameRegex = new(@"(^|[\r\n:=;\u001F])([ \t]*)[^\r\n:=;\u001E\u001F]*\.(?!ts:\d+)(?:mov|mp4|m4v|mkv|webm|avi|ts|m3u8|mpd|mp3|m4a|wav|aac|flac|ogg|opus|jpg|jpeg|png|gif|webp|heic|svg|pdf|txt|md|rtf|doc|docx|xls|xlsx|ppt|pptx|csv|json|xml|yaml|yml|toml|ini|cfg|conf|log|srt|vtt|ass|ssa|zip|tar|gz|tgz|bz2|xz|7z|rar|dmg|pkg|msi|exe|apk|aab|ipa|pem|key|crt|cer|p12|pfx|jks|keystore|db|sqlite|sqlite3|bin|dat|tmp|bak|proj|aun)\b(?!\()", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex EmailRegex = new(@"(?:[A-Za-z0-9._+-]|%(?!40))+(?:@|%40)[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex BearerTokenRegex = new(@"\bBearer\s+\S+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private readonly TelemetryAppInfo _app;
@@ -259,17 +261,121 @@ public sealed class CoreTelemetryService : ITelemetryService
         scrubbed = QuotedSpacedRootPathRegex.Replace(scrubbed, "[redacted-path]");
         scrubbed = UnixPathRegex.Replace(scrubbed, "[redacted-path]");
         scrubbed = RelativeSlashPathRegex.Replace(scrubbed, "$1[redacted-path]");
-        scrubbed = DoubleQuotedFilenameRegex.Replace(scrubbed, "[redacted-path]");
-        scrubbed = SingleQuotedFilenameRegex.Replace(scrubbed, "[redacted-path]");
+        if (scrubbed.Contains('.'))
+        {
+            scrubbed = DoubleQuotedFilenameRegex.Replace(scrubbed, "[redacted-path]");
+            scrubbed = SingleQuotedFilenameRegex.Replace(scrubbed, "[redacted-path]");
+        }
         scrubbed = KeywordQuotedPathRegex.Replace(scrubbed, "$1[redacted-path]");
-        scrubbed = KeywordUnquotedFilenameRegex.Replace(scrubbed, "$1[redacted-path]");
+        if (scrubbed.Contains('.'))
+        {
+            scrubbed = KeywordUnquotedFilenameRegex.Replace(scrubbed, "$1[redacted-path]");
+        }
         scrubbed = KeywordAssignedPathRegex.Replace(scrubbed, "$1[redacted-path]");
-        scrubbed = BareFilenameRegex.Replace(scrubbed, "$1$2[redacted-path]");
+        if (scrubbed.Contains('.'))
+        {
+            scrubbed = BareFilenameRegex.Replace(scrubbed, "$1$2[redacted-path]");
+        }
         scrubbed = RestoreVaultedUrls(scrubbed, VaultPrefix, vaultedUrls);
-        scrubbed = EmailRegex.Replace(scrubbed, "[redacted-email]");
+        scrubbed = RedactEmails(scrubbed);
         scrubbed = BearerTokenRegex.Replace(scrubbed, "Bearer [redacted]");
         return hadSentinels ? UnescapeSentinels(scrubbed) : scrubbed;
     }
+
+    private static string RedactEmails(string text)
+    {
+        if (text.IndexOf('@') < 0 && text.IndexOf("%40", StringComparison.Ordinal) < 0)
+        {
+            return text;
+        }
+        StringBuilder? sb = null;
+        var copied = 0;
+        var i = 0;
+        while (i < text.Length)
+        {
+            var atLen = text[i] == '@'
+                ? 1
+                : (text[i] == '%' && i + 2 < text.Length && text[i + 1] == '4' && text[i + 2] == '0' ? 3 : 0);
+            if (atLen == 0)
+            {
+                i++;
+                continue;
+            }
+            var localStart = i;
+            while (localStart > copied && IsEmailLocalChar(text, localStart - 1))
+            {
+                localStart--;
+            }
+            var domStart = i + atLen;
+            var domEnd = localStart < i ? FindEmailDomainEnd(text, domStart) : -1;
+            if (domEnd > 0)
+            {
+                sb ??= new StringBuilder(text.Length);
+                sb.Append(text, copied, localStart - copied);
+                sb.Append("[redacted-email]");
+                copied = domEnd;
+                i = domEnd;
+            }
+            else
+            {
+                i += atLen;
+            }
+        }
+        if (sb == null) return text;
+        sb.Append(text, copied, text.Length - copied);
+        return sb.ToString();
+    }
+
+    private static bool IsEmailLocalChar(string text, int pos)
+    {
+        var ch = text[pos];
+        if ((ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') ||
+            ch is '.' or '_' or '+' or '-')
+        {
+            return true;
+        }
+        return ch == '%' && !(pos + 2 < text.Length && text[pos + 1] == '4' && text[pos + 2] == '0');
+    }
+
+    private static int FindEmailDomainEnd(string text, int domStart)
+    {
+        var k = domStart;
+        var lastDot = -1;
+        var lettersSinceDot = 0;
+        var bestEnd = -1;
+        while (k < text.Length)
+        {
+            var ch = text[k];
+            var isLetter = (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z');
+            var isDigit = ch >= '0' && ch <= '9';
+            if (isLetter)
+            {
+                lettersSinceDot = lastDot >= 0 ? lettersSinceDot + 1 : 0;
+            }
+            else if (ch == '.')
+            {
+                lastDot = k > domStart ? k : -1;
+                lettersSinceDot = 0;
+            }
+            else if (isDigit || ch == '-')
+            {
+                lettersSinceDot = -1;
+            }
+            else
+            {
+                break;
+            }
+            k++;
+            if (lastDot > domStart && lettersSinceDot >= 2 && (k == text.Length || !IsAsciiWordChar(text[k])))
+            {
+                bestEnd = k;
+            }
+        }
+        return bestEnd;
+    }
+
+    private static bool IsAsciiWordChar(char ch) =>
+        (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '_';
 
     private static string EscapeSentinels(string text, out bool hadSentinels)
     {
@@ -322,6 +428,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     {
         private int _cursor;
         private bool _hasPathOnLine;
+        private char _openQuote;
         private char _pathQuote;
         private bool _escapedBackslash;
         private int _tokenStart;
@@ -339,7 +446,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         public bool IsEmbeddedInPath(string text, int matchStart)
         {
             AdvanceTo(text, matchStart);
-            var curTokenIsPath = _tokenHasPathSep && !IsNonPathSlashToken(text, _tokenStart, _tokenEnd);
+            var curTokenIsPath = _tokenHasPathSep && !IsNonPathSlashToken(text, _tokenStart, _tokenEnd, _openQuote != '\0');
             return _pathQuote != '\0' || curTokenIsPath || (_hasPathOnLine && (!_wsBeforeRun || _inWrapperRun));
         }
 
@@ -352,6 +459,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         private void ResetLineState()
         {
             _hasPathOnLine = false;
+            _openQuote = '\0';
             _pathQuote = '\0';
             _escapedBackslash = false;
             _tokenStart = -1;
@@ -380,22 +488,29 @@ public sealed class CoreTelemetryService : ITelemetryService
 
         private void ProcessLineChar(string text, char ch)
         {
-            var closedQuote =
-                !_escapedBackslash &&
-                ((_pathQuote != '\0' && ch == _pathQuote) ||
-                 (!_hasPathOnLine && !_inWrapperRun && _tokenStart > 0 && ch is '"' or '\'' && text[_tokenStart - 1] == ch));
-            if (closedQuote)
+            if (!_escapedBackslash && _openQuote != '\0' && ch == _openQuote && !IsInnerApostrophe(text, _cursor, ch))
             {
-                ResetLineState();
+                if (_pathQuote == ch || !_hasPathOnLine)
+                {
+                    ResetLineState();
+                    return;
+                }
+                _openQuote = '\0';
+                _tokenStart = -1;
+                _tokenEnd = -1;
+                _tokenHasPathSep = false;
+                _inWrapperRun = false;
+                _wsBeforeRun = false;
+                _escapedBackslash = false;
                 return;
             }
             var atTokenStart = _tokenStart < 0 || _inWrapperRun;
             if (IsFileSchemeAt(text, _cursor) || StartsLocalPathAt(text, _cursor, atTokenStart))
             {
                 _hasPathOnLine = true;
-                if (_pathQuote == '\0' && _cursor > 0 && text[_cursor - 1] is '"' or '\'')
+                if (_pathQuote == '\0' && _openQuote != '\0')
                 {
-                    _pathQuote = text[_cursor - 1];
+                    _pathQuote = _openQuote;
                 }
             }
             if (char.IsWhiteSpace(ch))
@@ -412,6 +527,10 @@ public sealed class CoreTelemetryService : ITelemetryService
             else if (IsOpeningWrapper(ch))
             {
                 if (!_inWrapperRun) PromoteTokenPath(text);
+                if (!_escapedBackslash && _openQuote == '\0' && CanOpenQuote(text, _cursor, ch))
+                {
+                    _openQuote = ch;
+                }
                 _inWrapperRun = true;
             }
             else
@@ -431,15 +550,26 @@ public sealed class CoreTelemetryService : ITelemetryService
 
         private void PromoteTokenPath(string text)
         {
-            if (_tokenHasPathSep && !IsNonPathSlashToken(text, _tokenStart, _tokenEnd))
+            if (_tokenHasPathSep && !IsNonPathSlashToken(text, _tokenStart, _tokenEnd, _openQuote != '\0'))
             {
                 _hasPathOnLine = true;
-                if (_pathQuote == '\0' && _tokenStart > 0 && text[_tokenStart - 1] is '"' or '\'')
+                if (_pathQuote == '\0' && _openQuote != '\0')
                 {
-                    _pathQuote = text[_tokenStart - 1];
+                    _pathQuote = _openQuote;
                 }
             }
         }
+
+        private static bool CanOpenQuote(string text, int pos, char ch)
+        {
+            if (ch == '"') return true;
+            if (ch != '\'') return false;
+            return pos == 0 || !char.IsLetterOrDigit(text[pos - 1]);
+        }
+
+        private static bool IsInnerApostrophe(string text, int pos, char ch) =>
+            ch == '\'' && pos > 0 && pos + 1 < text.Length &&
+            char.IsLetter(text[pos - 1]) && char.IsLetter(text[pos + 1]);
     }
 
     private static bool StartsLocalPathAt(string text, int pos, bool atTokenStart)
@@ -453,9 +583,9 @@ public sealed class CoreTelemetryService : ITelemetryService
             pos + 2 < text.Length && text[pos + 1] == ':' && text[pos + 2] is '/' or '\\';
     }
 
-    private static bool IsNonPathSlashToken(string text, int start, int end)
+    private static bool IsNonPathSlashToken(string text, int start, int end, bool insideQuote)
     {
-        if (start < 0 || end <= start) return false;
+        if (insideQuote || start < 0 || end <= start) return false;
         var span = text.AsSpan(start, end - start);
         var slashIdx = span.IndexOfAny('/', '\\');
         if (slashIdx <= 0 || slashIdx + 1 >= span.Length || span[slashIdx] != '/') return false;
@@ -469,8 +599,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         {
             return true;
         }
-        var quoted = start > 0 && text[start - 1] is '"' or '\'';
-        return !quoted && IsAllAsciiDigits(before) && IsAllAsciiDigits(after);
+        return IsAllAsciiDigits(before) && IsAllAsciiDigits(after);
     }
 
     private static bool IsAllAsciiDigits(ReadOnlySpan<char> span)
