@@ -34,10 +34,11 @@ public sealed class CoreTelemetryService : ITelemetryService
     };
     private static readonly Regex KeywordAssignedPathRegex = new(@"(\b(?:file|path|filename|filepath)\s*[:=]\s*)(?!\u001E)[^\r\n\u001E\u001F]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex BareFilenameRegex = new(@"(^|[\r\n:=;\u001F])([ \t]*)(?=[^\r\n:=;\u001E\u001F \t])[^\r\n:=;\u001E\u001F]*\.(?!ts:\d+)(?:mov|mp4|m4v|mkv|webm|avi|ts|m3u8|mpd|mp3|m4a|wav|aac|flac|ogg|opus|jpg|jpeg|png|gif|webp|heic|svg|pdf|txt|md|rtf|doc|docx|xls|xlsx|ppt|pptx|csv|json|xml|yaml|yml|toml|ini|cfg|conf|log|srt|vtt|ass|ssa|zip|tar|gz|tgz|bz2|xz|7z|rar|dmg|pkg|msi|exe|apk|aab|ipa|pem|key|crt|cer|p12|pfx|jks|keystore|db|sqlite|sqlite3|bin|dat|tmp|bak|proj|aun)\b(?!\()", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private const string KnownAuthSchemes = "Bearer|Basic|Digest|Token|Api-?Key|OAuth|Negotiate|Mutual|HOBA|Vapid|SCRAM-SHA-256|AWS4-HMAC-SHA256";
-    private static readonly Regex AuthHeaderDoubleQuotedRegex = new($@"([""']?\b(?:Proxy-)?Authorization[""']?\s*[:=]\s*""\s*(?:(?:{KnownAuthSchemes})\s+)?)(?:\\.|[^\\""\r\n])+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex AuthHeaderSingleQuotedRegex = new($@"([""']?\b(?:Proxy-)?Authorization[""']?\s*[:=]\s*'\s*(?:(?:{KnownAuthSchemes})\s+)?)(?:\\.|[^\\'\r\n])+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex AuthHeaderPlainRegex = new($@"([""']?\b(?:Proxy-)?Authorization[""']?[ \t]*[:=](?![ \t]*['""])[ \t]*(?:(?:{KnownAuthSchemes})[ \t]+)?)[^\r\n]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly string[] KnownAuthSchemeList =
+    {
+        "Bearer", "Basic", "Digest", "Token", "Api-Key", "ApiKey",
+        "OAuth", "Negotiate", "Mutual", "HOBA", "Vapid", "SCRAM-SHA-256", "AWS4-HMAC-SHA256"
+    };
     private static readonly Regex BearerTokenRegex = new(@"\b(Bearer)\s+(?!\[redacted\](?=$|[\s""',;)\]}]))[^\s""',;)\]}]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex BasicTokenRegex = new(@"\b(Basic)\s+([A-Za-z0-9+/_-]{2,}={0,2})(?![A-Za-z0-9+/_=-])", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly System.Text.UTF8Encoding StrictUtf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
@@ -49,6 +50,9 @@ public sealed class CoreTelemetryService : ITelemetryService
     private readonly string? _bufferPath;
     private readonly Func<string?>? _externalConsentToken;
     private readonly Func<IDisposable?>? _acquireExternalConsentLock;
+    private readonly object _externalLockGate = new();
+    private IDisposable? _heldExternalLock;
+    private int _externalLockRefs;
     private readonly object _gate = new();
     private TelemetryClient _client;
     private string? _activeBufferPath;
@@ -600,9 +604,7 @@ public sealed class CoreTelemetryService : ITelemetryService
 
     private static string RedactAuthCredentials(string text)
     {
-        var result = AuthHeaderDoubleQuotedRegex.Replace(text, "$1[redacted]");
-        result = AuthHeaderSingleQuotedRegex.Replace(result, "$1[redacted]");
-        result = AuthHeaderPlainRegex.Replace(result, "$1[redacted]");
+        var result = RedactAuthHeaders(text);
         result = BearerTokenRegex.Replace(result, "$1 [redacted]");
         return BasicTokenRegex.Replace(result, match =>
             IsBasicCredentialToken(match.Groups[2].Value)
@@ -610,34 +612,304 @@ public sealed class CoreTelemetryService : ITelemetryService
                 : match.Value);
     }
 
+    private static string RedactAuthHeaders(string text)
+    {
+        if (text.IndexOf(':') < 0 && text.IndexOf('=') < 0) return text;
+        StringBuilder? sb = null;
+        var copied = 0;
+        var i = 0;
+        while (i < text.Length)
+        {
+            if (!TryMatchAuthHeaderKey(text, i, out var keyEnd, out var allowNewlines, out var normalizedKey))
+            {
+                i++;
+                continue;
+            }
+            var sep = SkipAuthWhitespace(text, keyEnd, allowNewlines);
+            if (sep >= text.Length || text[sep] is not (':' or '='))
+            {
+                i = keyEnd;
+                continue;
+            }
+            var valStart = SkipAuthWhitespace(text, sep + 1, allowNewlines);
+            if (valStart >= text.Length || text[valStart] is '\r' or '\n')
+            {
+                i = sep + 1;
+                continue;
+            }
+            if (normalizedKey != null)
+            {
+                sb ??= new StringBuilder(text.Length);
+                sb.Append(text, copied, i - copied).Append(text[i]).Append(normalizedKey).Append(text[i]);
+                copied = keyEnd;
+            }
+            i = RedactAuthHeaderValue(text, valStart, allowNewlines, ref sb, ref copied);
+        }
+        if (sb == null) return text;
+        sb.Append(text, copied, text.Length - copied);
+        return sb.ToString();
+    }
+
+    private static bool TryMatchAuthHeaderKey(
+        string text, int pos, out int keyEnd, out bool allowNewlines, out string? normalizedKey)
+    {
+        keyEnd = pos;
+        allowNewlines = false;
+        normalizedKey = null;
+        var ch = text[pos];
+        if (ch is '"' or '\'')
+        {
+            return TryMatchQuotedAuthKey(text, pos, ch, out keyEnd, out allowNewlines, out normalizedKey);
+        }
+        if (pos > 0 && IsAuthKeyWordChar(text[pos - 1])) return false;
+        if (MatchesAsciiIgnoreCase(text, pos, "proxy-authorization") &&
+            (pos + 19 == text.Length || !IsAuthKeyWordChar(text[pos + 19])))
+        {
+            keyEnd = pos + 19;
+            return true;
+        }
+        if (MatchesAsciiIgnoreCase(text, pos, "authorization") &&
+            (pos + 13 == text.Length || !IsAuthKeyWordChar(text[pos + 13])))
+        {
+            keyEnd = pos + 13;
+            return true;
+        }
+        return false;
+    }
+
+    private static bool TryMatchQuotedAuthKey(
+        string text, int pos, char quote, out int keyEnd, out bool allowNewlines, out string? normalizedKey)
+    {
+        keyEnd = pos;
+        allowNewlines = false;
+        normalizedKey = null;
+        var limit = Math.Min(text.Length, pos + 129);
+        Span<char> decoded = stackalloc char[20];
+        var len = 0;
+        var sawEscape = false;
+        var j = pos + 1;
+        while (j < limit)
+        {
+            var c = text[j];
+            if (c is '\r' or '\n') return false;
+            if (c == quote)
+            {
+                ReadOnlySpan<char> span = decoded[..len];
+                if (span.Equals("authorization".AsSpan(), StringComparison.OrdinalIgnoreCase))
+                {
+                    keyEnd = j + 1;
+                    allowNewlines = true;
+                    normalizedKey = sawEscape ? "Authorization" : null;
+                    return true;
+                }
+                if (span.Equals("proxy-authorization".AsSpan(), StringComparison.OrdinalIgnoreCase))
+                {
+                    keyEnd = j + 1;
+                    allowNewlines = true;
+                    normalizedKey = sawEscape ? "Proxy-Authorization" : null;
+                    return true;
+                }
+                return false;
+            }
+            if (len >= 19) return false;
+            if (c == '\\')
+            {
+                sawEscape = true;
+                if (j + 5 < text.Length && text[j + 1] == 'u' && TryParseHex4(text, j + 2, out var codeUnit))
+                {
+                    decoded[len++] = (char)codeUnit;
+                    j += 6;
+                    continue;
+                }
+                if (j + 1 >= text.Length) return false;
+                decoded[len++] = text[j + 1];
+                j += 2;
+                continue;
+            }
+            decoded[len++] = c;
+            j++;
+        }
+        return false;
+    }
+
+    private static int RedactAuthHeaderValue(
+        string text, int valStart, bool allowNewlines, ref StringBuilder? sb, ref int copied)
+    {
+        var ch = text[valStart];
+        if (ch is '"' or '\'')
+        {
+            return RedactQuotedAuthString(text, valStart, ch, ref sb, ref copied);
+        }
+        if (ch == '[')
+        {
+            var k = valStart + 1;
+            while (k < text.Length)
+            {
+                var c = text[k];
+                if (c == ']') return k + 1;
+                if (!allowNewlines && c is '\r' or '\n') return k;
+                if (c is '"' or '\'')
+                {
+                    k = RedactQuotedAuthString(text, k, c, ref sb, ref copied);
+                    continue;
+                }
+                k++;
+            }
+            return k;
+        }
+        var lineEnd = valStart;
+        while (lineEnd < text.Length && text[lineEnd] is not ('\r' or '\n')) lineEnd++;
+        var redacted = RedactAuthValueBody(text, valStart, lineEnd);
+        if (redacted != null)
+        {
+            sb ??= new StringBuilder(text.Length);
+            sb.Append(text, copied, valStart - copied).Append(redacted);
+            copied = lineEnd;
+        }
+        return lineEnd;
+    }
+
+    private static int RedactQuotedAuthString(
+        string text, int quotePos, char quote, ref StringBuilder? sb, ref int copied)
+    {
+        var j = quotePos + 1;
+        var escaped = false;
+        while (j < text.Length)
+        {
+            var c = text[j];
+            if (c is '\r' or '\n') break;
+            if (c == quote && !escaped) break;
+            escaped = c == '\\' && !escaped;
+            j++;
+        }
+        var innerStart = quotePos + 1;
+        var redacted = RedactAuthValueBody(text, innerStart, j);
+        if (redacted != null)
+        {
+            sb ??= new StringBuilder(text.Length);
+            sb.Append(text, copied, innerStart - copied).Append(redacted);
+            copied = j;
+        }
+        return j < text.Length && text[j] == quote ? j + 1 : j;
+    }
+
+    private static string? RedactAuthValueBody(string text, int start, int end)
+    {
+        var s = start;
+        while (s < end && text[s] is ' ' or '\t') s++;
+        if (s >= end) return null;
+        foreach (var scheme in KnownAuthSchemeList)
+        {
+            if (s + scheme.Length < end && MatchesAsciiIgnoreCase(text, s, scheme))
+            {
+                var after = s + scheme.Length;
+                if (text[after] is ' ' or '\t')
+                {
+                    while (after < end && text[after] is ' ' or '\t') after++;
+                    if (after < end)
+                    {
+                        return text.Substring(start, after - start) + "[redacted]";
+                    }
+                }
+            }
+        }
+        return text.Substring(start, s - start) + "[redacted]";
+    }
+
+    private static int SkipAuthWhitespace(string text, int pos, bool allowNewlines)
+    {
+        var p = pos;
+        while (p < text.Length)
+        {
+            var c = text[p];
+            if (c is ' ' or '\t' || (allowNewlines && c is '\r' or '\n')) p++;
+            else break;
+        }
+        return p;
+    }
+
+    private static bool IsAuthKeyWordChar(char ch) => IsAsciiWordChar(ch) || ch == '-';
+
+    private static bool MatchesAsciiIgnoreCase(string text, int pos, string literal) =>
+        pos + literal.Length <= text.Length &&
+        text.AsSpan(pos, literal.Length).Equals(literal.AsSpan(), StringComparison.OrdinalIgnoreCase);
+
+    private static bool TryParseHex4(string text, int pos, out int value)
+    {
+        value = 0;
+        for (var k = 0; k < 4; k++)
+        {
+            var c = text[pos + k];
+            int digit;
+            if (c >= '0' && c <= '9') digit = c - '0';
+            else if (c >= 'a' && c <= 'f') digit = c - 'a' + 10;
+            else if (c >= 'A' && c <= 'F') digit = c - 'A' + 10;
+            else return false;
+            value = (value << 4) | digit;
+        }
+        return true;
+    }
+
+    private static int Base64CharValue(char ch)
+    {
+        if (ch >= 'A' && ch <= 'Z') return ch - 'A';
+        if (ch >= 'a' && ch <= 'z') return ch - 'a' + 26;
+        if (ch >= '0' && ch <= '9') return ch - '0' + 52;
+        if (ch is '+' or '-') return 62;
+        if (ch is '/' or '_') return 63;
+        return -1;
+    }
+
     private static bool IsBasicCredentialToken(string token)
     {
-        var hasPad = token.EndsWith('=');
-        if (hasPad && (token.Length & 3) != 0) return false;
-        var normalized = token.Replace('-', '+').Replace('_', '/');
-        var mod = normalized.Length & 3;
-        if (mod == 1) return false;
-        if (mod == 2) normalized += "==";
-        else if (mod == 3) normalized += "=";
+        var unpadded = token.TrimEnd('=');
+        var pad = token.Length - unpadded.Length;
+        if (pad > 2 || (pad > 0 && (token.Length & 3) != 0)) return false;
+        var rem = unpadded.Length & 3;
+        if (rem == 1 || (pad > 0 && rem + pad != 4)) return false;
+        if (rem == 2 && (Base64CharValue(unpadded[^1]) & 0x0F) != 0) return false;
+        if (rem == 3 && (Base64CharValue(unpadded[^1]) & 0x03) != 0) return false;
+        var normalized = unpadded.Replace('-', '+').Replace('_', '/');
+        if (rem == 2) normalized += "==";
+        else if (rem == 3) normalized += "=";
+        byte[] bytes;
         try
         {
-            var bytes = Convert.FromBase64String(normalized);
-            if (Array.IndexOf(bytes, (byte)':') < 0) return false;
-            var decoded = StrictUtf8.GetString(bytes);
-            foreach (var ch in decoded)
-            {
-                if (ch < 0x20 || ch == 0x7F) return false;
-            }
-            return true;
+            bytes = Convert.FromBase64String(normalized);
         }
         catch (FormatException)
         {
             return false;
         }
+        if (Array.IndexOf(bytes, (byte)':') < 0) return false;
+        if (IsPrintableStrictUtf8(bytes)) return true;
+        return IsPrintableIso88591(bytes);
+    }
+
+    private static bool IsPrintableStrictUtf8(byte[] bytes)
+    {
+        try
+        {
+            var decoded = StrictUtf8.GetString(bytes);
+            foreach (var ch in decoded)
+            {
+                if (ch < 0x20 || ch == 0x7F || (ch >= 0x80 && ch <= 0x9F)) return false;
+            }
+            return true;
+        }
         catch (System.Text.DecoderFallbackException)
         {
             return false;
         }
+    }
+
+    private static bool IsPrintableIso88591(byte[] bytes)
+    {
+        foreach (var b in bytes)
+        {
+            if (b < 0x20 || (b >= 0x7F && b <= 0x9F)) return false;
+        }
+        return true;
     }
 
     private static bool HasEmailAt(string text) =>
@@ -1608,7 +1880,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         IDisposable? externalConsentLock = null;
         if (consent != TelemetryConsent.Off && _acquireExternalConsentLock != null)
         {
-            externalConsentLock = _acquireExternalConsentLock();
+            externalConsentLock = TryAcquireExternalConsentLease();
             if (externalConsentLock == null)
             {
                 return false;
@@ -1745,7 +2017,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         IDisposable? externalConsentLock = null;
         if (_acquireExternalConsentLock != null)
         {
-            externalConsentLock = _acquireExternalConsentLock();
+            externalConsentLock = TryAcquireExternalConsentLease();
             if (externalConsentLock == null)
             {
                 lock (_gate)
@@ -1897,7 +2169,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         IDisposable? externalConsentLock = null;
         if (_acquireExternalConsentLock != null)
         {
-            externalConsentLock = _acquireExternalConsentLock();
+            externalConsentLock = TryAcquireExternalConsentLease();
             if (externalConsentLock == null)
             {
                 lock (_gate)
@@ -1908,6 +2180,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                 return;
             }
         }
+        var lockTransferred = false;
         try
         {
             lock (_gate)
@@ -1933,8 +2206,9 @@ public sealed class CoreTelemetryService : ITelemetryService
                 }
                 try
                 {
-                    // Dispatch immediately under the cross-process consent lock and `_gate` right after
-                    // verifying external consent so another process cannot persist opt-out before dispatch.
+                    // Dispatch under the cross-process consent lease and hold the lease until the
+                    // entire native flush completes so another process's opt-out serializes cleanly
+                    // with multi-batch flushing and no batch can start after opt-out finishes.
                     nativeFlush = flushOverride != null ? flushOverride() : _client.Flush();
                 }
                 catch (Exception ex) when (ex is AunException or ObjectDisposedException or OperationCanceledException)
@@ -1945,10 +2219,42 @@ public sealed class CoreTelemetryService : ITelemetryService
                     }
                 }
             }
+            if (nativeFlush != null)
+            {
+                var monitorToStop = monitorCts;
+                var heldLease = externalConsentLock;
+                lockTransferred = true;
+                // Defer decrementing `_inFlightFlushes`, any pending native `_client.Dispose()`, and
+                // releasing the cross-process consent lease until `nativeFlush` actually finishes,
+                // even if `WaitWithCancellationAsync` returns early on cancel/revoke.
+                _ = nativeFlush.ContinueWith(
+                    static (t, state) =>
+                    {
+                        _ = t.Exception;
+                        var (svc, cts, lease, epoch, bufPath) =
+                            ((CoreTelemetryService, CancellationTokenSource?, IDisposable?, long, string?))state!;
+                        try
+                        {
+                            if (cts != null) CancelQuietly(cts);
+                            svc.ReleaseInFlightFlush(epoch, bufPath);
+                        }
+                        finally
+                        {
+                            lease?.Dispose();
+                        }
+                    },
+                    (this, monitorToStop, heldLease, flushEpoch, flushBufferPath),
+                    CancellationToken.None,
+                    TaskContinuationOptions.ExecuteSynchronously,
+                    TaskScheduler.Default);
+            }
         }
         finally
         {
-            externalConsentLock?.Dispose();
+            if (!lockTransferred)
+            {
+                externalConsentLock?.Dispose();
+            }
         }
 
         if (nativeFlush == null)
@@ -1961,22 +2267,6 @@ public sealed class CoreTelemetryService : ITelemetryService
         try
         {
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, revokeToken);
-            var monitorToStop = monitorCts;
-            // Defer decrementing `_inFlightFlushes` (and any pending native `_client.Dispose()`) until
-            // `nativeFlush` actually finishes, even if `WaitWithCancellationAsync` returns early on cancel/revoke.
-            _ = nativeFlush.ContinueWith(
-                static (t, state) =>
-                {
-                    _ = t.Exception;
-                    var (svc, cts, epoch, bufPath) = ((CoreTelemetryService, CancellationTokenSource?, long, string?))state!;
-                    if (cts != null) CancelQuietly(cts);
-                    svc.ReleaseInFlightFlush(epoch, bufPath);
-                },
-                (this, monitorToStop, flushEpoch, flushBufferPath),
-                CancellationToken.None,
-                TaskContinuationOptions.ExecuteSynchronously,
-                TaskScheduler.Default);
-
             await WaitWithCancellationAsync(nativeFlush, linked.Token).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is AunException or ObjectDisposedException or OperationCanceledException)
@@ -1989,6 +2279,51 @@ public sealed class CoreTelemetryService : ITelemetryService
         return;
     CancelAndReturn:
         CancelQuietly(toCancel);
+    }
+
+    private IDisposable? TryAcquireExternalConsentLease()
+    {
+        if (_acquireExternalConsentLock == null) return null;
+        lock (_externalLockGate)
+        {
+            if (_externalLockRefs == 0)
+            {
+                var acquired = _acquireExternalConsentLock();
+                if (acquired == null) return null;
+                _heldExternalLock = acquired;
+            }
+            _externalLockRefs++;
+            return new ExternalConsentLease(this);
+        }
+    }
+
+    private void ReleaseExternalConsentLease()
+    {
+        IDisposable? toDispose = null;
+        lock (_externalLockGate)
+        {
+            if (_externalLockRefs <= 0) return;
+            _externalLockRefs--;
+            if (_externalLockRefs == 0)
+            {
+                toDispose = _heldExternalLock;
+                _heldExternalLock = null;
+            }
+        }
+        toDispose?.Dispose();
+    }
+
+    private sealed class ExternalConsentLease : IDisposable
+    {
+        private CoreTelemetryService? _owner;
+
+        public ExternalConsentLease(CoreTelemetryService owner) => _owner = owner;
+
+        public void Dispose()
+        {
+            var owner = Interlocked.Exchange(ref _owner, null);
+            owner?.ReleaseExternalConsentLease();
+        }
     }
 
     private async Task MonitorExternalConsentWhileFlushingAsync(CancellationToken stopToken)

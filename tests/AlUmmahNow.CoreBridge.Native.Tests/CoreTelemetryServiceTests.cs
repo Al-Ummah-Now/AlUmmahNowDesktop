@@ -990,6 +990,14 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("{\"Authorization\":\"Digest username=\\\"alice\\\", response=\\\"deadbeef\\\"\"}"));
             Assert.Equal("{\"Authorization\":\"Bearer [redacted]\",\"status\":401}",
                 CoreTelemetryService.SanitizeLocalPaths("{\"Authorization\":\"Bearer testSecret\",\"status\":401}"));
+            Assert.Equal("{\"Authorization\":[\"Bearer [redacted]\"],\"status\":401}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"Authorization\":[\"Bearer testSecret\"],\"status\":401}"));
+            Assert.Equal("{\"Authorization\":\"[redacted]\",\"status\":401}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"\\u0041uthorization\":\"opaqueSecret123\",\"status\":401}"));
+            Assert.Equal("{\"Authorization\":\"[redacted]\"}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"Authoriz\\u0061tion\":\"opaqueSecret123\"}"));
+            Assert.Equal("{\"Authorization\": \n \"[redacted]\",\"status\":401}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"Authorization\": \n \"opaqueSecret123\",\"status\":401}"));
             Assert.Equal("\"Authorization\": [redacted]",
                 CoreTelemetryService.SanitizeLocalPaths("\"Authorization\": opaqueSecret123 nextPart"));
             Assert.Equal("Authorization: [redacted]",
@@ -999,9 +1007,11 @@ public class CoreTelemetryServiceTests
             Assert.Equal("Basic [redacted]", CoreTelemetryService.SanitizeLocalPaths("Basic YTpi"));
             Assert.Equal("Basic [redacted].", CoreTelemetryService.SanitizeLocalPaths("Basic YTpi."));
             Assert.Equal("Basic [redacted]", CoreTelemetryService.SanitizeLocalPaths("Basic YTo="));
+            Assert.Equal("Basic YTp=", CoreTelemetryService.SanitizeLocalPaths("Basic YTp="));
             Assert.Equal("Basic [redacted]", CoreTelemetryService.SanitizeLocalPaths("Basic Og=="));
             Assert.Equal("Basic [redacted]", CoreTelemetryService.SanitizeLocalPaths("Basic ajpqampq"));
             Assert.Equal("BASIC [redacted]", CoreTelemetryService.SanitizeLocalPaths("BASIC YWxpY2U6c2VjcmV0"));
+            Assert.Equal("Basic [redacted]", CoreTelemetryService.SanitizeLocalPaths("Basic YWxpY2U6Y2Fm6Q=="));
             Assert.Equal("Basic YWJjZGU=", CoreTelemetryService.SanitizeLocalPaths("Basic YWJjZGU="));
             Assert.Equal("Basic YTpiCQ", CoreTelemetryService.SanitizeLocalPaths("Basic YTpiCQ"));
             Assert.Equal("Basic auth failed", CoreTelemetryService.SanitizeLocalPaths("Basic auth failed"));
@@ -1316,6 +1326,81 @@ public class CoreTelemetryServiceTests
         {
             if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
         }
+    }
+
+    [Fact]
+    public async Task FlushAsync_holds_external_consent_lock_until_native_flush_completes()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "aun-tel-flush-lease-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var bufferPath = Path.Combine(dir, "telemetry-buffer.json");
+        try
+        {
+            var activeLocks = 0;
+            var nativeStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var nativeRelease = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var lockReleased = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            using var service = new CoreTelemetryService(
+                platform: "linux",
+                appVersion: "1.0.0",
+                locale: "en",
+                videosApiBaseUrl: null,
+                userAgent: "AlUmmahNowLinux/1.0.0",
+                bufferPath: bufferPath,
+                initialEnabled: true,
+                externalConsentToken: () => "gen-1",
+                acquireExternalConsentLock: () =>
+                {
+                    if (Interlocked.Increment(ref activeLocks) != 1)
+                    {
+                        Interlocked.Decrement(ref activeLocks);
+                        return null;
+                    }
+                    return new CallbackDisposable(() =>
+                    {
+                        if (Interlocked.Decrement(ref activeLocks) == 0)
+                        {
+                            lockReleased.TrySetResult(true);
+                        }
+                    });
+                })
+            {
+                FlushOverrideForTesting = () =>
+                {
+                    nativeStarted.TrySetResult(true);
+                    return nativeRelease.Task;
+                }
+            };
+
+            lockReleased = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var flushTask = service.FlushAsync();
+            await nativeStarted.Task;
+            Assert.Equal(1, Volatile.Read(ref activeLocks));
+
+            // Same-process writes reuse the held lease without deadlocking on the non-reentrant OS lock.
+            service.Track("screen_view");
+            Assert.Equal(1, Volatile.Read(ref activeLocks));
+
+            // Same-process opt-out does not block on the lease, and the OS lock stays held until nativeFlush ends.
+            Assert.True(service.SetConsent(TelemetryConsent.Off));
+            await flushTask;
+            Assert.Equal(1, Volatile.Read(ref activeLocks));
+
+            nativeRelease.TrySetResult(true);
+            await lockReleased.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            Assert.Equal(0, Volatile.Read(ref activeLocks));
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    private sealed class CallbackDisposable : IDisposable
+    {
+        private Action? _onDispose;
+        public CallbackDisposable(Action onDispose) => _onDispose = onDispose;
+        public void Dispose() => Interlocked.Exchange(ref _onDispose, null)?.Invoke();
     }
 
     private sealed class NoOpDisposable : IDisposable
