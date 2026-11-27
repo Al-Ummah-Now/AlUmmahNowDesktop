@@ -31,10 +31,15 @@ public sealed class CoreTelemetryService : ITelemetryService
     private static readonly Regex KeywordAssignedPathRegex = new(@"(\b(?:file|path|filename|filepath)\s*[:=]\s*)(?!\u001E)[^\r\n\u001E\u001F]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex BareFilenameRegex = new(@"(^|[\r\n:=;\u001F])([ \t]*)[^\r\n:=;\u001E\u001F]*\.(?:mov|mp4|m4v|mkv|webm|avi|ts|m3u8|mpd|mp3|m4a|wav|aac|flac|ogg|opus|jpg|jpeg|png|gif|webp|heic|svg|pdf|txt|md|rtf|doc|docx|xls|xlsx|ppt|pptx|csv|json|xml|yaml|yml|toml|ini|cfg|conf|log|srt|vtt|ass|ssa|zip|tar|gz|tgz|bz2|xz|7z|rar|dmg|pkg|msi|exe|apk|aab|ipa|pem|key|crt|cer|p12|pfx|jks|keystore|db|sqlite|sqlite3|bin|dat|tmp|bak|proj|aun)\b(?!\()", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
-    private readonly TelemetryClient _client;
+    private readonly TelemetryAppInfo _app;
+    private readonly string? _ingestUrl;
+    private readonly string _userAgent;
+    private readonly string _clientHeader;
     private readonly string? _bufferPath;
     private readonly Func<string?>? _externalConsentToken;
     private readonly object _gate = new();
+    private TelemetryClient _client;
+    private string? _activeBufferPath;
     private TelemetryConsent _consent = TelemetryConsent.Off;
     private string? _observedExternalToken;
     private CancellationTokenSource _flushCts = new();
@@ -46,6 +51,13 @@ public sealed class CoreTelemetryService : ITelemetryService
     private bool _lastPurgeFailed;
     internal Func<Task>? FlushOverrideForTesting { get; set; }
     internal int ExternalPollIntervalMsForTesting { get; set; } = 50;
+    internal string? ActiveBufferPathForTesting
+    {
+        get
+        {
+            lock (_gate) return _activeBufferPath;
+        }
+    }
     internal bool IsClientDisposedForTesting
     {
         get
@@ -74,26 +86,33 @@ public sealed class CoreTelemetryService : ITelemetryService
         _bufferPath = bufferPath;
         _externalConsentToken = externalConsentToken;
         var os = AunClient.CurrentOs();
-        var app = new TelemetryAppInfo(
+        _app = new TelemetryAppInfo(
             platform,
             appVersion,
             string.IsNullOrEmpty(os.Version) ? os.Name : $"{os.Name} {os.Version}",
             "desktop",
             locale);
 
-        var ingestUrl = ResolveIngestUrl(videosApiBaseUrl);
-        var clientHeader = AunClient.FromUserAgent(userAgent, os);
+        _ingestUrl = ResolveIngestUrl(videosApiBaseUrl);
+        _userAgent = userAgent;
+        _clientHeader = AunClient.FromUserAgent(userAgent, os);
+        var initialToken = initialEnabled && _externalConsentToken != null ? ReadExternalTokenSafe() : null;
+        _activeBufferPath = ResolveBufferPathForToken(initialToken);
+        _client = CreateClient(_activeBufferPath);
+        SetConsent(initialEnabled ? TelemetryConsent.Full : TelemetryConsent.Off);
+    }
+
+    private TelemetryClient CreateClient(string? bufferPath)
+    {
         var config = new TelemetryClientConfig(
-            app,
-            ingestUrl,
-            userAgent,
-            clientHeader,
+            _app,
+            _ingestUrl,
+            _userAgent,
+            _clientHeader,
             bufferPath,
             null,
             null);
-
-        _client = new TelemetryClient(config);
-        SetConsent(initialEnabled ? TelemetryConsent.Full : TelemetryConsent.Off);
+        return new TelemetryClient(config);
     }
 
     /// <summary>
@@ -263,21 +282,34 @@ public sealed class CoreTelemetryService : ITelemetryService
                 string? externalToken = null;
                 if (_externalConsentToken != null)
                 {
-                    try
-                    {
-                        externalToken = _externalConsentToken();
-                    }
-                    catch
-                    {
-                        externalToken = null;
-                    }
+                    externalToken = ReadExternalTokenSafe();
                     if (string.IsNullOrEmpty(externalToken))
                     {
                         return false;
                     }
-                    if (!EnsureBufferGenerationMatchesLocked(externalToken))
+                    var targetBufferPath = ResolveBufferPathForToken(externalToken);
+                    if (!TryDeleteForeignGenerationBuffers(targetBufferPath))
                     {
                         return false;
+                    }
+                    if (!string.Equals(_activeBufferPath, targetBufferPath, StringComparison.Ordinal))
+                    {
+                        if (_inFlightFlushes > 0) return false;
+                        TelemetryClient? nextClient = null;
+                        try
+                        {
+                            nextClient = CreateClient(targetBufferPath);
+                            _client.Dispose();
+                            _client = nextClient;
+                            _activeBufferPath = targetBufferPath;
+                            nextClient = null;
+                        }
+                        catch (AunException ex)
+                        {
+                            nextClient?.Dispose();
+                            Log.For("telemetry").Warn("failed to bind generation telemetry buffer: " + ex.Message);
+                            return false;
+                        }
                     }
                 }
                 if (_lastPurgeFailed)
@@ -553,7 +585,8 @@ public sealed class CoreTelemetryService : ITelemetryService
 
         Action<bool>? purgeNotify = null;
         bool purgeNotifyValue = false;
-        RevokeLocked(out toCancel, "telemetry disk purge failed after cross-instance opt-out: ", ref purgeNotify, ref purgeNotifyValue);
+        var keepForeignPath = string.IsNullOrEmpty(currentToken) ? null : ResolveBufferPathForToken(currentToken);
+        RevokeLocked(out toCancel, "telemetry disk purge failed after cross-instance opt-out: ", ref purgeNotify, ref purgeNotifyValue, keepForeignPath);
         if (purgeNotify != null)
         {
             var notify = purgeNotify;
@@ -571,7 +604,8 @@ public sealed class CoreTelemetryService : ITelemetryService
         out CancellationTokenSource? toCancel,
         string failureLogPrefix,
         ref Action<bool>? purgeNotify,
-        ref bool purgeNotifyValue)
+        ref bool purgeNotifyValue,
+        string? keepForeignGenerationPath = null)
     {
         _consent = TelemetryConsent.Off;
         _observedExternalToken = null;
@@ -581,17 +615,19 @@ public sealed class CoreTelemetryService : ITelemetryService
         _flushCts = new CancellationTokenSource();
         if (_clientDisposed)
         {
-            UpdatePurgeFailedLocked(!TryDeleteBufferFallback(), ref purgeNotify, ref purgeNotifyValue);
+            UpdatePurgeFailedLocked(!TryDeleteBufferFallback(keepForeignGenerationPath), ref purgeNotify, ref purgeNotifyValue);
             return !_lastPurgeFailed;
         }
         try
         {
             _client.SetConsent(TelemetryConsentState.Denied);
-            UpdatePurgeFailedLocked(!TryDeleteSiblingTempFiles(), ref purgeNotify, ref purgeNotifyValue);
+            var foreignOk = TryDeleteForeignGenerationBuffers(keepForeignGenerationPath);
+            var tempsOk = TryDeleteSiblingTempFiles(keepForeignGenerationPath);
+            UpdatePurgeFailedLocked(!(foreignOk && tempsOk), ref purgeNotify, ref purgeNotifyValue);
         }
         catch (AunException ex)
         {
-            UpdatePurgeFailedLocked(!TryDeleteBufferFallback(), ref purgeNotify, ref purgeNotifyValue);
+            UpdatePurgeFailedLocked(!TryDeleteBufferFallback(keepForeignGenerationPath), ref purgeNotify, ref purgeNotifyValue);
             Log.For("telemetry").Error(failureLogPrefix + ex.Message);
         }
         return !_lastPurgeFailed;
@@ -664,58 +700,82 @@ public sealed class CoreTelemetryService : ITelemetryService
         CancelQuietly(toCancel);
     }
 
-    private string? BufferGenerationPath =>
-        string.IsNullOrWhiteSpace(_bufferPath) ? null : _bufferPath + ".generation";
-
-    private bool EnsureBufferGenerationMatchesLocked(string expectedToken)
+    private string? ReadExternalTokenSafe()
     {
-        var genPath = BufferGenerationPath;
-        if (genPath == null) return true;
-        string? existing = null;
+        if (_externalConsentToken == null) return null;
         try
         {
-            if (File.Exists(genPath))
-            {
-                existing = File.ReadAllText(genPath).Trim();
-            }
+            return _externalConsentToken();
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch
         {
-            existing = null;
-        }
-        if (string.Equals(existing, expectedToken, StringComparison.Ordinal))
-        {
-            return true;
-        }
-        // Any buffer on disk belongs to a different or unverified consent generation: purge it before opening.
-        if (!TryDeleteBufferFallback())
-        {
-            return false;
-        }
-        try
-        {
-            var dir = Path.GetDirectoryName(genPath);
-            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-            var tmp = genPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
-            File.WriteAllText(tmp, expectedToken);
-            if (File.Exists(genPath)) File.Replace(tmp, genPath, null);
-            else File.Move(tmp, genPath);
-            return true;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            return false;
+            return null;
         }
     }
 
-    private bool TryDeleteGenerationFile()
+    private string? ResolveBufferPathForToken(string? externalToken)
     {
-        var genPath = BufferGenerationPath;
-        if (genPath == null) return true;
+        if (string.IsNullOrWhiteSpace(_bufferPath)) return null;
+        if (_externalConsentToken == null || string.IsNullOrWhiteSpace(externalToken)) return _bufferPath;
+        var rawGen = externalToken.StartsWith("enabled:", StringComparison.Ordinal)
+            ? externalToken["enabled:".Length..]
+            : "legacy";
+        var safeGen = new string(rawGen.Where(static ch => char.IsAsciiLetterOrDigit(ch) || ch is '-' or '_').ToArray());
+        if (string.IsNullOrEmpty(safeGen)) safeGen = "legacy";
+        var dir = Path.GetDirectoryName(_bufferPath);
+        var stem = Path.GetFileNameWithoutExtension(_bufferPath);
+        var ext = Path.GetExtension(_bufferPath);
+        var fileName = $"{stem}.{safeGen}{ext}";
+        return string.IsNullOrEmpty(dir) ? fileName : Path.Combine(dir, fileName);
+    }
+
+    private bool TryDeleteForeignGenerationBuffers(string? keepPath)
+    {
+        if (string.IsNullOrWhiteSpace(_bufferPath)) return true;
+        var dir = Path.GetDirectoryName(_bufferPath);
+        var stem = Path.GetFileNameWithoutExtension(_bufferPath);
+        var ext = Path.GetExtension(_bufferPath);
+        if (string.IsNullOrEmpty(dir) || string.IsNullOrEmpty(stem)) return true;
+        var keepName = string.IsNullOrEmpty(keepPath) ? null : Path.GetFileName(keepPath);
+        var allDeleted = true;
         try
         {
-            File.Delete(genPath);
-            return true;
+            if (Directory.Exists(dir))
+            {
+                var baseName = stem + ext;
+                foreach (var candidate in Directory.EnumerateFiles(dir, $"{stem}*{ext}"))
+                {
+                    var name = Path.GetFileName(candidate);
+                    if (keepName != null && string.Equals(name, keepName, StringComparison.Ordinal)) continue;
+                    if (!string.Equals(name, baseName, StringComparison.Ordinal) &&
+                        !name.StartsWith(stem + ".", StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+                    try
+                    {
+                        File.Delete(candidate);
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                    {
+                        allDeleted = false;
+                    }
+                }
+                foreach (var tmp in Directory.EnumerateFiles(dir, $".{stem}*.tmp"))
+                {
+                    var name = Path.GetFileName(tmp);
+                    if (keepName != null && name.StartsWith($".{keepName}.", StringComparison.Ordinal)) continue;
+                    try
+                    {
+                        File.Delete(tmp);
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                    {
+                        allDeleted = false;
+                    }
+                }
+            }
+            return allDeleted;
         }
         catch (DirectoryNotFoundException)
         {
@@ -727,16 +787,31 @@ public sealed class CoreTelemetryService : ITelemetryService
         }
     }
 
-    private bool TryDeleteBufferFallback()
+    private bool TryDeleteBufferFallback(string? keepForeignGenerationPath = null)
     {
         if (string.IsNullOrWhiteSpace(_bufferPath)) return true;
-        var mainOk = false;
+        var activePath = _activeBufferPath ?? _bufferPath;
+        var mainOk = keepForeignGenerationPath != null && string.Equals(activePath, keepForeignGenerationPath, StringComparison.Ordinal)
+            ? true
+            : TryDeleteSingleFile(activePath);
+        if (!string.Equals(activePath, _bufferPath, StringComparison.Ordinal) &&
+            (keepForeignGenerationPath == null || !string.Equals(_bufferPath, keepForeignGenerationPath, StringComparison.Ordinal)))
+        {
+            mainOk = TryDeleteSingleFile(_bufferPath) && mainOk;
+        }
+        var foreignOk = TryDeleteForeignGenerationBuffers(keepForeignGenerationPath);
+        var tempsOk = TryDeleteSiblingTempFiles(keepForeignGenerationPath);
+        return mainOk && foreignOk && tempsOk;
+    }
+
+    private static bool TryDeleteSingleFile(string path)
+    {
         try
         {
             // Do NOT pre-check with File.Exists/Directory.Exists: both return false when directory
             // search permission is denied, which would falsely report purge success while data remains.
-            File.Delete(_bufferPath);
-            mainOk = true;
+            File.Delete(path);
+            return true;
         }
         catch (DirectoryNotFoundException)
         {
@@ -744,25 +819,27 @@ public sealed class CoreTelemetryService : ITelemetryService
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            mainOk = false;
+            return false;
         }
-        var tempsOk = TryDeleteSiblingTempFiles();
-        return mainOk && tempsOk;
     }
 
-    private bool TryDeleteSiblingTempFiles()
+    private bool TryDeleteSiblingTempFiles(string? keepForeignGenerationPath = null)
     {
         if (string.IsNullOrWhiteSpace(_bufferPath)) return true;
-        var genOk = TryDeleteGenerationFile();
         var dir = Path.GetDirectoryName(_bufferPath);
-        var fileName = Path.GetFileName(_bufferPath);
-        if (string.IsNullOrEmpty(dir) || string.IsNullOrEmpty(fileName)) return genOk;
+        var stem = Path.GetFileNameWithoutExtension(_bufferPath);
+        if (string.IsNullOrEmpty(dir) || string.IsNullOrEmpty(stem)) return true;
+        var keepName = string.IsNullOrEmpty(keepForeignGenerationPath) ? null : Path.GetFileName(keepForeignGenerationPath);
         try
         {
-            var pattern = $".{fileName}.*.tmp";
-            var allDeleted = genOk;
+            var pattern = $".{stem}*.tmp";
+            var allDeleted = true;
             foreach (var tmp in Directory.EnumerateFiles(dir, pattern))
             {
+                if (keepName != null && Path.GetFileName(tmp).StartsWith($".{keepName}.", StringComparison.Ordinal))
+                {
+                    continue;
+                }
                 try
                 {
                     File.Delete(tmp);
@@ -776,7 +853,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         }
         catch (DirectoryNotFoundException)
         {
-            return genOk;
+            return true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {

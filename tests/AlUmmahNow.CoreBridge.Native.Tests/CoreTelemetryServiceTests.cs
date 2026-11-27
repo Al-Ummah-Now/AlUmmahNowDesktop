@@ -347,9 +347,10 @@ public class CoreTelemetryServiceTests
 
             otherInstance.Track("screen_view", new Dictionary<string, object> { ["screen"] = "home" });
             otherInstance.Persist();
-            var siblingTmp = Path.Combine(dir, ".telemetry-buffer.json.4242.tmp");
+            var activeBufferPath = otherInstance.ActiveBufferPathForTesting!;
+            var siblingTmp = Path.Combine(dir, ".telemetry-buffer.gen1.json.4242.tmp");
             File.WriteAllText(siblingTmp, "stale");
-            Assert.True(File.Exists(bufferPath));
+            Assert.True(File.Exists(activeBufferPath));
             Assert.True(File.Exists(siblingTmp));
 
             // Simulate another running instance turning diagnostics off in shared settings.
@@ -364,7 +365,7 @@ public class CoreTelemetryServiceTests
             Assert.Equal(TelemetryConsent.Off, otherInstance.Consent);
             Assert.False(otherInstance.LastPurgeFailed);
             Assert.Equal(0, otherInstance.PendingCount);
-            Assert.False(File.Exists(bufferPath));
+            Assert.False(File.Exists(activeBufferPath));
             Assert.False(File.Exists(siblingTmp));
         }
         finally
@@ -404,7 +405,8 @@ public class CoreTelemetryServiceTests
 
             service.Track("screen_view", new Dictionary<string, object> { ["screen"] = "home" });
             service.Persist();
-            Assert.True(File.Exists(bufferPath));
+            var activeBufferPath = service.ActiveBufferPathForTesting!;
+            Assert.True(File.Exists(activeBufferPath));
 
             var flushTask = service.FlushAsync();
             await nativeStarted.Task;
@@ -418,7 +420,7 @@ public class CoreTelemetryServiceTests
             Assert.Same(flushTask, completed);
             Assert.Equal(TelemetryConsent.Off, service.Consent);
             Assert.Equal(AlUmmahNow.Core.TelemetryConsentState.Denied, service.NativeConsentForTesting);
-            Assert.False(File.Exists(bufferPath));
+            Assert.False(File.Exists(activeBufferPath));
 
             nativeRelease.TrySetResult(true);
             service.Dispose();
@@ -458,8 +460,9 @@ public class CoreTelemetryServiceTests
 
             instanceB.Track("screen_view", new Dictionary<string, object> { ["screen"] = "pre-optout" });
             instanceB.Persist();
+            var gen1BufferPath = instanceB.ActiveBufferPathForTesting!;
             Assert.Equal(1, instanceB.PendingCount);
-            Assert.True(File.Exists(bufferPath));
+            Assert.True(File.Exists(gen1BufferPath));
 
             // Instance A opts out and immediately opts back in with a new consent generation token.
             Volatile.Write(ref sharedToken, null);
@@ -471,7 +474,7 @@ public class CoreTelemetryServiceTests
             Assert.False(flushInvoked);
             Assert.Equal(TelemetryConsent.Off, instanceB.Consent);
             Assert.Equal(0, instanceB.PendingCount);
-            Assert.False(File.Exists(bufferPath));
+            Assert.False(File.Exists(gen1BufferPath));
         }
         finally
         {
@@ -488,6 +491,7 @@ public class CoreTelemetryServiceTests
         string? sharedToken = "enabled:gen1";
         try
         {
+            string gen1BufferPath;
             using (var gen1Instance = new CoreTelemetryService(
                 platform: "linux",
                 appVersion: "1.0.0",
@@ -498,14 +502,17 @@ public class CoreTelemetryServiceTests
                 initialEnabled: true,
                 externalConsentToken: () => Volatile.Read(ref sharedToken)))
             {
+                gen1BufferPath = gen1Instance.ActiveBufferPathForTesting!;
                 gen1Instance.Track("screen_view", new Dictionary<string, object> { ["screen"] = "gen1-old" });
                 gen1Instance.Persist();
-                Assert.True(File.Exists(bufferPath));
+                Assert.True(File.Exists(gen1BufferPath));
             }
 
-            // Simulate opt-out + re-enable creating a new generation while a stale gen1 buffer remained on disk.
+            // Simulate opt-out + re-enable creating a new generation while a stale gen1 buffer remained on disk
+            // (or was written late by a paused gen1 instance).
             Volatile.Write(ref sharedToken, "enabled:gen2");
 
+            string gen2BufferPath;
             using (var freshGen2 = new CoreTelemetryService(
                 platform: "linux",
                 appVersion: "1.0.0",
@@ -516,14 +523,22 @@ public class CoreTelemetryServiceTests
                 initialEnabled: true,
                 externalConsentToken: () => Volatile.Read(ref sharedToken)))
             {
+                gen2BufferPath = freshGen2.ActiveBufferPathForTesting!;
+                Assert.NotEqual(gen1BufferPath, gen2BufferPath);
                 Assert.Equal(TelemetryConsent.Full, freshGen2.Consent);
                 Assert.Equal(0, freshGen2.PendingCount);
+                Assert.False(File.Exists(gen1BufferPath));
 
                 // Persist a new event under gen2; a normal restart within gen2 must keep it.
                 freshGen2.Track("screen_view", new Dictionary<string, object> { ["screen"] = "gen2-new" });
                 freshGen2.Persist();
                 Assert.Equal(1, freshGen2.PendingCount);
+                Assert.True(File.Exists(gen2BufferPath));
             }
+
+            // Even if a paused gen1 process wrote a late file to gen1BufferPath after gen2 started,
+            // gen2's isolated file is untouched and the next gen2 startup sweeps gen1BufferPath without loading it.
+            File.WriteAllText(gen1BufferPath, "{\"stale\":\"gen1\"}");
 
             using var restartedGen2 = new CoreTelemetryService(
                 platform: "linux",
@@ -536,6 +551,7 @@ public class CoreTelemetryServiceTests
                 externalConsentToken: () => Volatile.Read(ref sharedToken));
             Assert.Equal(TelemetryConsent.Full, restartedGen2.Consent);
             Assert.Equal(1, restartedGen2.PendingCount);
+            Assert.False(File.Exists(gen1BufferPath));
         }
         finally
         {

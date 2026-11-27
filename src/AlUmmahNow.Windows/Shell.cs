@@ -325,21 +325,32 @@ public sealed partial class Shell
             Text = _telemetry.LastPurgeFailed ? purgeWarningText : string.Empty,
         };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(telemetryNotice, "SettingsTelemetryNotice");
+        var disableSaveFailed = false;
         void SyncPurgeNotice()
         {
             var failed = _telemetry.LastPurgeFailed;
+            if (disableSaveFailed)
+            {
+                if (!_settings.TelemetryEnabled)
+                {
+                    _settings.TelemetryEnabled = true;
+                    telemetryToggle.IsOn = true;
+                }
+                telemetryNotice.Text = failed
+                    ? disableErrorText + "\n" + purgeWarningText
+                    : disableErrorText;
+                telemetryNotice.Visibility = Visibility.Visible;
+                return;
+            }
             if (failed && _telemetry.Consent == TelemetryConsent.Off)
             {
-                if (telemetryNotice.Text != disableErrorText)
+                if (_settings.TelemetryEnabled)
                 {
-                    if (_settings.TelemetryEnabled)
-                    {
-                        _settings.TelemetryEnabled = false;
-                        telemetryToggle.IsOn = false;
-                    }
-                    telemetryNotice.Text = purgeWarningText;
-                    telemetryNotice.Visibility = Visibility.Visible;
+                    _settings.TelemetryEnabled = false;
+                    telemetryToggle.IsOn = false;
                 }
+                telemetryNotice.Text = purgeWarningText;
+                telemetryNotice.Visibility = Visibility.Visible;
             }
             else if (!failed && telemetryNotice.Text == purgeWarningText)
             {
@@ -384,13 +395,14 @@ public sealed partial class Shell
                 {
                     var rolledBack = _store.SaveTelemetryEnabled(false);
                     var purged = _telemetry.SetConsent(TelemetryConsent.Off);
+                    disableSaveFailed = !rolledBack;
                     if (!rolledBack)
                     {
                         _settings.TelemetryEnabled = true;
                         telemetryToggle.IsOn = true;
                         telemetryNotice.Text = purged
-                            ? _localizer["settings.telemetry.disableError"]
-                            : _localizer["settings.telemetry.disableError"] + "\n" + purgeWarningText;
+                            ? disableErrorText
+                            : disableErrorText + "\n" + purgeWarningText;
                         telemetryNotice.Visibility = Visibility.Visible;
                         return;
                     }
@@ -400,6 +412,7 @@ public sealed partial class Shell
                     telemetryNotice.Visibility = Visibility.Visible;
                     return;
                 }
+                disableSaveFailed = false;
                 _settings.TelemetryEnabled = true;
                 telemetryNotice.Text = string.Empty;
                 telemetryNotice.Visibility = Visibility.Collapsed;
@@ -408,13 +421,14 @@ public sealed partial class Shell
             {
                 var saved = _store.SaveTelemetryEnabled(false);
                 var purged = _telemetry.SetConsent(TelemetryConsent.Off);
+                disableSaveFailed = !saved;
                 if (!saved)
                 {
                     _settings.TelemetryEnabled = true;
                     telemetryToggle.IsOn = true;
                     telemetryNotice.Text = purged
-                        ? _localizer["settings.telemetry.disableError"]
-                        : _localizer["settings.telemetry.disableError"] + "\n" + purgeWarningText;
+                        ? disableErrorText
+                        : disableErrorText + "\n" + purgeWarningText;
                     telemetryNotice.Visibility = Visibility.Visible;
                     return;
                 }

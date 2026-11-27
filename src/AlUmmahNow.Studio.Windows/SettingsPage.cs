@@ -90,23 +90,34 @@ internal sealed class SettingsPage
             Text = initialPurgeFailed ? purgeWarningText : string.Empty,
         };
         AutomationProperties.SetAutomationId(telemetryNotice, "SettingsTelemetryNotice");
+        var disableSaveFailed = false;
         if (telemetry != null)
         {
             void SyncPurgeNotice()
             {
                 var failed = telemetry.LastPurgeFailed;
+                if (disableSaveFailed)
+                {
+                    if (!settings.TelemetryEnabled)
+                    {
+                        settings.TelemetryEnabled = true;
+                        telemetryToggle.IsOn = true;
+                    }
+                    telemetryNotice.Text = failed
+                        ? disableErrorText + "\n" + purgeWarningText
+                        : disableErrorText;
+                    telemetryNotice.Visibility = Visibility.Visible;
+                    return;
+                }
                 if (failed && telemetry.Consent == TelemetryConsent.Off)
                 {
-                    if (telemetryNotice.Text != disableErrorText)
+                    if (settings.TelemetryEnabled)
                     {
-                        if (settings.TelemetryEnabled)
-                        {
-                            settings.TelemetryEnabled = false;
-                            telemetryToggle.IsOn = false;
-                        }
-                        telemetryNotice.Text = purgeWarningText;
-                        telemetryNotice.Visibility = Visibility.Visible;
+                        settings.TelemetryEnabled = false;
+                        telemetryToggle.IsOn = false;
                     }
+                    telemetryNotice.Text = purgeWarningText;
+                    telemetryNotice.Visibility = Visibility.Visible;
                 }
                 else if (!failed && telemetryNotice.Text == purgeWarningText)
                 {
@@ -152,13 +163,14 @@ internal sealed class SettingsPage
                 {
                     var rolledBack = store.SaveTelemetryEnabled(false);
                     var purged = telemetry?.SetConsent(TelemetryConsent.Off) ?? true;
+                    disableSaveFailed = !rolledBack;
                     if (!rolledBack)
                     {
                         settings.TelemetryEnabled = true;
                         telemetryToggle.IsOn = true;
                         telemetryNotice.Text = purged
-                            ? l["settings.telemetry.disableError"]
-                            : l["settings.telemetry.disableError"] + "\n" + purgeWarningText;
+                            ? disableErrorText
+                            : disableErrorText + "\n" + purgeWarningText;
                         telemetryNotice.Visibility = Visibility.Visible;
                         return;
                     }
@@ -168,6 +180,7 @@ internal sealed class SettingsPage
                     telemetryNotice.Visibility = Visibility.Visible;
                     return;
                 }
+                disableSaveFailed = false;
                 settings.TelemetryEnabled = true;
                 telemetryNotice.Text = string.Empty;
                 telemetryNotice.Visibility = Visibility.Collapsed;
@@ -176,13 +189,14 @@ internal sealed class SettingsPage
             {
                 var saved = store.SaveTelemetryEnabled(false);
                 var purged = telemetry?.SetConsent(TelemetryConsent.Off) ?? true;
+                disableSaveFailed = !saved;
                 if (!saved)
                 {
                     settings.TelemetryEnabled = true;
                     telemetryToggle.IsOn = true;
                     telemetryNotice.Text = purged
-                        ? l["settings.telemetry.disableError"]
-                        : l["settings.telemetry.disableError"] + "\n" + purgeWarningText;
+                        ? disableErrorText
+                        : disableErrorText + "\n" + purgeWarningText;
                     telemetryNotice.Visibility = Visibility.Visible;
                     return;
                 }

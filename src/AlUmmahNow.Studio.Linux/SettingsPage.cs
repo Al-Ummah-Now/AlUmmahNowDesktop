@@ -80,23 +80,34 @@ public sealed class SettingsPage
         telemetryNotice.SetWrap(true);
         telemetryNotice.AddCssClass("error");
         telemetryNotice.SetVisible(false);
+        var disableSaveFailed = false;
         if (telemetry != null)
         {
             void SyncPurgeNotice()
             {
                 var failed = telemetry.LastPurgeFailed;
+                if (disableSaveFailed)
+                {
+                    if (!settings.TelemetryEnabled)
+                    {
+                        settings.TelemetryEnabled = true;
+                        telemetryCheck.SetActive(true);
+                    }
+                    telemetryNotice.SetText(failed
+                        ? disableErrorText + "\n" + purgeWarningText
+                        : disableErrorText);
+                    telemetryNotice.SetVisible(true);
+                    return;
+                }
                 if (failed && telemetry.Consent == TelemetryConsent.Off)
                 {
-                    if (telemetryNotice.GetText() != disableErrorText)
+                    if (settings.TelemetryEnabled)
                     {
-                        if (settings.TelemetryEnabled)
-                        {
-                            settings.TelemetryEnabled = false;
-                            telemetryCheck.SetActive(false);
-                        }
-                        telemetryNotice.SetText(purgeWarningText);
-                        telemetryNotice.SetVisible(true);
+                        settings.TelemetryEnabled = false;
+                        telemetryCheck.SetActive(false);
                     }
+                    telemetryNotice.SetText(purgeWarningText);
+                    telemetryNotice.SetVisible(true);
                 }
                 else if (!failed && telemetryNotice.GetText() == purgeWarningText)
                 {
@@ -134,13 +145,14 @@ public sealed class SettingsPage
                 {
                     var rolledBack = store.SaveTelemetryEnabled(false);
                     var purged = telemetry?.SetConsent(TelemetryConsent.Off) ?? true;
+                    disableSaveFailed = !rolledBack;
                     if (!rolledBack)
                     {
                         settings.TelemetryEnabled = true;
                         telemetryCheck.SetActive(true);
                         telemetryNotice.SetText(purged
-                            ? l["settings.telemetry.disableError"]
-                            : l["settings.telemetry.disableError"] + "\n" + purgeWarningText);
+                            ? disableErrorText
+                            : disableErrorText + "\n" + purgeWarningText);
                         telemetryNotice.SetVisible(true);
                         return;
                     }
@@ -150,6 +162,7 @@ public sealed class SettingsPage
                     telemetryNotice.SetVisible(true);
                     return;
                 }
+                disableSaveFailed = false;
                 settings.TelemetryEnabled = true;
                 telemetryNotice.SetText(string.Empty);
                 telemetryNotice.SetVisible(false);
@@ -158,13 +171,14 @@ public sealed class SettingsPage
             {
                 var saved = store.SaveTelemetryEnabled(false);
                 var purged = telemetry?.SetConsent(TelemetryConsent.Off) ?? true;
+                disableSaveFailed = !saved;
                 if (!saved)
                 {
                     settings.TelemetryEnabled = true;
                     telemetryCheck.SetActive(true);
                     telemetryNotice.SetText(purged
-                        ? l["settings.telemetry.disableError"]
-                        : l["settings.telemetry.disableError"] + "\n" + purgeWarningText);
+                        ? disableErrorText
+                        : disableErrorText + "\n" + purgeWarningText);
                     telemetryNotice.SetVisible(true);
                     return;
                 }
