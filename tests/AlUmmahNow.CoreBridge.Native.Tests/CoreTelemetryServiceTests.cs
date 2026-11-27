@@ -560,6 +560,90 @@ public class CoreTelemetryServiceTests
     }
 
     [Fact]
+    public async Task Revoked_gen1_flush_completion_and_stale_off_startup_preserve_newer_gen2_buffer()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "aun-tel-gen2-keep-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var bufferPath = Path.Combine(dir, "telemetry-buffer.json");
+        string? sharedToken = "enabled:gen1";
+        try
+        {
+            var nativeStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var nativeRelease = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            using var gen1 = new CoreTelemetryService(
+                platform: "linux",
+                appVersion: "1.0.0",
+                locale: "en",
+                videosApiBaseUrl: null,
+                userAgent: "AlUmmahNowLinux/1.0.0",
+                bufferPath: bufferPath,
+                initialEnabled: true,
+                externalConsentToken: () => Volatile.Read(ref sharedToken))
+            {
+                ExternalPollIntervalMsForTesting = 15,
+                FlushOverrideForTesting = () =>
+                {
+                    nativeStarted.TrySetResult(true);
+                    return nativeRelease.Task;
+                }
+            };
+
+            var gen1BufferPath = gen1.ActiveBufferPathForTesting!;
+            gen1.Track("screen_view", new Dictionary<string, object> { ["screen"] = "gen1" });
+            gen1.Persist();
+            Assert.True(File.Exists(gen1BufferPath));
+
+            var flushTask = gen1.FlushAsync();
+            await nativeStarted.Task;
+
+            // Another instance opts out and re-enables gen2, then persists a gen2 event while gen1's flush is still running.
+            Volatile.Write(ref sharedToken, "enabled:gen2");
+            string gen2BufferPath;
+            using (var gen2 = new CoreTelemetryService(
+                platform: "linux",
+                appVersion: "1.0.0",
+                locale: "en",
+                videosApiBaseUrl: null,
+                userAgent: "AlUmmahNowLinux/1.0.0",
+                bufferPath: bufferPath,
+                initialEnabled: true,
+                externalConsentToken: () => Volatile.Read(ref sharedToken)))
+            {
+                gen2BufferPath = gen2.ActiveBufferPathForTesting!;
+                gen2.Track("screen_view", new Dictionary<string, object> { ["screen"] = "gen2" });
+                gen2.Persist();
+                Assert.True(File.Exists(gen2BufferPath));
+            }
+
+            // Wait for gen1 to observe gen2 and revoke, then complete gen1's in-flight flush (triggers ReleaseInFlightFlush cleanup).
+            var completed = await Task.WhenAny(flushTask, Task.Delay(2000));
+            Assert.Same(flushTask, completed);
+            nativeRelease.TrySetResult(true);
+            await Task.Delay(50);
+
+            // gen2's buffer must survive gen1's flush completion cleanup, AND survive a stale process constructing with initialEnabled=false.
+            Assert.True(File.Exists(gen2BufferPath));
+            using (var staleOffStartup = new CoreTelemetryService(
+                platform: "linux",
+                appVersion: "1.0.0",
+                locale: "en",
+                videosApiBaseUrl: null,
+                userAgent: "AlUmmahNowLinux/1.0.0",
+                bufferPath: bufferPath,
+                initialEnabled: false,
+                externalConsentToken: () => Volatile.Read(ref sharedToken)))
+            {
+                Assert.Equal(TelemetryConsent.Off, staleOffStartup.Consent);
+            }
+            Assert.True(File.Exists(gen2BufferPath));
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
     public void ReportCrash_and_breadcrumb_redact_local_file_paths()
     {
         var dir = Path.Combine(Path.GetTempPath(), "aun-tel-paths-" + Guid.NewGuid().ToString("N"));

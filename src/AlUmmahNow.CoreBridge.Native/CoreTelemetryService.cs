@@ -267,13 +267,18 @@ public sealed class CoreTelemetryService : ITelemetryService
         {
             if (consent == TelemetryConsent.Off)
             {
-                result = RevokeLocked(out toCancel, "telemetry disk purge failed on opt-out: ", ref purgeNotify, ref purgeNotifyValue);
+                result = RevokeLocked(
+                    out toCancel,
+                    "telemetry disk purge failed on opt-out: ",
+                    ref purgeNotify,
+                    ref purgeNotifyValue,
+                    ResolveForeignKeepPathLocked());
             }
             else if (_disposeRequested || _clientDisposed)
             {
                 return false;
             }
-            else if (_revokedFlushesRemaining > 0 || (_lastPurgeFailed && !TryDeleteBufferFallback()))
+            else if (_revokedFlushesRemaining > 0 || (_lastPurgeFailed && !TryDeleteBufferFallback(ResolveForeignKeepPathLocked())))
             {
                 return false;
             }
@@ -585,8 +590,12 @@ public sealed class CoreTelemetryService : ITelemetryService
 
         Action<bool>? purgeNotify = null;
         bool purgeNotifyValue = false;
-        var keepForeignPath = string.IsNullOrEmpty(currentToken) ? null : ResolveBufferPathForToken(currentToken);
-        RevokeLocked(out toCancel, "telemetry disk purge failed after cross-instance opt-out: ", ref purgeNotify, ref purgeNotifyValue, keepForeignPath);
+        RevokeLocked(
+            out toCancel,
+            "telemetry disk purge failed after cross-instance opt-out: ",
+            ref purgeNotify,
+            ref purgeNotifyValue,
+            ResolveForeignKeepPathLocked());
         if (purgeNotify != null)
         {
             var notify = purgeNotify;
@@ -670,7 +679,10 @@ public sealed class CoreTelemetryService : ITelemetryService
                     // persist rename after SetConsent(Denied) deleted the file; remove any remnant.
                     // Ordinary Dispose() without revocation does not advance _consentEpoch, so
                     // retryable buffers survive normal shutdown.
-                    UpdatePurgeFailedLocked(!TryDeleteBufferFallback(), ref purgeNotify, ref purgeNotifyValue);
+                    UpdatePurgeFailedLocked(
+                        !TryDeleteBufferFallback(ResolveForeignKeepPathLocked()),
+                        ref purgeNotify,
+                        ref purgeNotifyValue);
                 }
             }
             if (_disposeRequested && _inFlightFlushes == 0 && !_clientDisposed)
@@ -698,6 +710,14 @@ public sealed class CoreTelemetryService : ITelemetryService
             }
         }
         CancelQuietly(toCancel);
+    }
+
+    private string? ResolveForeignKeepPathLocked()
+    {
+        var currentToken = ReadExternalTokenSafe();
+        if (string.IsNullOrEmpty(currentToken)) return null;
+        var currentPath = ResolveBufferPathForToken(currentToken);
+        return string.Equals(currentPath, _activeBufferPath, StringComparison.Ordinal) ? null : currentPath;
     }
 
     private string? ReadExternalTokenSafe()
