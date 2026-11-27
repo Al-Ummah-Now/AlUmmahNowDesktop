@@ -204,94 +204,18 @@ public sealed class CoreTelemetryService : ITelemetryService
     /// <summary>
     /// Scrubs local filesystem paths and file:// URIs before crash or breadcrumb text enters telemetry.
     /// </summary>
+    private const string VaultPrefix = "\u001EAUNURL";
+
     internal static string SanitizeLocalPaths(string text)
     {
         if (string.IsNullOrEmpty(text)) return text;
-        var prefix = "\u001EAUNURL";
-        while (text.Contains(prefix, StringComparison.Ordinal))
-        {
-            prefix += "X";
-        }
+        var escaped = EscapeSentinels(text, out var hadSentinels);
         var vaultedUrls = new List<string>();
-        var scanCursor = 0;
-        var hasFileUriOnLine = false;
-        var fileUriQuote = '\0';
-        var lastNonWsOrWrapperChar = '\0';
-        var tokenHasPathSep = false;
-        var inWrapperRun = false;
-        var wsBeforeRun = false;
-        var scrubbed = UrlVaultRegex.Replace(text, match =>
+        var tracker = new VaultLineTracker();
+        var scrubbed = UrlVaultRegex.Replace(escaped, match =>
         {
-            while (scanCursor < match.Index)
-            {
-                var ch = text[scanCursor];
-                if (ch is '\r' or '\n')
-                {
-                    hasFileUriOnLine = false;
-                    fileUriQuote = '\0';
-                    lastNonWsOrWrapperChar = '\0';
-                    tokenHasPathSep = false;
-                    inWrapperRun = false;
-                    wsBeforeRun = false;
-                }
-                else
-                {
-                    var closedFileQuote = fileUriQuote != '\0' && ch == fileUriQuote;
-                    if (closedFileQuote)
-                    {
-                        fileUriQuote = '\0';
-                    }
-                    else if ((ch == 'f' || ch == 'F') &&
-                        scanCursor + 7 <= text.Length &&
-                        text.AsSpan(scanCursor, 7).Equals("file://", StringComparison.OrdinalIgnoreCase) &&
-                        (scanCursor == 0 || !IsUrlSchemeChar(text[scanCursor - 1])))
-                    {
-                        hasFileUriOnLine = true;
-                        if (scanCursor > 0 && text[scanCursor - 1] is '"' or '\'')
-                        {
-                            fileUriQuote = text[scanCursor - 1];
-                        }
-                    }
-                    if (closedFileQuote)
-                    {
-                        lastNonWsOrWrapperChar = ch;
-                        inWrapperRun = false;
-                        wsBeforeRun = false;
-                    }
-                    else if (char.IsWhiteSpace(ch))
-                    {
-                        if (!inWrapperRun)
-                        {
-                            wsBeforeRun = true;
-                            tokenHasPathSep = false;
-                        }
-                    }
-                    else if (ch is '(' or '[' or '{' or '"' or '\'')
-                    {
-                        inWrapperRun = true;
-                    }
-                    else
-                    {
-                        lastNonWsOrWrapperChar = ch;
-                        if (ch is '/' or '\\')
-                        {
-                            tokenHasPathSep = true;
-                        }
-                        inWrapperRun = false;
-                        wsBeforeRun = false;
-                    }
-                }
-                scanCursor++;
-            }
-
             var raw = match.Value;
-            var afterPathSep = lastNonWsOrWrapperChar is '/' or '\\';
-            var embeddedInPath =
-                fileUriQuote != '\0' ||
-                tokenHasPathSep ||
-                (!wsBeforeRun && hasFileUriOnLine) ||
-                (hasFileUriOnLine && inWrapperRun && afterPathSep);
-            if (raw.StartsWith("file://", StringComparison.OrdinalIgnoreCase) || embeddedInPath)
+            if (raw.StartsWith("file://", StringComparison.OrdinalIgnoreCase) || tracker.IsEmbeddedInPath(escaped, match.Index))
             {
                 return raw;
             }
@@ -305,7 +229,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             string url;
             if (hasQueryOrFragment)
             {
-                var qf = TrimQueryOrFragmentDelimiters(match.Groups[3].Value, text, match.Index, out tail);
+                var qf = TrimQueryOrFragmentDelimiters(match.Groups[3].Value, escaped, match.Index, out tail);
                 url = match.Groups[1].Value + qf[0] + "[redacted]";
             }
             else
@@ -316,7 +240,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                     url = url[..^1];
                     tail = ";";
                 }
-                if (match.Index > 0 && text[match.Index - 1] == '\'' && url.EndsWith('\''))
+                if (match.Index > 0 && escaped[match.Index - 1] == '\'' && url.EndsWith('\''))
                 {
                     url = url[..^1];
                     tail = "'" + tail;
@@ -324,16 +248,10 @@ public sealed class CoreTelemetryService : ITelemetryService
             }
             var idx = vaultedUrls.Count;
             vaultedUrls.Add(url);
-            scanCursor = match.Index + match.Length;
-            hasFileUriOnLine = false;
-            fileUriQuote = '\0';
-            lastNonWsOrWrapperChar = '\0';
-            tokenHasPathSep = false;
-            inWrapperRun = false;
-            wsBeforeRun = false;
-            return $"{prefix}{idx}\u001F{tail}";
+            tracker.OnVaultedUrl(match.Index + match.Length);
+            return $"{VaultPrefix}{idx}\u001F{tail}";
         });
-        scrubbed = RedactFileUris(scrubbed, prefix);
+        scrubbed = RedactFileUris(scrubbed, VaultPrefix);
         scrubbed = ParenPathRegex.Replace(scrubbed, "$1[redacted-path]$2");
         scrubbed = ParenRelativeSlashPathRegex.Replace(scrubbed, "$1[redacted-path]$2");
         scrubbed = WindowsPathRegex.Replace(scrubbed, "[redacted-path]");
@@ -347,10 +265,235 @@ public sealed class CoreTelemetryService : ITelemetryService
         scrubbed = KeywordUnquotedFilenameRegex.Replace(scrubbed, "$1[redacted-path]");
         scrubbed = KeywordAssignedPathRegex.Replace(scrubbed, "$1[redacted-path]");
         scrubbed = BareFilenameRegex.Replace(scrubbed, "$1$2[redacted-path]");
-        scrubbed = RestoreVaultedUrls(scrubbed, prefix, vaultedUrls);
+        scrubbed = RestoreVaultedUrls(scrubbed, VaultPrefix, vaultedUrls);
         scrubbed = EmailRegex.Replace(scrubbed, "[redacted-email]");
         scrubbed = BearerTokenRegex.Replace(scrubbed, "Bearer [redacted]");
-        return scrubbed;
+        return hadSentinels ? UnescapeSentinels(scrubbed) : scrubbed;
+    }
+
+    private static string EscapeSentinels(string text, out bool hadSentinels)
+    {
+        var first = text.AsSpan().IndexOfAny('\u001D', '\u001E', '\u001F');
+        if (first < 0)
+        {
+            hadSentinels = false;
+            return text;
+        }
+        hadSentinels = true;
+        var sb = new StringBuilder(text.Length + 8);
+        sb.Append(text, 0, first);
+        for (var i = first; i < text.Length; i++)
+        {
+            switch (text[i])
+            {
+                case '\u001D': sb.Append("\u001D\u001D"); break;
+                case '\u001E': sb.Append("\u001D\u001C"); break;
+                case '\u001F': sb.Append("\u001D\u001B"); break;
+                default: sb.Append(text[i]); break;
+            }
+        }
+        return sb.ToString();
+    }
+
+    private static string UnescapeSentinels(string text)
+    {
+        var first = text.IndexOf('\u001D');
+        if (first < 0) return text;
+        var sb = new StringBuilder(text.Length);
+        sb.Append(text, 0, first);
+        var i = first;
+        while (i < text.Length)
+        {
+            if (text[i] == '\u001D' && i + 1 < text.Length)
+            {
+                switch (text[i + 1])
+                {
+                    case '\u001D': sb.Append('\u001D'); i += 2; continue;
+                    case '\u001C': sb.Append('\u001E'); i += 2; continue;
+                    case '\u001B': sb.Append('\u001F'); i += 2; continue;
+                }
+            }
+            sb.Append(text[i++]);
+        }
+        return sb.ToString();
+    }
+
+    private struct VaultLineTracker
+    {
+        private int _cursor;
+        private bool _hasPathOnLine;
+        private char _pathQuote;
+        private int _tokenStart;
+        private int _tokenEnd;
+        private int _prevTokenStart;
+        private int _prevTokenEnd;
+        private bool _tokenHasPathSep;
+        private bool _inWrapperRun;
+        private bool _wsBeforeRun;
+
+        public VaultLineTracker()
+        {
+            _tokenStart = -1;
+            _tokenEnd = -1;
+            _prevTokenStart = -1;
+            _prevTokenEnd = -1;
+        }
+
+        public bool IsEmbeddedInPath(string text, int matchStart)
+        {
+            AdvanceTo(text, matchStart);
+            var curTokenIsPath = _tokenHasPathSep && !IsProtocolToken(text, _tokenStart, _tokenEnd);
+            var wrappedUnderPath = _hasPathOnLine && _inWrapperRun && !IsPathConnectorOrSep(text, _prevTokenStart, _prevTokenEnd);
+            return _pathQuote != '\0' || curTokenIsPath || (!_wsBeforeRun && _hasPathOnLine) || wrappedUnderPath;
+        }
+
+        public void OnVaultedUrl(int matchEnd)
+        {
+            _cursor = matchEnd;
+            ResetLineState();
+        }
+
+        private void ResetLineState()
+        {
+            _hasPathOnLine = false;
+            _pathQuote = '\0';
+            _tokenStart = -1;
+            _tokenEnd = -1;
+            _prevTokenStart = -1;
+            _prevTokenEnd = -1;
+            _tokenHasPathSep = false;
+            _inWrapperRun = false;
+            _wsBeforeRun = false;
+        }
+
+        private void AdvanceTo(string text, int target)
+        {
+            while (_cursor < target)
+            {
+                var ch = text[_cursor];
+                if (ch is '\r' or '\n')
+                {
+                    ResetLineState();
+                }
+                else
+                {
+                    ProcessLineChar(text, ch);
+                }
+                _cursor++;
+            }
+        }
+
+        private void ProcessLineChar(string text, char ch)
+        {
+            var closedQuote = _pathQuote != '\0' && ch == _pathQuote;
+            if (closedQuote)
+            {
+                _pathQuote = '\0';
+                _hasPathOnLine = false;
+                if (_tokenStart >= 0)
+                {
+                    _prevTokenStart = _tokenStart;
+                    _prevTokenEnd = _tokenEnd;
+                    _tokenStart = -1;
+                    _tokenEnd = -1;
+                }
+                _tokenHasPathSep = false;
+                _inWrapperRun = false;
+                _wsBeforeRun = false;
+                return;
+            }
+            var atTokenStart = _tokenStart < 0 || _inWrapperRun;
+            if (IsFileSchemeAt(text, _cursor) || StartsLocalPathAt(text, _cursor, atTokenStart))
+            {
+                _hasPathOnLine = true;
+                if (_cursor > 0 && text[_cursor - 1] is '"' or '\'')
+                {
+                    _pathQuote = text[_cursor - 1];
+                }
+            }
+            if (char.IsWhiteSpace(ch))
+            {
+                if (!_inWrapperRun)
+                {
+                    if (_tokenStart >= 0)
+                    {
+                        _prevTokenStart = _tokenStart;
+                        _prevTokenEnd = _tokenEnd;
+                        _tokenStart = -1;
+                        _tokenEnd = -1;
+                    }
+                    _wsBeforeRun = true;
+                    _tokenHasPathSep = false;
+                }
+            }
+            else if (IsOpeningWrapper(ch))
+            {
+                if (!_inWrapperRun && _tokenStart >= 0)
+                {
+                    _prevTokenStart = _tokenStart;
+                    _prevTokenEnd = _tokenEnd;
+                }
+                _inWrapperRun = true;
+            }
+            else
+            {
+                if (_tokenStart < 0 || _inWrapperRun)
+                {
+                    _tokenStart = _cursor;
+                    _tokenHasPathSep = false;
+                }
+                _tokenEnd = _cursor + 1;
+                if (ch is '/' or '\\') _tokenHasPathSep = true;
+                _inWrapperRun = false;
+                _wsBeforeRun = false;
+            }
+        }
+    }
+
+    private static bool StartsLocalPathAt(string text, int pos, bool atTokenStart)
+    {
+        if (!atTokenStart) return false;
+        var ch = text[pos];
+        if (ch == '/') return true;
+        if (ch == '~' && pos + 1 < text.Length && text[pos + 1] == '/') return true;
+        if (ch == '\\' && pos + 1 < text.Length && text[pos + 1] == '\\') return true;
+        return ((ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z')) &&
+            pos + 2 < text.Length && text[pos + 1] == ':' && text[pos + 2] is '/' or '\\';
+    }
+
+    private static bool IsProtocolToken(string text, int start, int end)
+    {
+        if (start < 0 || end <= start) return false;
+        var span = text.AsSpan(start, end - start);
+        var slashIdx = span.IndexOfAny('/', '\\');
+        if (slashIdx <= 0 || slashIdx + 1 >= span.Length || span[slashIdx] != '/') return false;
+        if (span[(slashIdx + 1)..].IndexOfAny('/', '\\') >= 0) return false;
+        if (!char.IsAsciiDigit(span[slashIdx + 1])) return false;
+        var proto = span[..slashIdx];
+        return proto.Equals("HTTP", StringComparison.OrdinalIgnoreCase) ||
+            proto.Equals("TLS", StringComparison.OrdinalIgnoreCase) ||
+            proto.Equals("SSL", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsPathConnectorOrSep(string text, int start, int end)
+    {
+        if (start < 0 || end <= start) return false;
+        if (text[end - 1] is ';' or ',' or ':') return true;
+        var span = text.AsSpan(start, end - start);
+        return span.Equals("and", StringComparison.OrdinalIgnoreCase) ||
+            span.Equals("or", StringComparison.OrdinalIgnoreCase) ||
+            span.Equals("from", StringComparison.OrdinalIgnoreCase) ||
+            span.Equals("to", StringComparison.OrdinalIgnoreCase) ||
+            span.Equals("via", StringComparison.OrdinalIgnoreCase) ||
+            span.Equals("with", StringComparison.OrdinalIgnoreCase) ||
+            span.Equals("at", StringComparison.OrdinalIgnoreCase) ||
+            span.Equals("in", StringComparison.OrdinalIgnoreCase) ||
+            span.Equals("for", StringComparison.OrdinalIgnoreCase) ||
+            span.Equals("on", StringComparison.OrdinalIgnoreCase) ||
+            span.Equals("of", StringComparison.OrdinalIgnoreCase) ||
+            span.Equals("by", StringComparison.OrdinalIgnoreCase) ||
+            span.Equals("see", StringComparison.OrdinalIgnoreCase) ||
+            span.Equals("as", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsUrlSchemeChar(char ch) =>
