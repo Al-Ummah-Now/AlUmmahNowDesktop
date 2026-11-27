@@ -1578,6 +1578,18 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("Authorization\\u003a opaqueSecret123"));
             Assert.Equal("{\"msg\":\"Basic [redacted]\"}",
                 CoreTelemetryService.SanitizeLocalPaths("{\"msg\":\"Basic YWI6\\u00632VjcmV0\"}"));
+            Assert.Equal("received \"Authorizatio\\u006e: [redacted]\"",
+                CoreTelemetryService.SanitizeLocalPaths("received \"Authorizatio\\u006e: opaqueSecret123\""));
+            Assert.Equal("Cookie: [redacted]",
+                CoreTelemetryService.SanitizeLocalPaths("Cookie: session=opaqueSecret123"));
+            Assert.Equal("Set-Cookie: [redacted]\r\nNext: ok",
+                CoreTelemetryService.SanitizeLocalPaths("Set-Cookie: session=opaqueSecret123; HttpOnly\r\nNext: ok"));
+            Assert.Equal("{\"Cookie\":\"[redacted]\",\"status\":\"ok\"}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"Cooki\\u0065\":\"session=opaqueSecret123\",\"status\":\"ok\"}"));
+            Assert.Equal("{\"m\":\"\\\"Bearer [redacted]\\\"tail\",\"next\":1}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"m\":\"\\\"Bearer opaqueSecret123\\\"tail\",\"next\":1}"));
+            Assert.Equal("{\"m\":\"Bearer [redacted]\\nX-Public: ok\"}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"m\":\"Bearer secret\\nX-Public: ok\"}"));
             Assert.Equal("Bearer [redacted]",
                 CoreTelemetryService.SanitizeLocalPaths("Bearer " + new string('A', 10000)));
             Assert.Equal("{\"m\":\"literal=\\\"[redacted-path]\\\"tail\",\"next\":1}",
@@ -1596,12 +1608,15 @@ public class CoreTelemetryServiceTests
                 ["/Users/Alice/Acquisition.mov"] = 1,
                 ["/Users/Bob/Merger.mov"] = 2,
                 ["Authorization"] = "opaqueSecret123",
+                ["Cookie"] = "session=opaqueSecret123",
+                ["Set-Cookie"] = "sid=opaqueSecret456",
                 ["uri"] = new Uri("https://example.com/api?token=secret"),
                 ["count"] = 2,
                 ["ok"] = true
             });
             Assert.NotNull(scrubbedProps);
             Assert.DoesNotContain("secret", scrubbedProps!, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("session=", scrubbedProps!, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("Alice", scrubbedProps!, StringComparison.Ordinal);
             Assert.DoesNotContain("Bob", scrubbedProps!, StringComparison.Ordinal);
             Assert.DoesNotContain("Acquisition", scrubbedProps!, StringComparison.Ordinal);
@@ -1611,9 +1626,17 @@ public class CoreTelemetryServiceTests
             Assert.Contains("\"detail\":\"Authorization: Bearer [redacted]\"", scrubbedProps!, StringComparison.Ordinal);
             Assert.Contains("\"path\":\"[redacted-path]\"", scrubbedProps!, StringComparison.Ordinal);
             Assert.Contains("\"Authorization\":\"[redacted]\"", scrubbedProps!, StringComparison.Ordinal);
+            Assert.Contains("\"Cookie\":\"[redacted]\"", scrubbedProps!, StringComparison.Ordinal);
+            Assert.Contains("\"Set-Cookie\":\"[redacted]\"", scrubbedProps!, StringComparison.Ordinal);
             Assert.Contains("\"uri\":\"https://example.com/api?[redacted]\"", scrubbedProps!, StringComparison.Ordinal);
             Assert.Contains("\"count\":2", scrubbedProps!, StringComparison.Ordinal);
             Assert.Contains("\"ok\":true", scrubbedProps!, StringComparison.Ordinal);
+            var manyCollidingKeys = new Dictionary<string, object>(5000);
+            for (var k = 0; k < 5000; k++) manyCollidingKeys[$"/home/alice/private-{k}"] = k;
+            var manyCollidingJson = CoreTelemetryService.SerializeProperties(manyCollidingKeys);
+            Assert.NotNull(manyCollidingJson);
+            Assert.DoesNotContain("alice", manyCollidingJson!, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"[redacted-path]#5000\":4999", manyCollidingJson!, StringComparison.Ordinal);
             var manyFileUris = string.Join("\n", Enumerable.Repeat("open file:///Users/Alice/Secret.mov", 2000));
             var expectedFileUris = string.Join("\n", Enumerable.Repeat("open [redacted-path]", 2000));
             Assert.Equal(expectedFileUris, CoreTelemetryService.SanitizeLocalPaths(manyFileUris));

@@ -2503,10 +2503,37 @@ public sealed class CoreTelemetryService : ITelemetryService
     private static List<(int Start, int End)> FindBearerTokenRanges(string text)
     {
         var ranges = new List<(int Start, int End)>();
+        var inEscapedQuote = false;
         var i = 0;
-        while (i + 6 < text.Length)
+        while (i < text.Length)
         {
-            if ((i > 0 && IsAsciiWordChar(text[i - 1])) ||
+            var ch = text[i];
+            if (ch == '\\' && i + 1 < text.Length)
+            {
+                var next = text[i + 1];
+                if (next == '"')
+                {
+                    inEscapedQuote = !inEscapedQuote;
+                    i += 2;
+                    continue;
+                }
+                if (next == 'u' && i + 5 < text.Length && TryParseHex4(text, i + 2, out var code))
+                {
+                    if (code == '"') inEscapedQuote = !inEscapedQuote;
+                    i += 6;
+                    continue;
+                }
+                i += 2;
+                continue;
+            }
+            if (ch is '"' or '\r' or '\n')
+            {
+                inEscapedQuote = false;
+                i++;
+                continue;
+            }
+            if (i + 6 >= text.Length ||
+                (i > 0 && IsAsciiWordChar(text[i - 1])) ||
                 !MatchesAsciiIgnoreCase(text, i, "bearer") ||
                 !char.IsWhiteSpace(text[i + 6]))
             {
@@ -2516,12 +2543,12 @@ public sealed class CoreTelemetryService : ITelemetryService
             var wsEnd = i + 6;
             while (wsEnd < text.Length && char.IsWhiteSpace(text[wsEnd])) wsEnd++;
             if (wsEnd >= text.Length) break;
-            if (IsRedactedBearerPlaceholderAt(text, wsEnd))
+            if (IsRedactedBearerPlaceholderAt(text, wsEnd, inEscapedQuote))
             {
                 i = wsEnd + 10;
                 continue;
             }
-            var tokEnd = ScanBearerTokenEnd(text, wsEnd);
+            var tokEnd = ScanBearerTokenEnd(text, wsEnd, inEscapedQuote);
             if (tokEnd > wsEnd)
             {
                 ranges.Add((i, tokEnd));
@@ -2535,7 +2562,24 @@ public sealed class CoreTelemetryService : ITelemetryService
         return ranges;
     }
 
-    private static bool IsRedactedBearerPlaceholderAt(string text, int pos)
+    private static bool IsBearerStopPunct(char ch) =>
+        ch is '"' or '\'' or ',' or ';' or ')' or ']' or '}';
+
+    private static bool IsBearerEscapeTerminator(string text, int pos, bool stopAtEscapedQuote)
+    {
+        if (text[pos] != '\\' || pos + 1 >= text.Length) return false;
+        var esc = text[pos + 1];
+        if (esc is 'n' or 'r' or 't' or 'b' or 'f') return true;
+        if (stopAtEscapedQuote && esc == '"') return true;
+        if (esc == 'u' && pos + 5 < text.Length && TryParseHex4(text, pos + 2, out var code))
+        {
+            var decoded = (char)code;
+            return char.IsWhiteSpace(decoded) || (stopAtEscapedQuote && decoded == '"');
+        }
+        return false;
+    }
+
+    private static bool IsRedactedBearerPlaceholderAt(string text, int pos, bool stopAtEscapedQuote)
     {
         if (pos + 10 > text.Length || !text.AsSpan(pos, 10).Equals("[redacted]".AsSpan(), StringComparison.Ordinal))
         {
@@ -2544,20 +2588,11 @@ public sealed class CoreTelemetryService : ITelemetryService
         var after = pos + 10;
         if (after >= text.Length) return true;
         var ch = text[after];
-        if (char.IsWhiteSpace(ch) || ch is '"' or '\'' or ',' or ';' or ')' or ']' or '}') return true;
-        if (ch == '\\' && after + 1 < text.Length)
-        {
-            var esc = text[after + 1];
-            if (esc is 'n' or 'r' or 't' or 'b' or 'f' or '"') return true;
-            if (esc == 'u' && after + 5 < text.Length && TryParseHex4(text, after + 2, out var code))
-            {
-                return char.IsWhiteSpace((char)code);
-            }
-        }
-        return false;
+        if (char.IsWhiteSpace(ch) || IsBearerStopPunct(ch)) return true;
+        return IsBearerEscapeTerminator(text, after, stopAtEscapedQuote);
     }
 
-    private static int ScanBearerTokenEnd(string text, int start)
+    private static int ScanBearerTokenEnd(string text, int start, bool stopAtEscapedQuote)
     {
         var p = start;
         while (p < text.Length)
@@ -2570,10 +2605,12 @@ public sealed class CoreTelemetryService : ITelemetryService
                     p++;
                     break;
                 }
-                p += 2;
+                if (IsBearerEscapeTerminator(text, p, stopAtEscapedQuote)) break;
+                var next = text[p + 1];
+                p += next == 'u' && p + 5 < text.Length && TryParseHex4(text, p + 2, out _) ? 6 : 2;
                 continue;
             }
-            if (char.IsWhiteSpace(ch) || ch is '"' or '\'' or ',' or ';' or ')' or ']' or '}') break;
+            if (char.IsWhiteSpace(ch) || IsBearerStopPunct(ch)) break;
             p++;
         }
         return p;
@@ -2775,9 +2812,14 @@ public sealed class CoreTelemetryService : ITelemetryService
                 if (maxDepth > 0 && text[i] == '"' && !IsPrecededByOddBackslashes(text, i, writer.Copied))
                 {
                     var close = FindDoubleQuotedPathEnd(text, i + 1, out _, out _);
-                    if (close > i && IsJsonStringSpanBoundary(text, i, close))
+                    if (close > i)
                     {
-                        RedactAuthHeadersInBalancedSpan(text, i + 1, close, maxDepth - 1, writer);
+                        var changed = RedactAuthHeadersInBalancedSpan(text, i + 1, close, maxDepth - 1, writer);
+                        if (!changed && !IsJsonStringStartBoundary(text, i) && IsJsonStringStartBoundary(text, close))
+                        {
+                            i = close;
+                            continue;
+                        }
                         i = close + 1;
                         continue;
                     }
@@ -2808,19 +2850,16 @@ public sealed class CoreTelemetryService : ITelemetryService
         }
     }
 
-    private static bool IsJsonStringSpanBoundary(string text, int open, int close)
+    private static bool IsJsonStringStartBoundary(string text, int open)
     {
         var prev = SkipJsonWhitespaceBackward(text, open - 1);
-        if (prev >= 0 && text[prev] is not (':' or '=' or '[' or ',' or '{' or '(')) return false;
-        if (close + 1 >= text.Length || char.IsWhiteSpace(text[close + 1])) return true;
-        var after = SkipJsonWhitespaceForward(text, close + 1);
-        return after >= text.Length || text[after] is ',' or '}' or ']' or ':' or ';' or ')';
+        return prev < 0 || text[prev] is ':' or '=' or '[' or ',' or '{' or '(';
     }
 
-    private static void RedactAuthHeadersInBalancedSpan(
+    private static bool RedactAuthHeadersInBalancedSpan(
         string text, int innerStart, int close, int nextDepth, AuthHeaderWriter writer)
     {
-        if (innerStart >= close || !ContainsAuthHeaderCandidate(text, innerStart, close)) return;
+        if (innerStart >= close || !ContainsAuthHeaderCandidate(text, innerStart, close)) return false;
         var hasBackslash = text.IndexOf('\\', innerStart, close - innerStart) >= 0;
         string decoded;
         int[]? rawOffsets = null;
@@ -2832,15 +2871,17 @@ public sealed class CoreTelemetryService : ITelemetryService
         {
             decoded = text.Substring(innerStart, close - innerStart);
         }
-        if (decoded.IndexOf(':') < 0 && decoded.IndexOf('=') < 0) return;
+        if (decoded.IndexOf(':') < 0 && decoded.IndexOf('=') < 0) return false;
         var edits = new List<(int Start, int End, string Replacement)>();
         ScanAuthHeaders(decoded, nextDepth, new AuthHeaderWriter(decoded, edits));
+        if (edits.Count == 0) return false;
         foreach (var (eStart, eEnd, eRepl) in edits)
         {
             var rawStart = rawOffsets != null ? rawOffsets[eStart] : innerStart + eStart;
             var rawEnd = rawOffsets != null ? rawOffsets[eEnd] : innerStart + eEnd;
             writer.AppendRedacted(rawStart, rawEnd, EscapeJsonStringContent(eRepl));
         }
+        return true;
     }
 
     private static bool TryMatchAuthHeaderKey(
@@ -2859,18 +2900,25 @@ public sealed class CoreTelemetryService : ITelemetryService
                 text, pos, ch, cache, out keyEnd, out isJsonCandidate, out hasJsonPrefix, out failedTopEnd, out normalizedKey);
         }
         if (pos > 0 && IsAuthKeyWordChar(text[pos - 1])) return false;
-        if (MatchesAsciiIgnoreCase(text, pos, "proxy-authorization") &&
-            (pos + 19 == text.Length || !IsAuthKeyWordChar(text[pos + 19])))
+        if (MatchesUnquotedAuthKey(text, pos, "proxy-authorization", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "authorization", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "set-cookie", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "cookie", out keyEnd))
         {
-            keyEnd = pos + 19;
             return true;
         }
-        if (MatchesAsciiIgnoreCase(text, pos, "authorization") &&
-            (pos + 13 == text.Length || !IsAuthKeyWordChar(text[pos + 13])))
+        return false;
+    }
+
+    private static bool MatchesUnquotedAuthKey(string text, int pos, string literal, out int keyEnd)
+    {
+        var end = pos + literal.Length;
+        if (MatchesAsciiIgnoreCase(text, pos, literal) && (end == text.Length || !IsAuthKeyWordChar(text[end])))
         {
-            keyEnd = pos + 13;
+            keyEnd = end;
             return true;
         }
+        keyEnd = pos;
         return false;
     }
 
@@ -2899,6 +2947,8 @@ public sealed class CoreTelemetryService : ITelemetryService
                 string? canonical = null;
                 if (span.Equals("authorization".AsSpan(), StringComparison.OrdinalIgnoreCase)) canonical = "Authorization";
                 else if (span.Equals("proxy-authorization".AsSpan(), StringComparison.OrdinalIgnoreCase)) canonical = "Proxy-Authorization";
+                else if (span.Equals("cookie".AsSpan(), StringComparison.OrdinalIgnoreCase)) canonical = "Cookie";
+                else if (span.Equals("set-cookie".AsSpan(), StringComparison.OrdinalIgnoreCase)) canonical = "Set-Cookie";
                 if (canonical == null) return false;
                 keyEnd = j + 1;
                 if (quote == '"')
@@ -5107,6 +5157,10 @@ public sealed class CoreTelemetryService : ITelemetryService
     public void Track(string name, IReadOnlyDictionary<string, object>? properties = null)
     {
         if (string.IsNullOrWhiteSpace(name)) return;
+        lock (_gate)
+        {
+            if (_disposeRequested || _clientDisposed || _consent != TelemetryConsent.Full) return;
+        }
         var safeName = SanitizeLocalPaths(name);
         if (string.IsNullOrWhiteSpace(safeName)) return;
         var json = SerializeProperties(properties);
@@ -5126,6 +5180,10 @@ public sealed class CoreTelemetryService : ITelemetryService
     public void TrackError(string code, IReadOnlyDictionary<string, object>? properties = null)
     {
         if (string.IsNullOrWhiteSpace(code)) return;
+        lock (_gate)
+        {
+            if (_disposeRequested || _clientDisposed || _consent != TelemetryConsent.Full) return;
+        }
         var safeCode = SanitizeLocalPaths(code);
         if (string.IsNullOrWhiteSpace(safeCode)) return;
         var json = SerializeProperties(properties);
@@ -5886,18 +5944,25 @@ public sealed class CoreTelemetryService : ITelemetryService
     {
         var trimmed = key.AsSpan().Trim();
         return trimmed.Equals("authorization".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
-            trimmed.Equals("proxy-authorization".AsSpan(), StringComparison.OrdinalIgnoreCase);
+            trimmed.Equals("proxy-authorization".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+            trimmed.Equals("cookie".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+            trimmed.Equals("set-cookie".AsSpan(), StringComparison.OrdinalIgnoreCase);
     }
 
-    private static string ResolveUniquePropertyKey(Dictionary<string, object> flat, string safeKey)
+    private static string ResolveUniquePropertyKey(
+        Dictionary<string, object> flat, string safeKey, Dictionary<string, int> nextSuffixByBase)
     {
         if (!flat.ContainsKey(safeKey)) return safeKey;
-        var suffix = 2;
+        var suffix = nextSuffixByBase.TryGetValue(safeKey, out var next) ? next : 2;
         while (true)
         {
             var candidate = $"{safeKey}#{suffix}";
-            if (!flat.ContainsKey(candidate)) return candidate;
             suffix++;
+            if (!flat.ContainsKey(candidate))
+            {
+                nextSuffixByBase[safeKey] = suffix;
+                return candidate;
+            }
         }
     }
 
@@ -5905,13 +5970,14 @@ public sealed class CoreTelemetryService : ITelemetryService
     {
         if (properties == null || properties.Count == 0) return null;
         var flat = new Dictionary<string, object>(properties.Count, StringComparer.Ordinal);
+        var nextSuffixByBase = new Dictionary<string, int>(StringComparer.Ordinal);
         foreach (var kv in properties)
         {
             if (string.IsNullOrWhiteSpace(kv.Key) || kv.Value == null) continue;
             var isAuthKey = IsAuthHeaderPropertyKey(kv.Key);
             var safeKey = isAuthKey ? kv.Key : SanitizeLocalPaths(kv.Key);
             if (string.IsNullOrWhiteSpace(safeKey)) continue;
-            var uniqueKey = ResolveUniquePropertyKey(flat, safeKey);
+            var uniqueKey = ResolveUniquePropertyKey(flat, safeKey, nextSuffixByBase);
             if (isAuthKey)
             {
                 flat[uniqueKey] = "[redacted]";
