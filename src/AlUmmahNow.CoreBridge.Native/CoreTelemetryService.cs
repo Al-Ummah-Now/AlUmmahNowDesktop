@@ -947,7 +947,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             if (c == '"' && !IsEscapedQuote(text, i))
             {
                 var strStart = ScanJsonStringStartBackward(text, i);
-                if (strStart < 0) return -1;
+                if (strStart < 0) break;
                 i = strStart - 1;
                 continue;
             }

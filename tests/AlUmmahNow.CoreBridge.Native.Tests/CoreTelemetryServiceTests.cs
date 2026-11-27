@@ -1043,6 +1043,8 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("note \"hi\", \"Authorization\": \"firstValue\" } opaqueSecret123"));
             Assert.Equal("{\"a\":{\"b\":1},\"Authorization\":\"[redacted]\"}",
                 CoreTelemetryService.SanitizeLocalPaths("{\"a\":{\"b\":1},\"Authorization\":\"opaqueSecret123\"}"));
+            var repeatedMalformedBack = "\"\n" + string.Concat(Enumerable.Repeat("}, \"Authorization\": ", 2000));
+            Assert.NotNull(CoreTelemetryService.SanitizeLocalPaths(repeatedMalformedBack));
             Assert.Equal("Authorization: [[redacted]]\r\nNextHeader: safe",
                 CoreTelemetryService.SanitizeLocalPaths("Authorization: [firstValue]\r\nNextHeader: safe"));
             Assert.Equal("{\n  \"Authorization\": \"[redacted]\"\n  }",
