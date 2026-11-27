@@ -992,6 +992,16 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("{\"Authorization\":\"Bearer testSecret\",\"status\":401}"));
             Assert.Equal("{\"Authorization\":[\"Bearer [redacted]\"],\"status\":401}",
                 CoreTelemetryService.SanitizeLocalPaths("{\"Authorization\":[\"Bearer testSecret\"],\"status\":401}"));
+            Assert.Equal("{\"Authorization\":[[\"[redacted]\"],\"[redacted]\"]}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"Authorization\":[[\"firstValue\"],\"opaqueSecret123\"]}"));
+            Assert.Equal("Authorization: [[redacted]]",
+                CoreTelemetryService.SanitizeLocalPaths("Authorization: [opaqueSecret123]"));
+            Assert.Equal("Authorization:\r\n\t[redacted]",
+                CoreTelemetryService.SanitizeLocalPaths("Authorization:\r\n\topaqueSecret123"));
+            Assert.Equal("Authorization: Digest [redacted]",
+                CoreTelemetryService.SanitizeLocalPaths("Authorization: Digest username=\"alice\",\r\n response=\"deadbeef\""));
+            Assert.Equal("Authorization:\r\nNextHeader: safe",
+                CoreTelemetryService.SanitizeLocalPaths("Authorization:\r\nNextHeader: safe"));
             Assert.Equal("{\"Authorization\":\"[redacted]\",\"status\":401}",
                 CoreTelemetryService.SanitizeLocalPaths("{\"\\u0041uthorization\":\"opaqueSecret123\",\"status\":401}"));
             Assert.Equal("{\"Authorization\":\"[redacted]\"}",
@@ -1279,6 +1289,36 @@ public class CoreTelemetryServiceTests
             }
             Assert.False(File.Exists(bufferPath));
             Assert.True(service.LastPurgeFailed);
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void AddBreadcrumb_category_and_ReportCrash_kind_redact_pii()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "aun-tel-cat-pii-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var bufferPath = Path.Combine(dir, "telemetry-buffer.json");
+        try
+        {
+            using var service = new CoreTelemetryService(
+                platform: "linux",
+                appVersion: "1.0.0",
+                locale: "en",
+                videosApiBaseUrl: null,
+                userAgent: "AlUmmahNowLinux/1.0.0",
+                bufferPath: bufferPath,
+                initialEnabled: true);
+            service.AddBreadcrumb("alice@example.com", "Opening /Users/alice/Private/video.mp4");
+            service.ReportCrash("bob@example.com", "Failed to read /Users/alice/Secret.mov");
+            var bufText = File.ReadAllText(bufferPath);
+            Assert.DoesNotContain("alice@example.com", bufText);
+            Assert.DoesNotContain("bob@example.com", bufText);
+            Assert.DoesNotContain("/Users/alice", bufText);
+            Assert.Contains("[redacted-email]", bufText);
         }
         finally
         {

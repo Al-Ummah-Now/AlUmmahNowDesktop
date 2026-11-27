@@ -178,4 +178,42 @@ public class SettingsStoreTests
             if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
         }
     }
+
+    [Fact]
+    public void SaveTelemetryEnabled_false_succeeds_immediately_while_same_process_holds_consent_lock()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "aun-settings-reentrant-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var settingsPath = Path.Combine(dir, "settings.json");
+            var lockPath = Path.Combine(dir, "telemetry-consent.lock");
+            var store = new SettingsStore(settingsPath);
+            Assert.True(store.SaveTelemetryEnabled(true));
+
+            using (var flushLease = store.TryAcquireTelemetryConsentLock())
+            {
+                Assert.NotNull(flushLease);
+                // Another process trying to open the OS lock file directly must be blocked while the lease is held.
+                Assert.Throws<IOException>(() =>
+                    new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None));
+
+                // Same-process settings opt-out re-enters the held lease immediately without timing out.
+                Assert.True(store.SaveTelemetryEnabled(false));
+                Assert.False(store.LoadTelemetryEnabled());
+
+                // OS lock must remain held until the flush lease itself is disposed.
+                Assert.Throws<IOException>(() =>
+                    new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None));
+            }
+
+            // Once the flush lease is disposed, the OS lock is released cleanly.
+            using var external = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            Assert.NotNull(external);
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+    }
 }

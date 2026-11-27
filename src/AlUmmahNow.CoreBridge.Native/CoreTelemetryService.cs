@@ -742,23 +742,9 @@ public sealed class CoreTelemetryService : ITelemetryService
         }
         if (ch == '[')
         {
-            var k = valStart + 1;
-            while (k < text.Length)
-            {
-                var c = text[k];
-                if (c == ']') return k + 1;
-                if (!allowNewlines && c is '\r' or '\n') return k;
-                if (c is '"' or '\'')
-                {
-                    k = RedactQuotedAuthString(text, k, c, ref sb, ref copied);
-                    continue;
-                }
-                k++;
-            }
-            return k;
+            return RedactAuthArrayValue(text, valStart + 1, allowNewlines, ref sb, ref copied);
         }
-        var lineEnd = valStart;
-        while (lineEnd < text.Length && text[lineEnd] is not ('\r' or '\n')) lineEnd++;
+        var lineEnd = ScanPlainAuthValueEnd(text, valStart);
         var redacted = RedactAuthValueBody(text, valStart, lineEnd);
         if (redacted != null)
         {
@@ -767,6 +753,69 @@ public sealed class CoreTelemetryService : ITelemetryService
             copied = lineEnd;
         }
         return lineEnd;
+    }
+
+    private static int ScanPlainAuthValueEnd(string text, int start)
+    {
+        var end = start;
+        while (end < text.Length)
+        {
+            var c = text[end];
+            if (c is '\r' or '\n')
+            {
+                var fold = AdvanceObsFold(text, end);
+                if (fold > end)
+                {
+                    end = fold;
+                    continue;
+                }
+                break;
+            }
+            end++;
+        }
+        return end;
+    }
+
+    private static int RedactAuthArrayValue(
+        string text, int start, bool allowNewlines, ref StringBuilder? sb, ref int copied)
+    {
+        var depth = 1;
+        var k = start;
+        while (k < text.Length && depth > 0)
+        {
+            var c = text[k];
+            if (c == '[') { depth++; k++; continue; }
+            if (c == ']') { depth--; k++; continue; }
+            if (c is '"' or '\'')
+            {
+                k = RedactQuotedAuthString(text, k, c, ref sb, ref copied);
+                continue;
+            }
+            if (c is ' ' or '\t' or ',') { k++; continue; }
+            if (c is '\r' or '\n')
+            {
+                if (allowNewlines) { k++; continue; }
+                var fold = AdvanceObsFold(text, k);
+                if (fold > k) { k = fold; continue; }
+                return k;
+            }
+            var elemEnd = k;
+            while (elemEnd < text.Length && text[elemEnd] is not (',' or '[' or ']' or '\r' or '\n')) elemEnd++;
+            var trimEnd = elemEnd;
+            while (trimEnd > k && text[trimEnd - 1] is ' ' or '\t') trimEnd--;
+            if (trimEnd > k && !text.AsSpan(k, trimEnd - k).Equals("null".AsSpan(), StringComparison.Ordinal))
+            {
+                var redacted = RedactAuthValueBody(text, k, trimEnd);
+                if (redacted != null)
+                {
+                    sb ??= new StringBuilder(text.Length);
+                    sb.Append(text, copied, k - copied).Append(redacted).Append(text, trimEnd, elemEnd - trimEnd);
+                    copied = elemEnd;
+                }
+            }
+            k = elemEnd;
+        }
+        return k;
     }
 
     private static int RedactQuotedAuthString(
@@ -822,9 +871,32 @@ public sealed class CoreTelemetryService : ITelemetryService
         while (p < text.Length)
         {
             var c = text[p];
-            if (c is ' ' or '\t' || (allowNewlines && c is '\r' or '\n')) p++;
-            else break;
+            if (c is ' ' or '\t' || (allowNewlines && c is '\r' or '\n'))
+            {
+                p++;
+            }
+            else if (!allowNewlines && c is '\r' or '\n')
+            {
+                var fold = AdvanceObsFold(text, p);
+                if (fold > p) p = fold;
+                else break;
+            }
+            else
+            {
+                break;
+            }
         }
+        return p;
+    }
+
+    private static int AdvanceObsFold(string text, int nlPos)
+    {
+        var afterNl = text[nlPos] == '\r' && nlPos + 1 < text.Length && text[nlPos + 1] == '\n'
+            ? nlPos + 2
+            : nlPos + 1;
+        if (afterNl >= text.Length || text[afterNl] is not (' ' or '\t')) return -1;
+        var p = afterNl;
+        while (p < text.Length && text[p] is ' ' or '\t') p++;
         return p;
     }
 
@@ -2098,13 +2170,14 @@ public sealed class CoreTelemetryService : ITelemetryService
             TelemetryBreadcrumbSeverity.Error => TelemetryBreadcrumbLevel.Error,
             _ => TelemetryBreadcrumbLevel.Info,
         };
+        var safeCategory = SanitizeLocalPaths(category);
         var safeMessage = SanitizeLocalPaths(message ?? "");
         CancellationTokenSource? toCancel = null;
         lock (_gate)
         {
             if (!EnsureExternalConsentLocked(out toCancel)) goto CancelAndReturn;
             if (_disposeRequested || _clientDisposed || _consent == TelemetryConsent.Off) return;
-            _client.AddBreadcrumb(category, safeMessage, mapped);
+            _client.AddBreadcrumb(safeCategory, safeMessage, mapped);
         }
         return;
     CancelAndReturn:
@@ -2119,8 +2192,9 @@ public sealed class CoreTelemetryService : ITelemetryService
         }
         var safeMessage = string.IsNullOrWhiteSpace(message) ? "Unhandled exception" : SanitizeLocalPaths(message);
         var safeStack = stack == null ? null : SanitizeLocalPaths(stack);
+        var safeKind = string.IsNullOrWhiteSpace(kind) ? "UnhandledException" : SanitizeLocalPaths(kind);
         var report = new TelemetryCrashReport(
-            string.IsNullOrWhiteSpace(kind) ? "UnhandledException" : kind,
+            safeKind,
             safeMessage,
             safeStack,
             DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),

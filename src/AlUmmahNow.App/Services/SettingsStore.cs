@@ -37,6 +37,11 @@ namespace AlUmmahNow.App.Services
     /// <summary>Stores settings as JSON. A corrupt or missing file yields defaults.</summary>
     public sealed class SettingsStore
     {
+        private static readonly object ProcessLocksGate = new object();
+        private static readonly Dictionary<string, ProcessConsentLockEntry> ProcessLocks =
+            new Dictionary<string, ProcessConsentLockEntry>(
+                Path.DirectorySeparatorChar == '\\' ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+
         private readonly string _path;
         private readonly string _telemetryConsentPath;
 
@@ -121,7 +126,10 @@ namespace AlUmmahNow.App.Services
         public bool TrySaveTelemetryEnabled(bool enabled, out string? writtenToken)
         {
             writtenToken = null;
-            using var crossProcessLock = TryAcquireConsentLock(createDirectory: enabled, out var directoryMissing);
+            using var crossProcessLock = TryAcquireConsentLock(
+                createDirectory: enabled,
+                out var directoryMissing,
+                timeoutMs: enabled ? 2000 : 10000);
             if (!enabled && directoryMissing)
             {
                 return true;
@@ -206,9 +214,10 @@ namespace AlUmmahNow.App.Services
         public IDisposable? TryAcquireTelemetryConsentLock() =>
             TryAcquireConsentLock(createDirectory: false, out _);
 
-        private IDisposable? TryAcquireConsentLock(bool createDirectory, out bool directoryMissing)
+        private IDisposable? TryAcquireConsentLock(bool createDirectory, out bool directoryMissing, int timeoutMs = 2000)
         {
             directoryMissing = false;
+            string lockPath;
             try
             {
                 var directory = Path.GetDirectoryName(_telemetryConsentPath);
@@ -218,33 +227,118 @@ namespace AlUmmahNow.App.Services
                 }
                 // Keep the lock file in the same shared config directory as the consent sidecar so
                 // processes with different TMPDIR values still coordinate on the exact same lock file.
-                var lockPath = _telemetryConsentPath + ".lock";
-                var deadline = DateTime.UtcNow.AddSeconds(2);
-                while (true)
-                {
-                    try
-                    {
-                        return new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
-                    }
-                    catch (DirectoryNotFoundException) when (!createDirectory)
-                    {
-                        directoryMissing = true;
-                        return null;
-                    }
-                    catch (IOException) when (DateTime.UtcNow < deadline)
-                    {
-                        Thread.Sleep(10);
-                    }
-                }
-            }
-            catch (DirectoryNotFoundException) when (!createDirectory)
-            {
-                directoryMissing = true;
-                return null;
+                lockPath = Path.GetFullPath(_telemetryConsentPath + ".lock");
             }
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
             {
                 return null;
+            }
+
+            ProcessConsentLockEntry entry;
+            lock (ProcessLocksGate)
+            {
+                if (!ProcessLocks.TryGetValue(lockPath, out entry!))
+                {
+                    entry = new ProcessConsentLockEntry();
+                    ProcessLocks[lockPath] = entry;
+                }
+                entry.Waiters++;
+            }
+
+            try
+            {
+                lock (entry.Gate)
+                {
+                    if (entry.RefCount > 0)
+                    {
+                        entry.RefCount++;
+                        return new ProcessConsentLockLease(lockPath, entry);
+                    }
+
+                    var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+                    while (true)
+                    {
+                        try
+                        {
+                            entry.Stream = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+                            entry.RefCount = 1;
+                            return new ProcessConsentLockLease(lockPath, entry);
+                        }
+                        catch (DirectoryNotFoundException) when (!createDirectory)
+                        {
+                            directoryMissing = true;
+                            return null;
+                        }
+                        catch (IOException) when (DateTime.UtcNow < deadline)
+                        {
+                            Thread.Sleep(10);
+                        }
+                        catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+                        {
+                            return null;
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                lock (ProcessLocksGate)
+                {
+                    entry.Waiters--;
+                    if (entry.RefCount == 0 && entry.Waiters == 0 &&
+                        ProcessLocks.TryGetValue(lockPath, out var current) && ReferenceEquals(current, entry))
+                    {
+                        ProcessLocks.Remove(lockPath);
+                    }
+                }
+            }
+        }
+
+        private sealed class ProcessConsentLockEntry
+        {
+            public readonly object Gate = new object();
+            public FileStream? Stream;
+            public int RefCount;
+            public int Waiters;
+        }
+
+        private sealed class ProcessConsentLockLease : IDisposable
+        {
+            private readonly string _lockPath;
+            private ProcessConsentLockEntry? _entry;
+
+            public ProcessConsentLockLease(string lockPath, ProcessConsentLockEntry entry)
+            {
+                _lockPath = lockPath;
+                _entry = entry;
+            }
+
+            public void Dispose()
+            {
+                var entry = Interlocked.Exchange(ref _entry, null);
+                if (entry == null) return;
+                FileStream? toDispose = null;
+                lock (entry.Gate)
+                {
+                    if (entry.RefCount > 0)
+                    {
+                        entry.RefCount--;
+                        if (entry.RefCount == 0)
+                        {
+                            toDispose = entry.Stream;
+                            entry.Stream = null;
+                        }
+                    }
+                }
+                toDispose?.Dispose();
+                lock (ProcessLocksGate)
+                {
+                    if (entry.RefCount == 0 && entry.Waiters == 0 &&
+                        ProcessLocks.TryGetValue(_lockPath, out var current) && ReferenceEquals(current, entry))
+                    {
+                        ProcessLocks.Remove(_lockPath);
+                    }
+                }
             }
         }
 
