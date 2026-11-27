@@ -322,9 +322,9 @@ public sealed class CoreTelemetryService : ITelemetryService
             sb ??= new StringBuilder(text.Length);
             sb.Append(text, copied, start - copied);
             var finalTail = tail;
-            if (!hasQf && totalEnd >= failedContMax && totalEnd < text.Length &&
+            if (!hasQf && totalEnd < text.Length &&
                 text[totalEnd] is ',' or '(' or '[' or ')' or ']' or '{' or '}' &&
-                TryExtendUrlContinuation(text, rawUrl, tail, start, ref totalEnd, ref failedContMax,
+                TryExtendUrlContinuation(text, rawUrl, tail, start, inSingleQuote, ref totalEnd, ref failedContMax,
                     ref unclosedDoubleQuoteEnd, ref unclosedSingleQuoteEnd, out var ext))
             {
                 EmitUrlContinuation(sb, prefix, vaultedUrls, redactedUrl, tail, ext);
@@ -376,17 +376,35 @@ public sealed class CoreTelemetryService : ITelemetryService
     }
 
     private static bool TryExtendUrlContinuation(
-        string text, string rawUrl, string baseTail, int urlStart, ref int totalEnd, ref int failedContMax,
-        ref int unclosedDoubleQuoteEnd, ref int unclosedSingleQuoteEnd, out UrlContinuationResult result)
+        string text, string rawUrl, string baseTail, int urlStart, bool inSingleQuote, ref int totalEnd,
+        ref int failedContMax, ref int unclosedDoubleQuoteEnd, ref int unclosedSingleQuoteEnd,
+        out UrlContinuationResult result)
     {
         result = default;
-        var allowDoubleQuotes = totalEnd >= unclosedDoubleQuoteEnd && !(urlStart > 0 && text[urlStart - 1] == '"');
-        var allowSingleQuotes = totalEnd >= unclosedSingleQuoteEnd && !(urlStart > 0 && text[urlStart - 1] == '\'');
         var probeInput = rawUrl + "x";
         var probe = RedactUrlPathSecrets(probeInput);
         var webhookProbe = (probe != probeInput && probe.EndsWith("[redacted]", StringComparison.Ordinal)) ? probe : null;
-        var p = ScanUrlContinuation(text, totalEnd, allowDoubleQuotes, allowSingleQuotes,
-            stopAtSchemes: webhookProbe == null, out var sawInnerQf, out var unclosedQuote);
+        if (webhookProbe == null && totalEnd < failedContMax) return false;
+        var outerQuote = (inSingleQuote || (urlStart > 0 && text[urlStart - 1] == '\''))
+            ? '\''
+            : (urlStart > 0 && text[urlStart - 1] == '"' ? '"' : '\0');
+        var allowDoubleQuotes = totalEnd >= unclosedDoubleQuoteEnd;
+        var allowSingleQuotes = totalEnd >= unclosedSingleQuoteEnd;
+        var p = ScanUrlContinuation(text, totalEnd, allowDoubleQuotes, allowSingleQuotes, outerQuote,
+            stopAtSchemes: webhookProbe == null, out var sawInnerQf, out var unclosedQuote, out var unclosedOuterGroup);
+        var hitsQf = p > totalEnd && p < text.Length && text[p] is '?' or '#';
+        var retryQuote = (unclosedQuote != '\0' && (unclosedQuote == outerQuote || (webhookProbe == null && !hitsQf)))
+            ? unclosedQuote
+            : (unclosedOuterGroup ? outerQuote : '\0');
+        if (retryQuote != '\0')
+        {
+            if (retryQuote == '"' && p > unclosedDoubleQuoteEnd) unclosedDoubleQuoteEnd = p;
+            else if (retryQuote == '\'' && p > unclosedSingleQuoteEnd) unclosedSingleQuoteEnd = p;
+            if (retryQuote == '"') allowDoubleQuotes = false;
+            else allowSingleQuotes = false;
+            p = ScanUrlContinuation(text, totalEnd, allowDoubleQuotes, allowSingleQuotes, outerQuote,
+                stopAtSchemes: webhookProbe == null, out sawInnerQf, out unclosedQuote, out _);
+        }
         if (p > totalEnd && p < text.Length && text[p] is '?' or '#')
         {
             var qfStart = p;
@@ -395,7 +413,8 @@ public sealed class CoreTelemetryService : ITelemetryService
             {
                 p++;
             }
-            var qf = TrimQueryOrFragmentDelimiters(text.Substring(qfStart, p - qfStart), text, urlStart, out var qfTail);
+            var qf = TrimQueryOrFragmentDelimiters(
+                text.Substring(qfStart, p - qfStart), text, urlStart, out var qfTail, inSingleQuote);
             var qfToken = qf[0] + "[redacted]";
             if (webhookProbe != null)
             {
@@ -404,7 +423,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             else
             {
                 var baseRedacted = RedactUrlPathSecrets(rawUrl);
-                var prefixRedacted = RedactUrlPathSecrets(text.Substring(urlStart, qfStart - urlStart));
+                var prefixRedacted = RedactOuterContinuationPrefix(text, urlStart, totalEnd, qfStart);
                 if (prefixRedacted == baseRedacted || prefixRedacted == baseRedacted + "[redacted]")
                 {
                     result = new UrlContinuationResult(true, prefixRedacted + qfToken, false, string.Empty, string.Empty, qfTail);
@@ -421,7 +440,8 @@ public sealed class CoreTelemetryService : ITelemetryService
             totalEnd = p;
             return true;
         }
-        var end = TrimWebhookContinuationEnd(text, urlStart, totalEnd, p, allowDoubleQuotes, allowSingleQuotes);
+        var end = TrimWebhookContinuationEnd(
+            text, urlStart, totalEnd, p, allowDoubleQuotes, allowSingleQuotes, outerQuote, inSingleQuote);
         if (end > totalEnd)
         {
             var extTail = text.Substring(end, p - end);
@@ -432,7 +452,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                 return true;
             }
             var baseRedacted = RedactUrlPathSecrets(rawUrl);
-            var extRedacted = RedactUrlPathSecrets(text.Substring(urlStart, end - urlStart));
+            var extRedacted = RedactOuterContinuationPrefix(text, urlStart, totalEnd, end);
             if (extRedacted != baseRedacted + text.Substring(totalEnd, end - totalEnd))
             {
                 if (extRedacted == baseRedacted || extRedacted == baseRedacted + "[redacted]")
@@ -457,13 +477,40 @@ public sealed class CoreTelemetryService : ITelemetryService
         return false;
     }
 
+    private static string RedactOuterContinuationPrefix(string text, int urlStart, int totalEnd, int sliceEnd)
+    {
+        var nestedStart = FindFirstNestedUrlStart(text, totalEnd, sliceEnd);
+        if (nestedStart < 0) return RedactUrlPathSecrets(text.Substring(urlStart, sliceEnd - urlStart));
+        var prefix = text.Substring(urlStart, nestedStart - urlStart);
+        var probe = RedactUrlPathSecrets(prefix + "x");
+        if (probe != prefix + "x" && probe.EndsWith("[redacted]", StringComparison.Ordinal))
+        {
+            return RedactUrlPathSecrets(text.Substring(urlStart, sliceEnd - urlStart));
+        }
+        return RedactUrlPathSecrets(prefix) + text.Substring(nestedStart, sliceEnd - nestedStart);
+    }
+
+    private static int FindFirstNestedUrlStart(string text, int from, int to)
+    {
+        var search = from;
+        while (search < to)
+        {
+            var sep = text.IndexOf("://", search, to - search, StringComparison.Ordinal);
+            if (sep < 0) return -1;
+            if (TryFindNonFileSchemeStart(text, sep, from, out var start)) return start;
+            search = sep + 3;
+        }
+        return -1;
+    }
+
     private static int ScanUrlContinuation(
-        string text, int start, bool allowDoubleQuotes, bool allowSingleQuotes, bool stopAtSchemes,
-        out bool sawInnerQf, out char unclosedQuote)
+        string text, int start, bool allowDoubleQuotes, bool allowSingleQuotes, char outerQuote, bool stopAtSchemes,
+        out bool sawInnerQf, out char unclosedQuote, out bool unclosedOuterGroup)
     {
         var p = start;
         var groupStack = new List<char>();
         var quoteChar = '\0';
+        var sawNestedOuterQuote = false;
         sawInnerQf = false;
         while (p < text.Length)
         {
@@ -482,7 +529,8 @@ public sealed class CoreTelemetryService : ITelemetryService
                 continue;
             }
             if (IsFileSchemeAt(text, p) || ((p == 0 || !IsAsciiAlphaNum(text[p - 1])) && IsWindowsDriveAt(text, p))) break;
-            if (stopAtSchemes && p > start && !IsUrlSchemeChar(text[p - 1]) && text[p - 1] is not ('/' or '\\') && IsUrlSchemeAt(text, p))
+            if ((stopAtSchemes || sawNestedOuterQuote) && p > start &&
+                !IsUrlSchemeChar(text[p - 1]) && text[p - 1] is not ('/' or '\\') && IsUrlSchemeAt(text, p))
             {
                 break;
             }
@@ -492,14 +540,22 @@ public sealed class CoreTelemetryService : ITelemetryService
             }
             if (ch is '"' or '\'')
             {
-                var allowed = ch == '"' ? allowDoubleQuotes : allowSingleQuotes;
-                if (allowed && groupStack.Count > 0)
+                if (ch == '\'' && IsContractionApostrophe(text, p))
                 {
-                    quoteChar = ch;
                     p++;
                     continue;
                 }
-                if (ch == '"') break;
+                var allowed = ch == '"' ? allowDoubleQuotes : allowSingleQuotes;
+                var afterNonAlphaNum = p > start && !IsAsciiAlphaNum(text[p - 1]);
+                var canOpen = allowed && groupStack.Count > 0 && (ch == '"' ? (outerQuote != '"' || afterNonAlphaNum) : afterNonAlphaNum);
+                if (canOpen)
+                {
+                    quoteChar = ch;
+                    if (ch == outerQuote) sawNestedOuterQuote = true;
+                    p++;
+                    continue;
+                }
+                if (ch == '"' || (ch == outerQuote && (groupStack.Count == 0 || !allowed || sawNestedOuterQuote))) break;
                 p++;
                 continue;
             }
@@ -518,8 +574,12 @@ public sealed class CoreTelemetryService : ITelemetryService
             p++;
         }
         unclosedQuote = quoteChar;
+        unclosedOuterGroup = sawNestedOuterQuote && groupStack.Count > 0;
         return p;
     }
+
+    private static bool IsContractionApostrophe(string text, int pos) =>
+        pos > 0 && pos + 1 < text.Length && IsAsciiAlphaNum(text[pos - 1]) && IsAsciiAlphaNum(text[pos + 1]);
 
     private static bool IsUrlSchemeAt(string text, int pos)
     {
@@ -530,7 +590,8 @@ public sealed class CoreTelemetryService : ITelemetryService
     }
 
     private static int TrimWebhookContinuationEnd(
-        string text, int urlStart, int minEnd, int scanEnd, bool allowDoubleQuotes, bool allowSingleQuotes)
+        string text, int urlStart, int minEnd, int scanEnd, bool allowDoubleQuotes, bool allowSingleQuotes,
+        char outerQuote, bool inSingleQuote)
     {
         var excessParens = 0;
         var excessBrackets = 0;
@@ -546,7 +607,9 @@ public sealed class CoreTelemetryService : ITelemetryService
                 if (c == quoteChar) quoteChar = '\0';
                 continue;
             }
-            if (openGroups > 0 && ((c == '"' && allowDoubleQuotes) || (c == '\'' && allowSingleQuotes)))
+            var afterNonAlphaNum = i > urlStart && !IsAsciiAlphaNum(text[i - 1]);
+            if (openGroups > 0 && ((c == '"' && allowDoubleQuotes && (outerQuote != '"' || afterNonAlphaNum)) ||
+                (c == '\'' && allowSingleQuotes && afterNonAlphaNum)))
             {
                 quoteChar = c;
                 continue;
@@ -558,7 +621,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             else if (c == '{') { excessBraces--; openGroups++; }
             else if (c == '}') { excessBraces++; if (openGroups > 0) openGroups--; }
         }
-        var precededByQuote = urlStart > 0 && text[urlStart - 1] == '\'';
+        var precededByQuote = inSingleQuote || (urlStart > 0 && text[urlStart - 1] == '\'');
         var end = scanEnd;
         while (end > minEnd)
         {
@@ -785,7 +848,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                 continue;
             }
             if (openBraceCount > 0 && !(IsAsciiAlphaNum(ch) || ch is '_' or '-')) break;
-            if (openChars.Count > 0 && ch is ':' or '\'') break;
+            if (openChars.Count > 0 && (ch == ':' || (ch == '\'' && (p == 0 || !IsAsciiAlphaNum(text[p - 1]))))) break;
             p++;
         }
         if (openPositions.Count > 0)
