@@ -307,11 +307,14 @@ public sealed class CoreTelemetryService : ITelemetryService
                 }
             }
             var redactedUrl = RedactUrlPathSecrets(url);
-            if (!hasQf && tail.Length == 0 && redactedUrl != url &&
-                redactedUrl.EndsWith("[redacted]", StringComparison.Ordinal) &&
-                totalEnd < text.Length && text[totalEnd] == ',' && !ShouldStopAtUrlComma(text, totalEnd))
+            if (!hasQf && tail.Length == 0 && totalEnd < text.Length &&
+                text[totalEnd] == ',' && !ShouldStopAtUrlComma(text, totalEnd))
             {
-                redactedUrl = ExtendRedactedWebhookCommaContinuation(text, redactedUrl, start, ref totalEnd, out tail);
+                var probe = RedactUrlPathSecrets(url + ",");
+                if (probe != url + "," && probe.EndsWith("[redacted]", StringComparison.Ordinal))
+                {
+                    redactedUrl = ExtendRedactedWebhookCommaContinuation(text, probe, start, ref totalEnd, out tail);
+                }
             }
             sb ??= new StringBuilder(text.Length);
             sb.Append(text, copied, start - copied);
@@ -753,33 +756,40 @@ public sealed class CoreTelemetryService : ITelemetryService
                 : match.Value);
     }
 
+    private sealed class AuthJsonScanCache
+    {
+        public Dictionary<int, int>? ValidJsonValueEnd;
+        public Dictionary<int, int>? CloseToOpenMap;
+        public Dictionary<int, int>? MemberCommaOpen;
+        public Dictionary<int, int>? ArrayCommaOpen;
+        public Dictionary<int, bool>? ContainerValidForAuth;
+        public int FailedContainerBack = -1;
+    }
+
     private static string RedactAuthHeaders(string text)
     {
         if (text.IndexOf(':') < 0 && text.IndexOf('=') < 0) return text;
         StringBuilder? sb = null;
         var copied = 0;
-        Dictionary<int, int>? validJsonValueEnd = null;
-        Dictionary<int, int>? closeToOpenMap = null;
-        Dictionary<int, bool>? memberCommaValid = null;
-        var failedContainerBack = -1;
+        var cache = new AuthJsonScanCache();
         var i = 0;
         while (i < text.Length)
         {
             if (!TryMatchAuthHeaderKey(
-                text, i, ref validJsonValueEnd, ref closeToOpenMap, ref memberCommaValid, ref failedContainerBack,
-                out var keyEnd, out var isJsonCandidate, out var normalizedKey))
+                text, i, cache, out var keyEnd, out var isJsonCandidate, out var hasJsonPrefix, out var normalizedKey))
             {
                 i++;
                 continue;
             }
-            var sep = SkipAuthWhitespace(text, keyEnd, isJsonCandidate);
+            var sep = SkipAuthWhitespace(text, keyEnd, isJsonCandidate || hasJsonPrefix);
             if (sep >= text.Length || text[sep] is not (':' or '='))
             {
                 i = keyEnd;
                 continue;
             }
             var isJsonMember = isJsonCandidate && text[sep] == ':';
-            var valStart = SkipAuthWhitespace(text, sep + 1, isJsonMember);
+            var allowTruncatedObject = hasJsonPrefix && text[sep] == ':';
+            var valStart = SkipAuthWhitespace(text, sep + 1, isJsonMember || allowTruncatedObject);
             if (valStart >= text.Length || text[valStart] is '\r' or '\n')
             {
                 i = sep + 1;
@@ -791,7 +801,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                 sb.Append(text, copied, i - copied).Append(text[i]).Append(normalizedKey).Append(text[i]);
                 copied = keyEnd;
             }
-            i = RedactAuthHeaderValue(text, valStart, isJsonMember, ref validJsonValueEnd, ref sb, ref copied);
+            i = RedactAuthHeaderValue(text, valStart, isJsonMember, allowTruncatedObject, cache, ref sb, ref copied);
         }
         if (sb == null) return text;
         sb.Append(text, copied, text.Length - copied);
@@ -799,20 +809,18 @@ public sealed class CoreTelemetryService : ITelemetryService
     }
 
     private static bool TryMatchAuthHeaderKey(
-        string text, int pos, ref Dictionary<int, int>? validJsonValueEnd,
-        ref Dictionary<int, int>? closeToOpenMap, ref Dictionary<int, bool>? memberCommaValid,
-        ref int failedContainerBack,
-        out int keyEnd, out bool allowNewlines, out string? normalizedKey)
+        string text, int pos, AuthJsonScanCache cache,
+        out int keyEnd, out bool isJsonCandidate, out bool hasJsonPrefix, out string? normalizedKey)
     {
         keyEnd = pos;
-        allowNewlines = false;
+        isJsonCandidate = false;
+        hasJsonPrefix = false;
         normalizedKey = null;
         var ch = text[pos];
         if (ch is '"' or '\'')
         {
             return TryMatchQuotedAuthKey(
-                text, pos, ch, ref validJsonValueEnd, ref closeToOpenMap, ref memberCommaValid, ref failedContainerBack,
-                out keyEnd, out allowNewlines, out normalizedKey);
+                text, pos, ch, cache, out keyEnd, out isJsonCandidate, out hasJsonPrefix, out normalizedKey);
         }
         if (pos > 0 && IsAuthKeyWordChar(text[pos - 1])) return false;
         if (MatchesAsciiIgnoreCase(text, pos, "proxy-authorization") &&
@@ -831,13 +839,12 @@ public sealed class CoreTelemetryService : ITelemetryService
     }
 
     private static bool TryMatchQuotedAuthKey(
-        string text, int pos, char quote, ref Dictionary<int, int>? validJsonValueEnd,
-        ref Dictionary<int, int>? closeToOpenMap, ref Dictionary<int, bool>? memberCommaValid,
-        ref int failedContainerBack,
-        out int keyEnd, out bool allowNewlines, out string? normalizedKey)
+        string text, int pos, char quote, AuthJsonScanCache cache,
+        out int keyEnd, out bool isJsonCandidate, out bool hasJsonPrefix, out string? normalizedKey)
     {
         keyEnd = pos;
-        allowNewlines = false;
+        isJsonCandidate = false;
+        hasJsonPrefix = false;
         normalizedKey = null;
         var limit = Math.Min(text.Length, pos + 129);
         Span<char> decoded = stackalloc char[20];
@@ -852,25 +859,19 @@ public sealed class CoreTelemetryService : ITelemetryService
             if (c == quote)
             {
                 ReadOnlySpan<char> span = decoded[..len];
-                if (span.Equals("authorization".AsSpan(), StringComparison.OrdinalIgnoreCase))
+                string? canonical = null;
+                if (span.Equals("authorization".AsSpan(), StringComparison.OrdinalIgnoreCase)) canonical = "Authorization";
+                else if (span.Equals("proxy-authorization".AsSpan(), StringComparison.OrdinalIgnoreCase)) canonical = "Proxy-Authorization";
+                if (canonical == null) return false;
+                keyEnd = j + 1;
+                if (quote == '"' && !hasInvalidJsonEscape)
                 {
-                    keyEnd = j + 1;
-                    allowNewlines = quote == '"' && !hasInvalidJsonEscape &&
-                        IsPrecededByJsonMemberDelimiter(
-                            text, pos, ref validJsonValueEnd, ref closeToOpenMap, ref memberCommaValid, ref failedContainerBack);
-                    normalizedKey = sawEscape ? "Authorization" : null;
-                    return true;
+                    var openBrace = FindEnclosingJsonObjectStart(text, pos, cache);
+                    hasJsonPrefix = openBrace >= 0;
+                    isJsonCandidate = openBrace >= 0 && IsInsideValidTopLevelJsonContainer(text, openBrace, cache);
                 }
-                if (span.Equals("proxy-authorization".AsSpan(), StringComparison.OrdinalIgnoreCase))
-                {
-                    keyEnd = j + 1;
-                    allowNewlines = quote == '"' && !hasInvalidJsonEscape &&
-                        IsPrecededByJsonMemberDelimiter(
-                            text, pos, ref validJsonValueEnd, ref closeToOpenMap, ref memberCommaValid, ref failedContainerBack);
-                    normalizedKey = sawEscape ? "Proxy-Authorization" : null;
-                    return true;
-                }
-                return false;
+                normalizedKey = sawEscape ? canonical : null;
+                return true;
             }
             if (len >= 19) return false;
             if (c == '\\')
@@ -895,7 +896,8 @@ public sealed class CoreTelemetryService : ITelemetryService
     }
 
     private static int RedactAuthHeaderValue(
-        string text, int valStart, bool isJsonMember, ref Dictionary<int, int>? validJsonValueEnd, ref StringBuilder? sb, ref int copied)
+        string text, int valStart, bool isJsonMember, bool allowTruncatedObject,
+        AuthJsonScanCache cache, ref StringBuilder? sb, ref int copied)
     {
         var ch = text[valStart];
         if (ch is '"' or '\'')
@@ -906,13 +908,13 @@ public sealed class CoreTelemetryService : ITelemetryService
         }
         if (ch == '[')
         {
-            var afterArray = RedactAuthArrayValue(text, valStart + 1, isJsonMember, ref validJsonValueEnd, ref sb, ref copied);
-            var validJsonArr = isJsonMember && TryParseJsonValue(text, valStart, ref validJsonValueEnd) == afterArray;
+            var afterArray = RedactAuthArrayValue(text, valStart + 1, isJsonMember, allowTruncatedObject, cache, ref sb, ref copied);
+            var validJsonArr = isJsonMember && TryParseJsonValue(text, valStart, ref cache.ValidJsonValueEnd) == afterArray;
             return RedactTrailingPlainAuthContinuation(text, afterArray, validJsonArr, ref sb, ref copied);
         }
         if (ch == '{')
         {
-            var objEnd = TryParseJsonValue(text, valStart, ref validJsonValueEnd);
+            var objEnd = TryParseJsonValue(text, valStart, ref cache.ValidJsonValueEnd);
             if (objEnd > valStart)
             {
                 sb ??= new StringBuilder(text.Length);
@@ -920,7 +922,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                 copied = objEnd;
                 return RedactTrailingPlainAuthContinuation(text, objEnd, isJsonMember, ref sb, ref copied);
             }
-            if (isJsonMember)
+            if (isJsonMember || allowTruncatedObject)
             {
                 sb ??= new StringBuilder(text.Length);
                 sb.Append(text, copied, valStart - copied).Append("\"[redacted]\"");
@@ -1027,70 +1029,146 @@ public sealed class CoreTelemetryService : ITelemetryService
         return p;
     }
 
-    private static bool IsPrecededByJsonMemberDelimiter(
-        string text, int pos, ref Dictionary<int, int>? validJsonValueEnd,
-        ref Dictionary<int, int>? closeToOpenMap, ref Dictionary<int, bool>? memberCommaValid,
-        ref int failedContainerBack)
+    private static int FindEnclosingJsonObjectStart(string text, int pos, AuthJsonScanCache cache)
     {
         var p = SkipJsonWhitespaceBackward(text, pos - 1);
-        if (p < 0) return false;
-        if (text[p] == '{') return true;
-        if (text[p] != ',') return false;
-        memberCommaValid ??= new Dictionary<int, bool>();
-        if (memberCommaValid.TryGetValue(p, out var cached)) return cached;
+        if (p < 0) return -1;
+        if (text[p] == '{') return p;
+        if (text[p] != ',') return -1;
+        return FindEnclosingJsonObjectStartFromComma(text, p, cache);
+    }
+
+    private static int FindEnclosingJsonObjectStartFromComma(string text, int commaPos, AuthJsonScanCache cache)
+    {
+        cache.MemberCommaOpen ??= new Dictionary<int, int>();
+        if (cache.MemberCommaOpen.TryGetValue(commaPos, out var cached)) return cached;
         var visited = new List<int>();
-        var result = false;
+        var p = commaPos;
+        var openBrace = -1;
         while (p >= 0 && text[p] == ',')
         {
-            if (memberCommaValid.TryGetValue(p, out var known))
+            if (cache.MemberCommaOpen.TryGetValue(p, out var known))
             {
-                result = known;
+                openBrace = known;
                 break;
             }
             visited.Add(p);
-            var beforeKey = StepBackOverJsonMember(
-                text, p, ref validJsonValueEnd, ref closeToOpenMap, ref failedContainerBack);
+            var beforeKey = StepBackOverJsonMember(text, p, cache);
             if (beforeKey < 0) break;
             if (text[beforeKey] == '{')
             {
-                result = true;
+                openBrace = beforeKey;
                 break;
             }
             p = beforeKey;
         }
-        foreach (var commaPos in visited) memberCommaValid[commaPos] = result;
-        return result;
+        foreach (var cPos in visited) cache.MemberCommaOpen[cPos] = openBrace;
+        return openBrace;
     }
 
-    private static int StepBackOverJsonMember(
-        string text, int commaPos, ref Dictionary<int, int>? validJsonValueEnd,
-        ref Dictionary<int, int>? closeToOpenMap, ref int failedContainerBack)
+    private static int FindEnclosingJsonArrayStartFromComma(string text, int commaPos, AuthJsonScanCache cache)
+    {
+        cache.ArrayCommaOpen ??= new Dictionary<int, int>();
+        if (cache.ArrayCommaOpen.TryGetValue(commaPos, out var cached)) return cached;
+        var visited = new List<int>();
+        var p = commaPos;
+        var openBracket = -1;
+        while (p >= 0 && text[p] == ',')
+        {
+            if (cache.ArrayCommaOpen.TryGetValue(p, out var known))
+            {
+                openBracket = known;
+                break;
+            }
+            visited.Add(p);
+            var prev = SkipJsonWhitespaceBackward(text, p - 1);
+            if (prev < 0) break;
+            var valStart = FindJsonValueStartBackward(text, prev, cache);
+            if (valStart <= 0) break;
+            var beforeVal = SkipJsonWhitespaceBackward(text, valStart - 1);
+            if (beforeVal < 0) break;
+            if (text[beforeVal] == '[')
+            {
+                openBracket = beforeVal;
+                break;
+            }
+            if (text[beforeVal] != ',') break;
+            p = beforeVal;
+        }
+        foreach (var cPos in visited) cache.ArrayCommaOpen[cPos] = openBracket;
+        return openBracket;
+    }
+
+    private static bool IsInsideValidTopLevelJsonContainer(string text, int openPos, AuthJsonScanCache cache)
+    {
+        cache.ContainerValidForAuth ??= new Dictionary<int, bool>();
+        if (cache.ContainerValidForAuth.TryGetValue(openPos, out var cached)) return cached;
+        var visited = new List<int>();
+        var curOpen = openPos;
+        var valid = false;
+        while (curOpen >= 0)
+        {
+            if (cache.ContainerValidForAuth.TryGetValue(curOpen, out var known))
+            {
+                valid = known;
+                break;
+            }
+            visited.Add(curOpen);
+            var containerEnd = TryParseJsonValue(text, curOpen, ref cache.ValidJsonValueEnd);
+            if (containerEnd <= curOpen) break;
+            var after = containerEnd;
+            while (after < text.Length && text[after] is ' ' or '\t') after++;
+            if (after >= text.Length || text[after] is '\r' or '\n')
+            {
+                valid = true;
+                break;
+            }
+            curOpen = FindParentJsonContainerOpen(text, curOpen, cache);
+        }
+        foreach (var pos in visited) cache.ContainerValidForAuth[pos] = valid;
+        return valid;
+    }
+
+    private static int FindParentJsonContainerOpen(string text, int valueStart, AuthJsonScanCache cache)
+    {
+        var prev = SkipJsonWhitespaceBackward(text, valueStart - 1);
+        if (prev < 0) return -1;
+        if (text[prev] == ':')
+        {
+            var beforeKey = FindDelimiterBeforeJsonMemberKeyColon(text, valueStart);
+            if (beforeKey < 0) return -1;
+            return text[beforeKey] == '{' ? beforeKey : FindEnclosingJsonObjectStartFromComma(text, beforeKey, cache);
+        }
+        if (text[prev] == '[') return prev;
+        if (text[prev] == ',') return FindEnclosingJsonArrayStartFromComma(text, prev, cache);
+        return -1;
+    }
+
+    private static int StepBackOverJsonMember(string text, int commaPos, AuthJsonScanCache cache)
     {
         var prev = SkipJsonWhitespaceBackward(text, commaPos - 1);
         if (prev < 0) return -1;
+        var valueStart = FindJsonValueStartBackward(text, prev, cache);
+        if (valueStart <= 0) return -1;
+        return FindDelimiterBeforeJsonMemberKeyColon(text, valueStart);
+    }
+
+    private static int FindJsonValueStartBackward(string text, int prev, AuthJsonScanCache cache)
+    {
         var ch = text[prev];
-        int valueStart;
-        if (ch == '"')
+        if (ch == '"') return ScanJsonStringStartBackward(text, prev);
+        if (ch is '}' or ']')
         {
-            valueStart = ScanJsonStringStartBackward(text, prev);
+            return ScanBalancedJsonContainerStartBackward(
+                text, prev, ref cache.ValidJsonValueEnd, ref cache.CloseToOpenMap, ref cache.FailedContainerBack);
         }
-        else if (ch is '}' or ']')
-        {
-            valueStart = ScanBalancedJsonContainerStartBackward(
-                text, prev, ref validJsonValueEnd, ref closeToOpenMap, ref failedContainerBack);
-        }
-        else if (ch >= '0' && ch <= '9')
+        if (ch >= '0' && ch <= '9')
         {
             var s = prev;
             while (s >= 0 && text[s] is not (' ' or '\t' or '\r' or '\n' or ':' or ',' or '[')) s--;
-            valueStart = IsJsonNumberSpan(text.AsSpan(s + 1, prev - s)) ? s + 1 : -1;
+            return IsJsonNumberSpan(text.AsSpan(s + 1, prev - s)) ? s + 1 : -1;
         }
-        else
-        {
-            valueStart = FindJsonKeywordStartEndingAt(text, prev);
-        }
-        if (valueStart <= 0) return -1;
-        return FindDelimiterBeforeJsonMemberKeyColon(text, valueStart);
+        return FindJsonKeywordStartEndingAt(text, prev);
     }
 
     private static int FindJsonKeywordStartEndingAt(string text, int endIdx)
@@ -1405,7 +1483,8 @@ public sealed class CoreTelemetryService : ITelemetryService
     }
 
     private static int RedactAuthArrayValue(
-        string text, int start, bool isJsonMember, ref Dictionary<int, int>? validJsonValueEnd, ref StringBuilder? sb, ref int copied)
+        string text, int start, bool isJsonMember, bool allowTruncatedObject,
+        AuthJsonScanCache cache, ref StringBuilder? sb, ref int copied)
     {
         var depth = 1;
         var k = start;
@@ -1421,7 +1500,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             }
             if (c == '{')
             {
-                var objEnd = TryParseJsonValue(text, k, ref validJsonValueEnd);
+                var objEnd = TryParseJsonValue(text, k, ref cache.ValidJsonValueEnd);
                 if (objEnd > k)
                 {
                     sb ??= new StringBuilder(text.Length);
@@ -1430,7 +1509,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                     k = objEnd;
                     continue;
                 }
-                if (isJsonMember)
+                if (isJsonMember || allowTruncatedObject)
                 {
                     sb ??= new StringBuilder(text.Length);
                     sb.Append(text, copied, k - copied).Append("\"[redacted]\"");
