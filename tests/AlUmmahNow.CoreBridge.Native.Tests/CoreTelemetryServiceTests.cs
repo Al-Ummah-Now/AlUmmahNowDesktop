@@ -224,6 +224,12 @@ public class CoreTelemetryServiceTests
             CoreTelemetryService.ResolveIngestUrl("https://videos.api.example:8443/v2?token=abc#top"));
         Assert.Equal("https://videos.api.example/api/v1/telemetry/batches",
             CoreTelemetryService.ResolveIngestUrl("https://videos.api.example?x=1"));
+        Assert.Equal("https://videos.api.example/api/v1/telemetry/batches",
+            CoreTelemetryService.ResolveIngestUrl("https://videos.api.example:443/v1"));
+        Assert.Equal("https://[::1]:8443/api/v1/telemetry/batches",
+            CoreTelemetryService.ResolveIngestUrl("https://[::1]:8443/path?a=1#frag"));
+        Assert.Null(CoreTelemetryService.ResolveIngestUrl("https://user:password@videos.api.example/path"));
+        Assert.Null(CoreTelemetryService.ResolveIngestUrl("https://user@videos.api.example"));
         Assert.Null(CoreTelemetryService.ResolveIngestUrl("http://127.0.0.1:3086"));
         Assert.Null(CoreTelemetryService.ResolveIngestUrl("http://videos.api.alummahnow.net"));
         Assert.Null(CoreTelemetryService.ResolveIngestUrl(""));
@@ -232,5 +238,168 @@ public class CoreTelemetryServiceTests
         var demo = CoreTelemetryService.CreateOrNull("windows", "1.0.0", "en", "https://videos.api.alummahnow.net", "AlUmmahNowWindows/1.0.0", null, initialEnabled: true, demo: true);
         Assert.Same(NullTelemetryService.Instance, demo);
         Assert.Equal(TelemetryConsent.Off, demo.Consent);
+    }
+
+    [Fact]
+    public async Task Dispose_while_opted_in_flush_in_flight_preserves_retryable_buffer()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "aun-tel-dispose-keep-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var bufferPath = Path.Combine(dir, "telemetry-buffer.json");
+        try
+        {
+            var nativeStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var nativeRelease = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var service = new CoreTelemetryService(
+                platform: "linux",
+                appVersion: "1.0.0",
+                locale: "en",
+                videosApiBaseUrl: null,
+                userAgent: "AlUmmahNowLinux/1.0.0",
+                bufferPath: bufferPath,
+                initialEnabled: true)
+            {
+                FlushOverrideForTesting = () =>
+                {
+                    nativeStarted.TrySetResult(true);
+                    return nativeRelease.Task;
+                }
+            };
+
+            service.Track("screen_view", new Dictionary<string, object> { ["screen"] = "home" });
+            service.Persist();
+            Assert.True(File.Exists(bufferPath));
+
+            var flushTask = service.FlushAsync();
+            await nativeStarted.Task;
+
+            // Ordinary shutdown (Dispose without revoking consent) must preserve the persisted buffer for retry.
+            service.Dispose();
+            await flushTask;
+            Assert.False(service.IsClientDisposedForTesting);
+
+            nativeRelease.TrySetResult(true);
+            var deadline = DateTime.UtcNow.AddSeconds(2);
+            while (!service.IsClientDisposedForTesting && DateTime.UtcNow < deadline)
+            {
+                await Task.Delay(5);
+            }
+            Assert.True(service.IsClientDisposedForTesting);
+            Assert.True(File.Exists(bufferPath));
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task External_opt_out_revokes_other_instance_before_crash_persist_or_flush()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "aun-tel-multi-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var bufferPath = Path.Combine(dir, "telemetry-buffer.json");
+        var sharedEnabled = true;
+        try
+        {
+            using var otherInstance = new CoreTelemetryService(
+                platform: "linux",
+                appVersion: "1.0.0",
+                locale: "en",
+                videosApiBaseUrl: null,
+                userAgent: "AlUmmahNowLinux/1.0.0",
+                bufferPath: bufferPath,
+                initialEnabled: true,
+                isExternallyEnabled: () => Volatile.Read(ref sharedEnabled));
+
+            otherInstance.Track("screen_view", new Dictionary<string, object> { ["screen"] = "home" });
+            otherInstance.Persist();
+            Assert.True(File.Exists(bufferPath));
+
+            // Simulate another running instance turning diagnostics off in shared settings.
+            Volatile.Write(ref sharedEnabled, false);
+
+            // Crash, persist, and flush on this instance must all revoke instead of writing or sending.
+            otherInstance.ReportCrash("IOException", "boom", "at Foo.Bar()");
+            otherInstance.Persist();
+            await otherInstance.FlushAsync();
+
+            Assert.Equal(TelemetryConsent.Off, otherInstance.Consent);
+            Assert.Equal(0, otherInstance.PendingCount);
+            Assert.False(File.Exists(bufferPath));
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ReportCrash_and_breadcrumb_redact_local_file_paths()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "aun-tel-paths-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var bufferPath = Path.Combine(dir, "telemetry-buffer.json");
+        try
+        {
+            using var service = new CoreTelemetryService(
+                platform: "linux",
+                appVersion: "1.0.0",
+                locale: "en",
+                videosApiBaseUrl: null,
+                userAgent: "AlUmmahNowLinux/1.0.0",
+                bufferPath: bufferPath,
+                initialEnabled: true);
+
+            service.AddBreadcrumb("io", @"Opened C:\Users\alice\Videos\clip.mp4 and /home/alice/secret.mov");
+            service.ReportCrash(
+                "IOException",
+                @"Could not read C:\Users\alice\Videos\draft.mp4 or file:///Users/alice/private.txt",
+                @"at Foo.Open() in /Users/alice/src/App.cs:line 42 and \\fileserver\share\secret.mp4 and ~/private/key.pem");
+
+            Assert.True(File.Exists(bufferPath));
+            var json = File.ReadAllText(bufferPath);
+            Assert.DoesNotContain("alice", json, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain(@"C:\Users", json, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("fileserver", json, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("private/key.pem", json, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("[redacted-path]", json, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Failed_enable_transition_rolls_back_native_and_managed_consent_to_off()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "aun-tel-enable-fail-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var bufferPath = Path.Combine(dir, "telemetry-buffer.json");
+        try
+        {
+            // Place a non-empty directory at bufferPath so native SetConsent(Analytics) fails on load/persist.
+            Directory.CreateDirectory(bufferPath);
+            File.WriteAllText(Path.Combine(bufferPath, "keep.txt"), "x");
+
+            using var service = new CoreTelemetryService(
+                platform: "linux",
+                appVersion: "1.0.0",
+                locale: "en",
+                videosApiBaseUrl: null,
+                userAgent: "AlUmmahNowLinux/1.0.0",
+                bufferPath: bufferPath,
+                initialEnabled: false);
+
+            Assert.False(service.SetConsent(TelemetryConsent.Full));
+            Assert.Equal(TelemetryConsent.Off, service.Consent);
+            Assert.Equal(AlUmmahNow.Core.TelemetryConsentState.Denied, service.NativeConsentForTesting);
+            Assert.Equal(0, service.PendingCount);
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
     }
 }

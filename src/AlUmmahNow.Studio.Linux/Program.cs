@@ -62,7 +62,8 @@ var telemetry = CoreTelemetryService.CreateOrNull(
     userAgent: userAgent,
     bufferPath: Path.Combine(stateDir, "telemetry-buffer.json"),
     initialEnabled: settings.TelemetryEnabled,
-    demo: demo);
+    demo: demo,
+    isExternallyEnabled: () => settingsStore.Load().TelemetryEnabled);
 AppDomain.CurrentDomain.UnhandledException += (_, e) =>
 {
     if (e.ExceptionObject is Exception ex) telemetry.ReportCrash(ex.GetType().Name, ex.Message, ex.StackTrace);

@@ -121,7 +121,8 @@ public sealed partial class App : Application
             userAgent: "AlUmmahNowWindows/" + version,
             bufferPath: Path.Combine(dataRoot, "telemetry-buffer.json"),
             initialEnabled: settings.TelemetryEnabled,
-            demo: isDemo);
+            demo: isDemo,
+            isExternallyEnabled: () => store.Load().TelemetryEnabled);
         var updateStore = new UpdateStore(Path.Combine(dataRoot, "updates.json"));
         var updates = updateScene?.Service ?? WindowsInstall.Service("viewer", environment.VideosApi, version, "AlUmmahNowWindows/" + version,
             dataRoot, updateStore, isDemo, IsBusy, WindowsEnd.Close);
