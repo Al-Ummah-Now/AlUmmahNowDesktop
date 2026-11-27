@@ -854,7 +854,7 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("'Studio 2' Acquisition.qzx'"));
             Assert.Equal("[redacted-path]",
                 CoreTelemetryService.SanitizeLocalPaths("'Studio 'Private Acquisition.qzx'"));
-            Assert.Equal("status \"ready; detail [redacted-path]",
+            Assert.Equal("status \"ready; detail \"[redacted-path]\"",
                 CoreTelemetryService.SanitizeLocalPaths("status \"ready; detail \"Private Project.qzx\""));
             Assert.Equal("[redacted-path]",
                 CoreTelemetryService.SanitizeLocalPaths("private]folder\\secret"));
@@ -1306,6 +1306,25 @@ public class CoreTelemetryServiceTests
             Assert.Equal("[\"see \\\"example https://example.com/api?[redacted]\"]",
                 CoreTelemetryService.SanitizeLocalPaths(
                     "[\"see \\\"example https://example.com/api?token=first\\\",opaqueSecret123\"]"));
+            Assert.Equal("[\"https://example.com/api?[redacted]\"]",
+                CoreTelemetryService.SanitizeLocalPaths(
+                    "[\"https://example.com/api?token=first\\\">opaqueSecret123\"]"));
+            Assert.Equal("[\"https://example.com/api?[redacted]\",\"public\"]",
+                CoreTelemetryService.SanitizeLocalPaths(
+                    "[\"https://example.com/api?token=first<opaqueSecret123\",\"public\"]"));
+            Assert.Equal("[\"https://example.com/api(x)?[redacted]\",\"public\"]",
+                CoreTelemetryService.SanitizeLocalPaths(
+                    "[\"https://example.com/api(x)?token=first<opaqueSecret123\",\"public\"]"));
+            Assert.Equal("[\"see <https://example.com/api?[redacted]> public\"]",
+                CoreTelemetryService.SanitizeLocalPaths(
+                    "[\"see <https://example.com/api?token=secret> public\"]"));
+            Assert.Equal("[\"[redacted-path]\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"Acquisition.mov\"]"));
+            Assert.Equal("[\"[redacted-path]\",\"public\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"report.pdf\",\"public\"]"));
+            Assert.Equal("[\"https://example.com/api?[redacted]\",\"[redacted-path]\"]",
+                CoreTelemetryService.SanitizeLocalPaths(
+                    "[\"https://example.com/api?token=opaqueSecret123\",\"Quarterly Report.pdf\"]"));
             var repeatedRejectedSchemes = string.Concat(Enumerable.Repeat("https:// ", 2000));
             Assert.Equal("http[redacted-path] ", CoreTelemetryService.SanitizeLocalPaths(repeatedRejectedSchemes));
             var repeatedEqualsQuotedUrls = string.Join("=", Enumerable.Repeat("https://a.test/x{a:\"https://b.test/x\"}", 500));

@@ -270,6 +270,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         StringBuilder? sb = null;
         var copied = 0;
         var searchFrom = 0;
+        var quoteCursor = 0;
         var quoteState = 0;
         var failedContMax = 0;
         var unclosedDoubleQuoteEnd = 0;
@@ -288,14 +289,19 @@ public sealed class CoreTelemetryService : ITelemetryService
                 searchFrom = sep + 3;
                 continue;
             }
-            if (!TryScanUrlAfterScheme(text, sep, out var baseEnd, out var totalEnd, out var hasQf))
+            if (start > quoteCursor)
+            {
+                quoteState = AdvanceQuoteState(text, quoteCursor, start, quoteState);
+                quoteCursor = start;
+            }
+            var inSingleQuote = (quoteState & 1) != 0;
+            var inDoubleQuote = (quoteState & 2) != 0;
+            var allowAngleBrackets = inDoubleQuote && (start == 0 || text[start - 1] != '<');
+            if (!TryScanUrlAfterScheme(text, sep, allowAngleBrackets, out var baseEnd, out var totalEnd, out var hasQf))
             {
                 searchFrom = sep + 3;
                 continue;
             }
-            quoteState = AdvanceQuoteState(text, copied, start, quoteState);
-            var inSingleQuote = (quoteState & 1) != 0;
-            var inDoubleQuote = (quoteState & 2) != 0;
             string url;
             string tail;
             if (hasQf)
@@ -341,6 +347,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             quoteState = AdvanceQuoteState(finalTail, 0, finalTail.Length, quoteState);
             tracker.OnVaultedUrl(totalEnd);
             copied = totalEnd;
+            quoteCursor = totalEnd;
             searchFrom = totalEnd;
         }
         if (sb == null) return text;
@@ -418,7 +425,8 @@ public sealed class CoreTelemetryService : ITelemetryService
         if (p > totalEnd && p < text.Length && text[p] is '?' or '#')
         {
             var qfStart = p;
-            p = ScanQueryOrFragment(text, qfStart);
+            var allowAngleBrackets = (quoteState & 2) != 0 && (urlStart == 0 || text[urlStart - 1] != '<');
+            p = ScanQueryOrFragment(text, qfStart, allowAngleBrackets);
             var qf = TrimQueryOrFragmentDelimiters(
                 text.Substring(qfStart, p - qfStart), text, urlStart, out var qfTail, inSingleQuote);
             var qfToken = qf[0] + "[redacted]";
@@ -767,7 +775,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     }
 
     private static bool TryScanUrlAfterScheme(
-        string text, int sep, out int baseEnd, out int totalEnd, out bool hasQf)
+        string text, int sep, bool allowAngleBrackets, out int baseEnd, out int totalEnd, out bool hasQf)
     {
         baseEnd = 0;
         totalEnd = 0;
@@ -791,19 +799,19 @@ public sealed class CoreTelemetryService : ITelemetryService
         if (!truncatedPath && p < text.Length && text[p] is '?' or '#')
         {
             hasQf = true;
-            p = ScanQueryOrFragment(text, p);
+            p = ScanQueryOrFragment(text, p, allowAngleBrackets);
         }
         totalEnd = p;
         return totalEnd == text.Length || IsUrlEndBoundary(text, totalEnd);
     }
 
-    private static int ScanQueryOrFragment(string text, int start)
+    private static int ScanQueryOrFragment(string text, int start, bool allowAngleBrackets = false)
     {
         var p = start + 1;
         while (p < text.Length)
         {
             var ch = text[p];
-            if (char.IsWhiteSpace(ch) || ch is '<' or '>' or '\r' or '\n') break;
+            if (char.IsWhiteSpace(ch) || ch is '\r' or '\n' || (!allowAngleBrackets && ch is '<' or '>')) break;
             if (ch == '"')
             {
                 var bs = 0;
@@ -957,7 +965,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                 EndsWithFilenameExt(text, i + 1, j))
             {
                 sb ??= new StringBuilder(text.Length);
-                sb.Append(text, copied, i - copied).Append("[redacted-path]");
+                sb.Append(text, copied, i - copied).Append("\"[redacted-path]\"");
                 copied = j + 1;
                 i = j + 1;
             }
