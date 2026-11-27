@@ -121,27 +121,11 @@ namespace AlUmmahNow.App.Services
         public bool TrySaveTelemetryEnabled(bool enabled, out string? writtenToken)
         {
             writtenToken = null;
-            if (!enabled)
+            using var crossProcessLock = TryAcquireConsentLock(createDirectory: enabled, out var directoryMissing);
+            if (!enabled && directoryMissing)
             {
-                var dir = Path.GetDirectoryName(_telemetryConsentPath);
-                if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
-                {
-                    try
-                    {
-                        File.Delete(_telemetryConsentPath);
-                        return true;
-                    }
-                    catch (DirectoryNotFoundException)
-                    {
-                        return true;
-                    }
-                    catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
-                    {
-                        return false;
-                    }
-                }
+                return true;
             }
-            using var crossProcessLock = TryAcquireConsentLock(createDirectory: enabled);
             if (crossProcessLock == null)
             {
                 return false;
@@ -176,7 +160,8 @@ namespace AlUmmahNow.App.Services
         public bool RollbackTelemetryEnabled(string? expectedToken)
         {
             if (string.IsNullOrEmpty(expectedToken)) return false;
-            using var crossProcessLock = TryAcquireConsentLock(createDirectory: false);
+            using var crossProcessLock = TryAcquireConsentLock(createDirectory: false, out var directoryMissing);
+            if (directoryMissing) return true;
             if (crossProcessLock == null) return false;
             var current = LoadTelemetryConsentToken();
             if (!string.Equals(current, expectedToken, StringComparison.Ordinal))
@@ -213,8 +198,9 @@ namespace AlUmmahNow.App.Services
             }
         }
 
-        private IDisposable? TryAcquireConsentLock(bool createDirectory)
+        private IDisposable? TryAcquireConsentLock(bool createDirectory, out bool directoryMissing)
         {
+            directoryMissing = false;
             try
             {
                 var directory = Path.GetDirectoryName(_telemetryConsentPath);
@@ -232,11 +218,21 @@ namespace AlUmmahNow.App.Services
                     {
                         return new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
                     }
+                    catch (DirectoryNotFoundException) when (!createDirectory)
+                    {
+                        directoryMissing = true;
+                        return null;
+                    }
                     catch (IOException) when (DateTime.UtcNow < deadline)
                     {
                         Thread.Sleep(10);
                     }
                 }
+            }
+            catch (DirectoryNotFoundException) when (!createDirectory)
+            {
+                directoryMissing = true;
+                return null;
             }
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
             {

@@ -15,7 +15,7 @@ namespace AlUmmahNow.CoreBridge.Native;
 /// </summary>
 public sealed class CoreTelemetryService : ITelemetryService
 {
-    private static readonly Regex UrlVaultRegex = new(@"(?<![A-Za-z0-9+.-/\\])([A-Za-z][A-Za-z0-9+.-]+://(?:\[([^\]\s""'<>\\{}\r\n]+)\]|(?:[A-Za-z0-9._~!$&'*+;=-]|%[0-9A-Fa-f]{2})+)(?::\d+)?(?:/(?:(?!(?:file://|[A-Za-z]:[\\/]))(?:[^\s""<>\\{},()\[\]?#\r\n]|\([^\s""<>\\{},()\[\]/:\\?#]+\)|\[[^\s""<>\\{},()\[\]/:\\?#]+\]))*)?)([?#][^\s""<>\\{}\r\n]*)?(?=$|[\s""'<>\\{},;()\[\]]|file://|[A-Za-z]:[\\/])", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex UrlVaultRegex = new(@"(?<![A-Za-z0-9+.-/\\])([A-Za-z][A-Za-z0-9+.-]+://(?:\[([^\]\s""'<>\\{}\r\n]+)\]|(?:[A-Za-z0-9._~!$&'*+;=-]|%[0-9A-Fa-f]{2})+)(?::\d+)?(?:/(?:(?!(?:file://|[A-Za-z]:[\\/]))(?:[^\s""<>\\{},()\[\]?#\r\n]|\([^\s""<>\\{},()\[\]/:\\?#]+\)|\[[^\s""<>\\{},()\[\]/:\\?#]+\]))*)?)([?#][^\s""<>\r\n]*)?(?=$|[\s""'<>\\{},;()\[\]]|file://|[A-Za-z]:[\\/])", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex FileUriRegex = new(@"(?<![A-Za-z0-9+.-])file://(?:(?!\s+\u001E)[^\r\n\u001E])+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex ParenPathRegex = new(@"(\()(?:/|~/|[A-Za-z]:[\\/]|\\\\)[^()\r\n\u001E]+(\))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex ParenRelativeSlashPathRegex = new(@"(\()(?!HTTP/\d)(?!TLS/\d)(?!SSL/\d)[^\s/\\""'<>()\[\]{}:,;\u001E\u001F]+/[^()\r\n\u001E]+(\))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -30,7 +30,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     private static readonly Regex KeywordUnquotedFilenameRegex = new(@"(\b(?:open|opening|read|reading|write|writing|delete|deleting|remove|removing|rename|stat|create|creating|load|loading|save|saving|access|accessing|unlink|file|path|directory|folder|document|filename|filepath)\b(?:\s*[:=]\s*|\s+))(?!\u001E)[^\r\n\u001E\u001F]*\.(?!(?:kt|java|swift|cs|cpp|cc|c|h|hpp|rs|py|js|ts|go|rb|m|mm):\d+)[A-Za-z0-9]{1,16}\b(?!\()", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex KeywordAssignedPathRegex = new(@"(\b(?:file|path|filename|filepath)\s*[:=]\s*)(?!\u001E)[^\r\n\u001E\u001F]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex BareFilenameRegex = new(@"(^|[\r\n:=;\u001F])([ \t]*)[^\r\n:=;\u001E\u001F]*\.(?!ts:\d+)(?:mov|mp4|m4v|mkv|webm|avi|ts|m3u8|mpd|mp3|m4a|wav|aac|flac|ogg|opus|jpg|jpeg|png|gif|webp|heic|svg|pdf|txt|md|rtf|doc|docx|xls|xlsx|ppt|pptx|csv|json|xml|yaml|yml|toml|ini|cfg|conf|log|srt|vtt|ass|ssa|zip|tar|gz|tgz|bz2|xz|7z|rar|dmg|pkg|msi|exe|apk|aab|ipa|pem|key|crt|cer|p12|pfx|jks|keystore|db|sqlite|sqlite3|bin|dat|tmp|bak|proj|aun)\b(?!\()", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex EmailRegex = new(@"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", RegexOptions.Compiled);
+    private static readonly Regex EmailRegex = new(@"(?:[A-Za-z0-9._+-]|%(?!40)[0-9A-Fa-f]{2})+(?:@|%40)[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex BearerTokenRegex = new(@"\bBearer\s+\S+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private readonly TelemetryAppInfo _app;
@@ -216,7 +216,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         var scrubbed = UrlVaultRegex.Replace(text, match =>
         {
             var raw = match.Value;
-            if (raw.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
+            if (raw.StartsWith("file://", StringComparison.OrdinalIgnoreCase) || IsInsideFileUriToken(text, match.Index))
             {
                 return raw;
             }
@@ -274,49 +274,72 @@ public sealed class CoreTelemetryService : ITelemetryService
         return scrubbed;
     }
 
+    private static bool IsInsideFileUriToken(string text, int matchStart)
+    {
+        var tokenStart = matchStart;
+        while (tokenStart > 0 && !char.IsWhiteSpace(text[tokenStart - 1]))
+        {
+            tokenStart--;
+        }
+        return tokenStart < matchStart &&
+            text.AsSpan(tokenStart, matchStart - tokenStart).IndexOf("file://", StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
     private static string TrimQueryOrFragmentDelimiters(string qf, string fullText, int matchStart, out string tail)
     {
-        tail = string.Empty;
-        var s = qf;
-        while (s.Length > 1)
+        var openParens = 0;
+        var closeParens = 0;
+        var openBrackets = 0;
+        var closeBrackets = 0;
+        var openBraces = 0;
+        var closeBraces = 0;
+        foreach (var ch in qf)
         {
-            var last = s[^1];
+            switch (ch)
+            {
+                case '(': openParens++; break;
+                case ')': closeParens++; break;
+                case '[': openBrackets++; break;
+                case ']': closeBrackets++; break;
+                case '{': openBraces++; break;
+                case '}': closeBraces++; break;
+            }
+        }
+        var end = qf.Length;
+        var precededBySingleQuote = matchStart > 0 && fullText[matchStart - 1] == '\'';
+        while (end > 1)
+        {
+            var last = qf[end - 1];
             if (last is ';' or ',')
             {
-                s = s[..^1];
-                tail = last + tail;
+                end--;
             }
-            else if (last == '\'' && matchStart > 0 && fullText[matchStart - 1] == '\'')
+            else if (last == '\'' && precededBySingleQuote)
             {
-                s = s[..^1];
-                tail = "'" + tail;
+                end--;
             }
-            else if (last == ')' && CountChar(s, ')') > CountChar(s, '('))
+            else if (last == ')' && closeParens > openParens)
             {
-                s = s[..^1];
-                tail = ")" + tail;
+                closeParens--;
+                end--;
             }
-            else if (last == ']' && CountChar(s, ']') > CountChar(s, '['))
+            else if (last == ']' && closeBrackets > openBrackets)
             {
-                s = s[..^1];
-                tail = "]" + tail;
+                closeBrackets--;
+                end--;
+            }
+            else if (last == '}' && closeBraces > openBraces)
+            {
+                closeBraces--;
+                end--;
             }
             else
             {
                 break;
             }
         }
-        return s;
-    }
-
-    private static int CountChar(string s, char ch)
-    {
-        var count = 0;
-        foreach (var c in s)
-        {
-            if (c == ch) count++;
-        }
-        return count;
+        tail = end < qf.Length ? qf[end..] : string.Empty;
+        return end < qf.Length ? qf[..end] : qf;
     }
 
     public TelemetryConsent Consent
@@ -917,7 +940,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                     // revoked flush's own generation buffer and sibling temps so a concurrently
                     // enabled newer generation in another process can never be touched.
                     UpdatePurgeFailedLocked(
-                        !TryDeleteSingleBufferAndTemps(flushBufferPath),
+                        _lastPurgeFailed || !TryDeleteSingleBufferAndTemps(flushBufferPath),
                         ref purgeNotify,
                         ref purgeNotifyValue);
                 }

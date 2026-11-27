@@ -722,6 +722,12 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("https://example.com/api#first,PrivateProject"));
             Assert.Equal("https://example.com/users/[redacted-email]",
                 CoreTelemetryService.SanitizeLocalPaths("https://example.com/users/alice@example.com"));
+            Assert.Equal("https://example.com/users/[redacted-email]",
+                CoreTelemetryService.SanitizeLocalPaths("https://example.com/users/alice%40example.com"));
+            Assert.Equal("https://example.com/?[redacted]",
+                CoreTelemetryService.SanitizeLocalPaths("https://example.com/?token=abc{Secret}xyz"));
+            Assert.Equal("[redacted-path]",
+                CoreTelemetryService.SanitizeLocalPaths("file:///private/(https://Secret/Acquisition.mov)"));
             Assert.Equal("([redacted-path] https://example.com/api)",
                 CoreTelemetryService.SanitizeLocalPaths("(relative/Secret.mov and https://example.com/api)"));
             Assert.Equal("Failed for [redacted-email] with Bearer [redacted] and Bearer [redacted]",
