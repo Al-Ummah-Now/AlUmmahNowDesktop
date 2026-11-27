@@ -474,7 +474,9 @@ public sealed class CoreTelemetryService : ITelemetryService
             if (text[i] != '"') { i++; continue; }
             var j = i + 1;
             while (j < text.Length && text[j] is not ('"' or '\r' or '\n' or '/' or '\\' or '\u001E' or '\u001F')) j++;
-            if (j < text.Length && text[j] == '"' && EndsWithFilenameExt(text, i + 1, j))
+            if (j < text.Length && text[j] == '"' &&
+                !(j + 1 < text.Length && EmailAtLength(text, j + 1) > 0) &&
+                EndsWithFilenameExt(text, i + 1, j))
             {
                 sb ??= new StringBuilder(text.Length);
                 sb.Append(text, copied, i - copied).Append("[redacted-path]");
@@ -612,11 +614,43 @@ public sealed class CoreTelemetryService : ITelemetryService
         StringBuilder? sb = null;
         var copied = 0;
         var i = 0;
+        var quoteCacheUntil = -1;
+        var cachedNextQuote = -1;
         while (i < text.Length)
         {
-            var atLen = text[i] == '@'
-                ? 1
-                : (text[i] == '%' && i + 2 < text.Length && text[i + 1] == '4' && text[i + 2] == '0' ? 3 : 0);
+            if (text[i] == '"' && !IsPrecededByOddBackslashes(text, i, copied))
+            {
+                int closeQuote;
+                if (i < quoteCacheUntil)
+                {
+                    closeQuote = cachedNextQuote;
+                }
+                else
+                {
+                    closeQuote = FindNextEmailClosingQuote(text, i + 1, out var stopPos);
+                    cachedNextQuote = closeQuote;
+                    quoteCacheUntil = closeQuote >= 0 ? closeQuote : stopPos;
+                }
+                if (closeQuote > i)
+                {
+                    var qAtPos = closeQuote + 1;
+                    var qAtLen = qAtPos < text.Length ? EmailAtLength(text, qAtPos) : 0;
+                    var qDomEnd = qAtLen > 0 ? FindEmailDomainEnd(text, qAtPos + qAtLen) : -1;
+                    if (qDomEnd > 0)
+                    {
+                        sb ??= new StringBuilder(text.Length);
+                        sb.Append(text, copied, i - copied);
+                        sb.Append("[redacted-email]");
+                        copied = qDomEnd;
+                        i = qDomEnd;
+                        quoteCacheUntil = -1;
+                        continue;
+                    }
+                }
+                i++;
+                continue;
+            }
+            var atLen = EmailAtLength(text, i);
             if (atLen == 0)
             {
                 i++;
@@ -631,6 +665,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                 sb.Append("[redacted-email]");
                 copied = domEnd;
                 i = domEnd;
+                quoteCacheUntil = -1;
             }
             else
             {
@@ -640,6 +675,43 @@ public sealed class CoreTelemetryService : ITelemetryService
         if (sb == null) return text;
         sb.Append(text, copied, text.Length - copied);
         return sb.ToString();
+    }
+
+    private static int EmailAtLength(string text, int pos) =>
+        text[pos] == '@'
+            ? 1
+            : (text[pos] == '%' && pos + 2 < text.Length && text[pos + 1] == '4' && text[pos + 2] == '0' ? 3 : 0);
+
+    private static int FindNextEmailClosingQuote(string text, int start, out int stopPos)
+    {
+        var j = start;
+        var escaped = false;
+        while (j < text.Length)
+        {
+            var ch = text[j];
+            if (ch is '\r' or '\n')
+            {
+                // RFC 5322 folding whitespace (FWS): CRLF/LF/CR immediately followed by SP or HTAB.
+                var afterNewline = ch == '\r' && j + 1 < text.Length && text[j + 1] == '\n' ? j + 2 : j + 1;
+                if (afterNewline < text.Length && text[afterNewline] is ' ' or '\t')
+                {
+                    escaped = false;
+                    j = afterNewline + 1;
+                    continue;
+                }
+                stopPos = j;
+                return -1;
+            }
+            if (ch == '"' && !escaped)
+            {
+                stopPos = j;
+                return j;
+            }
+            escaped = ch == '\\' && !escaped;
+            j++;
+        }
+        stopPos = text.Length;
+        return -1;
     }
 
     private static string ReplaceUnquotedParenPaths(string text, Regex regex)
@@ -701,7 +773,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     {
         var ch = text[pos];
         if (IsAsciiAlphaNum(ch) ||
-            ch is '.' or '_' or '+' or '-' or '!' or '#' or '$' or '&' or '\'' or '*' or '^' or '`' or '{' or '|' or '}' or '~' ||
+            ch is '.' or '_' or '+' or '-' or '!' or '#' or '$' or '&' or '\'' or '*' or '=' or '?' or '^' or '`' or '{' or '|' or '}' or '~' ||
             IsNonAsciiEmailLocalChar(ch))
         {
             return true;
@@ -836,10 +908,15 @@ public sealed class CoreTelemetryService : ITelemetryService
                 break;
             }
             k++;
-            var validTld = lastDot > domStart &&
+            var atBoundary = k == text.Length ||
+                !(char.IsLetterOrDigit(text[k]) || text[k] is '_' or '-' || IsUnicodeCombiningMark(text[k]));
+            var validMultiLabel = lastDot > domStart &&
                 (lettersSinceDot >= 2 || IsPunycodeTld(text, lastDot + 1, k, tldAllAscii));
-            if (validTld &&
-                (k == text.Length || !(char.IsLetterOrDigit(text[k]) || text[k] == '_' || IsUnicodeCombiningMark(text[k]))))
+            var validSingleLabel = lastDot < 0 && k - domStart >= 2 &&
+                (char.IsLetter(text[domStart]) || char.IsSurrogate(text[domStart])) &&
+                text[k - 1] != '-' &&
+                !(k + 1 < text.Length && text[k] == '.' && (char.IsLetter(text[k + 1]) || char.IsSurrogate(text[k + 1])));
+            if (atBoundary && (validMultiLabel || validSingleLabel))
             {
                 bestEnd = k;
             }
