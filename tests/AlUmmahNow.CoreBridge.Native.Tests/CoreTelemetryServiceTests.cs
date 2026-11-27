@@ -1622,6 +1622,23 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("{\\\"Authorization\\\":123456789,\\\"next\\\":1}"));
             Assert.Equal("{\\\"Authorization\\\":\\\"[redacted]\\\",\\\"next\\\":1}",
                 CoreTelemetryService.SanitizeLocalPaths("{\\\"Authorization\\\":{\\\"token\\\":\\\"secret\\\"},\\\"next\\\":1}"));
+            Assert.Equal("[[\\\"Authorization\\\",[\\\"[redacted]\\\"]]]",
+                CoreTelemetryService.SanitizeLocalPaths("[[\\\"Authorization\\\",[\\\"opaqueSecret123\\\"]]]"));
+            Assert.Equal("[[\\\"Authorization\\\",[\\\"[redacted]\\\"]]]",
+                CoreTelemetryService.SanitizeLocalPaths("[[\\\"Authorization\\\",[123456789]]]"));
+            Assert.Equal("[[\\\"Authorization\\\",\\\"[redacted]\\\"]]",
+                CoreTelemetryService.SanitizeLocalPaths("[[\\\"Authorization\\\",{\\\"token\\\":\\\"opaqueSecret123\\\"}]]"));
+            Assert.Equal("{\\\"Authorization\\\":[\n  \\\"[redacted]\\\"\n],\\\"next\\\":1}",
+                CoreTelemetryService.SanitizeLocalPaths("{\\\"Authorization\\\":[\n  123456789\n],\\\"next\\\":1}"));
+            Assert.Equal("{\\\"Authorization\\\":\n\\\"[redacted]\\\"}",
+                CoreTelemetryService.SanitizeLocalPaths("{\\\"Authorization\\\":\n\\\"opaqueSecret123\\\"}"));
+            var paddedCookie = "{\"Cookie" + new string(' ', 60) + "\":\"opaqueSecret123\"}";
+            Assert.Equal("{\"Cookie" + new string(' ', 60) + "\":\"[redacted]\"}",
+                CoreTelemetryService.SanitizeLocalPaths(paddedCookie));
+            Assert.Equal("{\"m\":\"before {\\\"Cookie\\\":\\\"[redacted]\\\"} after\",\"next\":1}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"m\":\"before {\\\"Cookie\\\":\\\"opaqueSecret123\\\"} after\",\"next\":1}"));
+            var malformedEscapedArray = "{\\\"Authorization\\\":[" + string.Concat(Enumerable.Repeat("{,", 2000)) + "]";
+            Assert.StartsWith("{\\\"Authorization\\\":[\\\"[redacted]\\\"", CoreTelemetryService.SanitizeLocalPaths(malformedEscapedArray));
             Assert.Equal("Bearer [redacted]",
                 CoreTelemetryService.SanitizeLocalPaths("Bearer " + new string('A', 10000)));
             Assert.Equal("{\"m\":\"literal=\\\"[redacted-path]\\\"tail\",\"next\":1}",

@@ -2803,6 +2803,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         public Dictionary<int, int>? ArrayCommaOpen;
         /// <summary>0 = valid top-level JSON container; -1 = malformed/unclosed; >0 = valid container end with trailing text on closing line.</summary>
         public Dictionary<int, int>? ContainerAuthState;
+        public Dictionary<int, int>? EscapedContainerEnd;
         public int FailedContainerBack = -1;
     }
 
@@ -2856,7 +2857,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                 if (text[i] == '\\' && i + 1 < text.Length && text[i + 1] == '"' &&
                     !IsPrecededByOddBackslashes(text, i, writer.Copied))
                 {
-                    var escEnd = TryRedactEscapedQuotedAuthHeader(text, i, writer);
+                    var escEnd = TryRedactEscapedQuotedAuthHeader(text, i, cache, writer);
                     if (escEnd > i)
                     {
                         i = escEnd;
@@ -2924,18 +2925,30 @@ public sealed class CoreTelemetryService : ITelemetryService
         return afterVal < text.Length && text[afterVal] == ']';
     }
 
-    private static int TryRedactEscapedQuotedAuthHeader(string text, int pos, AuthHeaderWriter writer)
+    private static bool TryAppendTrimmedKeyChar(char ch, Span<char> core, ref int coreLen, ref bool sawTrailingPad)
     {
-        var limit = Math.Min(text.Length, pos + 256);
-        Span<char> decoded = stackalloc char[64];
-        var len = 0;
+        if (ch is ' ' or '\t')
+        {
+            if (coreLen > 0) sawTrailingPad = true;
+            return true;
+        }
+        if (sawTrailingPad || coreLen >= 19) return false;
+        core[coreLen++] = ch;
+        return true;
+    }
+
+    private static int TryRedactEscapedQuotedAuthHeader(string text, int pos, AuthJsonScanCache cache, AuthHeaderWriter writer)
+    {
+        Span<char> core = stackalloc char[20];
+        var coreLen = 0;
+        var sawTrailingPad = false;
         var j = pos + 2;
         var keyEnd = -1;
-        while (j < limit)
+        while (j < text.Length)
         {
             var c = text[j];
             if (c < 0x20 || c == '"') return -1;
-            if (c == '\\' && j + 1 < limit)
+            if (c == '\\' && j + 1 < text.Length)
             {
                 var next = text[j + 1];
                 if (next == '"')
@@ -2943,25 +2956,23 @@ public sealed class CoreTelemetryService : ITelemetryService
                     keyEnd = j + 2;
                     break;
                 }
-                if (next == 'u' && j + 5 < limit && TryParseHex4(text, j + 2, out var codeUnit))
+                if (next == 'u' && j + 5 < text.Length && TryParseHex4(text, j + 2, out var codeUnit))
                 {
-                    if (len >= 64) return -1;
-                    decoded[len++] = (char)codeUnit;
+                    if (!TryAppendTrimmedKeyChar((char)codeUnit, core, ref coreLen, ref sawTrailingPad)) return -1;
                     j += 6;
                     continue;
                 }
-                if (len >= 64) return -1;
-                decoded[len++] = DecodeSimpleJsonEscape(next);
+                if (!TryAppendTrimmedKeyChar(DecodeSimpleJsonEscape(next), core, ref coreLen, ref sawTrailingPad)) return -1;
                 j += 2;
                 continue;
             }
-            if (len >= 64) return -1;
-            decoded[len++] = c;
+            if (!TryAppendTrimmedKeyChar(c, core, ref coreLen, ref sawTrailingPad)) return -1;
             j++;
         }
-        if (keyEnd < 0 || MatchCanonicalAuthHeaderName(decoded[..len]) == null) return -1;
-        var sep = SkipAuthWhitespace(text, keyEnd, allowNewlines: false);
+        if (keyEnd < 0 || MatchCanonicalAuthHeaderName(core[..coreLen]) == null) return -1;
         var prevDelim = SkipJsonWhitespaceBackward(text, pos - 1);
+        var isEscapedJsonCtx = prevDelim >= 0 && text[prevDelim] is '{' or ',' or '[';
+        var sep = SkipAuthWhitespace(text, keyEnd, allowNewlines: isEscapedJsonCtx);
         var isTuple = false;
         int sepLen;
         if (TryMatchAuthSeparator(text, sep, out sepLen, out _))
@@ -2977,7 +2988,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         {
             return -1;
         }
-        var valStart = SkipAuthWhitespace(text, sep + sepLen, allowNewlines: false);
+        var valStart = SkipAuthWhitespace(text, sep + sepLen, allowNewlines: isEscapedJsonCtx);
         if (valStart >= text.Length || text[valStart] is '\r' or '\n') return -1;
         if (valStart + 1 < text.Length && text[valStart] == '\\' && text[valStart + 1] == '"')
         {
@@ -2987,7 +2998,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                 : closeVal;
             if (isTuple)
             {
-                var afterVal = SkipAuthWhitespace(text, afterClose, allowNewlines: false);
+                var afterVal = SkipAuthWhitespace(text, afterClose, allowNewlines: true);
                 if (afterVal >= text.Length || text[afterVal] != ']') return -1;
             }
             var redacted = RedactAuthValueBody(text, valStart + 2, closeVal);
@@ -2997,15 +3008,26 @@ public sealed class CoreTelemetryService : ITelemetryService
             }
             return afterClose;
         }
-        if (!isTuple && text[valStart] == '[')
+        if (text[valStart] == '[')
         {
-            return RedactEscapedAuthArrayValue(text, valStart + 1, writer);
+            if (isTuple)
+            {
+                var arrEnd = ScanEscapedJsonContainerEnd(text, valStart, cache);
+                var afterArr = arrEnd > valStart ? SkipAuthWhitespace(text, arrEnd, allowNewlines: true) : -1;
+                if (afterArr < 0 || afterArr >= text.Length || text[afterArr] != ']') return -1;
+            }
+            return RedactEscapedAuthArrayValue(text, valStart + 1, cache, writer);
         }
-        if (!isTuple && text[valStart] == '{')
+        if (text[valStart] == '{')
         {
-            var objEnd = ScanEscapedJsonObjectEnd(text, valStart);
+            var objEnd = ScanEscapedJsonContainerEnd(text, valStart, cache);
             if (objEnd > valStart)
             {
+                if (isTuple)
+                {
+                    var afterObj = SkipAuthWhitespace(text, objEnd, allowNewlines: true);
+                    if (afterObj >= text.Length || text[afterObj] != ']') return -1;
+                }
                 writer.AppendRedacted(valStart, objEnd, "\\\"[redacted]\\\"");
                 return objEnd;
             }
@@ -3046,7 +3068,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         var isBool = span.Equals("true".AsSpan(), StringComparison.Ordinal) ||
             span.Equals("false".AsSpan(), StringComparison.Ordinal);
         if (!isNull && !isBool && !IsJsonNumberSpan(span)) return false;
-        var after = SkipAuthWhitespace(text, tokEnd, allowNewlines: false);
+        var after = SkipAuthWhitespace(text, tokEnd, allowNewlines: true);
         if (isTuple)
         {
             if (after >= text.Length || text[after] != ']') return false;
@@ -3060,29 +3082,45 @@ public sealed class CoreTelemetryService : ITelemetryService
         return true;
     }
 
-    private static int ScanEscapedJsonObjectEnd(string text, int start)
+    private static int ScanEscapedJsonContainerEnd(string text, int start, AuthJsonScanCache cache)
     {
+        cache.EscapedContainerEnd ??= new Dictionary<int, int>();
+        if (cache.EscapedContainerEnd.TryGetValue(start, out var cached)) return cached;
+        var stack = new Stack<(int OpenPos, char ExpectedClose)>();
         var p = start;
-        var depth = 0;
         while (p < text.Length)
         {
             var ch = text[p];
-            if (ch is '\r' or '\n' or '"') return -1;
+            if (ch == '"') break;
             if (ch == '\\' && p + 1 < text.Length && text[p + 1] == '"')
             {
                 var closeVal = ScanEscapedQuotedAuthValueEnd(text, p + 2);
-                if (closeVal + 1 >= text.Length || text[closeVal] != '\\' || text[closeVal + 1] != '"') return -1;
+                if (closeVal + 1 >= text.Length || text[closeVal] != '\\' || text[closeVal + 1] != '"') break;
                 p = closeVal + 2;
                 continue;
             }
-            if (ch == '{') depth++;
-            else if (ch == '}')
+            if (ch is '{' or '[')
             {
-                depth--;
-                if (depth == 0) return p + 1;
+                if (cache.EscapedContainerEnd.TryGetValue(p, out var known))
+                {
+                    if (known <= p) break;
+                    p = known;
+                    if (stack.Count == 0) return p;
+                    continue;
+                }
+                stack.Push((p, ch == '{' ? '}' : ']'));
+            }
+            else if (ch is '}' or ']')
+            {
+                if (stack.Count == 0 || stack.Peek().ExpectedClose != ch) break;
+                var top = stack.Pop();
+                cache.EscapedContainerEnd[top.OpenPos] = p + 1;
+                if (stack.Count == 0) return p + 1;
             }
             p++;
         }
+        while (stack.Count > 0) cache.EscapedContainerEnd[stack.Pop().OpenPos] = -1;
+        cache.EscapedContainerEnd[start] = -1;
         return -1;
     }
 
@@ -3108,15 +3146,15 @@ public sealed class CoreTelemetryService : ITelemetryService
         return p;
     }
 
-    private static int RedactEscapedAuthArrayValue(string text, int start, AuthHeaderWriter writer)
+    private static int RedactEscapedAuthArrayValue(string text, int start, AuthJsonScanCache cache, AuthHeaderWriter writer)
     {
         var p = start;
         var depth = 1;
         while (p < text.Length && depth > 0)
         {
             var ch = text[p];
-            if (ch is '\r' or '\n' or '"') return p;
-            if (ch is ' ' or '\t' or ',')
+            if (ch == '"') return p;
+            if (ch is ' ' or '\t' or '\r' or '\n' or ',')
             {
                 p++;
                 continue;
@@ -3145,7 +3183,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             }
             if (ch == '{')
             {
-                var objEnd = ScanEscapedJsonObjectEnd(text, p);
+                var objEnd = ScanEscapedJsonContainerEnd(text, p, cache);
                 if (objEnd > p)
                 {
                     writer.AppendRedacted(p, objEnd, "\\\"[redacted]\\\"");
@@ -3269,19 +3307,19 @@ public sealed class CoreTelemetryService : ITelemetryService
         isTupleCandidate = false;
         failedTopEnd = -1;
         normalizedKey = null;
-        var limit = Math.Min(text.Length, pos + 256);
-        Span<char> decoded = stackalloc char[64];
-        var len = 0;
+        Span<char> core = stackalloc char[20];
+        var coreLen = 0;
+        var sawTrailingPad = false;
         var sawEscape = false;
         var hasInvalidJsonEscape = false;
         var j = pos + 1;
-        while (j < limit)
+        while (j < text.Length)
         {
             var c = text[j];
             if (c < 0x20) return false;
             if (c == quote)
             {
-                var canonical = MatchCanonicalAuthHeaderName(decoded[..len]);
+                var canonical = MatchCanonicalAuthHeaderName(core[..coreLen]);
                 if (canonical == null) return false;
                 keyEnd = j + 1;
                 if (quote == '"')
@@ -3303,31 +3341,32 @@ public sealed class CoreTelemetryService : ITelemetryService
                 normalizedKey = sawEscape ? canonical : null;
                 return true;
             }
-            if (len >= 64) return false;
             if (c == '\\')
             {
                 sawEscape = true;
                 if (j + 5 < text.Length && text[j + 1] == 'u' && TryParseHex4(text, j + 2, out var codeUnit))
                 {
-                    decoded[len++] = (char)codeUnit;
+                    if (!TryAppendTrimmedKeyChar((char)codeUnit, core, ref coreLen, ref sawTrailingPad)) return false;
                     j += 6;
                     continue;
                 }
                 if (j + 1 >= text.Length) return false;
                 var esc = text[j + 1];
+                char decodedChar;
                 if (esc is 't' or 'n' or 'r' or 'b' or 'f' or '"' or '\\' or '/')
                 {
-                    decoded[len++] = DecodeSimpleJsonEscape(esc);
+                    decodedChar = DecodeSimpleJsonEscape(esc);
                 }
                 else
                 {
                     hasInvalidJsonEscape = true;
-                    decoded[len++] = esc;
+                    decodedChar = esc;
                 }
+                if (!TryAppendTrimmedKeyChar(decodedChar, core, ref coreLen, ref sawTrailingPad)) return false;
                 j += 2;
                 continue;
             }
-            decoded[len++] = c;
+            if (!TryAppendTrimmedKeyChar(c, core, ref coreLen, ref sawTrailingPad)) return false;
             j++;
         }
         return false;
@@ -3560,7 +3599,10 @@ public sealed class CoreTelemetryService : ITelemetryService
             }
             var after = containerEnd;
             while (after < text.Length && text[after] is ' ' or '\t') after++;
-            state = after >= text.Length || text[after] is '\r' or '\n' or ';' or ')' ? 0 : containerEnd;
+            var before = curOpen - 1;
+            while (before >= 0 && text[before] is ' ' or '\t') before--;
+            var hasSameLinePrefix = before >= 0 && text[before] is not ('\r' or '\n');
+            state = after >= text.Length || text[after] is '\r' or '\n' or ';' or ')' || hasSameLinePrefix ? 0 : containerEnd;
             break;
         }
         foreach (var pos in visited) cache.ContainerAuthState[pos] = state;
