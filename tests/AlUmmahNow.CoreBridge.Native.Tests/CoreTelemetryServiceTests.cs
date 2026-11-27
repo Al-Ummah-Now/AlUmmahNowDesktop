@@ -1502,6 +1502,22 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("[\"\\u0020alice@example.com ok\"]"));
             Assert.Equal("[\"https://a.test\",\"open [redacted-path]\",\"https://b.test\"]",
                 CoreTelemetryService.SanitizeLocalPaths("[\"https://a.test\",\"open /foo\",\"https://b.test\"]"));
+            Assert.Equal("[\"https://example.com/webhook/[redacted]\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"https://example.com/webhook/first\\u00A0secondSecret\"]"));
+            Assert.Equal("[\"https://example.com/webhook/[redacted]\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"https://example.com/webhook/\\u00A0secondSecret\"]"));
+            Assert.Equal("[\" https://example.com/api?[redacted]\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\" https://example.com/api?token=first secondSecret\"]"));
+            Assert.Equal("[\"fetch https://example.com/api?[redacted]\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"fetch https://example.com/api?token=first secondSecret\"]"));
+            Assert.Equal("[\"fetch https://example.com/api?[redacted]\",\"public\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"fetch https://example.com/api?token=first secondSecret\",\"public\"]"));
+            Assert.Equal("[\"[redacted-email] ok\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"al\\u0069\\u0063e@example.com ok\"]"));
+            Assert.Equal("[\"prefix\\n[redacted-email]\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"prefix\\nal\\u0069\\u0063e@example.com\"]"));
+            Assert.Equal("[\"\\u0020[redacted-email] ok\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"\\u0020al\\u0069\\u0063e@example.com ok\"]"));
             var manyFileUris = string.Join("\n", Enumerable.Repeat("open file:///Users/Alice/Secret.mov", 2000));
             var expectedFileUris = string.Join("\n", Enumerable.Repeat("open [redacted-path]", 2000));
             Assert.Equal(expectedFileUris, CoreTelemetryService.SanitizeLocalPaths(manyFileUris));

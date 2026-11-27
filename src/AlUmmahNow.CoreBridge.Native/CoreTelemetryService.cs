@@ -478,6 +478,18 @@ public sealed class CoreTelemetryService : ITelemetryService
             }
             else
             {
+                if (!hasQf && inDoubleQuote && !(start > 0 && text[start - 1] == '<') &&
+                    totalEnd < text.Length && text[totalEnd] is not ('"' or '\r' or '\n'))
+                {
+                    var secretRedacted = ResolveQuotedSecretUrlRedaction(rawUrl, redactedUrl);
+                    if (secretRedacted != null)
+                    {
+                        redactedUrl = secretRedacted;
+                        totalEnd = ScanToClosingDoubleQuote(text, totalEnd);
+                        tail = string.Empty;
+                        finalTail = string.Empty;
+                    }
+                }
                 var idx = vaultedUrls.Count;
                 vaultedUrls.Add(redactedUrl);
                 sb.Append(prefix).Append(idx).Append('\u001F').Append(tail);
@@ -913,13 +925,34 @@ public sealed class CoreTelemetryService : ITelemetryService
         return !text.AsSpan(start, sep - start).Equals("file", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static string? ResolveQuotedSecretUrlRedaction(string rawUrl, string redactedUrl)
+    {
+        if (redactedUrl.EndsWith("[redacted]", StringComparison.Ordinal)) return redactedUrl;
+        var probe = RedactUrlPathSecrets(rawUrl + "x");
+        return probe.EndsWith("[redacted]", StringComparison.Ordinal) ? probe : null;
+    }
+
+    private static int ScanToClosingDoubleQuote(string text, int start)
+    {
+        var p = start;
+        var escaped = false;
+        while (p < text.Length)
+        {
+            var ch = text[p];
+            if (ch is '\r' or '\n') break;
+            if (ch == '"' && !escaped) break;
+            escaped = ch == '\\' && !escaped;
+            p++;
+        }
+        return p;
+    }
+
     private static int ComputeQueryAngleStopMask(string text, int urlStart, bool inDoubleQuote)
     {
         var wrappedInAngle = urlStart > 0 && text[urlStart - 1] == '<';
         var stopOnLess = !inDoubleQuote && !wrappedInAngle;
         var stopOnGreater = !inDoubleQuote || wrappedInAngle;
-        var allowInlineSpace = inDoubleQuote && urlStart > 0 && text[urlStart - 1] == '"' &&
-            !IsPrecededByOddBackslashes(text, urlStart - 1, 0);
+        var allowInlineSpace = inDoubleQuote && !wrappedInAngle;
         return (stopOnLess ? 1 : 0) | (stopOnGreater ? 2 : 0) | (allowInlineSpace ? 4 : 0);
     }
 
@@ -3441,23 +3474,33 @@ public sealed class CoreTelemetryService : ITelemetryService
             return atPos;
         }
         var localStart = atPos;
-        while (localStart > minPos && IsEmailLocalChar(text, localStart - 1) && !IsSchemeSlash(text, localStart - 1))
+        while (true)
         {
-            localStart--;
-        }
-        if (localStart < atPos && localStart > minPos && IsPrecededByOddBackslashes(text, localStart, minPos))
-        {
-            var esc = text[localStart];
-            if (esc is 'n' or 'r' or 't' or 'b' or 'f' or '/')
+            while (localStart > minPos && IsEmailLocalChar(text, localStart - 1) && !IsSchemeSlash(text, localStart - 1))
             {
-                localStart++;
+                localStart--;
             }
-            else if (esc == 'u' && localStart + 5 <= atPos && TryParseHex4(text, localStart + 1, out var code))
+            if (localStart < atPos && localStart > minPos && IsPrecededByOddBackslashes(text, localStart, minPos))
             {
-                var decoded = (char)code;
-                var isLocal = IsEmailLocalChar(decoded.ToString(), 0);
-                localStart = isLocal ? localStart - 1 : localStart + 5;
+                var esc = text[localStart];
+                if (esc is 'n' or 'r' or 't' or 'b' or 'f' or '/')
+                {
+                    localStart++;
+                    break;
+                }
+                if (esc == 'u' && localStart + 5 <= atPos && TryParseHex4(text, localStart + 1, out var code))
+                {
+                    var decoded = (char)code;
+                    if (IsEmailLocalChar(decoded.ToString(), 0))
+                    {
+                        localStart--;
+                        continue;
+                    }
+                    localStart += 5;
+                    break;
+                }
             }
+            break;
         }
         var trimmedStart = localStart;
         while (trimmedStart < atPos && IsEmailLeadingWrapper(text[trimmedStart]))
