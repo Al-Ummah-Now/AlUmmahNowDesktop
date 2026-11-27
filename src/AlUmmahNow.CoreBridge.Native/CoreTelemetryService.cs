@@ -831,6 +831,12 @@ public sealed class CoreTelemetryService : ITelemetryService
         {
             if (!_escapedBackslash && _openQuote != '\0' && ch == _openQuote && !IsInnerApostrophe(text, _cursor, ch))
             {
+                if (ch == '\'' && _hasPathOnLine)
+                {
+                    // Single-quoted paths may contain unescaped apostrophes; fail closed on this line.
+                    _escapedBackslash = false;
+                    return;
+                }
                 if (_pathQuote == ch || !_hasPathOnLine)
                 {
                     ResetLineState();
@@ -993,13 +999,14 @@ public sealed class CoreTelemetryService : ITelemetryService
         {
             if (IsFileSchemeAt(text, pos))
             {
-                var quote = pos > 0 && text[pos - 1] is '"' or '\'' ? text[pos - 1] : '\0';
+                // Double-quoted file:// URIs terminate at the next unescaped '"'. Unquoted and
+                // single-quoted file:// URIs fail closed to the next vaulted URL or line break so
+                // unescaped apostrophes inside filenames (e.g. "O' Connor") can never leak suffixes.
+                var isDoubleQuoted = pos > 0 && text[pos - 1] == '"';
                 var schemeEnd = pos + 7;
                 var rawEnd = schemeEnd;
                 var stoppedAtVault = false;
                 var escapedBackslash = false;
-                var candidateClose = -1;
-                var hasUnclosedOpenAfterClose = false;
                 while (rawEnd < text.Length)
                 {
                     var ch = text[rawEnd];
@@ -1011,38 +1018,12 @@ public sealed class CoreTelemetryService : ITelemetryService
                         stoppedAtVault = true;
                         break;
                     }
-                    if (quote != '\0' && ch == quote && !escapedBackslash)
+                    if (isDoubleQuoted && ch == '"' && !escapedBackslash)
                     {
-                        if (quote == '"')
-                        {
-                            candidateClose = rawEnd;
-                            break;
-                        }
-                        // Single-quoted file:// URIs may contain unescaped literal apostrophes
-                        // (e.g. "O' Connor" or "Artists' Private 'Collection'"); fail closed to the
-                        // last closing quote before the next file:// URI, vaulted URL, or line break.
-                        var canClose = rawEnd + 1 == text.Length || !char.IsLetterOrDigit(text[rawEnd + 1]);
-                        if (canClose)
-                        {
-                            candidateClose = rawEnd;
-                            hasUnclosedOpenAfterClose = false;
-                        }
-                        else if (rawEnd <= schemeEnd || !char.IsLetterOrDigit(text[rawEnd - 1]))
-                        {
-                            if (candidateClose >= 0 && !hasUnclosedOpenAfterClose && IsFileSchemeAt(text, rawEnd + 1))
-                            {
-                                break;
-                            }
-                            hasUnclosedOpenAfterClose = true;
-                        }
+                        break;
                     }
                     escapedBackslash = ch == '\\' ? !escapedBackslash : false;
                     rawEnd++;
-                }
-                if (candidateClose >= 0 && !hasUnclosedOpenAfterClose)
-                {
-                    rawEnd = candidateClose;
-                    stoppedAtVault = false;
                 }
                 var trimmedEnd = rawEnd;
                 if (stoppedAtVault)
