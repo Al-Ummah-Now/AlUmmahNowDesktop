@@ -312,7 +312,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             sb ??= new StringBuilder(text.Length);
             sb.Append(text, copied, start - copied);
             if (!hasQf && totalEnd >= failedContMax && totalEnd < text.Length &&
-                text[totalEnd] is ',' or '(' or '[' or ')' or ']' &&
+                text[totalEnd] is ',' or '(' or '[' or ')' or ']' or '{' or '}' &&
                 TryExtendUrlContinuation(text, rawUrl, tail, start, ref totalEnd, ref failedContMax, out var ext))
             {
                 EmitUrlContinuation(sb, prefix, vaultedUrls, redactedUrl, tail, ext);
@@ -425,12 +425,12 @@ public sealed class CoreTelemetryService : ITelemetryService
         while (p < text.Length)
         {
             if (IsFileSchemeAt(text, p) || IsWindowsDriveAt(text, p)) break;
-            if (p > start && text[p - 1] is ',' or ';' or '(' or '[' or ')' or ']' or '\'' && IsUrlSchemeAt(text, p))
+            if (p > start && text[p - 1] is ',' or ';' or '(' or '[' or ')' or ']' or '{' or '}' or '\'' && IsUrlSchemeAt(text, p))
             {
                 break;
             }
             var ch = text[p];
-            if (char.IsWhiteSpace(ch) || ch is '"' or '<' or '>' or '\\' or '{' or '}' or '?' or '#' or '\r' or '\n')
+            if (char.IsWhiteSpace(ch) || ch is '"' or '<' or '>' or '\\' or '?' or '#' or '\r' or '\n')
             {
                 break;
             }
@@ -451,12 +451,15 @@ public sealed class CoreTelemetryService : ITelemetryService
     {
         var excessParens = 0;
         var excessBrackets = 0;
+        var excessBraces = 0;
         for (var i = urlStart; i < scanEnd; i++)
         {
             if (text[i] == '(') excessParens--;
             else if (text[i] == ')') excessParens++;
             else if (text[i] == '[') excessBrackets--;
             else if (text[i] == ']') excessBrackets++;
+            else if (text[i] == '{') excessBraces--;
+            else if (text[i] == '}') excessBraces++;
         }
         var precededByQuote = urlStart > 0 && text[urlStart - 1] == '\'';
         var end = scanEnd;
@@ -467,6 +470,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             if (c == '\'' && precededByQuote) { end--; continue; }
             if (c == ')' && excessParens > 0) { excessParens--; end--; continue; }
             if (c == ']' && excessBrackets > 0) { excessBrackets--; end--; continue; }
+            if (c == '}' && excessBraces > 0) { excessBraces--; end--; continue; }
             break;
         }
         return end;
