@@ -1289,7 +1289,7 @@ public class CoreTelemetryServiceTests
             Assert.Equal("[\"https://example.test/webhook/[redacted]\"]",
                 CoreTelemetryService.SanitizeLocalPaths(
                     "[\"https://example.test/webhook/fakeToken\\\"opaqueSecret123\"]"));
-            Assert.Equal("[\"https://example.com/api{1:\\\"see https://other.com/x?[redacted]\\\"}?[redacted]\"]",
+            Assert.Equal("[\"https://example.com/api{1:\\\"see https://other.com/x?[redacted]}?[redacted]\"]",
                 CoreTelemetryService.SanitizeLocalPaths(
                     "[\"https://example.com/api{1:\\\"see https://other.com/x?token=opaqueSecret123\\\"}?outer=value\"]"));
             Assert.Equal("[\"https://example.com/api?[redacted]\"]",
@@ -1298,9 +1298,16 @@ public class CoreTelemetryServiceTests
             Assert.Equal("[\"https://example.com/api?[redacted]\",\"public\"]",
                 CoreTelemetryService.SanitizeLocalPaths(
                     "[\"https://example.com/api?token=first\\\",opaqueSecret123\",\"public\"]"));
-            Assert.Equal("[\"https://example.com/api{1:\\\"see https://other.com/x?[redacted]\\\"}\"]",
+            Assert.Equal("[\"https://example.com/api{1:\\\"see https://other.com/x?[redacted]}\"]",
                 CoreTelemetryService.SanitizeLocalPaths(
                     "[\"https://example.com/api{1:\\\"see https://other.com/x?token=opaqueSecret123\\\"}\"]"));
+            Assert.Equal("https://example.com/api?[redacted]",
+                CoreTelemetryService.SanitizeLocalPaths("https://example.com/api?token=first\\\"opaqueSecret123"));
+            Assert.Equal("[\"see \\\"example https://example.com/api?[redacted]\"]",
+                CoreTelemetryService.SanitizeLocalPaths(
+                    "[\"see \\\"example https://example.com/api?token=first\\\",opaqueSecret123\"]"));
+            var repeatedRejectedSchemes = string.Concat(Enumerable.Repeat("https:// ", 2000));
+            Assert.Equal("http[redacted-path] ", CoreTelemetryService.SanitizeLocalPaths(repeatedRejectedSchemes));
             var repeatedEqualsQuotedUrls = string.Join("=", Enumerable.Repeat("https://a.test/x{a:\"https://b.test/x\"}", 500));
             Assert.Equal(repeatedEqualsQuotedUrls, CoreTelemetryService.SanitizeLocalPaths(repeatedEqualsQuotedUrls));
             Assert.Equal("https://example.test/webhook/[redacted]",

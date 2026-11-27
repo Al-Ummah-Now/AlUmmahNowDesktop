@@ -288,13 +288,12 @@ public sealed class CoreTelemetryService : ITelemetryService
                 searchFrom = sep + 3;
                 continue;
             }
-            var urlQuoteState = AdvanceQuoteState(text, copied, start, quoteState);
-            if (!TryScanUrlAfterScheme(text, sep, urlQuoteState, out var baseEnd, out var totalEnd, out var hasQf))
+            if (!TryScanUrlAfterScheme(text, sep, out var baseEnd, out var totalEnd, out var hasQf))
             {
                 searchFrom = sep + 3;
                 continue;
             }
-            quoteState = urlQuoteState;
+            quoteState = AdvanceQuoteState(text, copied, start, quoteState);
             var inSingleQuote = (quoteState & 1) != 0;
             var inDoubleQuote = (quoteState & 2) != 0;
             string url;
@@ -419,7 +418,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         if (p > totalEnd && p < text.Length && text[p] is '?' or '#')
         {
             var qfStart = p;
-            p = ScanQueryOrFragment(text, qfStart, quoteState);
+            p = ScanQueryOrFragment(text, qfStart);
             var qf = TrimQueryOrFragmentDelimiters(
                 text.Substring(qfStart, p - qfStart), text, urlStart, out var qfTail, inSingleQuote);
             var qfToken = qf[0] + "[redacted]";
@@ -768,7 +767,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     }
 
     private static bool TryScanUrlAfterScheme(
-        string text, int sep, int quoteState, out int baseEnd, out int totalEnd, out bool hasQf)
+        string text, int sep, out int baseEnd, out int totalEnd, out bool hasQf)
     {
         baseEnd = 0;
         totalEnd = 0;
@@ -792,16 +791,14 @@ public sealed class CoreTelemetryService : ITelemetryService
         if (!truncatedPath && p < text.Length && text[p] is '?' or '#')
         {
             hasQf = true;
-            p = ScanQueryOrFragment(text, p, quoteState);
+            p = ScanQueryOrFragment(text, p);
         }
         totalEnd = p;
         return totalEnd == text.Length || IsUrlEndBoundary(text, totalEnd);
     }
 
-    private static int ScanQueryOrFragment(string text, int start, int quoteState)
+    private static int ScanQueryOrFragment(string text, int start)
     {
-        var inDouble = (quoteState & 2) != 0;
-        var inEscapedDouble = (quoteState & 4) != 0;
         var p = start + 1;
         while (p < text.Length)
         {
@@ -812,12 +809,6 @@ public sealed class CoreTelemetryService : ITelemetryService
                 var bs = 0;
                 while (p - 1 - bs > start && text[p - 1 - bs] == '\\') bs++;
                 if ((bs & 1) == 0) break;
-                if (inEscapedDouble)
-                {
-                    p--;
-                    break;
-                }
-                if (!inDouble) break;
             }
             p++;
         }
@@ -2715,18 +2706,20 @@ public sealed class CoreTelemetryService : ITelemetryService
                     _tokenStart = _cursor;
                 }
                 _tokenEnd = _cursor + 1;
-                TrackTokenChar(ch);
+                TrackTokenChar(text, ch);
                 _inWrapperRun = false;
                 _wsBeforeRun = false;
             }
             _escapedBackslash = ch == '\\' ? !_escapedBackslash : false;
         }
 
-        private void TrackTokenChar(char ch)
+        private void TrackTokenChar(string text, char ch)
         {
             if (ch == '\\')
             {
-                _tokenHasBackslash = true;
+                var isLeadingEscapedQuote = _openQuote == '"' && !_escapedBackslash &&
+                    _tokenStart == _cursor && _cursor + 1 < text.Length && text[_cursor + 1] == '"';
+                if (!isLeadingEscapedQuote) _tokenHasBackslash = true;
             }
             else if (ch == '/')
             {
@@ -2916,20 +2909,15 @@ public sealed class CoreTelemetryService : ITelemetryService
     {
         var inSingle = (quoteState & 1) != 0;
         var inDouble = (quoteState & 2) != 0;
-        var inEscapedDouble = (quoteState & 4) != 0;
         for (var i = from; i < to; i++)
         {
             var ch = text[i];
-            if (ch is '\r' or '\n') { inSingle = false; inDouble = false; inEscapedDouble = false; continue; }
-            if (ch == '\\' && i + 1 < to && text[i + 1] is not ('\r' or '\n'))
-            {
-                if (!inSingle && text[i + 1] == '"') { inEscapedDouble = !inEscapedDouble; i++; continue; }
-                if (inSingle || inDouble || inEscapedDouble) { i++; continue; }
-            }
-            if (ch == '"' && !inSingle) { inDouble = !inDouble; if (!inDouble) inEscapedDouble = false; continue; }
-            if (ch == '\'' && !inDouble && !inEscapedDouble && !IsContractionApostrophe(text, i)) inSingle = !inSingle;
+            if (ch is '\r' or '\n') { inSingle = false; inDouble = false; continue; }
+            if (ch == '\\' && (inSingle || inDouble) && i + 1 < to && text[i + 1] is not ('\r' or '\n')) { i++; continue; }
+            if (ch == '"' && !inSingle) { inDouble = !inDouble; continue; }
+            if (ch == '\'' && !inDouble && !IsContractionApostrophe(text, i)) inSingle = !inSingle;
         }
-        return (inSingle ? 1 : 0) | (inDouble ? 2 : 0) | (inEscapedDouble ? 4 : 0);
+        return (inSingle ? 1 : 0) | (inDouble ? 2 : 0);
     }
 
     private static string TrimQueryOrFragmentDelimiters(
