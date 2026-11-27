@@ -307,13 +307,20 @@ public sealed class CoreTelemetryService : ITelemetryService
                 }
             }
             var redactedUrl = RedactUrlPathSecrets(url);
-            if (!hasQf && tail.Length == 0 && totalEnd < text.Length &&
-                text[totalEnd] == ',' && !ShouldStopAtUrlComma(text, totalEnd))
+            if (!hasQf && tail.Length == 0 && totalEnd < text.Length)
             {
-                var probe = RedactUrlPathSecrets(url + ",");
-                if (probe != url + "," && probe.EndsWith("[redacted]", StringComparison.Ordinal))
+                var nextCh = text[totalEnd];
+                var canContinue = nextCh == ','
+                    ? !ShouldStopAtUrlComma(text, totalEnd)
+                    : nextCh is '(' or '[' && !StartsEmbeddedPathInsideGroup(text, totalEnd + 1);
+                if (canContinue)
                 {
-                    redactedUrl = ExtendRedactedWebhookCommaContinuation(text, probe, start, ref totalEnd, out tail);
+                    var withNext = url + nextCh;
+                    var probe = RedactUrlPathSecrets(withNext);
+                    if (probe != withNext && probe.EndsWith("[redacted]", StringComparison.Ordinal))
+                    {
+                        redactedUrl = ExtendRedactedWebhookCommaContinuation(text, probe, start, ref totalEnd, out tail);
+                    }
                 }
             }
             sb ??= new StringBuilder(text.Length);
@@ -570,7 +577,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                 p++;
                 continue;
             }
-            if (openChars.Count > 0 && ch == ':') break;
+            if (!allowCommas && openChars.Count > 0 && ch == ':') break;
             p++;
         }
         if (openPositions.Count > 0)
