@@ -17,7 +17,7 @@ namespace AlUmmahNow.CoreBridge.Native;
 public sealed class CoreTelemetryService : ITelemetryService
 {
     private static readonly Regex UrlVaultRegex = new(@"(?<![A-Za-z0-9+.-/\\])([A-Za-z][A-Za-z0-9+.-]+://(?:\[([^\]\s""'<>\\{}\r\n]+)\]|(?:[A-Za-z0-9._~!$&'*+;=-]|%[0-9A-Fa-f]{2})+)(?::\d+)?(?:/(?:(?!(?:file://|[A-Za-z]:[\\/]))(?:[^\s""<>\\{},()\[\]?#\r\n]|\([^\s""<>\\{},()\[\]/:\\?#]+\)|\[[^\s""<>\\{},()\[\]/:\\?#]+\]))*)?)([?#][^\s""<>\r\n]*)?(?=$|[\s""'<>\\{},;()\[\]]|file://|[A-Za-z]:[\\/])", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex FileUriRegex = new(@"(?<![A-Za-z0-9+.-])file://(?:(?!\s+(?:[\(\[\{""']\s*)*\u001E)[^\r\n\u001E])+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex FileUriRegex = new(@"(?<![A-Za-z0-9+.-])file://[^\s\r\n\u001E]+(?:(?>[ \t]+)(?![\(\[\{""']{0,2}\u001E)[^\s\r\n\u001E]+)*", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex ParenPathRegex = new(@"(\()(?:/|~/|[A-Za-z]:[\\/]|\\\\)[^()\r\n\u001E]+(\))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex ParenRelativeSlashPathRegex = new(@"(\()(?!HTTP/\d)(?!TLS/\d)(?!SSL/\d)[^\s/\\""'<>()\[\]{}:,;\u001E\u001F]+/[^()\r\n\u001E]+(\))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex WindowsPathRegex = new(@"(?:[A-Za-z]:[\\/]|\\\\)(?:(?!\s+\u001E)[^\r\n\u001E])+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -216,6 +216,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         var vaultedUrls = new List<string>();
         var scanCursor = 0;
         var hasFileUriOnLine = false;
+        var fileUriQuote = '\0';
         var lastNonWsOrWrapperChar = '\0';
         var inWrapperRun = false;
         var wsBeforeRun = false;
@@ -227,21 +228,36 @@ public sealed class CoreTelemetryService : ITelemetryService
                 if (ch is '\r' or '\n')
                 {
                     hasFileUriOnLine = false;
+                    fileUriQuote = '\0';
                     lastNonWsOrWrapperChar = '\0';
                     inWrapperRun = false;
                     wsBeforeRun = false;
                 }
                 else
                 {
-                    if (!hasFileUriOnLine &&
-                        (ch == 'f' || ch == 'F') &&
+                    var closedFileQuote = fileUriQuote != '\0' && ch == fileUriQuote;
+                    if (closedFileQuote)
+                    {
+                        fileUriQuote = '\0';
+                    }
+                    else if ((ch == 'f' || ch == 'F') &&
                         scanCursor + 7 <= text.Length &&
                         text.AsSpan(scanCursor, 7).Equals("file://", StringComparison.OrdinalIgnoreCase) &&
                         (scanCursor == 0 || !IsUrlSchemeChar(text[scanCursor - 1])))
                     {
                         hasFileUriOnLine = true;
+                        if (scanCursor > 0 && text[scanCursor - 1] is '"' or '\'')
+                        {
+                            fileUriQuote = text[scanCursor - 1];
+                        }
                     }
-                    if (char.IsWhiteSpace(ch))
+                    if (closedFileQuote)
+                    {
+                        lastNonWsOrWrapperChar = ch;
+                        inWrapperRun = false;
+                        wsBeforeRun = false;
+                    }
+                    else if (char.IsWhiteSpace(ch))
                     {
                         if (!inWrapperRun)
                         {
@@ -264,7 +280,7 @@ public sealed class CoreTelemetryService : ITelemetryService
 
             var raw = match.Value;
             var afterPathSep = lastNonWsOrWrapperChar is '/' or '\\';
-            var embeddedInPath = !wsBeforeRun && (hasFileUriOnLine || afterPathSep);
+            var embeddedInPath = fileUriQuote != '\0' || (!wsBeforeRun && (hasFileUriOnLine || afterPathSep));
             if (raw.StartsWith("file://", StringComparison.OrdinalIgnoreCase) || embeddedInPath)
             {
                 return raw;
