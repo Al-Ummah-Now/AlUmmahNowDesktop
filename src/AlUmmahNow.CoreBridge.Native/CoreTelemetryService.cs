@@ -37,9 +37,9 @@ public sealed class CoreTelemetryService : ITelemetryService
     private const string KnownAuthSchemes = "Bearer|Basic|Digest|Token|Api-?Key|OAuth|Negotiate|Mutual|HOBA|Vapid|SCRAM-SHA-256|AWS4-HMAC-SHA256";
     private static readonly Regex AuthHeaderDoubleQuotedRegex = new($@"([""']?\b(?:Proxy-)?Authorization[""']?\s*[:=]\s*""\s*(?:(?:{KnownAuthSchemes})\s+)?)(?:\\.|[^\\""\r\n])+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex AuthHeaderSingleQuotedRegex = new($@"([""']?\b(?:Proxy-)?Authorization[""']?\s*[:=]\s*'\s*(?:(?:{KnownAuthSchemes})\s+)?)(?:\\.|[^\\'\r\n])+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex AuthHeaderPlainRegex = new($@"(\b(?:Proxy-)?Authorization\s*[:=]\s*(?!['""])(?:(?:{KnownAuthSchemes})\s+)?)[^\r\n]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex BearerTokenRegex = new(@"\bBearer\s+\S+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex BasicTokenRegex = new(@"\b(Basic)\s+([A-Za-z0-9+/_-]{4,}={0,2})(?=$|[\s""',;)\]}])", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex AuthHeaderPlainRegex = new($@"([""']?\b(?:Proxy-)?Authorization[""']?[ \t]*[:=](?![ \t]*['""])[ \t]*(?:(?:{KnownAuthSchemes})[ \t]+)?)[^\r\n]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex BearerTokenRegex = new(@"\b(Bearer)\s+(?!\[redacted\](?=$|[\s""',;)\]}]))[^\s""',;)\]}]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex BasicTokenRegex = new(@"\b(Basic)\s+([A-Za-z0-9+/_-]{2,}={0,2})(?![A-Za-z0-9+/_=-])", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly System.Text.UTF8Encoding StrictUtf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
 
     private readonly TelemetryAppInfo _app;
@@ -226,6 +226,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         if (string.IsNullOrEmpty(text)) return text;
         var escaped = EscapeSentinels(text, out var hadSentinels);
         var scrubbed = RedactQuotedEmails(escaped);
+        scrubbed = RedactAuthCredentials(scrubbed);
         scrubbed = VaultNonFileUrls(scrubbed, VaultPrefix, out var vaultedUrls);
         scrubbed = RedactFileUris(scrubbed, VaultPrefix);
         scrubbed = ReplaceUnquotedParenPaths(scrubbed, ParenPathRegex);
@@ -249,7 +250,6 @@ public sealed class CoreTelemetryService : ITelemetryService
         {
             scrubbed = RedactEmails(scrubbed);
         }
-        scrubbed = RedactAuthCredentials(scrubbed);
         return hadSentinels ? UnescapeSentinels(scrubbed) : scrubbed;
     }
 
@@ -603,7 +603,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         var result = AuthHeaderDoubleQuotedRegex.Replace(text, "$1[redacted]");
         result = AuthHeaderSingleQuotedRegex.Replace(result, "$1[redacted]");
         result = AuthHeaderPlainRegex.Replace(result, "$1[redacted]");
-        result = BearerTokenRegex.Replace(result, "Bearer [redacted]");
+        result = BearerTokenRegex.Replace(result, "$1 [redacted]");
         return BasicTokenRegex.Replace(result, match =>
             IsBasicCredentialToken(match.Groups[2].Value)
                 ? $"{match.Groups[1].Value} [redacted]"
@@ -612,7 +612,8 @@ public sealed class CoreTelemetryService : ITelemetryService
 
     private static bool IsBasicCredentialToken(string token)
     {
-        if (token.Length >= 8 && token.AsSpan().IndexOfAny('+', '/', '=') >= 0) return true;
+        var hasPad = token.EndsWith('=');
+        if (hasPad && (token.Length & 3) != 0) return false;
         var normalized = token.Replace('-', '+').Replace('_', '/');
         var mod = normalized.Length & 3;
         if (mod == 1) return false;
@@ -625,7 +626,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             var decoded = StrictUtf8.GetString(bytes);
             foreach (var ch in decoded)
             {
-                if ((ch < 0x20 && ch != '\t') || ch == 0x7F) return false;
+                if (ch < 0x20 || ch == 0x7F) return false;
             }
             return true;
         }
