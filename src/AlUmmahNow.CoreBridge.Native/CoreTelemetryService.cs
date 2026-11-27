@@ -13,16 +13,25 @@ namespace AlUmmahNow.CoreBridge.Native;
 /// </summary>
 public sealed class CoreTelemetryService : ITelemetryService
 {
-    private static readonly Regex FileUriRegex = new(@"file://[^\r\n]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex WindowsPathRegex = new(@"(?:(?<![\p{L}\p{N}])[A-Za-z]:[\\/]|\\\\)[^\r\n]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex UrlVaultRegex = new(@"(?<![A-Za-z0-9+.-])[A-Za-z][A-Za-z0-9+.-]*://[^\s""'<>()\[\]{}\r\n]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex FileUriRegex = new(@"(?<![A-Za-z0-9+.-])file://[^\r\n]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex WindowsPathRegex = new(@"(?:[A-Za-z]:[\\/]|\\\\)[^\r\n]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex RelativeBackslashPathRegex = new(@"(^|[\s(\[{""'=,:;])[^\s\\/""'<>]+\\[^\r\n]+", RegexOptions.Compiled);
     private static readonly Regex QuotedSpacedRootPathRegex = new(@"[""']/[ \t]+[^\r\n]+", RegexOptions.Compiled);
-    private static readonly Regex UnixPathRegex = new(@"(?<![\p{L}\p{M}\p{N}._/-])(?:~/|(?<![A-Za-z][A-Za-z0-9+.-]{0,31}:)//+(?=[ \t]*[^\s/])|/(?=[ \t]*[^\s/]))[^\r\n]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex UnixPathRegex = new(@"(?<![\p{L}\p{M}\p{N}._/-])(?:~/|//+(?=[ \t]*[^\s/])|/(?=[ \t]*[^\s/]))[^\r\n]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex RelativeSlashPathRegex = new(@"(^|[\s(\[{""'=,:;])(?!HTTP/\d)(?!TLS/\d)(?!SSL/\d)[^\s/\\""'<>()\[\]{}:]+/[^\r\n]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex DoubleQuotedFilenameRegex = new(@"""[^""\r\n/\\]*\.[A-Za-z0-9]{1,16}""", RegexOptions.Compiled);
+    private static readonly Regex SingleQuotedFilenameRegex = new(@"'(?:[^'\r\n/\\]|'(?=\p{L}))*\.[A-Za-z0-9]{1,16}'", RegexOptions.Compiled);
+    private static readonly Regex KeywordQuotedPathRegex = new(@"(\b(?:file|path|directory|folder|document)\s+)([""'])(?!\u001E)[^'""\r\n]+\2", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex KeywordAssignedPathRegex = new(@"(\b(?:file|path|filename|filepath)\s*[:=]\s*)(?!\u001E)[^\r\n]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex BareFilenameRegex = new(@"(?<![\p{L}\p{N}._-])[\p{L}\p{N}_-]+\.(?:mov|mp4|m4v|mkv|webm|avi|ts|m3u8|mpd|mp3|m4a|wav|aac|flac|ogg|opus|jpg|jpeg|png|gif|webp|heic|svg|pdf|txt|md|rtf|doc|docx|xls|xlsx|ppt|pptx|csv|json|xml|yaml|yml|toml|ini|cfg|conf|log|srt|vtt|ass|ssa|zip|tar|gz|tgz|bz2|xz|7z|rar|dmg|pkg|msi|exe|apk|aab|ipa|pem|key|crt|cer|p12|pfx|jks|keystore|db|sqlite|sqlite3|bin|dat|tmp|bak|proj|aun)\b(?!\s*\()", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private readonly TelemetryClient _client;
     private readonly string? _bufferPath;
-    private readonly Func<bool>? _isExternallyEnabled;
+    private readonly Func<string?>? _externalConsentToken;
     private readonly object _gate = new();
     private TelemetryConsent _consent = TelemetryConsent.Off;
+    private string? _observedExternalToken;
     private CancellationTokenSource _flushCts = new();
     private int _inFlightFlushes;
     private long _consentEpoch;
@@ -55,10 +64,10 @@ public sealed class CoreTelemetryService : ITelemetryService
         string userAgent,
         string? bufferPath,
         bool initialEnabled = false,
-        Func<bool>? isExternallyEnabled = null)
+        Func<string?>? externalConsentToken = null)
     {
         _bufferPath = bufferPath;
-        _isExternallyEnabled = isExternallyEnabled;
+        _externalConsentToken = externalConsentToken;
         var os = AunClient.CurrentOs();
         var app = new TelemetryAppInfo(
             platform,
@@ -95,12 +104,12 @@ public sealed class CoreTelemetryService : ITelemetryService
         string? bufferPath,
         bool initialEnabled,
         bool demo = false,
-        Func<bool>? isExternallyEnabled = null)
+        Func<string?>? externalConsentToken = null)
     {
         if (demo) return NullTelemetryService.Instance;
         try
         {
-            return new CoreTelemetryService(platform, appVersion, locale, videosApiBaseUrl, userAgent, bufferPath, initialEnabled, isExternallyEnabled);
+            return new CoreTelemetryService(platform, appVersion, locale, videosApiBaseUrl, userAgent, bufferPath, initialEnabled, externalConsentToken);
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException or AunException)
         {
@@ -132,10 +141,38 @@ public sealed class CoreTelemetryService : ITelemetryService
     internal static string SanitizeLocalPaths(string text)
     {
         if (string.IsNullOrEmpty(text)) return text;
-        var scrubbed = FileUriRegex.Replace(text, "[redacted-path]");
+        var prefix = "\u001EAUNURL";
+        while (text.Contains(prefix, StringComparison.Ordinal))
+        {
+            prefix += "X";
+        }
+        var vaultedUrls = new List<string>();
+        var scrubbed = UrlVaultRegex.Replace(text, match =>
+        {
+            if (match.Value.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
+            {
+                return match.Value;
+            }
+            var idx = vaultedUrls.Count;
+            vaultedUrls.Add(match.Value);
+            return $"{prefix}{idx}\u001F";
+        });
+        scrubbed = FileUriRegex.Replace(scrubbed, "[redacted-path]");
         scrubbed = WindowsPathRegex.Replace(scrubbed, "[redacted-path]");
+        scrubbed = RelativeBackslashPathRegex.Replace(scrubbed, "$1[redacted-path]");
         scrubbed = QuotedSpacedRootPathRegex.Replace(scrubbed, "[redacted-path]");
-        return UnixPathRegex.Replace(scrubbed, "[redacted-path]");
+        scrubbed = UnixPathRegex.Replace(scrubbed, "[redacted-path]");
+        scrubbed = RelativeSlashPathRegex.Replace(scrubbed, "$1[redacted-path]");
+        scrubbed = DoubleQuotedFilenameRegex.Replace(scrubbed, "[redacted-path]");
+        scrubbed = SingleQuotedFilenameRegex.Replace(scrubbed, "[redacted-path]");
+        scrubbed = KeywordQuotedPathRegex.Replace(scrubbed, "$1[redacted-path]");
+        scrubbed = KeywordAssignedPathRegex.Replace(scrubbed, "$1[redacted-path]");
+        scrubbed = BareFilenameRegex.Replace(scrubbed, "[redacted-path]");
+        for (var i = 0; i < vaultedUrls.Count; i++)
+        {
+            scrubbed = scrubbed.Replace($"{prefix}{i}\u001F", vaultedUrls[i], StringComparison.Ordinal);
+        }
+        return scrubbed;
     }
 
     public TelemetryConsent Consent
@@ -197,6 +234,22 @@ public sealed class CoreTelemetryService : ITelemetryService
             }
             else
             {
+                string? externalToken = null;
+                if (_externalConsentToken != null)
+                {
+                    try
+                    {
+                        externalToken = _externalConsentToken();
+                    }
+                    catch
+                    {
+                        externalToken = null;
+                    }
+                    if (string.IsNullOrEmpty(externalToken))
+                    {
+                        return false;
+                    }
+                }
                 if (_lastPurgeFailed)
                 {
                     UpdatePurgeFailedLocked(false, ref purgeNotify, ref purgeNotifyValue);
@@ -205,6 +258,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                 {
                     _client.SetConsent(state);
                     _consent = consent;
+                    _observedExternalToken = externalToken;
                     UpdatePurgeFailedLocked(false, ref purgeNotify, ref purgeNotifyValue);
                     result = true;
                 }
@@ -373,7 +427,7 @@ public sealed class CoreTelemetryService : ITelemetryService
 
             var flushOverride = FlushOverrideForTesting;
             nativeFlush = flushOverride != null ? flushOverride() : _client.Flush();
-            if (_isExternallyEnabled != null)
+            if (_externalConsentToken != null)
             {
                 monitorCts = new CancellationTokenSource();
                 _ = MonitorExternalConsentWhileFlushingAsync(monitorCts.Token);
@@ -449,20 +503,23 @@ public sealed class CoreTelemetryService : ITelemetryService
     private bool EnsureExternalConsentLocked(out CancellationTokenSource? toCancel)
     {
         toCancel = null;
-        if (_disposeRequested || _clientDisposed || _consent == TelemetryConsent.Off || _isExternallyEnabled == null)
+        if (_disposeRequested || _clientDisposed || _consent == TelemetryConsent.Off || _externalConsentToken == null)
         {
             return true;
         }
-        bool stillEnabled;
+        string? currentToken;
         try
         {
-            stillEnabled = _isExternallyEnabled();
+            currentToken = _externalConsentToken();
         }
         catch
         {
-            stillEnabled = false;
+            currentToken = null;
         }
-        if (stillEnabled) return true;
+        if (!string.IsNullOrEmpty(currentToken) && string.Equals(currentToken, _observedExternalToken, StringComparison.Ordinal))
+        {
+            return true;
+        }
 
         Action<bool>? purgeNotify = null;
         bool purgeNotifyValue = false;
@@ -487,6 +544,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         ref bool purgeNotifyValue)
     {
         _consent = TelemetryConsent.Off;
+        _observedExternalToken = null;
         _consentEpoch++;
         _revokedFlushesRemaining = _inFlightFlushes;
         toCancel = _flushCts;

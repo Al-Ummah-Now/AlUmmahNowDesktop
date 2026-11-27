@@ -332,7 +332,7 @@ public class CoreTelemetryServiceTests
         var dir = Path.Combine(Path.GetTempPath(), "aun-tel-multi-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
         var bufferPath = Path.Combine(dir, "telemetry-buffer.json");
-        var sharedEnabled = true;
+        string? sharedToken = "enabled:gen1";
         try
         {
             using var otherInstance = new CoreTelemetryService(
@@ -343,7 +343,7 @@ public class CoreTelemetryServiceTests
                 userAgent: "AlUmmahNowLinux/1.0.0",
                 bufferPath: bufferPath,
                 initialEnabled: true,
-                isExternallyEnabled: () => Volatile.Read(ref sharedEnabled));
+                externalConsentToken: () => Volatile.Read(ref sharedToken));
 
             otherInstance.Track("screen_view", new Dictionary<string, object> { ["screen"] = "home" });
             otherInstance.Persist();
@@ -353,7 +353,7 @@ public class CoreTelemetryServiceTests
             Assert.True(File.Exists(siblingTmp));
 
             // Simulate another running instance turning diagnostics off in shared settings.
-            Volatile.Write(ref sharedEnabled, false);
+            Volatile.Write(ref sharedToken, null);
 
             // Crash, persist, and flush on this instance must all revoke instead of writing or sending,
             // and clean up both the buffer and any sibling temp files.
@@ -379,7 +379,7 @@ public class CoreTelemetryServiceTests
         var dir = Path.Combine(Path.GetTempPath(), "aun-tel-midflush-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
         var bufferPath = Path.Combine(dir, "telemetry-buffer.json");
-        var sharedEnabled = true;
+        string? sharedToken = "enabled:gen1";
         try
         {
             var nativeStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -392,7 +392,7 @@ public class CoreTelemetryServiceTests
                 userAgent: "AlUmmahNowLinux/1.0.0",
                 bufferPath: bufferPath,
                 initialEnabled: true,
-                isExternallyEnabled: () => Volatile.Read(ref sharedEnabled))
+                externalConsentToken: () => Volatile.Read(ref sharedToken))
             {
                 ExternalPollIntervalMsForTesting = 15,
                 FlushOverrideForTesting = () =>
@@ -410,7 +410,7 @@ public class CoreTelemetryServiceTests
             await nativeStarted.Task;
 
             // Another instance opts out while B's flush is ALREADY in flight.
-            Volatile.Write(ref sharedEnabled, false);
+            Volatile.Write(ref sharedToken, null);
 
             // FlushAsync must observe the external opt-out and revoke BOTH managed and native consent
             // before nativeRelease even completes.
@@ -422,6 +422,54 @@ public class CoreTelemetryServiceTests
 
             nativeRelease.TrySetResult(true);
             service.Dispose();
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task External_opt_out_and_reenable_aba_revokes_stale_instance_before_flushing_old_events()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "aun-tel-aba-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var bufferPath = Path.Combine(dir, "telemetry-buffer.json");
+        string? sharedToken = "enabled:gen1";
+        var flushInvoked = false;
+        try
+        {
+            using var instanceB = new CoreTelemetryService(
+                platform: "linux",
+                appVersion: "1.0.0",
+                locale: "en",
+                videosApiBaseUrl: null,
+                userAgent: "AlUmmahNowLinux/1.0.0",
+                bufferPath: bufferPath,
+                initialEnabled: true,
+                externalConsentToken: () => Volatile.Read(ref sharedToken))
+            {
+                FlushOverrideForTesting = () =>
+                {
+                    flushInvoked = true;
+                    return Task.CompletedTask;
+                }
+            };
+
+            instanceB.Track("screen_view", new Dictionary<string, object> { ["screen"] = "pre-optout" });
+            Assert.Equal(1, instanceB.PendingCount);
+
+            // Instance A opts out and immediately opts back in with a new consent generation token.
+            Volatile.Write(ref sharedToken, null);
+            Volatile.Write(ref sharedToken, "enabled:gen2");
+
+            // Instance B must detect the generation change, revoke + purge its pre-opt-out queue, and NOT flush.
+            await instanceB.FlushAsync();
+
+            Assert.False(flushInvoked);
+            Assert.Equal(TelemetryConsent.Off, instanceB.Consent);
+            Assert.Equal(0, instanceB.PendingCount);
+            Assert.False(File.Exists(bufferPath));
         }
         finally
         {
@@ -449,7 +497,7 @@ public class CoreTelemetryServiceTests
             service.AddBreadcrumb("io", "Opened /workspace/E\u0301lodie/Very Secret Client Project Name.mov\nFailed '/data/user/0/O'Brien.mov'\nRead \"/Users/O'Brien/Final.mov\"");
             service.ReportCrash(
                 "IOException",
-                "Failed reading /Private (Client).mov\n/Private Client\n/private-key\n/Users/alice/Secret<Project>.mov\n/Users/alice/Draft:77 in open() Acquisition.mov\nFailed /home/alice/Secret\"Acquisition.mov\nFailed to open \"/ Secret/Acquisition.mov\"\nFailed to open \"/ SecretFile\"\n/ SecretFile.mov\n/ SecretFile\n/ SecretFile.abcdefghijkl\n// SecretFile\n42:/ Secret/Acquisition.mov:77\nerror 42://SecretHost/Acquisition.mov\nFailed to open path\\\\Server\\Share\\Secret.mov\nopen //storage/emulated/0/Private.mov\n/workspace/alice/Project|Acquisition.mov\nerror 42:/home/alice/private.mov\n/Client Files/Private.mov\n/workspace/alice/Project;Acquisition.mov\n'/workspace/alice/Project:2026;Acquisition.mov'\n/!Acquisition.mov\n\"/!Acquisition.mov\"\n\"C:\\Users\\Alice Smith\\Private Draft.mp4\"",
+                "Failed reading /Private (Client).mov\n/Private Client\n/private-key\n/Users/alice/Secret<Project>.mov\n/Users/alice/Draft:77 in open() Acquisition.mov\nFailed /home/alice/Secret\"Acquisition.mov\nFailed to open \"/ Secret/Acquisition.mov\"\nFailed to open \"/ SecretFile\"\n/ SecretFile.mov\n/ SecretFile\n/ SecretFile.abcdefghijkl\n// SecretFile\n42:/ Secret/Acquisition.mov:77\nerror 42://SecretHost/Acquisition.mov\nFailed to open path\\\\Server\\Share\\Secret.mov\nopen(pathC:\\Secret\\Acquisition.mov)\nCould not find file 'Secret.mov'\nCould not find file 'private/Secret.mov'\nCould not find file './Secret.mov'\nCould not find file 'O'Brien.mov'\nCould not find file 'SecretBareName'\nopen //storage/emulated/0/Private.mov\n/workspace/alice/Project|Acquisition.mov\nerror 42:/home/alice/private.mov\n/Client Files/Private.mov\n/workspace/alice/Project;Acquisition.mov\n'/workspace/alice/Project:2026;Acquisition.mov'\n/!Acquisition.mov\n\"/!Acquisition.mov\"\n\"C:\\Users\\Alice Smith\\Private Draft.mp4\"",
                 "System.IO.IOException: /Users/alice/Draft:99 in open()\n123 files failed under /home/alice/Draft:99\rCaused by: /Users/alice/Cause:99\n   at Foo.Open() in /workspace/Élodie/src/App.cs:line 42\n   at \"/home/alice/private:66\" while opening file\n   at file:///Users/alice/Player.cs:55\n   at Bar.Run() in \\\\fileserver\\share\\secret.mp4\n~/private/key.pem\nhttps://videos.api.alummahnow.net/v1/items");
 
             Assert.True(File.Exists(bufferPath));
@@ -480,8 +528,18 @@ public class CoreTelemetryServiceTests
             Assert.Contains("[redacted-path]", json, StringComparison.Ordinal);
             Assert.Equal("https://videos.api.alummahnow.net/v1/items",
                 CoreTelemetryService.SanitizeLocalPaths("https://videos.api.alummahnow.net/v1/items"));
+            Assert.Equal("https://example.com/?path=/api/items",
+                CoreTelemetryService.SanitizeLocalPaths("https://example.com/?path=/api/items"));
             Assert.Equal("git+http2://example.com/repo",
                 CoreTelemetryService.SanitizeLocalPaths("git+http2://example.com/repo"));
+            Assert.Equal("profile://example.com/repo",
+                CoreTelemetryService.SanitizeLocalPaths("profile://example.com/repo"));
+            Assert.Equal("x://example.com/repo",
+                CoreTelemetryService.SanitizeLocalPaths("x://example.com/repo"));
+            Assert.Equal("a123456789012345678901234567890123://example.com/repo",
+                CoreTelemetryService.SanitizeLocalPaths("a123456789012345678901234567890123://example.com/repo"));
+            Assert.Equal("HTTP/1.1 503 Service Unavailable",
+                CoreTelemetryService.SanitizeLocalPaths("HTTP/1.1 503 Service Unavailable"));
         }
         finally
         {

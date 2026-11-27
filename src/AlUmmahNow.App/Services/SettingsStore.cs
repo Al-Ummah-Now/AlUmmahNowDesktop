@@ -75,20 +75,32 @@ namespace AlUmmahNow.App.Services
         }
 
         /// <summary>
-        /// Reads the standalone telemetry consent state. Missing, unreadable, or unrecognized files default to off.
+        /// Reads the standalone telemetry consent generation token, or <c>null</c> when disabled, missing, or unreadable.
+        /// Each opt-in writes a fresh unique token so another running instance can detect an intervening opt-out + re-enable.
         /// </summary>
-        public bool LoadTelemetryEnabled()
+        public string? LoadTelemetryConsentToken()
         {
             try
             {
-                if (!File.Exists(_telemetryConsentPath)) return false;
-                return string.Equals(File.ReadAllText(_telemetryConsentPath).Trim(), "enabled", StringComparison.Ordinal);
+                if (!File.Exists(_telemetryConsentPath)) return null;
+                var raw = File.ReadAllText(_telemetryConsentPath).Trim();
+                if (string.Equals(raw, "enabled", StringComparison.Ordinal) ||
+                    (raw.StartsWith("enabled:", StringComparison.Ordinal) && raw.Length > "enabled:".Length))
+                {
+                    return raw;
+                }
+                return null;
             }
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
             {
-                return false;
+                return null;
             }
         }
+
+        /// <summary>
+        /// Reads the standalone telemetry consent state. Missing, unreadable, or unrecognized files default to off.
+        /// </summary>
+        public bool LoadTelemetryEnabled() => LoadTelemetryConsentToken() != null;
 
         /// <summary>
         /// Atomically updates the standalone telemetry consent state without touching <c>settings.json</c>.
@@ -131,7 +143,7 @@ namespace AlUmmahNow.App.Services
                 var directory = Path.GetDirectoryName(_telemetryConsentPath);
                 if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
                 var temp = _telemetryConsentPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
-                File.WriteAllText(temp, "enabled");
+                File.WriteAllText(temp, "enabled:" + Guid.NewGuid().ToString("N"));
                 ReplaceFile(temp, _telemetryConsentPath);
                 return true;
             }
