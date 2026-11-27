@@ -254,12 +254,17 @@ public sealed class CoreTelemetryService : ITelemetryService
         {
             var sep = text.IndexOf("://", searchFrom, StringComparison.Ordinal);
             if (sep < 0) break;
-            if (!TryScanNonFileUrl(text, sep, copied, out var start, out var baseEnd, out var totalEnd, out var hasQf))
+            if (!TryFindNonFileSchemeStart(text, sep, copied, out var start))
             {
                 searchFrom = sep + 3;
                 continue;
             }
             if (tracker.IsEmbeddedInPath(text, start))
+            {
+                searchFrom = sep + 3;
+                continue;
+            }
+            if (!TryScanUrlAfterScheme(text, sep, out var baseEnd, out var totalEnd, out var hasQf))
             {
                 searchFrom = sep + 3;
                 continue;
@@ -300,18 +305,21 @@ public sealed class CoreTelemetryService : ITelemetryService
         return sb.ToString();
     }
 
-    private static bool TryScanNonFileUrl(
-        string text, int sep, int minStart, out int start, out int baseEnd, out int totalEnd, out bool hasQf)
+    private static bool TryFindNonFileSchemeStart(string text, int sep, int minStart, out int start)
     {
         start = sep;
-        baseEnd = 0;
-        totalEnd = 0;
-        hasQf = false;
         while (start > minStart && IsUrlSchemeChar(text[start - 1])) start--;
         if (sep - start < 2 || !char.IsAsciiLetter(text[start])) return false;
         if (start > 0 && (IsUrlSchemeChar(text[start - 1]) || text[start - 1] is '/' or '\\')) return false;
-        if (text.AsSpan(start, sep - start).Equals("file", StringComparison.OrdinalIgnoreCase)) return false;
+        return !text.AsSpan(start, sep - start).Equals("file", StringComparison.OrdinalIgnoreCase);
+    }
 
+    private static bool TryScanUrlAfterScheme(
+        string text, int sep, out int baseEnd, out int totalEnd, out bool hasQf)
+    {
+        baseEnd = 0;
+        totalEnd = 0;
+        hasQf = false;
         var p = sep + 3;
         if (!TryScanUrlHost(text, ref p)) return false;
         if (p < text.Length && text[p] == ':')
@@ -475,7 +483,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             }
             else
             {
-                i = j < text.Length && text[j] == '"' ? j + 1 : j;
+                i = j < text.Length && text[j] == '"' ? j : j + 1;
             }
         }
         if (sb == null) return text;
@@ -491,22 +499,34 @@ public sealed class CoreTelemetryService : ITelemetryService
         {
             var segEnd = segStart;
             while (segEnd < text.Length && text[segEnd] is not ('\r' or '\n' or '/' or '\\' or '\u001E' or '\u001F')) segEnd++;
-            var minOpen = Math.Max(segStart, copied);
-            for (var close = segStart + 1; close < segEnd; close++)
+            var open = -1;
+            var candidateClose = -1;
+            for (var p = segStart; p < segEnd; p++)
             {
-                if (text[close] != '\'' || !EndsWithFilenameExt(text, minOpen, close)) continue;
-                var open = close - 1;
-                while (open >= minOpen)
+                if (text[p] != '\'') continue;
+                var isOpener = p == segStart || !char.IsLetterOrDigit(text[p - 1]);
+                if (isOpener)
                 {
-                    if (text[open] == '\'' && (open == segStart || !char.IsLetterOrDigit(text[open - 1]))) break;
-                    open--;
+                    if (open < 0 || candidateClose >= 0)
+                    {
+                        open = p;
+                        candidateClose = -1;
+                    }
                 }
-                if (open >= minOpen && EndsWithFilenameExt(text, open + 1, close))
+                else if (open >= 0)
                 {
-                    sb ??= new StringBuilder(text.Length);
-                    sb.Append(text, copied, open - copied).Append("[redacted-path]");
-                    copied = close + 1;
-                    minOpen = copied;
+                    if (EndsWithFilenameExt(text, open + 1, p))
+                    {
+                        sb ??= new StringBuilder(text.Length);
+                        sb.Append(text, copied, open - copied).Append("[redacted-path]");
+                        copied = p + 1;
+                        open = -1;
+                        candidateClose = -1;
+                    }
+                    else if (p + 1 == segEnd || !char.IsLetterOrDigit(text[p + 1]))
+                    {
+                        candidateClose = p;
+                    }
                 }
             }
             segStart = segEnd + 1;
@@ -943,7 +963,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                 var rawEnd = schemeEnd;
                 var stoppedAtVault = false;
                 var escapedBackslash = false;
-                var lastQuotePos = -1;
+                var candidateClose = -1;
                 while (rawEnd < text.Length)
                 {
                     var ch = text[rawEnd];
@@ -957,14 +977,26 @@ public sealed class CoreTelemetryService : ITelemetryService
                     }
                     if (quote != '\0' && ch == quote && !escapedBackslash)
                     {
-                        lastQuotePos = rawEnd;
+                        if (quote == '"')
+                        {
+                            candidateClose = rawEnd;
+                            break;
+                        }
+                        if (candidateClose >= 0 && rawEnd > schemeEnd && !char.IsLetterOrDigit(text[rawEnd - 1]))
+                        {
+                            break;
+                        }
+                        if (rawEnd + 1 == text.Length || !char.IsLetterOrDigit(text[rawEnd + 1]))
+                        {
+                            candidateClose = rawEnd;
+                        }
                     }
                     escapedBackslash = ch == '\\' ? !escapedBackslash : false;
                     rawEnd++;
                 }
-                if (lastQuotePos >= 0)
+                if (candidateClose >= 0)
                 {
-                    rawEnd = lastQuotePos;
+                    rawEnd = candidateClose;
                     stoppedAtVault = false;
                 }
                 var trimmedEnd = rawEnd;
@@ -1250,15 +1282,59 @@ public sealed class CoreTelemetryService : ITelemetryService
         return result;
     }
 
+    private void WithPersistingConsent(bool requiresFull, Action nativeAction)
+    {
+        lock (_gate)
+        {
+            if (_disposeRequested || _clientDisposed || _consent == TelemetryConsent.Off ||
+                (requiresFull && _consent != TelemetryConsent.Full))
+            {
+                return;
+            }
+        }
+        CancellationTokenSource? toCancel = null;
+        IDisposable? externalConsentLock = null;
+        if (_acquireExternalConsentLock != null)
+        {
+            externalConsentLock = _acquireExternalConsentLock();
+            if (externalConsentLock == null)
+            {
+                lock (_gate)
+                {
+                    EnsureExternalConsentLocked(out toCancel);
+                }
+                if (toCancel != null) CancelQuietly(toCancel);
+                return;
+            }
+        }
+        try
+        {
+            lock (_gate)
+            {
+                if (!EnsureExternalConsentLocked(out toCancel)) goto CancelAndReturn;
+                if (_disposeRequested || _clientDisposed || _consent == TelemetryConsent.Off ||
+                    (requiresFull && _consent != TelemetryConsent.Full))
+                {
+                    return;
+                }
+                nativeAction();
+            }
+        }
+        finally
+        {
+            externalConsentLock?.Dispose();
+        }
+        return;
+    CancelAndReturn:
+        if (toCancel != null) CancelQuietly(toCancel);
+    }
+
     public void Track(string name, IReadOnlyDictionary<string, object>? properties = null)
     {
         if (string.IsNullOrWhiteSpace(name)) return;
         var json = SerializeProperties(properties);
-        CancellationTokenSource? toCancel = null;
-        lock (_gate)
+        WithPersistingConsent(requiresFull: true, () =>
         {
-            if (!EnsureExternalConsentLocked(out toCancel)) goto CancelAndReturn;
-            if (_disposeRequested || _clientDisposed || _consent != TelemetryConsent.Full) return;
             try
             {
                 _client.Track(name, json);
@@ -1267,21 +1343,15 @@ public sealed class CoreTelemetryService : ITelemetryService
             {
                 Log.For("telemetry").Warn("telemetry track skipped: " + ex.Message);
             }
-        }
-        return;
-    CancelAndReturn:
-        if (toCancel != null) CancelQuietly(toCancel);
+        });
     }
 
     public void TrackError(string code, IReadOnlyDictionary<string, object>? properties = null)
     {
         if (string.IsNullOrWhiteSpace(code)) return;
         var json = SerializeProperties(properties);
-        CancellationTokenSource? toCancel = null;
-        lock (_gate)
+        WithPersistingConsent(requiresFull: true, () =>
         {
-            if (!EnsureExternalConsentLocked(out toCancel)) goto CancelAndReturn;
-            if (_disposeRequested || _clientDisposed || _consent != TelemetryConsent.Full) return;
             try
             {
                 _client.TrackError(code, json);
@@ -1290,10 +1360,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             {
                 Log.For("telemetry").Warn("telemetry error skipped: " + ex.Message);
             }
-        }
-        return;
-    CancelAndReturn:
-        if (toCancel != null) CancelQuietly(toCancel);
+        });
     }
 
     public void AddBreadcrumb(string category, string message, TelemetryBreadcrumbSeverity level = TelemetryBreadcrumbSeverity.Info)
@@ -1330,11 +1397,8 @@ public sealed class CoreTelemetryService : ITelemetryService
             DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
             fromPreviousSession,
             null);
-        CancellationTokenSource? toCancel = null;
-        lock (_gate)
+        WithPersistingConsent(requiresFull: false, () =>
         {
-            if (!EnsureExternalConsentLocked(out toCancel)) goto CancelAndReturn;
-            if (_disposeRequested || _clientDisposed || _consent == TelemetryConsent.Off) return;
             try
             {
                 _client.ReportCrash(report);
@@ -1344,19 +1408,13 @@ public sealed class CoreTelemetryService : ITelemetryService
             {
                 Log.For("telemetry").Warn("telemetry crash record skipped: " + ex.Message);
             }
-        }
-        return;
-    CancelAndReturn:
-        if (toCancel != null) CancelQuietly(toCancel);
+        });
     }
 
     public void Persist()
     {
-        CancellationTokenSource? toCancel = null;
-        lock (_gate)
+        WithPersistingConsent(requiresFull: false, () =>
         {
-            if (!EnsureExternalConsentLocked(out toCancel)) goto CancelAndReturn;
-            if (_disposeRequested || _clientDisposed || _consent == TelemetryConsent.Off) return;
             try
             {
                 _client.Persist();
@@ -1365,10 +1423,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             {
                 Log.For("telemetry").Warn("telemetry persist failed: " + ex.Message);
             }
-        }
-        return;
-    CancelAndReturn:
-        if (toCancel != null) CancelQuietly(toCancel);
+        });
     }
 
     public async Task FlushAsync(CancellationToken cancellationToken = default)
