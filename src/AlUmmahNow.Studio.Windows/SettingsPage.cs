@@ -80,6 +80,14 @@ internal sealed class SettingsPage
         telemetryBody.Children.Add(new TextBlock { Text = l["settings.telemetry.body"], TextWrapping = TextWrapping.Wrap, Foreground = LanternGlass.Res("StudioMutedBrush") });
         var telemetryToggle = new ToggleSwitch { Header = l["settings.telemetry.toggle"], IsOn = settings.TelemetryEnabled };
         AutomationProperties.SetAutomationId(telemetryToggle, "SettingsTelemetryToggle");
+        var initialPurgeFailed = telemetry?.LastPurgeFailed ?? false;
+        var telemetryNotice = new TextBlock
+        {
+            TextWrapping = TextWrapping.Wrap,
+            Visibility = initialPurgeFailed ? Visibility.Visible : Visibility.Collapsed,
+            Text = initialPurgeFailed ? l["settings.telemetry.purgeWarning"] : string.Empty,
+        };
+        AutomationProperties.SetAutomationId(telemetryNotice, "SettingsTelemetryNotice");
         telemetryToggle.Toggled += (_, _) =>
         {
             var enabled = telemetryToggle.IsOn;
@@ -92,23 +100,32 @@ internal sealed class SettingsPage
                     store.SaveTelemetryEnabled(false);
                     settings.TelemetryEnabled = false;
                     telemetryToggle.IsOn = false;
+                    telemetryNotice.Text = l["settings.telemetry.enableError"];
+                    telemetryNotice.Visibility = Visibility.Visible;
                     return;
                 }
                 settings.TelemetryEnabled = true;
+                telemetryNotice.Text = string.Empty;
+                telemetryNotice.Visibility = Visibility.Collapsed;
             }
             else
             {
-                telemetry?.SetConsent(TelemetryConsent.Off);
+                var purged = telemetry?.SetConsent(TelemetryConsent.Off) ?? true;
                 if (!store.SaveTelemetryEnabled(false))
                 {
                     settings.TelemetryEnabled = true;
                     telemetryToggle.IsOn = true;
+                    telemetryNotice.Text = l["settings.telemetry.purgeWarning"];
+                    telemetryNotice.Visibility = Visibility.Visible;
                     return;
                 }
                 settings.TelemetryEnabled = false;
+                telemetryNotice.Text = purged ? string.Empty : l["settings.telemetry.purgeWarning"];
+                telemetryNotice.Visibility = purged ? Visibility.Collapsed : Visibility.Visible;
             }
         };
         telemetryBody.Children.Add(telemetryToggle);
+        telemetryBody.Children.Add(telemetryNotice);
         left.Children.Add(LanternGlass.Card(telemetryBody));
 
         var accountsBody = new StackPanel { Spacing = 8 };

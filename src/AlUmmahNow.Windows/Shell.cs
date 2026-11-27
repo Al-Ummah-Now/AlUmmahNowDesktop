@@ -316,6 +316,13 @@ public sealed partial class Shell
         telemetryBody.Children.Add(new TextBlock { Text = _localizer["settings.telemetry.body"], TextWrapping = TextWrapping.Wrap }.Dim(0.75));
         var telemetryToggle = new ToggleSwitch { Header = _localizer["settings.telemetry.toggle"], IsOn = _settings.TelemetryEnabled };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(telemetryToggle, "SettingsTelemetryToggle");
+        var telemetryNotice = new TextBlock
+        {
+            TextWrapping = TextWrapping.Wrap,
+            Visibility = _telemetry.LastPurgeFailed ? Visibility.Visible : Visibility.Collapsed,
+            Text = _telemetry.LastPurgeFailed ? _localizer["settings.telemetry.purgeWarning"] : string.Empty,
+        };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(telemetryNotice, "SettingsTelemetryNotice");
         telemetryToggle.Toggled += (_, _) =>
         {
             var enabled = telemetryToggle.IsOn;
@@ -328,23 +335,32 @@ public sealed partial class Shell
                     _store.SaveTelemetryEnabled(false);
                     _settings.TelemetryEnabled = false;
                     telemetryToggle.IsOn = false;
+                    telemetryNotice.Text = _localizer["settings.telemetry.enableError"];
+                    telemetryNotice.Visibility = Visibility.Visible;
                     return;
                 }
                 _settings.TelemetryEnabled = true;
+                telemetryNotice.Text = string.Empty;
+                telemetryNotice.Visibility = Visibility.Collapsed;
             }
             else
             {
-                _telemetry.SetConsent(TelemetryConsent.Off);
+                var purged = _telemetry.SetConsent(TelemetryConsent.Off);
                 if (!_store.SaveTelemetryEnabled(false))
                 {
                     _settings.TelemetryEnabled = true;
                     telemetryToggle.IsOn = true;
+                    telemetryNotice.Text = _localizer["settings.telemetry.purgeWarning"];
+                    telemetryNotice.Visibility = Visibility.Visible;
                     return;
                 }
                 _settings.TelemetryEnabled = false;
+                telemetryNotice.Text = purged ? string.Empty : _localizer["settings.telemetry.purgeWarning"];
+                telemetryNotice.Visibility = purged ? Visibility.Collapsed : Visibility.Visible;
             }
         };
         telemetryBody.Children.Add(telemetryToggle);
+        telemetryBody.Children.Add(telemetryNotice);
         var telemetryCard = Updates.Card(telemetryBody);
 
         var column = new StackPanel { Spacing = 18, Padding = new Thickness(24, 18, 24, 24) };

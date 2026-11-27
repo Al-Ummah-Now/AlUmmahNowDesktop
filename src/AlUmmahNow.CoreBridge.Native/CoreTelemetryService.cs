@@ -13,10 +13,10 @@ namespace AlUmmahNow.CoreBridge.Native;
 /// </summary>
 public sealed class CoreTelemetryService : ITelemetryService
 {
-    private static readonly Regex DoubleQuotedPathRegex = new(@"""(?:file://|(?:[A-Za-z]:[\\/]|\\\\)|~/(?!\s)|/(?=[\p{L}\p{M}\p{N}._~]))[^""\r\n]*""", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex DoubleQuotedPathRegex = new(@"""(?:file://|(?:[A-Za-z]:[\\/]|\\\\)|~/(?!\s)|/(?=[^\s/""]))[^""\r\n]*""", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex FileUriRegex = new(@"file://[^\r\n""<>|]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex WindowsPathRegex = new(@"(?:[A-Za-z]:[\\/]|\\\\)[^\r\n""<>|]+?(?=(?::line\b|:\d+\b|[\r\n""<>|]|$))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex UnixPathRegex = new(@"(?<![\p{L}\p{M}\p{N}._:/-])(?:~/|/(?=[\p{L}\p{M}\p{N}._~]))[^\r\n""<>|]+?(?=(?::line\b|:\d+\b|[\r\n""<>|]|$))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex WindowsPathRegex = new(@"(?:[A-Za-z]:[\\/]|\\\\)[^\r\n""<>|]+?(?=(?::line\s+\d+|:\d+(?::\d+)?)[)\]]*(?=\r|\n|$)|[\r\n""<>|]|$)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex UnixPathRegex = new(@"(?<![\p{L}\p{M}\p{N}._:/-])(?:~/|/(?=[^\s/""<>|]))[^\r\n""<>|]+?(?=(?::line\s+\d+|:\d+(?::\d+)?)[)\]]*(?=\r|\n|$)|[\r\n""<>|]|$)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private readonly TelemetryClient _client;
     private readonly string? _bufferPath;

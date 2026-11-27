@@ -327,6 +327,11 @@ public sealed partial class MainWindow
         telemetryCard.Append(telemetryBody);
         var telemetryCheck = Gtk.CheckButton.NewWithLabel(_localizer["settings.telemetry.toggle"]);
         telemetryCheck.SetActive(_settings.TelemetryEnabled);
+        var telemetryNotice = Gtk.Label.New(_telemetry.LastPurgeFailed ? _localizer["settings.telemetry.purgeWarning"] : string.Empty);
+        telemetryNotice.SetHalign(Gtk.Align.Start);
+        telemetryNotice.SetWrap(true);
+        telemetryNotice.AddCssClass("error");
+        telemetryNotice.SetVisible(_telemetry.LastPurgeFailed);
         telemetryCheck.OnToggled += (_, _) =>
         {
             var enabled = telemetryCheck.GetActive();
@@ -339,23 +344,32 @@ public sealed partial class MainWindow
                     _store.SaveTelemetryEnabled(false);
                     _settings.TelemetryEnabled = false;
                     telemetryCheck.SetActive(false);
+                    telemetryNotice.SetText(_localizer["settings.telemetry.enableError"]);
+                    telemetryNotice.SetVisible(true);
                     return;
                 }
                 _settings.TelemetryEnabled = true;
+                telemetryNotice.SetText(string.Empty);
+                telemetryNotice.SetVisible(false);
             }
             else
             {
-                _telemetry.SetConsent(TelemetryConsent.Off);
+                var purged = _telemetry.SetConsent(TelemetryConsent.Off);
                 if (!_store.SaveTelemetryEnabled(false))
                 {
                     _settings.TelemetryEnabled = true;
                     telemetryCheck.SetActive(true);
+                    telemetryNotice.SetText(_localizer["settings.telemetry.purgeWarning"]);
+                    telemetryNotice.SetVisible(true);
                     return;
                 }
                 _settings.TelemetryEnabled = false;
+                telemetryNotice.SetText(purged ? string.Empty : _localizer["settings.telemetry.purgeWarning"]);
+                telemetryNotice.SetVisible(!purged);
             }
         };
         telemetryCard.Append(telemetryCheck);
+        telemetryCard.Append(telemetryNotice);
         column.Append(telemetryCard);
 
         var page = Gtk.ScrolledWindow.New();

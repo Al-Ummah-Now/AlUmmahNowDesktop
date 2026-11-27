@@ -73,6 +73,12 @@ public sealed class SettingsPage
         telemetryBody.Append(Ui.Label(l["settings.telemetry.body"], dim: true));
         var telemetryCheck = Gtk.CheckButton.NewWithLabel(l["settings.telemetry.toggle"]);
         telemetryCheck.SetActive(settings.TelemetryEnabled);
+        var initialPurgeFailed = telemetry?.LastPurgeFailed ?? false;
+        var telemetryNotice = Gtk.Label.New(initialPurgeFailed ? l["settings.telemetry.purgeWarning"] : string.Empty);
+        telemetryNotice.SetHalign(Gtk.Align.Start);
+        telemetryNotice.SetWrap(true);
+        telemetryNotice.AddCssClass("error");
+        telemetryNotice.SetVisible(initialPurgeFailed);
         telemetryCheck.OnToggled += (_, _) =>
         {
             var enabled = telemetryCheck.GetActive();
@@ -85,23 +91,32 @@ public sealed class SettingsPage
                     store.SaveTelemetryEnabled(false);
                     settings.TelemetryEnabled = false;
                     telemetryCheck.SetActive(false);
+                    telemetryNotice.SetText(l["settings.telemetry.enableError"]);
+                    telemetryNotice.SetVisible(true);
                     return;
                 }
                 settings.TelemetryEnabled = true;
+                telemetryNotice.SetText(string.Empty);
+                telemetryNotice.SetVisible(false);
             }
             else
             {
-                telemetry?.SetConsent(TelemetryConsent.Off);
+                var purged = telemetry?.SetConsent(TelemetryConsent.Off) ?? true;
                 if (!store.SaveTelemetryEnabled(false))
                 {
                     settings.TelemetryEnabled = true;
                     telemetryCheck.SetActive(true);
+                    telemetryNotice.SetText(l["settings.telemetry.purgeWarning"]);
+                    telemetryNotice.SetVisible(true);
                     return;
                 }
                 settings.TelemetryEnabled = false;
+                telemetryNotice.SetText(purged ? string.Empty : l["settings.telemetry.purgeWarning"]);
+                telemetryNotice.SetVisible(!purged);
             }
         };
         telemetryBody.Append(telemetryCheck);
+        telemetryBody.Append(telemetryNotice);
         left.Append(Ui.Card(telemetryBody));
 
         var about = Gtk.Box.New(Gtk.Orientation.Vertical, 6);

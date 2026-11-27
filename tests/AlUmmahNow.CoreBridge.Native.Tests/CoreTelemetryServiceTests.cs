@@ -449,7 +449,7 @@ public class CoreTelemetryServiceTests
             service.AddBreadcrumb("io", "Opened /workspace/E\u0301lodie/Very Secret Client Project Name.mov\nFailed '/data/user/0/O'Brien.mov'\nRead \"/Users/O'Brien/Final.mov\"");
             service.ReportCrash(
                 "IOException",
-                "Failed reading /Private (Client).mov\n/Private Client\n/private-key\n/Client Files/Private.mov\n/workspace/alice/Project;Acquisition.mov\n\"C:\\Users\\Alice Smith\\Private Draft.mp4\"",
+                "Failed reading /Private (Client).mov\n/Private Client\n/private-key\n/Client Files/Private.mov\n/workspace/alice/Project;Acquisition.mov\n'/workspace/alice/Project:2026;Acquisition.mov'\n/!Acquisition.mov\n\"/!Acquisition.mov\"\n\"C:\\Users\\Alice Smith\\Private Draft.mp4\"",
                 "at Foo.Open() in /workspace/Élodie/src/App.cs:line 42\nat Bar.Run() in \\\\fileserver\\share\\secret.mp4\n~/private/key.pem");
 
             Assert.True(File.Exists(bufferPath));
