@@ -929,6 +929,7 @@ public sealed class CoreTelemetryService : ITelemetryService
 
     private static int AdvanceObsFold(string text, int nlPos)
     {
+        if (nlPos >= text.Length || text[nlPos] is not ('\r' or '\n')) return -1;
         var afterNl = text[nlPos] == '\r' && nlPos + 1 < text.Length && text[nlPos + 1] == '\n'
             ? nlPos + 2
             : nlPos + 1;
