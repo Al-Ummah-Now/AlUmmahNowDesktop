@@ -236,15 +236,15 @@ public sealed class CoreTelemetryService : ITelemetryService
         scrubbed = RedactDoubleQuotedLocalPaths(scrubbed);
         scrubbed = ReplaceUnquotedParenPaths(scrubbed, ParenPathRegex);
         scrubbed = ReplaceUnquotedParenPaths(scrubbed, ParenRelativeSlashPathRegex);
-        scrubbed = WindowsPathRegex.Replace(scrubbed, "[redacted-path]");
-        scrubbed = RelativeBackslashPathRegex.Replace(scrubbed, "$1[redacted-path]");
-        scrubbed = QuotedSpacedRootPathRegex.Replace(scrubbed, "[redacted-path]");
-        scrubbed = UnixPathRegex.Replace(scrubbed, "[redacted-path]");
-        scrubbed = RelativeSlashPathRegex.Replace(scrubbed, "$1[redacted-path]");
+        scrubbed = ReplaceOutsideBalancedDoubleQuotes(scrubbed, WindowsPathRegex, "[redacted-path]", hasPrefixGroup: false);
+        scrubbed = ReplaceOutsideBalancedDoubleQuotes(scrubbed, RelativeBackslashPathRegex, "$1[redacted-path]", hasPrefixGroup: true);
+        scrubbed = ReplaceOutsideBalancedDoubleQuotes(scrubbed, QuotedSpacedRootPathRegex, "[redacted-path]", hasPrefixGroup: false, checkNextChar: true);
+        scrubbed = ReplaceOutsideBalancedDoubleQuotes(scrubbed, UnixPathRegex, "[redacted-path]", hasPrefixGroup: false);
+        scrubbed = ReplaceOutsideBalancedDoubleQuotes(scrubbed, RelativeSlashPathRegex, "$1[redacted-path]", hasPrefixGroup: true);
         scrubbed = RedactQuotedFilenames(scrubbed);
         scrubbed = KeywordQuotedPathRegex.Replace(scrubbed, "$1[redacted-path]");
         scrubbed = RedactKeywordUnquotedFilenames(scrubbed);
-        scrubbed = KeywordAssignedPathRegex.Replace(scrubbed, "$1[redacted-path]");
+        scrubbed = ReplaceKeywordAssignedPaths(scrubbed);
         scrubbed = RedactEmails(scrubbed);
         if (scrubbed.Contains('.'))
         {
@@ -970,30 +970,112 @@ public sealed class CoreTelemetryService : ITelemetryService
                 i++;
                 continue;
             }
-            var close = FindDoubleQuotedPathEnd(text, i + 1, out var lastVaultEnd, out var stopPos);
+            var close = FindDoubleQuotedPathEnd(text, i + 1, out var stopPos);
             if (close < 0)
             {
                 i = stopPos + 1;
                 continue;
             }
-            var sliceStart = lastVaultEnd > i + 1 ? lastVaultEnd : i + 1;
-            var pathPos = sliceStart < close ? FindLocalPathStartInQuoted(text, sliceStart, close) : -1;
-            if (pathPos >= 0)
-            {
-                if (pathPos > sliceStart && IsPrecededByOddBackslashes(text, pathPos, sliceStart)) pathPos--;
-                sb ??= new StringBuilder(text.Length);
-                sb.Append(text, copied, pathPos - copied).Append("[redacted-path]");
-                copied = close;
-            }
+            RedactQuotedNonVaultSegments(text, i + 1, close, ref sb, ref copied);
             i = close + 1;
         }
         if (sb == null) return text;
         return sb.Append(text, copied, text.Length - copied).ToString();
     }
 
-    private static int FindDoubleQuotedPathEnd(string text, int start, out int lastVaultEnd, out int stopPos)
+    private static void RedactQuotedNonVaultSegments(
+        string text, int start, int close, ref StringBuilder? sb, ref int copied)
     {
-        lastVaultEnd = -1;
+        var segStart = start;
+        while (segStart < close)
+        {
+            var vaultStart = text.IndexOf('\u001E', segStart, close - segStart);
+            var segEnd = vaultStart >= 0 ? vaultStart : close;
+            var pathPos = segStart < segEnd ? FindLocalPathStartInQuoted(text, segStart, segEnd) : -1;
+            if (pathPos >= 0)
+            {
+                if (pathPos > segStart && IsPrecededByOddBackslashes(text, pathPos, segStart)) pathPos--;
+                var redactEnd = segEnd;
+                if (vaultStart >= 0)
+                {
+                    while (redactEnd > pathPos && text[redactEnd - 1] is ' ' or '\t') redactEnd--;
+                }
+                sb ??= new StringBuilder(text.Length);
+                sb.Append(text, copied, pathPos - copied).Append("[redacted-path]");
+                copied = redactEnd;
+            }
+            if (vaultStart < 0) break;
+            var vaultEnd = text.IndexOf('\u001F', vaultStart + 1, close - vaultStart - 1);
+            if (vaultEnd < 0) break;
+            segStart = vaultEnd + 1;
+        }
+    }
+
+    private static List<(int Open, int Close)> CollectBalancedDoubleQuoteSpans(string text)
+    {
+        var spans = new List<(int Open, int Close)>();
+        var i = 0;
+        while (i < text.Length)
+        {
+            if (text[i] != '"' || IsPrecededByOddBackslashes(text, i, 0))
+            {
+                i++;
+                continue;
+            }
+            var close = FindDoubleQuotedPathEnd(text, i + 1, out var stopPos);
+            if (close < 0)
+            {
+                i = stopPos + 1;
+                continue;
+            }
+            spans.Add((i, close));
+            i = close + 1;
+        }
+        return spans;
+    }
+
+    private static string ReplaceOutsideBalancedDoubleQuotes(
+        string text, Regex regex, string replacement, bool hasPrefixGroup, bool checkNextChar = false)
+    {
+        if (text.IndexOf('"') < 0) return regex.Replace(text, replacement);
+        var spans = CollectBalancedDoubleQuoteSpans(text);
+        if (spans.Count == 0) return regex.Replace(text, replacement);
+        var spanIdx = 0;
+        return regex.Replace(text, match =>
+        {
+            var pos = hasPrefixGroup ? match.Index + match.Groups[1].Length
+                : (checkNextChar ? match.Index + 1 : match.Index);
+            while (spanIdx < spans.Count && spans[spanIdx].Close <= pos) spanIdx++;
+            if (spanIdx < spans.Count && spans[spanIdx].Open < pos && pos < spans[spanIdx].Close)
+            {
+                return match.Value;
+            }
+            return hasPrefixGroup ? match.Groups[1].Value + "[redacted-path]" : "[redacted-path]";
+        });
+    }
+
+    private static string ReplaceKeywordAssignedPaths(string text)
+    {
+        if (text.IndexOf('"') < 0) return KeywordAssignedPathRegex.Replace(text, "$1[redacted-path]");
+        var spans = CollectBalancedDoubleQuoteSpans(text);
+        if (spans.Count == 0) return KeywordAssignedPathRegex.Replace(text, "$1[redacted-path]");
+        var spanIdx = 0;
+        return KeywordAssignedPathRegex.Replace(text, match =>
+        {
+            var pos = match.Index;
+            while (spanIdx < spans.Count && spans[spanIdx].Close <= pos) spanIdx++;
+            if (spanIdx < spans.Count && spans[spanIdx].Open < pos && pos < spans[spanIdx].Close &&
+                match.Index + match.Length > spans[spanIdx].Close)
+            {
+                var tailStart = spans[spanIdx].Close - match.Index;
+                return match.Groups[1].Value + "[redacted-path]" + match.Value.Substring(tailStart);
+            }
+            return match.Groups[1].Value + "[redacted-path]";
+        });
+    }
+
+    private static int FindDoubleQuotedPathEnd(string text, int start, out int stopPos)
+    {
         var escaped = false;
         var j = start;
         while (j < text.Length)
@@ -1006,7 +1088,6 @@ public sealed class CoreTelemetryService : ITelemetryService
             }
             if (ch == '\u001F')
             {
-                lastVaultEnd = j + 1;
                 escaped = false;
                 j++;
                 continue;
@@ -1023,61 +1104,97 @@ public sealed class CoreTelemetryService : ITelemetryService
         return -1;
     }
 
+    private static int DecodeJsonCharAt(string text, int pos, int end, out char decoded)
+    {
+        var ch = text[pos];
+        if (ch == '\\' && pos + 1 < end)
+        {
+            var next = text[pos + 1];
+            switch (next)
+            {
+                case '"': decoded = '"'; return 2;
+                case '/': decoded = '/'; return 2;
+                case '\\': decoded = '\\'; return 2;
+                case 'b': decoded = '\b'; return 2;
+                case 'f': decoded = '\f'; return 2;
+                case 'n': decoded = '\n'; return 2;
+                case 'r': decoded = '\r'; return 2;
+                case 't': decoded = '\t'; return 2;
+                case 'u':
+                    if (pos + 5 < end && TryParseHex4(text, pos + 2, out var code))
+                    {
+                        decoded = (char)code;
+                        return 6;
+                    }
+                    break;
+            }
+        }
+        decoded = ch;
+        return 1;
+    }
+
     private static int FindLocalPathStartInQuoted(string text, int start, int end)
     {
         var tokenStart = -1;
         var p = start;
         while (p < end)
         {
-            var ch = text[p];
-            if (ch == '\\' && p + 1 < end && text[p + 1] == '"')
+            var len0 = DecodeJsonCharAt(text, p, end, out var c0);
+            if (((c0 >= 'A' && c0 <= 'Z') || (c0 >= 'a' && c0 <= 'z')) && p + len0 < end)
             {
-                tokenStart = -1;
-                p += 2;
-                continue;
+                var p1 = p + len0;
+                var len1 = DecodeJsonCharAt(text, p1, end, out var c1);
+                if (c1 == ':' && p1 + len1 < end)
+                {
+                    var p2 = p1 + len1;
+                    var len2 = DecodeJsonCharAt(text, p2, end, out var c2);
+                    if (c2 is '/' or '\\')
+                    {
+                        var next = NextNonHorizontalSpaceDecoded(text, p2 + len2, end, out var nextCh);
+                        if (next < end && !IsDecodedWhitespace(nextCh)) return p;
+                        tokenStart = -1;
+                        p = next;
+                        continue;
+                    }
+                }
             }
-            if (IsWindowsDriveAt(text, p))
+            if (c0 == '/')
             {
-                var next = NextNonHorizontalSpace(text, p + 3, end);
-                if (next < end && !char.IsWhiteSpace(text[next])) return p;
-                tokenStart = -1;
-                p = next;
-                continue;
-            }
-            if (ch == '/' || (ch == '\\' && p + 1 < end && text[p + 1] == '/'))
-            {
-                var step = ch == '\\' ? 2 : 1;
                 if (tokenStart >= 0)
                 {
-                    var next = NextNonHorizontalSpace(text, p + step, end);
-                    if (next < end && !char.IsWhiteSpace(text[next])) return tokenStart;
+                    var next = NextNonHorizontalSpaceDecoded(text, p + len0, end, out var nextCh);
+                    if (next < end && !IsDecodedWhitespace(nextCh)) return tokenStart;
                     tokenStart = -1;
                     p = next;
                     continue;
                 }
-                var nextRoot = ScanSlashRunEnd(text, p + step, end);
-                if (nextRoot < end && !char.IsWhiteSpace(text[nextRoot])) return p;
+                var nextRoot = ScanSlashRunEnd(text, p + len0, end, out var rootCh);
+                if (nextRoot < end && !IsDecodedWhitespace(rootCh)) return p;
                 p = nextRoot;
                 continue;
             }
-            if (tokenStart < 0 && ((ch == '~' && p + 1 < end && text[p + 1] == '/') ||
-                (ch == '\\' && p + 1 < end && text[p + 1] == '\\')))
+            if (tokenStart < 0 && c0 is '~' or '\\' && p + len0 < end)
             {
-                var next = NextNonHorizontalSpace(text, p + 2, end);
-                if (next < end && !char.IsWhiteSpace(text[next])) return p;
-                p = next;
-                continue;
+                var p1 = p + len0;
+                var len1 = DecodeJsonCharAt(text, p1, end, out var c1);
+                if ((c0 == '~' && c1 == '/') || (c0 == '\\' && c1 == '\\'))
+                {
+                    var next = NextNonHorizontalSpaceDecoded(text, p1 + len1, end, out var nextCh);
+                    if (next < end && !IsDecodedWhitespace(nextCh)) return p;
+                    p = next;
+                    continue;
+                }
             }
-            if (char.IsWhiteSpace(ch) || IsQuotedPathDelimiter(ch))
+            if (IsDecodedWhitespace(c0) || IsQuotedPathDelimiter(c0))
             {
                 tokenStart = -1;
             }
-            else if (ch == '\\')
+            else if (c0 == '\\')
             {
                 if (tokenStart >= 0)
                 {
-                    var next = NextNonHorizontalSpace(text, p + 1, end);
-                    if (next < end && !char.IsWhiteSpace(text[next])) return tokenStart;
+                    var next = NextNonHorizontalSpaceDecoded(text, p + len0, end, out var nextCh);
+                    if (next < end && !IsDecodedWhitespace(nextCh)) return tokenStart;
                     tokenStart = -1;
                     p = next;
                     continue;
@@ -1087,39 +1204,52 @@ public sealed class CoreTelemetryService : ITelemetryService
             {
                 tokenStart = p;
             }
-            p++;
+            p += len0;
         }
         return -1;
     }
 
-    private static int ScanSlashRunEnd(string text, int pos, int end)
+    private static int ScanSlashRunEnd(string text, int pos, int end, out char stopChar)
     {
         var next = pos;
+        stopChar = '\0';
         while (next < end)
         {
-            var c = text[next];
+            var len = DecodeJsonCharAt(text, next, end, out var c);
             if (c == '/' || c is ' ' or '\t')
             {
-                next++;
-            }
-            else if (c == '\\' && next + 1 < end && text[next + 1] == '/')
-            {
-                next += 2;
+                next += len;
             }
             else
             {
+                stopChar = c;
                 break;
             }
         }
         return next;
     }
 
-    private static int NextNonHorizontalSpace(string text, int pos, int end)
+    private static int NextNonHorizontalSpaceDecoded(string text, int pos, int end, out char stopChar)
     {
         var p = pos;
-        while (p < end && text[p] is ' ' or '\t') p++;
+        stopChar = '\0';
+        while (p < end)
+        {
+            var len = DecodeJsonCharAt(text, p, end, out var c);
+            if (c is ' ' or '\t')
+            {
+                p += len;
+            }
+            else
+            {
+                stopChar = c;
+                break;
+            }
+        }
         return p;
     }
+
+    private static bool IsDecodedWhitespace(char ch) => char.IsWhiteSpace(ch) || ch == '\b';
 
     private static bool IsQuotedPathDelimiter(char ch) =>
         ch is '"' or '\'' or '<' or '>' or '(' or ')' or '[' or ']' or '{' or '}' or ':' or ',' or ';' or '=';

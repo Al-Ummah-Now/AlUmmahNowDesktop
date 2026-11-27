@@ -1358,6 +1358,26 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("[\"\\/\",\"public\"]"));
             Assert.Equal("[\"relative/\",\"public\"]",
                 CoreTelemetryService.SanitizeLocalPaths("[\"relative/\",\"public\"]"));
+            Assert.Equal("[\"relative\\/\",\"public\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"relative\\/\",\"public\"]"));
+            Assert.Equal("[\"relative\\u002F\",\"public\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"relative\\u002F\",\"public\"]"));
+            Assert.Equal("[\"[redacted-path]\",\"public\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"\\u002Fprivate\",\"public\"]"));
+            Assert.Equal("[\"[redacted-path]\",\"public\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"\\u002fAcquisition\",\"public\"]"));
+            Assert.Equal("[\"[redacted-path]\",\"public\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"C\\u003A\\u002FSecret\",\"public\"]"));
+            Assert.Equal("[\"[redacted-path]\",\"public\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"\\u007E\\u002FSecret\",\"public\"]"));
+            Assert.Equal("[\"[redacted-path]\",\"public\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"\\u005C\\u005CServer\\u005CShare\",\"public\"]"));
+            Assert.Equal("[\"hello\\nworld\",\"public\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"hello\\nworld\",\"public\"]"));
+            Assert.Equal("[\"path=[redacted-path]\",\"public\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"path=secret\",\"public\"]"));
+            Assert.Equal("Failed reading [redacted-path]",
+                CoreTelemetryService.SanitizeLocalPaths("Failed reading /Users/alice/My \"Secret\" Folder/file.mov"));
             var manySlashes = "[\"" + new string('/', 10_000) + "\",\"public\"]";
             Assert.Equal(manySlashes, CoreTelemetryService.SanitizeLocalPaths(manySlashes));
             var repeatedRejectedSchemes = string.Concat(Enumerable.Repeat("https:// ", 2000));
