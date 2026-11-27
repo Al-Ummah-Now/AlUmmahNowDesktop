@@ -356,7 +356,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         {
             return false;
         }
-        return ch is not ('"' or '\\' or '<' or '>' or '\'' or '(' or ')' or '[' or ']' or '{' or '}' or ',' or ';');
+        return ch is not ('"' or '\\' or '<' or '>');
     }
 
     private static string DecodeUrlEscapesForVault(string text, int start, int end)
@@ -377,6 +377,12 @@ public sealed class CoreTelemetryService : ITelemetryService
                 }
                 if (next == 'u' && pos + 5 < end && TryParseHex4(text, pos + 2, out var code))
                 {
+                    if (code == '"')
+                    {
+                        sb.Append('\\').Append('"');
+                        pos += 6;
+                        continue;
+                    }
                     var decoded = (char)code;
                     if (IsUrlStructuralEscape(decoded))
                     {
@@ -477,7 +483,8 @@ public sealed class CoreTelemetryService : ITelemetryService
                 sb.Append(prefix).Append(idx).Append('\u001F').Append(tail);
             }
             quoteState = AdvanceQuoteState(finalTail, 0, finalTail.Length, quoteState);
-            tracker.OnVaultedUrl(totalEnd);
+            var activeQuote = (quoteState & 2) != 0 ? '"' : ((quoteState & 1) != 0 ? '\'' : '\0');
+            tracker.OnVaultedUrl(totalEnd, activeQuote);
             copied = totalEnd;
             quoteCursor = totalEnd;
             searchFrom = totalEnd;
@@ -911,7 +918,9 @@ public sealed class CoreTelemetryService : ITelemetryService
         var wrappedInAngle = urlStart > 0 && text[urlStart - 1] == '<';
         var stopOnLess = !inDoubleQuote && !wrappedInAngle;
         var stopOnGreater = !inDoubleQuote || wrappedInAngle;
-        return (stopOnLess ? 1 : 0) | (stopOnGreater ? 2 : 0);
+        var allowInlineSpace = inDoubleQuote && urlStart > 0 && text[urlStart - 1] == '"' &&
+            !IsPrecededByOddBackslashes(text, urlStart - 1, 0);
+        return (stopOnLess ? 1 : 0) | (stopOnGreater ? 2 : 0) | (allowInlineSpace ? 4 : 0);
     }
 
     private static bool TryScanUrlAfterScheme(
@@ -951,7 +960,8 @@ public sealed class CoreTelemetryService : ITelemetryService
         while (p < text.Length)
         {
             var ch = text[p];
-            if (char.IsWhiteSpace(ch) || ch is '\r' or '\n' ||
+            if (ch is '\r' or '\n' ||
+                ((angleStopMask & 4) == 0 && char.IsWhiteSpace(ch)) ||
                 (ch == '<' && (angleStopMask & 1) != 0) ||
                 (ch == '>' && (angleStopMask & 2) != 0))
             {
@@ -3435,6 +3445,20 @@ public sealed class CoreTelemetryService : ITelemetryService
         {
             localStart--;
         }
+        if (localStart < atPos && localStart > minPos && IsPrecededByOddBackslashes(text, localStart, minPos))
+        {
+            var esc = text[localStart];
+            if (esc is 'n' or 'r' or 't' or 'b' or 'f' or '/')
+            {
+                localStart++;
+            }
+            else if (esc == 'u' && localStart + 5 <= atPos && TryParseHex4(text, localStart + 1, out var code))
+            {
+                var decoded = (char)code;
+                var isLocal = IsEmailLocalChar(decoded.ToString(), 0);
+                localStart = isLocal ? localStart - 1 : localStart + 5;
+            }
+        }
         var trimmedStart = localStart;
         while (trimmedStart < atPos && IsEmailLeadingWrapper(text[trimmedStart]))
         {
@@ -3690,10 +3714,11 @@ public sealed class CoreTelemetryService : ITelemetryService
             return IsCurrentTokenPath(text);
         }
 
-        public void OnVaultedUrl(int matchEnd)
+        public void OnVaultedUrl(int matchEnd, char activeQuote = '\0')
         {
             _cursor = matchEnd;
             ResetLineState();
+            _openQuote = activeQuote;
         }
 
         private void ResetTokenState()
@@ -3806,9 +3831,9 @@ public sealed class CoreTelemetryService : ITelemetryService
         {
             if (ch == '\\')
             {
-                var isLeadingEscapedQuote = _openQuote == '"' && !_escapedBackslash &&
-                    _tokenStart == _cursor && _cursor + 1 < text.Length && text[_cursor + 1] == '"';
-                if (!isLeadingEscapedQuote) _tokenHasBackslash = true;
+                var isEscapedDoubleQuote = _openQuote == '"' && !_escapedBackslash &&
+                    _cursor + 1 < text.Length && text[_cursor + 1] == '"';
+                if (!isEscapedDoubleQuote) _tokenHasBackslash = true;
             }
             else if (ch == '/')
             {
