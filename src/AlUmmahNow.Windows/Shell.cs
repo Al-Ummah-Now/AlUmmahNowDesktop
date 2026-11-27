@@ -42,12 +42,14 @@ public sealed partial class Shell
     private Action? _unbind;
     private readonly UpdateService _updates;
     private readonly Action _quit;
-    private bool _hasSettings;
+    private readonly ITelemetryService _telemetry;
+    private bool _hasSettings = true;
 
-    public Shell(ICatalogClient catalog, Localizer localizer, Navigator navigator, WindowsMediaPlayer player, SmtcSession session, AppSettings settings, SettingsStore store, AuthViewModel auth, ILiveClient live, string shortLinkHost, UpdateService updates, Action quit)
+    public Shell(ICatalogClient catalog, Localizer localizer, Navigator navigator, WindowsMediaPlayer player, SmtcSession session, AppSettings settings, SettingsStore store, AuthViewModel auth, ILiveClient live, string shortLinkHost, UpdateService updates, Action quit, ITelemetryService? telemetry = null)
     {
         _updates = updates;
         _quit = quit;
+        _telemetry = telemetry ?? NullTelemetryService.Instance;
         _live = live;
         _shortLinkHost = shortLinkHost;
         LiveList = new LiveListViewModel(live, localizer, navigator);
@@ -71,10 +73,8 @@ public sealed partial class Shell
         localizer.LanguageChanged += (_, _) => Render();
         updates.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName != nameof(UpdateService.IsSectionVisible) || updates.IsSectionVisible == _hasSettings) return;
-            // The page is gone with the section: the settings have nothing else
-            if (!updates.IsSectionVisible && navigator.Current is Route.Settings) navigator.Back();
-            else Render();
+            if (e.PropertyName != nameof(UpdateService.IsSectionVisible)) return;
+            Render();
         };
         // Every brush follows high contrast itself: no box behind a text on a highlight
         _root.HighContrastAdjustment = ElementHighContrastAdjustment.None;
@@ -137,7 +137,7 @@ public sealed partial class Shell
         Updates?.Dispose();
         Updates = new UpdateViews(_updates, new UpdateText(_localizer, UpdateApp.Viewer, _updates), UpdateText.Icon(UpdateApp.Viewer), _quit);
         Updates.ForcedChanged += Render;
-        _hasSettings = _updates.IsSectionVisible;
+        _hasSettings = true;
         var header = new StackPanel();
         header.Children.Add(BuildHeader());
         header.Children.Add(Updates.Bar);
@@ -298,7 +298,7 @@ public sealed partial class Shell
         return panel;
     }
 
-    /// <summary>Settings: the updates. Theme and language are in the header.</summary>
+    /// <summary>Settings: updates and opt-in diagnostics. Theme and language are in the header.</summary>
     private FrameworkElement BuildSettings()
     {
         var title = new TextBlock { Text = _localizer["updates.settings"], FontSize = 26, FontWeight = Microsoft.UI.Text.FontWeights.Bold };
@@ -308,9 +308,28 @@ public sealed partial class Shell
         body.Children.Add(Updates.SectionActions);
         var card = Updates.Card(body);
         Updates.UseSection(card);
+
+        var telemetryBody = new StackPanel { Spacing = 10 };
+        var telemetryHeading = new TextBlock { Text = _localizer["settings.telemetry.title"], FontSize = 18, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetHeadingLevel(telemetryHeading, Microsoft.UI.Xaml.Automation.Peers.AutomationHeadingLevel.Level2);
+        telemetryBody.Children.Add(telemetryHeading);
+        telemetryBody.Children.Add(new TextBlock { Text = _localizer["settings.telemetry.body"], TextWrapping = TextWrapping.Wrap }.Dim(0.75));
+        var telemetryToggle = new ToggleSwitch { Header = _localizer["settings.telemetry.toggle"], IsOn = _settings.TelemetryEnabled };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(telemetryToggle, "SettingsTelemetryToggle");
+        telemetryToggle.Toggled += (_, _) =>
+        {
+            if (_settings.TelemetryEnabled == telemetryToggle.IsOn) return;
+            _settings.TelemetryEnabled = telemetryToggle.IsOn;
+            _store.Save(_settings);
+            _telemetry.SetConsent(_settings.TelemetryEnabled ? TelemetryConsent.Full : TelemetryConsent.Off);
+        };
+        telemetryBody.Children.Add(telemetryToggle);
+        var telemetryCard = Updates.Card(telemetryBody);
+
         var column = new StackPanel { Spacing = 18, Padding = new Thickness(24, 18, 24, 24) };
         column.Children.Add(title);
         column.Children.Add(card);
+        column.Children.Add(telemetryCard);
         return new ScrollViewer { Content = column };
     }
 

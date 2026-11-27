@@ -33,6 +33,7 @@ public sealed partial class App : Application
     private DispatcherQueueTimer? _endTimer;
     private DispatcherQueueTimer? _updateTimer;
     private StudioWindow? _window;
+    private ITelemetryService _telemetry = NullTelemetryService.Instance;
 
     public App()
     {
@@ -50,6 +51,7 @@ public sealed partial class App : Application
         UnhandledException += (_, e) =>
         {
             Log.For("app").Error("unhandled exception", e.Exception);
+            _telemetry.ReportCrash(e.Exception.GetType().Name, e.Exception.Message, e.Exception.StackTrace);
             File.AppendAllText(ResultPath + ".crash.txt", LogScrubber.Scrub(e.Exception.ToString()) + "\n");
         };
 
@@ -96,6 +98,15 @@ public sealed partial class App : Application
         // The saved language (Settings), Arabic by default; CI and screenshots force one with AUN_LANG.
         var localizer = new Localizer(Environment.GetEnvironmentVariable("AUN_LANG") is { Length: > 0 } l ? l : settings.Language);
         var userAgent = "AlUmmahNowStudioWindows/" + version;
+        _telemetry = CoreTelemetryService.CreateOrNull(
+            platform: "windows",
+            appVersion: version,
+            locale: localizer.Language,
+            videosApiBaseUrl: environment.VideosApi.AbsoluteUri,
+            userAgent: userAgent,
+            bufferPath: Path.Combine(dataRoot, "telemetry-buffer.json"),
+            initialEnabled: settings.TelemetryEnabled,
+            demo: demo);
 
         // The passkey sheet is modal to the Studio window; its handle is filled in once it exists.
         var hwnd = IntPtr.Zero;
@@ -198,7 +209,7 @@ public sealed partial class App : Application
         {
             updates.AskRestart();
             WindowsEnd.Close();
-        });
+        }, _telemetry);
         window.AddPage(StudioPages.Settings, localizer["studio.tab.settings"], Symbol.Setting, settingsPage.Root);
         window.UsePages(pages);
         window.SearchRequested += (_, q) => videos.SearchFor(q);
@@ -210,9 +221,10 @@ public sealed partial class App : Application
         };
         var closing = new CancellationTokenSource();
         _ = updates.RunAsync(closing.Token);
-        WindowsEnd.Attach(window.Window, updates, new Action[] { closing.Cancel },
+        _ = _telemetry.FlushAsync(closing.Token);
+        WindowsEnd.Attach(window.Window, updates, new Action[] { closing.Cancel, _telemetry.Persist },
             // Uploads (and the details of finished ones) and encodes, at once and within the end's limit
-            stop => Task.WhenAll(uploadsVm.StopAsync(stop), encode.StopAsync(stop)), allowRestart: updateScene == null);
+            stop => Task.WhenAll(uploadsVm.StopAsync(stop), encode.StopAsync(stop), _telemetry.FlushAsync(stop)), allowRestart: updateScene == null);
 
         _refresh = ui.CreateTimer();
         _refresh.Interval = TimeSpan.FromMilliseconds(300);

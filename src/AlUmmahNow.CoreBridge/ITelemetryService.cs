@@ -1,0 +1,63 @@
+using System;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
+
+namespace AlUmmahNow.CoreBridge
+{
+    /// <summary>The user's telemetry consent choice. Defaults to <see cref="Off"/>.</summary>
+    public enum TelemetryConsent
+    {
+        Off = 0,
+        CrashOnly = 1,
+        Full = 2,
+    }
+
+    /// <summary>Breadcrumb severity level attached to crash reports.</summary>
+    public enum TelemetryBreadcrumbSeverity
+    {
+        Debug = 0,
+        Info = 1,
+        Warning = 2,
+        Error = 3,
+    }
+
+    /// <summary>
+    /// Opt-in, consent-gated telemetry and crash reporting backed by <c>aun-telemetry</c>.
+    /// Nothing is recorded, persisted, or sent while <see cref="Consent"/> is <see cref="TelemetryConsent.Off"/>.
+    /// Turning consent off immediately purges any buffered events from memory and disk.
+    /// </summary>
+    public interface ITelemetryService : IDisposable
+    {
+        TelemetryConsent Consent { get; }
+        int PendingCount { get; }
+
+        void SetConsent(TelemetryConsent consent);
+        void Track(string name, IReadOnlyDictionary<string, object>? properties = null);
+        void TrackError(string code, IReadOnlyDictionary<string, object>? properties = null);
+        void AddBreadcrumb(string category, string message, TelemetryBreadcrumbSeverity level = TelemetryBreadcrumbSeverity.Info);
+        void ReportCrash(string kind, string message, string? stack = null, bool fromPreviousSession = false);
+        void Persist();
+        Task FlushAsync(CancellationToken cancellationToken = default);
+    }
+
+    /// <summary>No-op telemetry service used in demo mode, tests, or platforms without native core.</summary>
+    public sealed class NullTelemetryService : ITelemetryService
+    {
+        public static readonly NullTelemetryService Instance = new NullTelemetryService();
+
+        private NullTelemetryService() { }
+
+        public TelemetryConsent Consent => TelemetryConsent.Off;
+        public int PendingCount => 0;
+
+        public void SetConsent(TelemetryConsent consent) { }
+        public void Track(string name, IReadOnlyDictionary<string, object>? properties = null) { }
+        public void TrackError(string code, IReadOnlyDictionary<string, object>? properties = null) { }
+        public void AddBreadcrumb(string category, string message, TelemetryBreadcrumbSeverity level = TelemetryBreadcrumbSeverity.Info) { }
+        public void ReportCrash(string kind, string message, string? stack = null, bool fromPreviousSession = false) { }
+        public void Persist() { }
+        public Task FlushAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public void Dispose() { }
+    }
+}

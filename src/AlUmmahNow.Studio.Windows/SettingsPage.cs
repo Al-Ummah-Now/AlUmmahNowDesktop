@@ -1,5 +1,6 @@
 using AlUmmahNow.App.I18n;
 using AlUmmahNow.App.Services;
+using AlUmmahNow.CoreBridge;
 using AlUmmahNow.CoreBridge.Studio;
 using AlUmmahNow.Studio.Shell;
 using AlUmmahNow.Studio.Upload;
@@ -29,7 +30,8 @@ internal sealed class SettingsPage
     private readonly Func<StudioAccount, Task> _signOut;
 
     public SettingsPage(Localizer l, AppSettings settings, SettingsStore store, StudioShellViewModel shell, UploadsViewModel uploads,
-        Func<Task<string?>> chooseFolder, Func<StudioAccount, Task> signOut, Func<Task> addPasskey, string version, UpdateViews updates, Action restart)
+        Func<Task<string?>> chooseFolder, Func<StudioAccount, Task> signOut, Func<Task> addPasskey, string version, UpdateViews updates, Action restart,
+        ITelemetryService? telemetry = null)
     {
         _l = l;
         _shell = shell;
@@ -72,6 +74,21 @@ internal sealed class SettingsPage
         _updatesCard = LanternGlass.Card(updates.SectionBody, updates.SectionActions);
         left.Children.Add(_updatesCard);
         updates.UseSection(_updatesCard);
+
+        var telemetryBody = new StackPanel { Spacing = 8 };
+        telemetryBody.Children.Add(Heading(l["settings.telemetry.title"]));
+        telemetryBody.Children.Add(new TextBlock { Text = l["settings.telemetry.body"], TextWrapping = TextWrapping.Wrap, Foreground = LanternGlass.Res("StudioMutedBrush") });
+        var telemetryToggle = new ToggleSwitch { Header = l["settings.telemetry.toggle"], IsOn = settings.TelemetryEnabled };
+        AutomationProperties.SetAutomationId(telemetryToggle, "SettingsTelemetryToggle");
+        telemetryToggle.Toggled += (_, _) =>
+        {
+            if (settings.TelemetryEnabled == telemetryToggle.IsOn) return;
+            settings.TelemetryEnabled = telemetryToggle.IsOn;
+            store.Save(settings);
+            telemetry?.SetConsent(settings.TelemetryEnabled ? TelemetryConsent.Full : TelemetryConsent.Off);
+        };
+        telemetryBody.Children.Add(telemetryToggle);
+        left.Children.Add(LanternGlass.Card(telemetryBody));
 
         var accountsBody = new StackPanel { Spacing = 8 };
         accountsBody.Children.Add(Heading(l[IdentityMenu.AccountsHeadingKey]));

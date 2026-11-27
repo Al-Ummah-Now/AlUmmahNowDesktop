@@ -32,11 +32,13 @@ public sealed partial class MainWindow
     private string? _watchId;
     private Action? _unbindWatch;
     private readonly UpdateService _updates;
-    private bool _hasSettings;
+    private readonly ITelemetryService _telemetry;
+    private bool _hasSettings = true;
 
-    public MainWindow(Adw.Application app, ICatalogClient catalog, Localizer localizer, Navigator navigator, GstMediaPlayer player, IMediaSession session, HttpClient http, AppSettings settings, SettingsStore store, AuthViewModel auth, ILiveClient live, string shortLinkHost, UpdateService updates)
+    public MainWindow(Adw.Application app, ICatalogClient catalog, Localizer localizer, Navigator navigator, GstMediaPlayer player, IMediaSession session, HttpClient http, AppSettings settings, SettingsStore store, AuthViewModel auth, ILiveClient live, string shortLinkHost, UpdateService updates, ITelemetryService? telemetry = null)
     {
         _updates = updates;
+        _telemetry = telemetry ?? NullTelemetryService.Instance;
         _auth = auth;
         _live = live;
         _shortLinkHost = shortLinkHost;
@@ -78,10 +80,8 @@ public sealed partial class MainWindow
         auth.PropertyChanged += (_, _) => Render();
         updates.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName != nameof(UpdateService.IsSectionVisible) || updates.IsSectionVisible == _hasSettings) return;
-            // The page is gone with the section: the settings have nothing else
-            if (!updates.IsSectionVisible && navigator.Current is Route.Settings) navigator.Back();
-            else Render();
+            if (e.PropertyName != nameof(UpdateService.IsSectionVisible)) return;
+            Render();
         };
     }
 
@@ -135,7 +135,7 @@ public sealed partial class MainWindow
         Updates?.Dispose();
         Updates = new UpdateViews(_updates, new UpdateText(_localizer, UpdateApp.Viewer, _updates), _window, UpdateText.Icon(UpdateApp.Viewer), () => _window.GetApplication()?.Quit());
         Updates.ForcedChanged += Render;
-        _hasSettings = _updates.IsSectionVisible;
+        _hasSettings = true;
 
         var root = Gtk.Box.New(Gtk.Orientation.Vertical, 0);
         root.Append(BuildHeader());
@@ -293,7 +293,7 @@ public sealed partial class MainWindow
         return box;
     }
 
-    /// <summary>Settings: the updates. Theme and language are in the header.</summary>
+    /// <summary>Settings: updates and opt-in diagnostics. Theme and language are in the header.</summary>
     private Gtk.Widget BuildSettings()
     {
         var column = Gtk.Box.New(Gtk.Orientation.Vertical, 18);
@@ -313,6 +313,31 @@ public sealed partial class MainWindow
         card.Append(Updates.SectionActions);
         column.Append(card);
         Updates.UseSection(card);
+
+        var telemetryCard = Gtk.Box.New(Gtk.Orientation.Vertical, 10);
+        telemetryCard.AddCssClass("update-card");
+        var telemetryTitle = Gtk.Label.New(_localizer["settings.telemetry.title"]);
+        telemetryTitle.SetHalign(Gtk.Align.Start);
+        telemetryTitle.AddCssClass("title-3");
+        telemetryCard.Append(telemetryTitle);
+        var telemetryBody = Gtk.Label.New(_localizer["settings.telemetry.body"]);
+        telemetryBody.SetHalign(Gtk.Align.Start);
+        telemetryBody.SetWrap(true);
+        telemetryBody.AddCssClass("dim-label");
+        telemetryCard.Append(telemetryBody);
+        var telemetryCheck = Gtk.CheckButton.NewWithLabel(_localizer["settings.telemetry.toggle"]);
+        telemetryCheck.SetActive(_settings.TelemetryEnabled);
+        telemetryCheck.OnToggled += (_, _) =>
+        {
+            var enabled = telemetryCheck.GetActive();
+            if (_settings.TelemetryEnabled == enabled) return;
+            _settings.TelemetryEnabled = enabled;
+            _store.Save(_settings);
+            _telemetry.SetConsent(enabled ? TelemetryConsent.Full : TelemetryConsent.Off);
+        };
+        telemetryCard.Append(telemetryCheck);
+        column.Append(telemetryCard);
+
         var page = Gtk.ScrolledWindow.New();
         page.SetVexpand(true);
         page.SetChild(column);

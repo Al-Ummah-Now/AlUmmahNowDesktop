@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using AlUmmahNow.App.I18n;
 using AlUmmahNow.App.Services;
+using AlUmmahNow.CoreBridge;
 using AlUmmahNow.CoreBridge.Studio;
 using AlUmmahNow.Studio.Shell;
 using AlUmmahNow.Studio.Upload;
@@ -24,7 +25,8 @@ public sealed class SettingsPage
     private readonly Adw.Banner _restart;
 
     public SettingsPage(Localizer l, AppSettings settings, SettingsStore store, StudioShellViewModel shell, UploadsViewModel uploads,
-        Func<Task<string?>> chooseFolder, Func<StudioAccount, Task> signOut, string version, UpdateViews updates)
+        Func<Task<string?>> chooseFolder, Func<StudioAccount, Task> signOut, string version, UpdateViews updates,
+        ITelemetryService? telemetry = null)
     {
         _l = l;
         _shell = shell;
@@ -64,6 +66,23 @@ public sealed class SettingsPage
             store.Save(settings);
             _restart.SetRevealed(settings.Language != l.Language);
         }));
+
+        // Opt-in diagnostics and crash reports (off by default).
+        var telemetryBody = Gtk.Box.New(Gtk.Orientation.Vertical, 8);
+        telemetryBody.Append(Ui.CardTitle(l["settings.telemetry.title"]));
+        telemetryBody.Append(Ui.Label(l["settings.telemetry.body"], dim: true));
+        var telemetryCheck = Gtk.CheckButton.NewWithLabel(l["settings.telemetry.toggle"]);
+        telemetryCheck.SetActive(settings.TelemetryEnabled);
+        telemetryCheck.OnToggled += (_, _) =>
+        {
+            var enabled = telemetryCheck.GetActive();
+            if (settings.TelemetryEnabled == enabled) return;
+            settings.TelemetryEnabled = enabled;
+            store.Save(settings);
+            telemetry?.SetConsent(enabled ? TelemetryConsent.Full : TelemetryConsent.Off);
+        };
+        telemetryBody.Append(telemetryCheck);
+        left.Append(Ui.Card(telemetryBody));
 
         var about = Gtk.Box.New(Gtk.Orientation.Vertical, 6);
         about.Append(Ui.CardTitle(l["studio.settings.about"]));

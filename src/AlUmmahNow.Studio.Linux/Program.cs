@@ -54,6 +54,19 @@ if (Environment.GetEnvironmentVariable("AUN_THEME") is "dark" or "light") settin
 var localizer = new Localizer(Environment.GetEnvironmentVariable("AUN_LANG") is { Length: > 0 } lang ? lang : settings.Language);
 
 var userAgent = "AlUmmahNowStudioLinux/" + version;
+var telemetry = CoreTelemetryService.CreateOrNull(
+    platform: "linux",
+    appVersion: version,
+    locale: localizer.Language,
+    videosApiBaseUrl: environment.VideosApi.AbsoluteUri,
+    userAgent: userAgent,
+    bufferPath: Path.Combine(stateDir, "telemetry-buffer.json"),
+    initialEnabled: settings.TelemetryEnabled,
+    demo: demo);
+AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+{
+    if (e.ExceptionObject is Exception ex) telemetry.ReportCrash(ex.GetType().Name, ex.Message, ex.StackTrace);
+};
 IStudioAccounts accounts;
 IApiTransport transport;
 Func<string, IUploadService> uploadServiceFor;
@@ -156,7 +169,7 @@ app.OnActivate += (_, _) =>
         updateStore, updateInstall, version, IsBusy, new DownloadPageDelivery(new ShellBrowserLauncher()));
     var updateViews = new UpdateViews(updates, new UpdateText(localizer, UpdateApp.Studio, updates), window.Window, UpdateText.Icon(UpdateApp.Studio), app.Quit);
     window.UseUpdates(updateViews);
-    var settingsPage = new SettingsPage(localizer, settings, settingsStore, shell, uploadsVm, ChooseFolderAsync, window.SignOut, updates.InstalledVersion, updateViews);
+    var settingsPage = new SettingsPage(localizer, settings, settingsStore, shell, uploadsVm, ChooseFolderAsync, window.SignOut, updates.InstalledVersion, updateViews, telemetry);
     window.AddPage(StudioPages.Settings, localizer["studio.tab.settings"], "emblem-system-symbolic", settingsPage.Root);
     window.UsePages(pages);
     window.SearchRequested += (_, q) => videos.SearchFor(q);
@@ -175,9 +188,11 @@ app.OnActivate += (_, _) =>
     });
     var closing = new CancellationTokenSource();
     _ = updates.RunAsync(closing.Token);
+    _ = telemetry.FlushAsync(closing.Token);
     app.OnShutdown += (_, _) =>
     {
         closing.Cancel();
+        telemetry.Persist();
         uploadsVm.Dispose();
     };
 

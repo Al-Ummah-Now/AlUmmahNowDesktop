@@ -8,7 +8,7 @@
     <PackageVersion Include="Tizen.NET" Version="5.0.0.14629" />
     <PackageVersion Include="Microsoft.WindowsAppSDK" Version="1.7.250606001" />
     <PackageVersion Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.4188" />
-    <PackageVersion Include="AlUmmahNow.Core" Version="0.4.0-rc.11" />
+    <PackageVersion Include="AlUmmahNow.Core" Version="0.4.0-rc.13" />
     <PackageVersion Include="System.Security.Cryptography.ProtectedData" Version="9.0.10" />
     <PackageVersion Include="Microsoft.Win32.SystemEvents" Version="9.0.10" />
     <PackageVersion Include="GirCore.Gtk-4.0" Version="0.8.1" />

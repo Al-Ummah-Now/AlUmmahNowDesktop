@@ -70,6 +70,21 @@ MainWindow? viewer = null;
 bool IsBusy() => viewer?.IsLivePlaying == true;
 var updateScene = UpdateScene.FromEnvironment(localizer, UpdateInstall.Flatpak, IsBusy);
 var version = UpdateText.VersionOf(typeof(MainWindow).Assembly);
+var stateHome = Environment.GetEnvironmentVariable("XDG_STATE_HOME");
+if (string.IsNullOrEmpty(stateHome)) stateHome = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "state");
+var telemetry = CoreTelemetryService.CreateOrNull(
+    platform: "linux",
+    appVersion: version,
+    locale: settings.Language,
+    videosApiBaseUrl: environment.VideosApi.AbsoluteUri,
+    userAgent: "AlUmmahNowLinux/" + version,
+    bufferPath: Path.Combine(stateHome, "alummahnow", "telemetry-buffer.json"),
+    initialEnabled: settings.TelemetryEnabled,
+    demo: isDemo);
+AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+{
+    if (e.ExceptionObject is Exception ex) telemetry.ReportCrash(ex.GetType().Name, ex.Message, ex.StackTrace);
+};
 var updateStore = new UpdateStore(Path.Combine(configHome, "alummahnow", "updates.json"));
 var app = Adw.Application.New("net.alummahnow.AlUmmahNow", Gio.ApplicationFlags.NonUnique);
 var exitCode = 0;
@@ -101,8 +116,12 @@ app.OnActivate += async (_, _) =>
         new CoreUpdateChecker(environment.VideosApi, "viewer", "linux", version, "AlUmmahNowLinux/" + version, updateStore.Load().Core),
         updateStore, updateInstall, version, IsBusy, new DownloadPageDelivery(new ShellBrowserLauncher()));
     var closing = new CancellationTokenSource();
-    app.OnShutdown += (_, _) => closing.Cancel();
-    window = new MainWindow(app, catalog, localizer, navigator, player, session, http, settings, store, auth, live, environment.ShortLinkHost, updates);
+    app.OnShutdown += (_, _) =>
+    {
+        closing.Cancel();
+        telemetry.Persist();
+    };
+    window = new MainWindow(app, catalog, localizer, navigator, player, session, http, settings, store, auth, live, environment.ShortLinkHost, updates, telemetry);
     viewer = window;
     try
     {
@@ -148,6 +167,7 @@ app.OnActivate += async (_, _) =>
 
     var started = window.StartAsync();
     _ = updates.RunAsync(closing.Token);
+    _ = telemetry.FlushAsync(closing.Token);
     if (updateScene != null)
     {
         GLib.Functions.TimeoutAdd(0, 6000, () =>

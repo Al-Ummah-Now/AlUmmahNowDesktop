@@ -23,11 +23,16 @@ public sealed partial class App : Application
     private DispatcherQueueTimer? _sampleTimer;
     private DispatcherQueueTimer? _endTimer;
     private DispatcherQueueTimer? _updateTimer;
+    private ITelemetryService _telemetry = NullTelemetryService.Instance;
 
     public App()
     {
         InitializeComponent();
-        UnhandledException += (_, e) => ReportCrash("unhandled: " + e.Message + "\n" + e.Exception);
+        UnhandledException += (_, e) =>
+        {
+            _telemetry.ReportCrash(e.Exception.GetType().Name, e.Exception.Message, e.Exception.StackTrace);
+            ReportCrash("unhandled: " + e.Message + "\n" + e.Exception);
+        };
     }
 
     private static void ReportCrash(string text)
@@ -106,10 +111,21 @@ public sealed partial class App : Application
         Shell? shown = null;
         bool IsBusy() => shown?.IsLivePlaying == true;
         var updateScene = UpdateScene.FromEnvironment(localizer, UpdateInstall.Msix, IsBusy);
-        var updateStore = new UpdateStore(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AlUmmahNow", "updates.json"));
+        var dataRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AlUmmahNow");
+        var isDemo = Environment.GetEnvironmentVariable("AUN_DEMO") == "1";
+        _telemetry = CoreTelemetryService.CreateOrNull(
+            platform: "windows",
+            appVersion: version,
+            locale: settings.Language,
+            videosApiBaseUrl: environment.VideosApi.AbsoluteUri,
+            userAgent: "AlUmmahNowWindows/" + version,
+            bufferPath: Path.Combine(dataRoot, "telemetry-buffer.json"),
+            initialEnabled: settings.TelemetryEnabled,
+            demo: isDemo);
+        var updateStore = new UpdateStore(Path.Combine(dataRoot, "updates.json"));
         var updates = updateScene?.Service ?? WindowsInstall.Service("viewer", environment.VideosApi, version, "AlUmmahNowWindows/" + version,
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AlUmmahNow"), updateStore, Environment.GetEnvironmentVariable("AUN_DEMO") == "1", IsBusy, WindowsEnd.Close);
-        var shell = shown = new Shell(catalog, localizer, navigator, player, session, settings, store, auth, live, environment.ShortLinkHost, updates, WindowsEnd.Close);
+            dataRoot, updateStore, isDemo, IsBusy, WindowsEnd.Close);
+        var shell = shown = new Shell(catalog, localizer, navigator, player, session, settings, store, auth, live, environment.ShortLinkHost, updates, WindowsEnd.Close, _telemetry);
         var closing = new CancellationTokenSource();
 
         _window = new Window { Title = localizer["app.name"], Content = shell.Root };
@@ -128,8 +144,8 @@ public sealed partial class App : Application
         _window.AppWindow.Resize(new global::Windows.Graphics.SizeInt32(1280, 800));
         if (_window.AppWindow.Presenter is OverlappedPresenter presenter) presenter.Maximize();
         var leaving = Task.CompletedTask;
-        WindowsEnd.Attach(_window, updates, new Action[] { closing.Cancel, player.Stop, () => leaving = shell.LeaveLive() },
-            stop => Task.WhenAny(leaving, Task.Delay(TimeSpan.FromSeconds(2), stop)), allowRestart: updateScene == null);
+        WindowsEnd.Attach(_window, updates, new Action[] { closing.Cancel, player.Stop, _telemetry.Persist, () => leaving = shell.LeaveLive() },
+            stop => Task.WhenAny(Task.WhenAll(leaving, _telemetry.FlushAsync(stop)), Task.Delay(TimeSpan.FromSeconds(2), stop)), allowRestart: updateScene == null);
         _window.VisibilityChanged += (_, e) => shell.SetHidden(!e.Visible);
         _window.Activate();
 
@@ -184,6 +200,7 @@ public sealed partial class App : Application
 
         var started = shell.StartAsync();
         _ = updates.RunAsync(closing.Token);
+        _ = _telemetry.FlushAsync(closing.Token);
         if (updateScene != null)
         {
             var act = _updateTimer = ui.CreateTimer();
