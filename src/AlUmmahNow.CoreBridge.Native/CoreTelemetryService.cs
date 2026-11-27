@@ -602,7 +602,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         if (nextPos >= text.Length) return true;
         var next = text[nextPos];
         if (char.IsWhiteSpace(next) ||
-            next is '"' or '\'' or '<' or '>' or '\\' or '{' or '}' or ')' or ']' or '\r' or '\n')
+            next is '"' or '<' or '>' or '\\' or '{' or '}' or ')' or ']' or '\r' or '\n')
         {
             return true;
         }
