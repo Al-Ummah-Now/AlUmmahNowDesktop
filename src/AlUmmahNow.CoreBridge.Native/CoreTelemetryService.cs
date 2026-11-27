@@ -33,7 +33,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         "kt", "java", "swift", "cs", "cpp", "cc", "c", "h", "hpp", "rs", "py", "js", "ts", "go", "rb", "m", "mm"
     };
     private static readonly Regex KeywordAssignedPathRegex = new(@"(\b(?:file|path|filename|filepath)\s*[:=]\s*)(?!\u001E)[^\r\n\u001E\u001F]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex BareFilenameRegex = new(@"(^|[\r\n:=;\u001F])([ \t]*)(?=[^\r\n:=;\u001E\u001F \t])[^\r\n:=;\u001E\u001F]*\.(?!ts:\d+)(?:mov|mp4|m4v|mkv|webm|avi|ts|m3u8|mpd|mp3|m4a|wav|aac|flac|ogg|opus|jpg|jpeg|png|gif|webp|heic|svg|pdf|txt|md|rtf|doc|docx|xls|xlsx|ppt|pptx|csv|json|xml|yaml|yml|toml|ini|cfg|conf|log|srt|vtt|ass|ssa|zip|tar|gz|tgz|bz2|xz|7z|rar|dmg|pkg|msi|exe|apk|aab|ipa|pem|key|crt|cer|p12|pfx|jks|keystore|db|sqlite|sqlite3|bin|dat|tmp|bak|proj|aun)\b(?!\()", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex BareFilenameRegex = new(@"(^|[\r\n:=;\u001F""])([ \t]*)(?=[^\r\n:=;\u001E\u001F"" \t])[^\r\n:=;\u001E\u001F""]*\.(?!ts:\d+)(?:mov|mp4|m4v|mkv|webm|avi|ts|m3u8|mpd|mp3|m4a|wav|aac|flac|ogg|opus|jpg|jpeg|png|gif|webp|heic|svg|pdf|txt|md|rtf|doc|docx|xls|xlsx|ppt|pptx|csv|json|xml|yaml|yml|toml|ini|cfg|conf|log|srt|vtt|ass|ssa|zip|tar|gz|tgz|bz2|xz|7z|rar|dmg|pkg|msi|exe|apk|aab|ipa|pem|key|crt|cer|p12|pfx|jks|keystore|db|sqlite|sqlite3|bin|dat|tmp|bak|proj|aun)\b(?!\()", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly string[] KnownAuthSchemeList =
     {
         "Bearer", "Basic", "Digest", "Token", "Api-Key", "ApiKey",
@@ -236,11 +236,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         scrubbed = RedactDoubleQuotedLocalPaths(scrubbed);
         scrubbed = ReplaceUnquotedParenPaths(scrubbed, ParenPathRegex);
         scrubbed = ReplaceUnquotedParenPaths(scrubbed, ParenRelativeSlashPathRegex);
-        scrubbed = ReplaceOutsideBalancedDoubleQuotes(scrubbed, WindowsPathRegex, "[redacted-path]", hasPrefixGroup: false);
-        scrubbed = ReplaceOutsideBalancedDoubleQuotes(scrubbed, RelativeBackslashPathRegex, "$1[redacted-path]", hasPrefixGroup: true);
-        scrubbed = ReplaceOutsideBalancedDoubleQuotes(scrubbed, QuotedSpacedRootPathRegex, "[redacted-path]", hasPrefixGroup: false, checkNextChar: true);
-        scrubbed = ReplaceOutsideBalancedDoubleQuotes(scrubbed, UnixPathRegex, "[redacted-path]", hasPrefixGroup: false);
-        scrubbed = ReplaceOutsideBalancedDoubleQuotes(scrubbed, RelativeSlashPathRegex, "$1[redacted-path]", hasPrefixGroup: true);
+        scrubbed = ReplacePreKeywordPathRules(scrubbed);
         scrubbed = RedactQuotedFilenames(scrubbed);
         scrubbed = KeywordQuotedPathRegex.Replace(scrubbed, "$1[redacted-path]");
         scrubbed = RedactKeywordUnquotedFilenames(scrubbed);
@@ -970,13 +966,27 @@ public sealed class CoreTelemetryService : ITelemetryService
                 i++;
                 continue;
             }
-            var close = FindDoubleQuotedPathEnd(text, i + 1, out var stopPos);
+            var close = FindDoubleQuotedPathEnd(text, i + 1, out var hasVault, out var stopPos);
             if (close < 0)
             {
                 i = stopPos + 1;
                 continue;
             }
-            RedactQuotedNonVaultSegments(text, i + 1, close, ref sb, ref copied);
+            if (!hasVault)
+            {
+                var pathPos = i + 1 < close ? FindLocalPathStartInQuoted(text, i + 1, close) : -1;
+                if (pathPos >= 0)
+                {
+                    if (pathPos > i + 1 && IsPrecededByOddBackslashes(text, pathPos, i + 1)) pathPos--;
+                    sb ??= new StringBuilder(text.Length);
+                    sb.Append(text, copied, pathPos - copied).Append("[redacted-path]");
+                    copied = close;
+                }
+            }
+            else
+            {
+                RedactQuotedNonVaultSegments(text, i + 1, close, ref sb, ref copied);
+            }
             i = close + 1;
         }
         if (sb == null) return text;
@@ -1022,7 +1032,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                 i++;
                 continue;
             }
-            var close = FindDoubleQuotedPathEnd(text, i + 1, out var stopPos);
+            var close = FindDoubleQuotedPathEnd(text, i + 1, out _, out var stopPos);
             if (close < 0)
             {
                 i = stopPos + 1;
@@ -1034,24 +1044,87 @@ public sealed class CoreTelemetryService : ITelemetryService
         return spans;
     }
 
-    private static string ReplaceOutsideBalancedDoubleQuotes(
-        string text, Regex regex, string replacement, bool hasPrefixGroup, bool checkNextChar = false)
+    private static string BuildMaskedDoubleQuotes(string text, List<(int Open, int Close)> spans)
     {
-        if (text.IndexOf('"') < 0) return regex.Replace(text, replacement);
-        var spans = CollectBalancedDoubleQuoteSpans(text);
-        if (spans.Count == 0) return regex.Replace(text, replacement);
-        var spanIdx = 0;
-        return regex.Replace(text, match =>
+        var chars = text.ToCharArray();
+        foreach (var (open, close) in spans)
         {
-            var pos = hasPrefixGroup ? match.Index + match.Groups[1].Length
-                : (checkNextChar ? match.Index + 1 : match.Index);
-            while (spanIdx < spans.Count && spans[spanIdx].Close <= pos) spanIdx++;
-            if (spanIdx < spans.Count && spans[spanIdx].Open < pos && pos < spans[spanIdx].Close)
+            for (var k = open + 1; k < close; k++)
             {
-                return match.Value;
+                if (chars[k] is not ('\u001E' or '\u001F')) chars[k] = 'a';
             }
-            return hasPrefixGroup ? match.Groups[1].Value + "[redacted-path]" : "[redacted-path]";
-        });
+        }
+        return new string(chars);
+    }
+
+    private static string ReplacePreKeywordPathRules(string text)
+    {
+        var rules = new (Regex Regex, bool HasPrefix)[]
+        {
+            (WindowsPathRegex, false),
+            (RelativeBackslashPathRegex, true),
+            (QuotedSpacedRootPathRegex, false),
+            (UnixPathRegex, false),
+            (RelativeSlashPathRegex, true),
+        };
+        var current = text;
+        string? masked = null;
+        var hasMask = false;
+        foreach (var (regex, hasPrefix) in rules)
+        {
+            if (current.IndexOf('"') < 0)
+            {
+                current = regex.Replace(current, hasPrefix ? "$1[redacted-path]" : "[redacted-path]");
+                continue;
+            }
+            if (!hasMask)
+            {
+                var spans = CollectBalancedDoubleQuoteSpans(current);
+                masked = spans.Count > 0 ? BuildMaskedDoubleQuotes(current, spans) : null;
+                hasMask = true;
+            }
+            if (masked == null)
+            {
+                var next = regex.Replace(current, hasPrefix ? "$1[redacted-path]" : "[redacted-path]");
+                if (!ReferenceEquals(next, current))
+                {
+                    current = next;
+                    hasMask = false;
+                }
+                continue;
+            }
+            var replaced = ApplyMaskedPathRegex(current, masked, regex, hasPrefix);
+            if (!ReferenceEquals(replaced, current))
+            {
+                current = replaced;
+                hasMask = false;
+            }
+        }
+        return current;
+    }
+
+    private static string ApplyMaskedPathRegex(string text, string masked, Regex regex, bool hasPrefix)
+    {
+        var match = regex.Match(masked);
+        if (!match.Success) return text;
+        var sb = new StringBuilder(text.Length);
+        var copied = 0;
+        while (match.Success)
+        {
+            var start = match.Index;
+            var end = start + match.Length;
+            sb.Append(text, copied, start - copied);
+            if (hasPrefix)
+            {
+                var g1 = match.Groups[1];
+                sb.Append(text, g1.Index, g1.Length);
+            }
+            sb.Append("[redacted-path]");
+            copied = end;
+            match = match.NextMatch();
+        }
+        sb.Append(text, copied, text.Length - copied);
+        return sb.ToString();
     }
 
     private static string ReplaceKeywordAssignedPaths(string text)
@@ -1059,23 +1132,43 @@ public sealed class CoreTelemetryService : ITelemetryService
         if (text.IndexOf('"') < 0) return KeywordAssignedPathRegex.Replace(text, "$1[redacted-path]");
         var spans = CollectBalancedDoubleQuoteSpans(text);
         if (spans.Count == 0) return KeywordAssignedPathRegex.Replace(text, "$1[redacted-path]");
-        var spanIdx = 0;
-        return KeywordAssignedPathRegex.Replace(text, match =>
+        var masked = BuildMaskedDoubleQuotes(text, spans);
+        var current = ApplyMaskedPathRegex(text, masked, KeywordAssignedPathRegex, hasPrefix: true);
+        if (!ReferenceEquals(current, text))
         {
-            var pos = match.Index;
-            while (spanIdx < spans.Count && spans[spanIdx].Close <= pos) spanIdx++;
-            if (spanIdx < spans.Count && spans[spanIdx].Open < pos && pos < spans[spanIdx].Close &&
-                match.Index + match.Length > spans[spanIdx].Close)
-            {
-                var tailStart = spans[spanIdx].Close - match.Index;
-                return match.Groups[1].Value + "[redacted-path]" + match.Value.Substring(tailStart);
-            }
-            return match.Groups[1].Value + "[redacted-path]";
-        });
+            if (current.IndexOf('"') < 0) return current;
+            spans = CollectBalancedDoubleQuoteSpans(current);
+        }
+        StringBuilder? sb = null;
+        var copied = 0;
+        foreach (var (open, close) in spans)
+        {
+            var innerStart = open + 1;
+            var innerLen = close - innerStart;
+            if (innerLen <= 0 || !ContainsAssignDelimiter(current, innerStart, close)) continue;
+            var inner = current.Substring(innerStart, innerLen);
+            var scrubbedInner = KeywordAssignedPathRegex.Replace(inner, "$1[redacted-path]");
+            if (ReferenceEquals(scrubbedInner, inner) || scrubbedInner == inner) continue;
+            sb ??= new StringBuilder(current.Length);
+            sb.Append(current, copied, innerStart - copied).Append(scrubbedInner);
+            copied = close;
+        }
+        if (sb == null) return current;
+        return sb.Append(current, copied, current.Length - copied).ToString();
     }
 
-    private static int FindDoubleQuotedPathEnd(string text, int start, out int stopPos)
+    private static bool ContainsAssignDelimiter(string text, int start, int end)
     {
+        for (var i = start; i < end; i++)
+        {
+            if (text[i] is ':' or '=') return true;
+        }
+        return false;
+    }
+
+    private static int FindDoubleQuotedPathEnd(string text, int start, out bool hasVault, out int stopPos)
+    {
+        hasVault = false;
         var escaped = false;
         var j = start;
         while (j < text.Length)
@@ -1085,6 +1178,10 @@ public sealed class CoreTelemetryService : ITelemetryService
             {
                 stopPos = j;
                 return -1;
+            }
+            if (ch == '\u001E')
+            {
+                hasVault = true;
             }
             if (ch == '\u001F')
             {

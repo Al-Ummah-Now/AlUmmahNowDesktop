@@ -1376,6 +1376,22 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("[\"hello\\nworld\",\"public\"]"));
             Assert.Equal("[\"path=[redacted-path]\",\"public\"]",
                 CoreTelemetryService.SanitizeLocalPaths("[\"path=secret\",\"public\"]"));
+            Assert.Equal("[\"path=[redacted-path]\",\"path=[redacted-path]\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"path=alpha\",\"path=beta\"]"));
+            Assert.Equal("[\"hello\\nworld\"] [redacted-path]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"hello\\nworld\"] relative\\secret"));
+            Assert.Equal("[\"hello\\nworld\",\"public\"] [redacted-path]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"hello\\nworld\",\"public\"] relative\\Secret"));
+            Assert.Equal("[\"public\",\"[redacted-path] attached\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"public\",\"report.pdf attached\"]"));
+            Assert.Equal("{\"message\":\"[redacted-path] now\",\"keep\":\"public\"}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"message\":\"see report.pdf now\",\"keep\":\"public\"}"));
+            Assert.Equal("{\"status\":\"[redacted-path] pending\"}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"status\":\"secret.mov pending\"}"));
+            var manyPublic = "[" + string.Join(",", Enumerable.Repeat("\"public\"", 2000)) + "]";
+            Assert.Equal(manyPublic, CoreTelemetryService.SanitizeLocalPaths(manyPublic));
+            var manyNewlines = "[" + string.Join(",", Enumerable.Repeat("\"hello\\nworld\"", 2000)) + "]";
+            Assert.Equal(manyNewlines, CoreTelemetryService.SanitizeLocalPaths(manyNewlines));
             Assert.Equal("Failed reading [redacted-path]",
                 CoreTelemetryService.SanitizeLocalPaths("Failed reading /Users/alice/My \"Secret\" Folder/file.mov"));
             var manySlashes = "[\"" + new string('/', 10_000) + "\",\"public\"]";
