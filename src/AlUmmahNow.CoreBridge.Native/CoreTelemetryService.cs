@@ -21,10 +21,10 @@ public sealed class CoreTelemetryService : ITelemetryService
 {
     private static readonly Regex ParenPathRegex = new(@"(\()(?:/|~/|[A-Za-z]:[\\/]|\\\\)[^()\r\n\u001E]+(\))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex ParenRelativeSlashPathRegex = new(@"(\()(?![ \t]*(?:HTTP|TLS|SSL)/\d)(?![ \t]*\d+/\d+[.,;:!?\s]*\))[^\s/\\""'<>()\[\]{}:,;=\u001E\u001F]+/[^()\r\n\u001E]+(\))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex WindowsPathRegex = new(@"(?:[A-Za-z]:[\\/]|\\\\)[^\S\r\n]*[^\r\n\u001E\s](?:[^\r\n\u001E]*[^\r\n\u001E\s])?", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex RelativeBackslashPathRegex = new(@"(^|[\s(\[{""'=,:;<>)\u001F])[^\s\\/""'<>()\[{:,;=\u001E\u001F]+\\[^\r\n\u001E\u001F\s](?:[^\r\n\u001E\u001F]*[^\r\n\u001E\u001F\s])?", RegexOptions.Compiled);
-    private static readonly Regex QuotedSpacedRootPathRegex = new(@"[""']/[ \t]+[^\r\n\u001E]+", RegexOptions.Compiled);
-    private static readonly Regex UnixPathRegex = new(@"(?<![\p{L}\p{M}\p{N}._/-])(?:~/|//+(?=[^\S\r\n]*[^\s/])|/(?=[^\S\r\n]*[^\s/]))[^\S\r\n]*[^\r\n\u001E\s](?:[^\r\n\u001E]*[^\r\n\u001E\s])?", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex WindowsPathRegex = new(@"(?:[A-Za-z]:[\\/]|\\\\)[^\S\r\n]*[^\r\n\u001E\s""](?:[^\r\n\u001E]*[^\r\n\u001E\s])?", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex RelativeBackslashPathRegex = new(@"(^|[\s(\[{""'=,:;<>)\u001F])[^\s\\/""'<>()\[{:,;=\u001E\u001F]+\\[^\r\n\u001E\u001F\s""](?:[^\r\n\u001E\u001F]*[^\r\n\u001E\u001F\s])?", RegexOptions.Compiled);
+    private static readonly Regex QuotedSpacedRootPathRegex = new(@"[""']/[ \t]+[^\r\n\u001E\s""][^\r\n\u001E]*", RegexOptions.Compiled);
+    private static readonly Regex UnixPathRegex = new(@"(?<![\p{L}\p{M}\p{N}._/-])(?:~/(?=[^\S\r\n]*[^\s""])|//+(?=[^\S\r\n]*[^\s/""])|/(?=[^\S\r\n]*[^\s/""]))[^\S\r\n]*[^\r\n\u001E\s](?:[^\r\n\u001E]*[^\r\n\u001E\s])?", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex RelativeSlashPathRegex = new(@"(^|[\s(\[{)\]}<>""'=,:;\u001F])(?!(?<!['""])(?:HTTP|TLS|SSL)/\d)(?!(?<!['""])\d+/\d+(?:$|[\s)\]},;:!?]|\.(?![A-Za-z0-9])))[^\s/\\""'<>()\[\]{}:,;=\u001E\u001F]+/[^\r\n\u001E\u001F\s](?:[^\r\n\u001E\u001F]*[^\r\n\u001E\u001F\s])?", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex KeywordQuotedPathRegex = new(@"(\b(?:file|path|directory|folder|document)[^\S\r\n]+)([""'])(?!\u001E)[^'""\r\n]+\2", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex KeywordFilenamePrefixRegex = new(@"\b(?:open|opening|read|reading|write|writing|delete|deleting|remove|removing|rename|stat|create|creating|load|loading|save|saving|access|accessing|unlink|file|path|directory|folder|document|filename|filepath)\b(?:[^\S\r\n]*[:=][^\S\r\n]*|[^\S\r\n]+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -39,7 +39,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         "Bearer", "Basic", "Digest", "Token", "Api-Key", "ApiKey",
         "OAuth", "Negotiate", "Mutual", "HOBA", "Vapid", "SCRAM-SHA-256", "AWS4-HMAC-SHA256"
     };
-    private static readonly Regex BearerTokenRegex = new(@"\b(Bearer)\s+(?!\[redacted\](?=$|[\s""',;)\]}]))[^\s""',;)\]}]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex BearerTokenRegex = new(@"\b(Bearer)\s+(?!\[redacted\](?=$|[\s""',;)\]}]))(?:\\[^\r\n\s]|[^\s\\""',;)\]}]|\\(?=$|[\s\r\n]))+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex BasicTokenRegex = new(@"\b(Basic)\s+([A-Za-z0-9+/_-]{2,}={0,2})(?![A-Za-z0-9+/_=-])", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly System.Text.UTF8Encoding StrictUtf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
 
@@ -233,6 +233,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         scrubbed = RedactAuthCredentials(scrubbed);
         scrubbed = VaultNonFileUrls(scrubbed, VaultPrefix, out var vaultedUrls);
         scrubbed = RedactFileUris(scrubbed, VaultPrefix);
+        scrubbed = RedactDoubleQuotedLocalPaths(scrubbed);
         scrubbed = ReplaceUnquotedParenPaths(scrubbed, ParenPathRegex);
         scrubbed = ReplaceUnquotedParenPaths(scrubbed, ParenRelativeSlashPathRegex);
         scrubbed = WindowsPathRegex.Replace(scrubbed, "[redacted-path]");
@@ -296,8 +297,8 @@ public sealed class CoreTelemetryService : ITelemetryService
             }
             var inSingleQuote = (quoteState & 1) != 0;
             var inDoubleQuote = (quoteState & 2) != 0;
-            var allowAngleBrackets = inDoubleQuote && (start == 0 || text[start - 1] != '<');
-            if (!TryScanUrlAfterScheme(text, sep, allowAngleBrackets, out var baseEnd, out var totalEnd, out var hasQf))
+            var angleStopMask = ComputeQueryAngleStopMask(text, start, inDoubleQuote);
+            if (!TryScanUrlAfterScheme(text, sep, angleStopMask, out var baseEnd, out var totalEnd, out var hasQf))
             {
                 searchFrom = sep + 3;
                 continue;
@@ -425,8 +426,8 @@ public sealed class CoreTelemetryService : ITelemetryService
         if (p > totalEnd && p < text.Length && text[p] is '?' or '#')
         {
             var qfStart = p;
-            var allowAngleBrackets = (quoteState & 2) != 0 && (urlStart == 0 || text[urlStart - 1] != '<');
-            p = ScanQueryOrFragment(text, qfStart, allowAngleBrackets);
+            var angleStopMask = ComputeQueryAngleStopMask(text, urlStart, (quoteState & 2) != 0);
+            p = ScanQueryOrFragment(text, qfStart, angleStopMask);
             var qf = TrimQueryOrFragmentDelimiters(
                 text.Substring(qfStart, p - qfStart), text, urlStart, out var qfTail, inSingleQuote);
             var qfToken = qf[0] + "[redacted]";
@@ -774,8 +775,16 @@ public sealed class CoreTelemetryService : ITelemetryService
         return !text.AsSpan(start, sep - start).Equals("file", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static int ComputeQueryAngleStopMask(string text, int urlStart, bool inDoubleQuote)
+    {
+        var wrappedInAngle = urlStart > 0 && text[urlStart - 1] == '<';
+        var stopOnLess = !inDoubleQuote && !wrappedInAngle;
+        var stopOnGreater = !inDoubleQuote || wrappedInAngle;
+        return (stopOnLess ? 1 : 0) | (stopOnGreater ? 2 : 0);
+    }
+
     private static bool TryScanUrlAfterScheme(
-        string text, int sep, bool allowAngleBrackets, out int baseEnd, out int totalEnd, out bool hasQf)
+        string text, int sep, int angleStopMask, out int baseEnd, out int totalEnd, out bool hasQf)
     {
         baseEnd = 0;
         totalEnd = 0;
@@ -799,19 +808,24 @@ public sealed class CoreTelemetryService : ITelemetryService
         if (!truncatedPath && p < text.Length && text[p] is '?' or '#')
         {
             hasQf = true;
-            p = ScanQueryOrFragment(text, p, allowAngleBrackets);
+            p = ScanQueryOrFragment(text, p, angleStopMask);
         }
         totalEnd = p;
         return totalEnd == text.Length || IsUrlEndBoundary(text, totalEnd);
     }
 
-    private static int ScanQueryOrFragment(string text, int start, bool allowAngleBrackets = false)
+    private static int ScanQueryOrFragment(string text, int start, int angleStopMask = 3)
     {
         var p = start + 1;
         while (p < text.Length)
         {
             var ch = text[p];
-            if (char.IsWhiteSpace(ch) || ch is '\r' or '\n' || (!allowAngleBrackets && ch is '<' or '>')) break;
+            if (char.IsWhiteSpace(ch) || ch is '\r' or '\n' ||
+                (ch == '<' && (angleStopMask & 1) != 0) ||
+                (ch == '>' && (angleStopMask & 2) != 0))
+            {
+                break;
+            }
             if (ch == '"')
             {
                 var bs = 0;
@@ -942,6 +956,129 @@ public sealed class CoreTelemetryService : ITelemetryService
         }
         return IsFileSchemeAt(text, pos) || IsWindowsDriveAt(text, pos);
     }
+
+    private static string RedactDoubleQuotedLocalPaths(string text)
+    {
+        if (text.IndexOf('"') < 0) return text;
+        StringBuilder? sb = null;
+        var copied = 0;
+        var i = 0;
+        while (i < text.Length)
+        {
+            if (text[i] != '"' || IsPrecededByOddBackslashes(text, i, copied))
+            {
+                i++;
+                continue;
+            }
+            var close = FindDoubleQuotedPathEnd(text, i + 1, out var lastVaultEnd, out var stopPos);
+            if (close < 0)
+            {
+                i = stopPos + 1;
+                continue;
+            }
+            var sliceStart = lastVaultEnd > i + 1 ? lastVaultEnd : i + 1;
+            var pathPos = sliceStart < close ? FindLocalPathStartInQuoted(text, sliceStart, close) : -1;
+            if (pathPos >= 0)
+            {
+                sb ??= new StringBuilder(text.Length);
+                sb.Append(text, copied, pathPos - copied).Append("[redacted-path]");
+                copied = close;
+            }
+            i = close + 1;
+        }
+        if (sb == null) return text;
+        return sb.Append(text, copied, text.Length - copied).ToString();
+    }
+
+    private static int FindDoubleQuotedPathEnd(string text, int start, out int lastVaultEnd, out int stopPos)
+    {
+        lastVaultEnd = -1;
+        var escaped = false;
+        var j = start;
+        while (j < text.Length)
+        {
+            var ch = text[j];
+            if (ch is '\r' or '\n')
+            {
+                stopPos = j;
+                return -1;
+            }
+            if (ch == '\u001F')
+            {
+                lastVaultEnd = j + 1;
+                escaped = false;
+                j++;
+                continue;
+            }
+            if (ch == '"' && !escaped)
+            {
+                stopPos = j;
+                return j;
+            }
+            escaped = ch == '\\' && !escaped;
+            j++;
+        }
+        stopPos = text.Length;
+        return -1;
+    }
+
+    private static int FindLocalPathStartInQuoted(string text, int start, int end)
+    {
+        var tokenStart = -1;
+        var p = start;
+        while (p < end)
+        {
+            var ch = text[p];
+            if (ch == '\\' && p + 1 < end && text[p + 1] == '"')
+            {
+                tokenStart = -1;
+                p += 2;
+                continue;
+            }
+            if (IsWindowsDriveAt(text, p) && HasNonWhitespaceAfter(text, p + 3, end)) return p;
+            if (tokenStart < 0 && IsQuotedLocalPathStart(text, p, end)) return p;
+            if (char.IsWhiteSpace(ch) || IsQuotedPathDelimiter(ch))
+            {
+                tokenStart = -1;
+            }
+            else if (ch is '/' or '\\')
+            {
+                if (tokenStart >= 0 && HasNonWhitespaceAfter(text, p + 1, end)) return tokenStart;
+                tokenStart = -1;
+            }
+            else if (tokenStart < 0)
+            {
+                tokenStart = p;
+            }
+            p++;
+        }
+        return -1;
+    }
+
+    private static bool IsQuotedLocalPathStart(string text, int p, int end)
+    {
+        var ch = text[p];
+        if (ch == '/')
+        {
+            var next = p + 1;
+            while (next < end && text[next] == '/') next++;
+            while (next < end && text[next] is ' ' or '\t') next++;
+            return next < end && !char.IsWhiteSpace(text[next]) && text[next] != '/';
+        }
+        if (ch == '~' && p + 1 < end && text[p + 1] == '/') return HasNonWhitespaceAfter(text, p + 2, end);
+        if (ch == '\\' && p + 1 < end && text[p + 1] == '\\') return HasNonWhitespaceAfter(text, p + 2, end);
+        return false;
+    }
+
+    private static bool HasNonWhitespaceAfter(string text, int pos, int end)
+    {
+        var p = pos;
+        while (p < end && text[p] is ' ' or '\t') p++;
+        return p < end && !char.IsWhiteSpace(text[p]);
+    }
+
+    private static bool IsQuotedPathDelimiter(char ch) =>
+        ch is '"' or '\'' or '<' or '>' or '(' or ')' or '[' or ']' or '{' or '}' or ':' or ',' or ';' or '=';
 
     private static string RedactQuotedFilenames(string text)
     {
