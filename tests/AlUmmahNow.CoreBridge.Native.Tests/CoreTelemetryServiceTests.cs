@@ -1174,6 +1174,14 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("{https://example.test/webhook/fakeToken}"));
             Assert.Equal("https://example.test/webhook/[redacted]",
                 CoreTelemetryService.SanitizeLocalPaths("https://example.test/webhook/fakeToken{tag:opaqueSecret123}"));
+            Assert.Equal("https://example.com/users/{id}/profile?[redacted]",
+                CoreTelemetryService.SanitizeLocalPaths("https://example.com/users/{id}/profile?token=opaqueSecret123"));
+            Assert.Equal("https://example.com/users/{[redacted-path]?[redacted]",
+                CoreTelemetryService.SanitizeLocalPaths("https://example.com/users/{private/Secret.mov}?token=opaqueSecret123"));
+            Assert.Equal("https://example.test/webhook/[redacted]",
+                CoreTelemetryService.SanitizeLocalPaths("https://example.test/webhook/fakeToken{tag:\"opaqueSecret123\"}"));
+            Assert.Equal("https://example.com/api{tag:\"value\"}?[redacted]",
+                CoreTelemetryService.SanitizeLocalPaths("https://example.com/api{tag:\"value\"}?token=opaqueSecret123"));
             Assert.Equal("https://api.telegram.org/bot123:[redacted]/sendMessage",
                 CoreTelemetryService.SanitizeLocalPaths("https://api.telegram." + "org/bot123:%2FopaqueSecret123/sendMessage"));
             Assert.Equal("https://example.test/webhook%2F[redacted]",

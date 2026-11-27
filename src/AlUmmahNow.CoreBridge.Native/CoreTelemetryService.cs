@@ -363,7 +363,8 @@ public sealed class CoreTelemetryService : ITelemetryService
         string text, string rawUrl, string baseTail, int urlStart, ref int totalEnd, ref int failedContMax, out UrlContinuationResult result)
     {
         result = default;
-        var p = ScanUrlContinuation(text, totalEnd);
+        var allowGroupQuotes = !(urlStart > 0 && text[urlStart - 1] == '"');
+        var p = ScanUrlContinuation(text, totalEnd, allowGroupQuotes);
         if (p > totalEnd && p < text.Length && text[p] is '?' or '#')
         {
             var qfStart = p;
@@ -419,9 +420,10 @@ public sealed class CoreTelemetryService : ITelemetryService
         return false;
     }
 
-    private static int ScanUrlContinuation(string text, int start)
+    private static int ScanUrlContinuation(string text, int start, bool allowGroupQuotes)
     {
         var p = start;
+        var groupDepth = 0;
         while (p < text.Length)
         {
             if (IsFileSchemeAt(text, p) || IsWindowsDriveAt(text, p)) break;
@@ -430,10 +432,13 @@ public sealed class CoreTelemetryService : ITelemetryService
                 break;
             }
             var ch = text[p];
-            if (char.IsWhiteSpace(ch) || ch is '"' or '<' or '>' or '\\' or '?' or '#' or '\r' or '\n')
+            if (char.IsWhiteSpace(ch) || ch is '<' or '>' or '\\' or '?' or '#' or '\r' or '\n')
             {
                 break;
             }
+            if (ch == '"' && !(allowGroupQuotes && groupDepth > 0)) break;
+            if (ch is '(' or '[' or '{') groupDepth++;
+            else if (ch is ')' or ']' or '}' && groupDepth > 0) groupDepth--;
             p++;
         }
         return p;
@@ -662,12 +667,12 @@ public sealed class CoreTelemetryService : ITelemetryService
         {
             if (IsFileSchemeAt(text, p) || IsWindowsDriveAt(text, p)) break;
             var ch = text[p];
-            if (char.IsWhiteSpace(ch) || ch is '"' or '<' or '>' or '\\' or '{' or '}' or '?' or '#' or '\r' or '\n')
+            if (char.IsWhiteSpace(ch) || ch is '"' or '<' or '>' or '\\' or '?' or '#' or '\r' or '\n')
             {
                 break;
             }
             if (ch == ',') break;
-            if (ch is '(' or '[')
+            if (ch is '(' or '[' or '{')
             {
                 if (StartsEmbeddedPathInsideGroup(text, p + 1)) break;
                 openPositions.Add(p);
@@ -675,16 +680,16 @@ public sealed class CoreTelemetryService : ITelemetryService
                 p++;
                 continue;
             }
-            if (ch is ')' or ']')
+            if (ch is ')' or ']' or '}')
             {
-                var expected = ch == ')' ? '(' : '[';
+                var expected = ch == ')' ? '(' : (ch == ']' ? '[' : '{');
                 if (openChars.Count == 0 || openChars[^1] != expected) break;
                 openPositions.RemoveAt(openPositions.Count - 1);
                 openChars.RemoveAt(openChars.Count - 1);
                 p++;
                 continue;
             }
-            if (openChars.Count > 0 && ch == ':') break;
+            if (openChars.Count > 0 && (ch == ':' || (ch == '/' && openChars.Contains('{')))) break;
             p++;
         }
         if (openPositions.Count > 0)
