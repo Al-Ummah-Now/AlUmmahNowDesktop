@@ -342,13 +342,13 @@ public sealed partial class Shell
                 telemetryNotice.Visibility = Visibility.Visible;
                 return;
             }
+            if (_telemetry.Consent == TelemetryConsent.Off && _settings.TelemetryEnabled)
+            {
+                _settings.TelemetryEnabled = false;
+                telemetryToggle.IsOn = false;
+            }
             if (failed && _telemetry.Consent == TelemetryConsent.Off)
             {
-                if (_settings.TelemetryEnabled)
-                {
-                    _settings.TelemetryEnabled = false;
-                    telemetryToggle.IsOn = false;
-                }
                 telemetryNotice.Text = purgeWarningText;
                 telemetryNotice.Visibility = Visibility.Visible;
             }
@@ -359,12 +359,14 @@ public sealed partial class Shell
             }
         }
         Action<bool> onPurgeChanged = _ => telemetryNotice.DispatcherQueue?.TryEnqueue(SyncPurgeNotice);
+        Action<TelemetryConsent> onConsentChanged = _ => telemetryNotice.DispatcherQueue?.TryEnqueue(SyncPurgeNotice);
         var purgeSubscribed = false;
         telemetryNotice.Loaded += (_, _) =>
         {
             if (!purgeSubscribed)
             {
                 _telemetry.PurgeFailureChanged += onPurgeChanged;
+                _telemetry.ConsentChanged += onConsentChanged;
                 purgeSubscribed = true;
             }
             SyncPurgeNotice();
@@ -374,6 +376,7 @@ public sealed partial class Shell
             if (purgeSubscribed)
             {
                 _telemetry.PurgeFailureChanged -= onPurgeChanged;
+                _telemetry.ConsentChanged -= onConsentChanged;
                 purgeSubscribed = false;
             }
         };

@@ -593,6 +593,11 @@ public class CoreTelemetryServiceTests
             gen1.Persist();
             Assert.True(File.Exists(gen1BufferPath));
 
+            var consentEvents = new TaskCompletionSource<TelemetryConsent>(TaskCreationOptions.RunContinuationsAsynchronously);
+            gen1.ConsentChanged += consent =>
+            {
+                if (consent == TelemetryConsent.Off) consentEvents.TrySetResult(consent);
+            };
             var flushTask = gen1.FlushAsync();
             await nativeStarted.Task;
 
@@ -600,6 +605,7 @@ public class CoreTelemetryServiceTests
             Volatile.Write(ref sharedToken, null);
             var completed = await Task.WhenAny(flushTask, Task.Delay(2000));
             Assert.Same(flushTask, completed);
+            Assert.Equal(TelemetryConsent.Off, await consentEvents.Task.WaitAsync(TimeSpan.FromSeconds(2)));
 
             Volatile.Write(ref sharedToken, "enabled:gen2");
             string gen2BufferPath;
@@ -702,8 +708,16 @@ public class CoreTelemetryServiceTests
             Assert.Contains("[redacted-path]", json, StringComparison.Ordinal);
             Assert.Equal("https://videos.api.alummahnow.net/v1/items",
                 CoreTelemetryService.SanitizeLocalPaths("https://videos.api.alummahnow.net/v1/items"));
-            Assert.Equal("https://example.com/?path=/api/items",
-                CoreTelemetryService.SanitizeLocalPaths("https://example.com/?path=/api/items"));
+            Assert.Equal("https://example.com/api?page=2&sort=asc",
+                CoreTelemetryService.SanitizeLocalPaths("https://example.com/api?page=2&sort=asc"));
+            Assert.Equal("https://example.com/?path=[redacted-path]",
+                CoreTelemetryService.SanitizeLocalPaths("https://example.com/?path=/Users/alice/Secret.mov"));
+            Assert.Equal("https://example.com/api?path=[redacted-path]",
+                CoreTelemetryService.SanitizeLocalPaths("https://example.com/api?path=/storage/emulated/0/Secret.mov"));
+            Assert.Equal("https://example.com/api;[redacted-path]",
+                CoreTelemetryService.SanitizeLocalPaths("https://example.com/api;C://Secret/Acquisition.mov"));
+            Assert.Equal("[redacted-path] https://example.com/api",
+                CoreTelemetryService.SanitizeLocalPaths("file:///storage/emulated/0/Secret.mov and https://example.com/api"));
             Assert.Equal("https://[2001:db8::1]/v1/items",
                 CoreTelemetryService.SanitizeLocalPaths("https://[2001:db8::1]/v1/items"));
             Assert.Equal("https://example.com/a(b)/items",

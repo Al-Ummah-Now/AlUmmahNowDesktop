@@ -351,13 +351,13 @@ public sealed partial class MainWindow
                 telemetryNotice.SetVisible(true);
                 return;
             }
+            if (_telemetry.Consent == TelemetryConsent.Off && _settings.TelemetryEnabled)
+            {
+                _settings.TelemetryEnabled = false;
+                telemetryCheck.SetActive(false);
+            }
             if (failed && _telemetry.Consent == TelemetryConsent.Off)
             {
-                if (_settings.TelemetryEnabled)
-                {
-                    _settings.TelemetryEnabled = false;
-                    telemetryCheck.SetActive(false);
-                }
                 telemetryNotice.SetText(purgeWarningText);
                 telemetryNotice.SetVisible(true);
             }
@@ -367,7 +367,7 @@ public sealed partial class MainWindow
                 telemetryNotice.SetVisible(false);
             }
         }
-        Action<bool> onPurgeChanged = _ =>
+        Action scheduleSync = () =>
         {
             GLib.Functions.IdleAdd(GLib.Constants.PRIORITY_DEFAULT_IDLE, () =>
             {
@@ -375,8 +375,15 @@ public sealed partial class MainWindow
                 return false;
             });
         };
+        Action<bool> onPurgeChanged = _ => scheduleSync();
+        Action<TelemetryConsent> onConsentChanged = _ => scheduleSync();
         _telemetry.PurgeFailureChanged += onPurgeChanged;
-        telemetryNotice.OnDestroy += (_, _) => _telemetry.PurgeFailureChanged -= onPurgeChanged;
+        _telemetry.ConsentChanged += onConsentChanged;
+        telemetryNotice.OnDestroy += (_, _) =>
+        {
+            _telemetry.PurgeFailureChanged -= onPurgeChanged;
+            _telemetry.ConsentChanged -= onConsentChanged;
+        };
         SyncPurgeNotice();
         telemetryCheck.OnToggled += (_, _) =>
         {

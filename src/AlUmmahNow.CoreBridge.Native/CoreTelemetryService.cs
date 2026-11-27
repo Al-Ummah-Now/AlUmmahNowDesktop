@@ -1,5 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using AlUmmahNow.Core;
@@ -15,14 +17,14 @@ namespace AlUmmahNow.CoreBridge.Native;
 /// </summary>
 public sealed class CoreTelemetryService : ITelemetryService
 {
-    private static readonly Regex UrlVaultRegex = new(@"(?<![A-Za-z0-9+.-])[A-Za-z][A-Za-z0-9+.-]+://(?:\[([^\]\s""'<>\\{}\r\n]+)\]|(?:[A-Za-z0-9._~!$&'*+;=-]|%[0-9A-Fa-f]{2})+)(?::\d+)?(?:[/?#](?:[^\s""<>\\{},()\[\]\r\n]|\([^\s""<>\\{},()\[\]/:\\]+\)|\[[^\s""<>\\{},()\[\]/:\\]+\])*|(?=$|[\s""'<>\\{},;()\[\]]))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex FileUriRegex = new(@"(?<![A-Za-z0-9+.-])file://[^\r\n]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex UrlVaultRegex = new(@"(?<![A-Za-z0-9+.-])[A-Za-z][A-Za-z0-9+.-]+://(?:\[([^\]\s""'<>\\{}\r\n]+)\]|(?:[A-Za-z0-9._~!$&'*+;=-]|%[0-9A-Fa-f]{2})+)(?::\d+)?(?:/(?:(?!(?:file://|[A-Za-z]:[\\/]))(?:[^\s""<>\\{},()\[\]?#\r\n]|\([^\s""<>\\{},()\[\]/:\\?#]+\)|\[[^\s""<>\\{},()\[\]/:\\?#]+\]))*|(?=$|[\s""'<>\\{},;()\[\]?#]))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex FileUriRegex = new(@"(?<![A-Za-z0-9+.-])file://(?:(?!\s+\u001E)[^\r\n\u001E])+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex ParenPathRegex = new(@"(\()(?:/|~/|[A-Za-z]:[\\/]|\\\\)[^()\r\n]+(\))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex ParenRelativeSlashPathRegex = new(@"(\()(?!HTTP/\d)(?!TLS/\d)(?!SSL/\d)[^\s/\\""'<>()\[\]{}:,;\u001E\u001F]+/[^()\r\n]+(\))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex WindowsPathRegex = new(@"(?:[A-Za-z]:[\\/]|\\\\)[^\r\n]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex WindowsPathRegex = new(@"(?:[A-Za-z]:[\\/]|\\\\)(?:(?!\s+\u001E)[^\r\n\u001E])+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex RelativeBackslashPathRegex = new(@"(^|[\s(\[{""'=,:;\u001F])[^\s\\/""'<>(),;\u001E\u001F]+\\[^\r\n\u001E\u001F]+", RegexOptions.Compiled);
-    private static readonly Regex QuotedSpacedRootPathRegex = new(@"[""']/[ \t]+[^\r\n]+", RegexOptions.Compiled);
-    private static readonly Regex UnixPathRegex = new(@"(?<![\p{L}\p{M}\p{N}._/-])(?:~/|//+(?=[ \t]*[^\s/])|/(?=[ \t]*[^\s/]))[^\r\n]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex QuotedSpacedRootPathRegex = new(@"[""']/[ \t]+[^\r\n\u001E]+", RegexOptions.Compiled);
+    private static readonly Regex UnixPathRegex = new(@"(?<![\p{L}\p{M}\p{N}._/-])(?:~/|//+(?=[ \t]*[^\s/])|/(?=[ \t]*[^\s/]))(?:(?!\s+\u001E)[^\r\n\u001E])+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex RelativeSlashPathRegex = new(@"(^|[\s(\[{""'=,:;\u001F])(?!HTTP/\d)(?!TLS/\d)(?!SSL/\d)[^\s/\\""'<>()\[\]{}:,;\u001E\u001F]+/[^\r\n\u001E\u001F]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex DoubleQuotedFilenameRegex = new(@"""[^""\r\n/\\]*\.[A-Za-z0-9]{1,16}""", RegexOptions.Compiled);
     private static readonly Regex SingleQuotedFilenameRegex = new(@"'(?:[^'\r\n/\\]|'(?=\p{L}))*\.[A-Za-z0-9]{1,16}'", RegexOptions.Compiled);
@@ -185,14 +187,13 @@ public sealed class CoreTelemetryService : ITelemetryService
     internal static string SanitizeLocalPaths(string text)
     {
         if (string.IsNullOrEmpty(text)) return text;
-        var textWithoutFileUris = FileUriRegex.Replace(text, "[redacted-path]");
         var prefix = "\u001EAUNURL";
-        while (textWithoutFileUris.Contains(prefix, StringComparison.Ordinal))
+        while (text.Contains(prefix, StringComparison.Ordinal))
         {
             prefix += "X";
         }
         var vaultedUrls = new List<string>();
-        var scrubbed = UrlVaultRegex.Replace(textWithoutFileUris, match =>
+        var scrubbed = UrlVaultRegex.Replace(text, match =>
         {
             var raw = match.Value;
             if (raw.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
@@ -211,7 +212,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                 url = url[..^1];
                 tail = ";";
             }
-            if (match.Index > 0 && textWithoutFileUris[match.Index - 1] == '\'' && url.EndsWith('\''))
+            if (match.Index > 0 && text[match.Index - 1] == '\'' && url.EndsWith('\''))
             {
                 url = url[..^1];
                 tail = "'" + tail;
@@ -220,6 +221,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             vaultedUrls.Add(url);
             return $"{prefix}{idx}\u001F{tail}";
         });
+        scrubbed = FileUriRegex.Replace(scrubbed, "[redacted-path]");
         scrubbed = ParenPathRegex.Replace(scrubbed, "$1[redacted-path]$2");
         scrubbed = ParenRelativeSlashPathRegex.Replace(scrubbed, "$1[redacted-path]$2");
         scrubbed = WindowsPathRegex.Replace(scrubbed, "[redacted-path]");
@@ -269,6 +271,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     }
 
     public event Action<bool>? PurgeFailureChanged;
+    public event Action<TelemetryConsent>? ConsentChanged;
 
     public bool SetConsent(TelemetryConsent consent)
     {
@@ -282,84 +285,96 @@ public sealed class CoreTelemetryService : ITelemetryService
         CancellationTokenSource? toCancel = null;
         Action<bool>? purgeNotify = null;
         bool purgeNotifyValue = false;
+        Action<TelemetryConsent>? consentNotify = null;
+        TelemetryConsent consentNotifyValue = TelemetryConsent.Off;
         bool result;
-        lock (_gate)
+        using (AcquireCrossProcessBufferLock())
         {
-            if (consent == TelemetryConsent.Off)
+            lock (_gate)
             {
-                result = RevokeLocked(
-                    out toCancel,
-                    "telemetry disk purge failed on opt-out: ",
-                    ref purgeNotify,
-                    ref purgeNotifyValue,
-                    ResolveForeignKeepPathLocked());
-            }
-            else if (_disposeRequested || _clientDisposed)
-            {
-                return false;
-            }
-            else if (_revokedFlushesRemaining > 0 || (_lastPurgeFailed && !TryDeleteBufferFallback(ResolveForeignKeepPathLocked())))
-            {
-                return false;
-            }
-            else
-            {
-                string? externalToken = null;
-                if (_externalConsentToken != null)
+                var priorConsent = _consent;
+                if (consent == TelemetryConsent.Off)
                 {
-                    externalToken = ReadExternalTokenSafe();
-                    if (string.IsNullOrEmpty(externalToken))
+                    result = RevokeLocked(
+                        out toCancel,
+                        "telemetry disk purge failed on opt-out: ",
+                        ref purgeNotify,
+                        ref purgeNotifyValue,
+                        ResolveForeignKeepPathLocked());
+                }
+                else if (_disposeRequested || _clientDisposed)
+                {
+                    return false;
+                }
+                else if (_revokedFlushesRemaining > 0 || (_lastPurgeFailed && !TryDeleteBufferFallback(ResolveForeignKeepPathLocked())))
+                {
+                    return false;
+                }
+                else
+                {
+                    string? externalToken = null;
+                    if (_externalConsentToken != null)
                     {
-                        return false;
-                    }
-                    var targetBufferPath = ResolveBufferPathForToken(externalToken);
-                    if (!TryDeleteForeignGenerationBuffers(targetBufferPath))
-                    {
-                        return false;
-                    }
-                    if (!string.Equals(_activeBufferPath, targetBufferPath, StringComparison.Ordinal))
-                    {
-                        if (_inFlightFlushes > 0) return false;
-                        TelemetryClient? nextClient = null;
-                        try
+                        externalToken = ReadExternalTokenSafe();
+                        if (string.IsNullOrEmpty(externalToken))
                         {
-                            nextClient = CreateClient(targetBufferPath);
-                            _client.Dispose();
-                            _client = nextClient;
-                            _activeBufferPath = targetBufferPath;
-                            nextClient = null;
-                        }
-                        catch (AunException ex)
-                        {
-                            nextClient?.Dispose();
-                            Log.For("telemetry").Warn("failed to bind generation telemetry buffer: " + ex.Message);
                             return false;
                         }
+                        var targetBufferPath = ResolveBufferPathForToken(externalToken);
+                        if (!TryDeleteForeignGenerationBuffers(targetBufferPath))
+                        {
+                            return false;
+                        }
+                        if (!string.Equals(_activeBufferPath, targetBufferPath, StringComparison.Ordinal))
+                        {
+                            if (_inFlightFlushes > 0) return false;
+                            TelemetryClient? nextClient = null;
+                            try
+                            {
+                                nextClient = CreateClient(targetBufferPath);
+                                _client.Dispose();
+                                _client = nextClient;
+                                _activeBufferPath = targetBufferPath;
+                                nextClient = null;
+                            }
+                            catch (AunException ex)
+                            {
+                                nextClient?.Dispose();
+                                Log.For("telemetry").Warn("failed to bind generation telemetry buffer: " + ex.Message);
+                                return false;
+                            }
+                        }
+                    }
+                    if (_lastPurgeFailed)
+                    {
+                        UpdatePurgeFailedLocked(false, ref purgeNotify, ref purgeNotifyValue);
+                    }
+                    try
+                    {
+                        _client.SetConsent(state);
+                        _consent = consent;
+                        _observedExternalToken = externalToken;
+                        UpdatePurgeFailedLocked(false, ref purgeNotify, ref purgeNotifyValue);
+                        result = true;
+                    }
+                    catch (AunException ex)
+                    {
+                        // Fail closed in BOTH managed and native state so an earlier native consent update
+                        // (before an I/O failure) cannot leave native telemetry enabled for a queued flush.
+                        RevokeLocked(out toCancel, "telemetry rollback purge failed: ", ref purgeNotify, ref purgeNotifyValue);
+                        Log.For("telemetry").Warn("failed to update telemetry consent; failing closed to Off: " + ex.Message);
+                        result = false;
                     }
                 }
-                if (_lastPurgeFailed)
+                if (_consent != priorConsent)
                 {
-                    UpdatePurgeFailedLocked(false, ref purgeNotify, ref purgeNotifyValue);
-                }
-                try
-                {
-                    _client.SetConsent(state);
-                    _consent = consent;
-                    _observedExternalToken = externalToken;
-                    UpdatePurgeFailedLocked(false, ref purgeNotify, ref purgeNotifyValue);
-                    result = true;
-                }
-                catch (AunException ex)
-                {
-                    // Fail closed in BOTH managed and native state so an earlier native consent update
-                    // (before an I/O failure) cannot leave native telemetry enabled for a queued flush.
-                    RevokeLocked(out toCancel, "telemetry rollback purge failed: ", ref purgeNotify, ref purgeNotifyValue);
-                    Log.For("telemetry").Warn("failed to update telemetry consent; failing closed to Off: " + ex.Message);
-                    result = false;
+                    consentNotify = ConsentChanged;
+                    consentNotifyValue = _consent;
                 }
             }
         }
         if (toCancel != null) CancelQuietly(toCancel);
+        NotifyConsentChangedQuietly(consentNotify, consentNotifyValue);
         NotifyPurgeFailureQuietly(purgeNotify, purgeNotifyValue);
         return result;
     }
@@ -612,6 +627,7 @@ public sealed class CoreTelemetryService : ITelemetryService
 
         Action<bool>? purgeNotify = null;
         bool purgeNotifyValue = false;
+        var priorConsent = _consent;
         RevokeLocked(
             out toCancel,
             "telemetry disk purge failed after cross-instance opt-out: ",
@@ -619,11 +635,19 @@ public sealed class CoreTelemetryService : ITelemetryService
             ref purgeNotifyValue,
             keepForeignGenerationPath: null,
             ownBufferOnly: true);
-        if (purgeNotify != null)
+        var consentNotify = _consent != priorConsent ? ConsentChanged : null;
+        var consentNotifyValue = _consent;
+        if (consentNotify != null || purgeNotify != null)
         {
+            var notifyConsent = consentNotify;
+            var consentValue = consentNotifyValue;
             var notify = purgeNotify;
             var value = purgeNotifyValue;
-            _ = Task.Run(() => NotifyPurgeFailureQuietly(notify, value));
+            _ = Task.Run(() =>
+            {
+                NotifyConsentChangedQuietly(notifyConsent, consentValue);
+                NotifyPurgeFailureQuietly(notify, value);
+            });
         }
         return false;
     }
@@ -679,6 +703,46 @@ public sealed class CoreTelemetryService : ITelemetryService
         _lastPurgeFailed = failed;
         purgeNotify = PurgeFailureChanged;
         purgeNotifyValue = failed;
+    }
+
+    private static void NotifyConsentChangedQuietly(Action<TelemetryConsent>? handler, TelemetryConsent consent)
+    {
+        if (handler == null) return;
+        try
+        {
+            handler(consent);
+        }
+        catch (Exception ex)
+        {
+            Log.For("telemetry").Warn("telemetry consent listener failed: " + ex.Message);
+        }
+    }
+
+    private IDisposable? AcquireCrossProcessBufferLock()
+    {
+        if (string.IsNullOrWhiteSpace(_bufferPath)) return null;
+        try
+        {
+            var fullPath = Path.GetFullPath(_bufferPath);
+            var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(fullPath)))[..16];
+            var lockPath = Path.Combine(Path.GetTempPath(), $"aun-telemetry-{hash}.lock");
+            var deadline = DateTime.UtcNow.AddSeconds(2);
+            while (true)
+            {
+                try
+                {
+                    return new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+                }
+                catch (IOException) when (DateTime.UtcNow < deadline)
+                {
+                    Thread.Sleep(10);
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
 
     private static void NotifyPurgeFailureQuietly(Action<bool>? handler, bool failed)

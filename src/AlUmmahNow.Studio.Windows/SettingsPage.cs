@@ -109,13 +109,13 @@ internal sealed class SettingsPage
                     telemetryNotice.Visibility = Visibility.Visible;
                     return;
                 }
+                if (telemetry.Consent == TelemetryConsent.Off && settings.TelemetryEnabled)
+                {
+                    settings.TelemetryEnabled = false;
+                    telemetryToggle.IsOn = false;
+                }
                 if (failed && telemetry.Consent == TelemetryConsent.Off)
                 {
-                    if (settings.TelemetryEnabled)
-                    {
-                        settings.TelemetryEnabled = false;
-                        telemetryToggle.IsOn = false;
-                    }
                     telemetryNotice.Text = purgeWarningText;
                     telemetryNotice.Visibility = Visibility.Visible;
                 }
@@ -126,12 +126,14 @@ internal sealed class SettingsPage
                 }
             }
             Action<bool> onPurgeChanged = _ => telemetryNotice.DispatcherQueue?.TryEnqueue(SyncPurgeNotice);
+            Action<TelemetryConsent> onConsentChanged = _ => telemetryNotice.DispatcherQueue?.TryEnqueue(SyncPurgeNotice);
             var purgeSubscribed = false;
             telemetryNotice.Loaded += (_, _) =>
             {
                 if (!purgeSubscribed)
                 {
                     telemetry.PurgeFailureChanged += onPurgeChanged;
+                    telemetry.ConsentChanged += onConsentChanged;
                     purgeSubscribed = true;
                 }
                 SyncPurgeNotice();
@@ -141,6 +143,7 @@ internal sealed class SettingsPage
                 if (purgeSubscribed)
                 {
                     telemetry.PurgeFailureChanged -= onPurgeChanged;
+                    telemetry.ConsentChanged -= onConsentChanged;
                     purgeSubscribed = false;
                 }
             };
