@@ -259,8 +259,8 @@ public sealed class CoreTelemetryService : ITelemetryService
     private static string VaultNonFileUrls(string text, string prefix, out List<string> vaultedUrls)
     {
         vaultedUrls = new List<string>();
-        var scrubbed = VaultNonFileUrlsInto(text, prefix, vaultedUrls);
-        return VaultJsonEscapedUrlsInBalancedQuotes(scrubbed, prefix, vaultedUrls);
+        var withEscaped = VaultJsonEscapedUrlsInBalancedQuotes(text, prefix, vaultedUrls);
+        return VaultNonFileUrlsInto(withEscaped, prefix, vaultedUrls);
     }
 
     private static string VaultJsonEscapedUrlsInBalancedQuotes(string text, string prefix, List<string> vaultedUrls)
@@ -351,7 +351,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     }
 
     private static bool IsUrlStructuralEscape(char ch) =>
-        ch is ':' or '/' or '?' or '#' or '&' or '=' or '@';
+        ch >= 0x20 && ch <= 0x7E && ch != '"' && ch != '\\';
 
     private static string DecodeUrlEscapesForVault(string text, int start, int end)
     {
@@ -3743,6 +3743,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     private static string RedactFileUris(string text, string vaultPrefix)
     {
         if (text.Length < 7) return text;
+        var checkedQuotes = false;
         List<(int Open, int Close)>? quoteSpans = null;
         var spanIdx = 0;
         StringBuilder? sb = null;
@@ -3755,9 +3756,10 @@ public sealed class CoreTelemetryService : ITelemetryService
                 // Double-quoted file:// URIs terminate at the next unescaped '"'. Unquoted and
                 // single-quoted file:// URIs fail closed to the next vaulted URL or line break so
                 // unescaped apostrophes inside filenames (e.g. "O' Connor") can never leak suffixes.
-                if (quoteSpans == null && text.IndexOf('"') >= 0)
+                if (!checkedQuotes)
                 {
-                    quoteSpans = CollectBalancedDoubleQuoteSpans(text);
+                    checkedQuotes = true;
+                    if (text.IndexOf('"') >= 0) quoteSpans = CollectBalancedDoubleQuoteSpans(text);
                 }
                 if (quoteSpans != null)
                 {

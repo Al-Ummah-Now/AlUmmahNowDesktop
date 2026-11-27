@@ -1460,6 +1460,15 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("[\"https:\\/\\/example.com\\/api?token=opaqueSecret123\",\"public\"]"));
             Assert.Equal("[\"https://example.com/api?[redacted]\",\"public\"]",
                 CoreTelemetryService.SanitizeLocalPaths("[\"https:\\/\\/example.com\\/api\\u003ftoken=opaqueSecret123\",\"public\"]"));
+            Assert.Equal("[\"https://example.com/api#[redacted]\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"https://example.com/api\\u0023opaqueSecret123\"]"));
+            Assert.Equal("[\"https://example.com/api?[redacted]\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"https://example.com/api\\u003ftoken=opaqueSecret123\"]"));
+            Assert.Equal("[\"https://example.test/webhook/[redacted]\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"https://example.test/webhook/fake\\u0054oken\"]"));
+            var manyFileUris = string.Join("\n", Enumerable.Repeat("open file:///Users/Alice/Secret.mov", 2000));
+            var expectedFileUris = string.Join("\n", Enumerable.Repeat("open [redacted-path]", 2000));
+            Assert.Equal(expectedFileUris, CoreTelemetryService.SanitizeLocalPaths(manyFileUris));
             var manyPublic = "[" + string.Join(",", Enumerable.Repeat("\"public\"", 2000)) + "]";
             Assert.Equal(manyPublic, CoreTelemetryService.SanitizeLocalPaths(manyPublic));
             var manyNewlines = "[" + string.Join(",", Enumerable.Repeat("\"hello\\nworld\"", 2000)) + "]";
