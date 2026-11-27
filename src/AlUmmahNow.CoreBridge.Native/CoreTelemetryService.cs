@@ -309,21 +309,21 @@ public sealed class CoreTelemetryService : ITelemetryService
             }
             var rawUrl = text.Substring(start, baseEnd - start);
             var redactedUrl = RedactUrlPathSecrets(url);
-            if (!hasQf && totalEnd >= failedContMax && totalEnd < text.Length &&
-                text[totalEnd] is ',' or '(' or '[' or ')' or ']')
-            {
-                if (TryExtendUrlContinuation(text, rawUrl, start, ref totalEnd, ref failedContMax, out var extUrl, out var extTail))
-                {
-                    redactedUrl = extUrl;
-                    tail = extTail;
-                }
-            }
             sb ??= new StringBuilder(text.Length);
             sb.Append(text, copied, start - copied);
-            var idx = vaultedUrls.Count;
-            vaultedUrls.Add(redactedUrl);
+            if (!hasQf && totalEnd >= failedContMax && totalEnd < text.Length &&
+                text[totalEnd] is ',' or '(' or '[' or ')' or ']' &&
+                TryExtendUrlContinuation(text, rawUrl, tail, start, ref totalEnd, ref failedContMax, out var ext))
+            {
+                EmitUrlContinuation(sb, prefix, vaultedUrls, redactedUrl, tail, ext);
+            }
+            else
+            {
+                var idx = vaultedUrls.Count;
+                vaultedUrls.Add(redactedUrl);
+                sb.Append(prefix).Append(idx).Append('\u001F').Append(tail);
+            }
             tracker.OnVaultedUrl(totalEnd);
-            sb.Append(prefix).Append(idx).Append('\u001F').Append(tail);
             copied = totalEnd;
             searchFrom = totalEnd;
         }
@@ -332,11 +332,37 @@ public sealed class CoreTelemetryService : ITelemetryService
         return sb.ToString();
     }
 
-    private static bool TryExtendUrlContinuation(
-        string text, string rawUrl, int urlStart, ref int totalEnd, ref int failedContMax, out string resultUrl, out string tail)
+    private readonly record struct UrlContinuationResult(
+        bool ReplaceBase, string BaseUrl, bool KeepBaseTail, string Middle, string QfToken, string Tail);
+
+    private static void EmitUrlContinuation(
+        StringBuilder sb, string prefix, List<string> vaultedUrls, string redactedUrl, string baseTail, UrlContinuationResult ext)
     {
-        resultUrl = string.Empty;
-        tail = string.Empty;
+        if (ext.ReplaceBase)
+        {
+            var idx = vaultedUrls.Count;
+            vaultedUrls.Add(ext.BaseUrl);
+            sb.Append(prefix).Append(idx).Append('\u001F').Append(ext.Tail);
+            return;
+        }
+        var baseIdx = vaultedUrls.Count;
+        vaultedUrls.Add(redactedUrl);
+        sb.Append(prefix).Append(baseIdx).Append('\u001F');
+        if (ext.KeepBaseTail) sb.Append(baseTail);
+        sb.Append(ext.Middle);
+        if (ext.QfToken.Length > 0)
+        {
+            var qfIdx = vaultedUrls.Count;
+            vaultedUrls.Add(ext.QfToken);
+            sb.Append(prefix).Append(qfIdx).Append('\u001F');
+        }
+        sb.Append(ext.Tail);
+    }
+
+    private static bool TryExtendUrlContinuation(
+        string text, string rawUrl, string baseTail, int urlStart, ref int totalEnd, ref int failedContMax, out UrlContinuationResult result)
+    {
+        result = default;
         var p = ScanUrlContinuation(text, totalEnd);
         if (p > totalEnd && p < text.Length && text[p] is '?' or '#')
         {
@@ -346,8 +372,22 @@ public sealed class CoreTelemetryService : ITelemetryService
             {
                 p++;
             }
-            var qf = TrimQueryOrFragmentDelimiters(text.Substring(qfStart, p - qfStart), text, urlStart, out tail);
-            resultUrl = RedactUrlPathSecrets(text.Substring(urlStart, qfStart - urlStart)) + qf[0] + "[redacted]";
+            var qf = TrimQueryOrFragmentDelimiters(text.Substring(qfStart, p - qfStart), text, urlStart, out var qfTail);
+            var qfToken = qf[0] + "[redacted]";
+            var baseRedacted = RedactUrlPathSecrets(rawUrl);
+            var prefixRedacted = RedactUrlPathSecrets(text.Substring(urlStart, qfStart - urlStart));
+            if (prefixRedacted == baseRedacted || prefixRedacted == baseRedacted + "[redacted]")
+            {
+                result = new UrlContinuationResult(true, prefixRedacted + qfToken, false, string.Empty, string.Empty, qfTail);
+            }
+            else
+            {
+                var middle = prefixRedacted.StartsWith(baseRedacted, StringComparison.Ordinal)
+                    ? prefixRedacted.Substring(baseRedacted.Length)
+                    : text.Substring(totalEnd, qfStart - totalEnd);
+                var keepTail = baseTail.Length > 0 && baseRedacted.EndsWith(baseTail, StringComparison.Ordinal);
+                result = new UrlContinuationResult(false, string.Empty, keepTail, middle, qfToken, qfTail);
+            }
             totalEnd = p;
             return true;
         }
@@ -355,12 +395,22 @@ public sealed class CoreTelemetryService : ITelemetryService
         if (end > totalEnd)
         {
             var baseRedacted = RedactUrlPathSecrets(rawUrl);
-            var extCandidate = text.Substring(urlStart, end - urlStart);
-            var extRedacted = RedactUrlPathSecrets(extCandidate);
+            var extRedacted = RedactUrlPathSecrets(text.Substring(urlStart, end - urlStart));
             if (extRedacted != baseRedacted + text.Substring(totalEnd, end - totalEnd))
             {
-                resultUrl = extRedacted;
-                tail = text.Substring(end, p - end);
+                var extTail = text.Substring(end, p - end);
+                if (extRedacted == baseRedacted || extRedacted == baseRedacted + "[redacted]")
+                {
+                    result = new UrlContinuationResult(true, extRedacted, false, string.Empty, string.Empty, extTail);
+                }
+                else
+                {
+                    var middle = extRedacted.StartsWith(baseRedacted, StringComparison.Ordinal)
+                        ? extRedacted.Substring(baseRedacted.Length)
+                        : text.Substring(totalEnd, end - totalEnd);
+                    var keepTail = baseTail.Length > 0 && baseRedacted.EndsWith(baseTail, StringComparison.Ordinal);
+                    result = new UrlContinuationResult(false, string.Empty, keepTail, middle, string.Empty, extTail);
+                }
                 totalEnd = p;
                 return true;
             }
