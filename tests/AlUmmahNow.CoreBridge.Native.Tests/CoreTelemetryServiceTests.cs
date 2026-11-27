@@ -1223,6 +1223,18 @@ public class CoreTelemetryServiceTests
             Assert.Equal("['https://a.test/webhook/[redacted]','https://other.com/webhook/[redacted]']",
                 CoreTelemetryService.SanitizeLocalPaths(
                     "['https://a.test/webhook/tok(','https://other.com/webhook/tok2('x)secret')']"));
+            Assert.Equal("'https://example.test/webhook/[redacted]'",
+                CoreTelemetryService.SanitizeLocalPaths(
+                    "'https://example.test/webhook/fakeToken('a)first opaqueSecret123',https://other.test/x)'"));
+            Assert.Equal("'https://example.test/webhook/[redacted]', more)'",
+                CoreTelemetryService.SanitizeLocalPaths(
+                    "'https://example.test/webhook/fakeToken('a)first opaqueSecret123', more)'"));
+            Assert.Equal("[\"https://example.test/webhook/[redacted]\",\")public-text\"]",
+                CoreTelemetryService.SanitizeLocalPaths(
+                    "[\"https://example.test/webhook/fakeToken(\",\")public-text\"]"));
+            Assert.Equal("'https://example.test/webhook/[redacted]'",
+                CoreTelemetryService.SanitizeLocalPaths(
+                    "'https://example.test/webhook/fakeToken(' opaqueSecret123')'"));
             var repeatedEqualsQuotedUrls = string.Join("=", Enumerable.Repeat("https://a.test/x{a:\"https://b.test/x\"}", 500));
             Assert.Equal(repeatedEqualsQuotedUrls, CoreTelemetryService.SanitizeLocalPaths(repeatedEqualsQuotedUrls));
             Assert.Equal("https://example.test/webhook/[redacted]",
