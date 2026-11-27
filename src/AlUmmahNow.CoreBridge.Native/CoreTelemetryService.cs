@@ -325,8 +325,6 @@ public sealed class CoreTelemetryService : ITelemetryService
         private char _pathQuote;
         private int _tokenStart;
         private int _tokenEnd;
-        private int _prevTokenStart;
-        private int _prevTokenEnd;
         private bool _tokenHasPathSep;
         private bool _inWrapperRun;
         private bool _wsBeforeRun;
@@ -335,16 +333,13 @@ public sealed class CoreTelemetryService : ITelemetryService
         {
             _tokenStart = -1;
             _tokenEnd = -1;
-            _prevTokenStart = -1;
-            _prevTokenEnd = -1;
         }
 
         public bool IsEmbeddedInPath(string text, int matchStart)
         {
             AdvanceTo(text, matchStart);
             var curTokenIsPath = _tokenHasPathSep && !IsProtocolToken(text, _tokenStart, _tokenEnd);
-            var wrappedUnderPath = _hasPathOnLine && _inWrapperRun && !IsPathConnectorOrSep(text, _prevTokenStart, _prevTokenEnd);
-            return _pathQuote != '\0' || curTokenIsPath || (!_wsBeforeRun && _hasPathOnLine) || wrappedUnderPath;
+            return _pathQuote != '\0' || curTokenIsPath || (_hasPathOnLine && (!_wsBeforeRun || _inWrapperRun));
         }
 
         public void OnVaultedUrl(int matchEnd)
@@ -359,8 +354,6 @@ public sealed class CoreTelemetryService : ITelemetryService
             _pathQuote = '\0';
             _tokenStart = -1;
             _tokenEnd = -1;
-            _prevTokenStart = -1;
-            _prevTokenEnd = -1;
             _tokenHasPathSep = false;
             _inWrapperRun = false;
             _wsBeforeRun = false;
@@ -390,13 +383,8 @@ public sealed class CoreTelemetryService : ITelemetryService
             {
                 _pathQuote = '\0';
                 _hasPathOnLine = false;
-                if (_tokenStart >= 0)
-                {
-                    _prevTokenStart = _tokenStart;
-                    _prevTokenEnd = _tokenEnd;
-                    _tokenStart = -1;
-                    _tokenEnd = -1;
-                }
+                _tokenStart = -1;
+                _tokenEnd = -1;
                 _tokenHasPathSep = false;
                 _inWrapperRun = false;
                 _wsBeforeRun = false;
@@ -415,24 +403,14 @@ public sealed class CoreTelemetryService : ITelemetryService
             {
                 if (!_inWrapperRun)
                 {
-                    if (_tokenStart >= 0)
-                    {
-                        _prevTokenStart = _tokenStart;
-                        _prevTokenEnd = _tokenEnd;
-                        _tokenStart = -1;
-                        _tokenEnd = -1;
-                    }
+                    _tokenStart = -1;
+                    _tokenEnd = -1;
                     _wsBeforeRun = true;
                     _tokenHasPathSep = false;
                 }
             }
             else if (IsOpeningWrapper(ch))
             {
-                if (!_inWrapperRun && _tokenStart >= 0)
-                {
-                    _prevTokenStart = _tokenStart;
-                    _prevTokenEnd = _tokenEnd;
-                }
                 _inWrapperRun = true;
             }
             else
@@ -473,27 +451,6 @@ public sealed class CoreTelemetryService : ITelemetryService
         return proto.Equals("HTTP", StringComparison.OrdinalIgnoreCase) ||
             proto.Equals("TLS", StringComparison.OrdinalIgnoreCase) ||
             proto.Equals("SSL", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static bool IsPathConnectorOrSep(string text, int start, int end)
-    {
-        if (start < 0 || end <= start) return false;
-        if (text[end - 1] is ';' or ',' or ':') return true;
-        var span = text.AsSpan(start, end - start);
-        return span.Equals("and", StringComparison.OrdinalIgnoreCase) ||
-            span.Equals("or", StringComparison.OrdinalIgnoreCase) ||
-            span.Equals("from", StringComparison.OrdinalIgnoreCase) ||
-            span.Equals("to", StringComparison.OrdinalIgnoreCase) ||
-            span.Equals("via", StringComparison.OrdinalIgnoreCase) ||
-            span.Equals("with", StringComparison.OrdinalIgnoreCase) ||
-            span.Equals("at", StringComparison.OrdinalIgnoreCase) ||
-            span.Equals("in", StringComparison.OrdinalIgnoreCase) ||
-            span.Equals("for", StringComparison.OrdinalIgnoreCase) ||
-            span.Equals("on", StringComparison.OrdinalIgnoreCase) ||
-            span.Equals("of", StringComparison.OrdinalIgnoreCase) ||
-            span.Equals("by", StringComparison.OrdinalIgnoreCase) ||
-            span.Equals("see", StringComparison.OrdinalIgnoreCase) ||
-            span.Equals("as", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsUrlSchemeChar(char ch) =>
