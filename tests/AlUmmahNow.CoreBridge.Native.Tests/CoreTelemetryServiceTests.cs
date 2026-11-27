@@ -786,6 +786,12 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("\"relative/My Clip.mov\" and (https://example.com/api)"));
             Assert.Equal("progress 1/2 (https://example.com/api)",
                 CoreTelemetryService.SanitizeLocalPaths("progress 1/2 (https://example.com/api)"));
+            Assert.Equal("progress 1/2.",
+                CoreTelemetryService.SanitizeLocalPaths("progress 1/2."));
+            Assert.Equal("progress 1/2. (https://example.com/api)",
+                CoreTelemetryService.SanitizeLocalPaths("progress 1/2. (https://example.com/api)"));
+            Assert.Equal("opening [redacted-path]",
+                CoreTelemetryService.SanitizeLocalPaths("opening 1/2.mov"));
             Assert.Contains("https://example.com/api",
                 CoreTelemetryService.SanitizeLocalPaths("progress \"1/2\" (https://example.com/api)"));
             Assert.DoesNotContain("private.example",
@@ -808,9 +814,11 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("opening relative/My(1) (https://private.example/Acquisition.mov)"));
             Assert.Equal("can't reach https://example.com/api",
                 CoreTelemetryService.SanitizeLocalPaths("can't reach https://example.com/api"));
-            // Linear scaling regression test: long alphanumeric run without '@'/'%40' must complete rapidly.
+            // Linear scaling regression tests: long alphanumeric runs and repeated keywords before a trailing dot.
             var longAlpha = new string('a', 100_000);
             Assert.Equal(longAlpha, CoreTelemetryService.SanitizeLocalPaths(longAlpha));
+            var repeatedKeywords = string.Concat(Enumerable.Repeat("open ", 20_000)) + ".";
+            Assert.Equal(repeatedKeywords, CoreTelemetryService.SanitizeLocalPaths(repeatedKeywords));
             Assert.Equal("\"[redacted-path]\" (https://example.com/api)",
                 CoreTelemetryService.SanitizeLocalPaths("\"file:///a.mov\" (https://example.com/api)"));
             Assert.Equal("[redacted-path]",

@@ -26,11 +26,15 @@ public sealed class CoreTelemetryService : ITelemetryService
     private static readonly Regex RelativeBackslashPathRegex = new(@"(^|[\s(\[{""'=,:;\u001F])[^\s\\/""'<>(),;\u001E\u001F]+\\[^\r\n\u001E\u001F\s]+(?:[^\S\r\n]+[^\r\n\u001E\u001F\s]+)*", RegexOptions.Compiled);
     private static readonly Regex QuotedSpacedRootPathRegex = new(@"[""']/[ \t]+[^\r\n\u001E]+", RegexOptions.Compiled);
     private static readonly Regex UnixPathRegex = new(@"(?<![\p{L}\p{M}\p{N}._/-])(?:~/|//+(?=[ \t]*[^\s/])|/(?=[ \t]*[^\s/]))[^\S\r\n]*[^\r\n\u001E\s]+(?:[^\S\r\n]+[^\r\n\u001E\s]+)*", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex RelativeSlashPathRegex = new(@"(^|[\s(\[{""'=,:;\u001F])(?!(?<!['""])(?:HTTP|TLS|SSL)/\d)(?!(?<!['""])\d+/\d+(?:$|[\s)\]},;]))[^\s/\\""'<>()\[\]{}:,;\u001E\u001F]+/[^\r\n\u001E\u001F\s]+(?:[^\S\r\n]+[^\r\n\u001E\u001F\s]+)*", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex RelativeSlashPathRegex = new(@"(^|[\s(\[{""'=,:;\u001F])(?!(?<!['""])(?:HTTP|TLS|SSL)/\d)(?!(?<!['""])\d+/\d+(?:$|[\s)\]},;:!?]|\.(?![A-Za-z0-9])))[^\s/\\""'<>()\[\]{}:,;\u001E\u001F]+/[^\r\n\u001E\u001F\s]+(?:[^\S\r\n]+[^\r\n\u001E\u001F\s]+)*", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex DoubleQuotedFilenameRegex = new(@"""[^""\r\n/\\]*\.[A-Za-z0-9]{1,16}""", RegexOptions.Compiled);
     private static readonly Regex SingleQuotedFilenameRegex = new(@"(?<!\p{L})'(?:[^'\r\n/\\]|'(?=\p{L}))*\.[A-Za-z0-9]{1,16}'", RegexOptions.Compiled);
     private static readonly Regex KeywordQuotedPathRegex = new(@"(\b(?:file|path|directory|folder|document)\s+)([""'])(?!\u001E)[^'""\r\n]+\2", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex KeywordUnquotedFilenameRegex = new(@"(\b(?:open|opening|read|reading|write|writing|delete|deleting|remove|removing|rename|stat|create|creating|load|loading|save|saving|access|accessing|unlink|file|path|directory|folder|document|filename|filepath)\b(?:\s*[:=]\s*|\s+))(?!\u001E)[^\r\n\u001E\u001F]*\.(?!(?:kt|java|swift|cs|cpp|cc|c|h|hpp|rs|py|js|ts|go|rb|m|mm):\d+)[A-Za-z0-9]{1,16}\b(?!\()", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex KeywordFilenamePrefixRegex = new(@"\b(?:open|opening|read|reading|write|writing|delete|deleting|remove|removing|rename|stat|create|creating|load|loading|save|saving|access|accessing|unlink|file|path|directory|folder|document|filename|filepath)\b(?:[ \t]*[:=][ \t]*|[ \t]+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly HashSet<string> SourceLineExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "kt", "java", "swift", "cs", "cpp", "cc", "c", "h", "hpp", "rs", "py", "js", "ts", "go", "rb", "m", "mm"
+    };
     private static readonly Regex KeywordAssignedPathRegex = new(@"(\b(?:file|path|filename|filepath)\s*[:=]\s*)(?!\u001E)[^\r\n\u001E\u001F]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex BareFilenameRegex = new(@"(^|[\r\n:=;\u001F])([ \t]*)[^\r\n:=;\u001E\u001F]*\.(?!ts:\d+)(?:mov|mp4|m4v|mkv|webm|avi|ts|m3u8|mpd|mp3|m4a|wav|aac|flac|ogg|opus|jpg|jpeg|png|gif|webp|heic|svg|pdf|txt|md|rtf|doc|docx|xls|xlsx|ppt|pptx|csv|json|xml|yaml|yml|toml|ini|cfg|conf|log|srt|vtt|ass|ssa|zip|tar|gz|tgz|bz2|xz|7z|rar|dmg|pkg|msi|exe|apk|aab|ipa|pem|key|crt|cer|p12|pfx|jks|keystore|db|sqlite|sqlite3|bin|dat|tmp|bak|proj|aun)\b(?!\()", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex BearerTokenRegex = new(@"\bBearer\s+\S+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -267,10 +271,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             scrubbed = SingleQuotedFilenameRegex.Replace(scrubbed, "[redacted-path]");
         }
         scrubbed = KeywordQuotedPathRegex.Replace(scrubbed, "$1[redacted-path]");
-        if (scrubbed.Contains('.'))
-        {
-            scrubbed = KeywordUnquotedFilenameRegex.Replace(scrubbed, "$1[redacted-path]");
-        }
+        scrubbed = RedactKeywordUnquotedFilenames(scrubbed);
         scrubbed = KeywordAssignedPathRegex.Replace(scrubbed, "$1[redacted-path]");
         if (scrubbed.Contains('.'))
         {
@@ -281,6 +282,66 @@ public sealed class CoreTelemetryService : ITelemetryService
         scrubbed = BearerTokenRegex.Replace(scrubbed, "Bearer [redacted]");
         return hadSentinels ? UnescapeSentinels(scrubbed) : scrubbed;
     }
+
+    private static string RedactKeywordUnquotedFilenames(string text)
+    {
+        if (!text.Contains('.')) return text;
+        StringBuilder? sb = null;
+        var copied = 0;
+        var segStart = 0;
+        while (segStart < text.Length)
+        {
+            var segEnd = segStart;
+            while (segEnd < text.Length && text[segEnd] is not ('\r' or '\n' or '\u001E' or '\u001F'))
+            {
+                segEnd++;
+            }
+            var (lastDot, lastExtEnd) = FindLastUnquotedFilenameExt(text, segStart, segEnd);
+            if (lastDot >= 0)
+            {
+                var kwMatch = KeywordFilenamePrefixRegex.Match(text, segStart, lastDot - segStart);
+                if (kwMatch.Success)
+                {
+                    var kwEnd = kwMatch.Index + kwMatch.Length;
+                    sb ??= new StringBuilder(text.Length);
+                    sb.Append(text, copied, kwEnd - copied);
+                    sb.Append("[redacted-path]");
+                    copied = lastExtEnd;
+                }
+            }
+            segStart = segEnd + 1;
+        }
+        if (sb == null) return text;
+        sb.Append(text, copied, text.Length - copied);
+        return sb.ToString();
+    }
+
+    private static (int Dot, int ExtEnd) FindLastUnquotedFilenameExt(string text, int segStart, int segEnd)
+    {
+        for (var dot = segEnd - 1; dot >= segStart; dot--)
+        {
+            if (text[dot] != '.') continue;
+            var extStart = dot + 1;
+            var extEnd = extStart;
+            while (extEnd < segEnd && extEnd - extStart < 17 && IsAsciiAlphaNum(text[extEnd]))
+            {
+                extEnd++;
+            }
+            var extLen = extEnd - extStart;
+            if (extLen < 1 || extLen > 16) continue;
+            if (extEnd < text.Length && (IsAsciiWordChar(text[extEnd]) || text[extEnd] == '(')) continue;
+            if (extEnd + 1 < text.Length && text[extEnd] == ':' && char.IsAsciiDigit(text[extEnd + 1]) &&
+                SourceLineExtensions.Contains(text.Substring(extStart, extLen)))
+            {
+                continue;
+            }
+            return (dot, extEnd);
+        }
+        return (-1, -1);
+    }
+
+    private static bool IsAsciiAlphaNum(char ch) =>
+        (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9');
 
     private static string RedactEmails(string text)
     {
@@ -586,6 +647,11 @@ public sealed class CoreTelemetryService : ITelemetryService
     private static bool IsNonPathSlashToken(string text, int start, int end, bool insideQuote)
     {
         if (insideQuote || start < 0 || end <= start) return false;
+        while (end > start && text[end - 1] is '.' or ',' or ';' or ':' or '!' or '?' or ')' or ']' or '}')
+        {
+            end--;
+        }
+        if (end <= start) return false;
         var span = text.AsSpan(start, end - start);
         var slashIdx = span.IndexOfAny('/', '\\');
         if (slashIdx <= 0 || slashIdx + 1 >= span.Length || span[slashIdx] != '/') return false;
