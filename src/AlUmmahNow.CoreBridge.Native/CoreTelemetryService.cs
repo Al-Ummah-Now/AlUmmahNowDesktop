@@ -617,7 +617,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         if (text.IndexOf(':') < 0 && text.IndexOf('=') < 0) return text;
         StringBuilder? sb = null;
         var copied = 0;
-        var objScanBudget = Math.Max(text.Length * 2, 4096);
+        Dictionary<int, int>? braceMap = null;
         var i = 0;
         while (i < text.Length)
         {
@@ -645,7 +645,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                 sb.Append(text, copied, i - copied).Append(text[i]).Append(normalizedKey).Append(text[i]);
                 copied = keyEnd;
             }
-            i = RedactAuthHeaderValue(text, valStart, isJsonMember, ref objScanBudget, ref sb, ref copied);
+            i = RedactAuthHeaderValue(text, valStart, isJsonMember, ref braceMap, ref sb, ref copied);
         }
         if (sb == null) return text;
         sb.Append(text, copied, text.Length - copied);
@@ -735,7 +735,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     }
 
     private static int RedactAuthHeaderValue(
-        string text, int valStart, bool isJsonMember, ref int objScanBudget, ref StringBuilder? sb, ref int copied)
+        string text, int valStart, bool isJsonMember, ref Dictionary<int, int>? braceMap, ref StringBuilder? sb, ref int copied)
     {
         var ch = text[valStart];
         if (ch is '"' or '\'')
@@ -745,12 +745,12 @@ public sealed class CoreTelemetryService : ITelemetryService
         }
         if (ch == '[')
         {
-            var afterArray = RedactAuthArrayValue(text, valStart + 1, isJsonMember, ref objScanBudget, ref sb, ref copied);
+            var afterArray = RedactAuthArrayValue(text, valStart + 1, isJsonMember, ref braceMap, ref sb, ref copied);
             return RedactTrailingPlainAuthContinuation(text, afterArray, isJsonMember, ref sb, ref copied);
         }
         if (ch == '{')
         {
-            var objEnd = ScanBalancedJsonObjectEnd(text, valStart, ref objScanBudget);
+            var objEnd = FindBalancedJsonObjectEnd(text, valStart, ref braceMap);
             if (objEnd > valStart)
             {
                 sb ??= new StringBuilder(text.Length);
@@ -873,34 +873,56 @@ public sealed class CoreTelemetryService : ITelemetryService
         return next < text.Length && text[next] == '"';
     }
 
-    private static int ScanBalancedJsonObjectEnd(string text, int bracePos, ref int objScanBudget)
+    private static int FindBalancedJsonObjectEnd(string text, int bracePos, ref Dictionary<int, int>? braceMap)
     {
-        if (objScanBudget <= 0 || bracePos >= text.Length || text[bracePos] != '{') return -1;
-        var depth = 0;
-        var inString = false;
-        var escaped = false;
-        var i = bracePos;
-        for (; i < text.Length; i++)
+        if (bracePos >= text.Length || text[bracePos] != '{') return -1;
+        braceMap ??= BuildJsonBraceMatchMap(text);
+        return braceMap.TryGetValue(bracePos, out var endPos) ? endPos : -1;
+    }
+
+    private static Dictionary<int, int> BuildJsonBraceMatchMap(string text)
+    {
+        var map = new Dictionary<int, int>();
+        var stack = new Stack<int>();
+        var noCloseQuoteBefore = -1;
+        var i = 0;
+        while (i < text.Length)
         {
             var c = text[i];
-            if (inString)
+            if (c == '"' && i >= noCloseQuoteBefore)
             {
-                if (c is '\r' or '\n') break;
-                if (escaped) { escaped = false; continue; }
-                if (c == '\\') { escaped = true; continue; }
-                if (c == '"') { inString = false; continue; }
-                continue;
+                var strEnd = ScanJsonStringEnd(text, i + 1);
+                if (strEnd > 0)
+                {
+                    i = strEnd;
+                    continue;
+                }
+                noCloseQuoteBefore = -strEnd - 1;
             }
-            if (c == '"') { inString = true; continue; }
-            if (c == '{') { depth++; continue; }
-            if (c == '}')
+            else if (c == '{')
             {
-                depth--;
-                if (depth == 0) return i + 1;
+                stack.Push(i);
             }
+            else if (c == '}' && stack.Count > 0)
+            {
+                map[stack.Pop()] = i + 1;
+            }
+            i++;
         }
-        objScanBudget -= Math.Max(1, i - bracePos);
-        return -1;
+        return map;
+    }
+
+    private static int ScanJsonStringEnd(string text, int start)
+    {
+        var escaped = false;
+        for (var i = start; i < text.Length; i++)
+        {
+            var c = text[i];
+            if (c is '\r' or '\n') return -(i + 1);
+            if (c == '"' && !escaped) return i + 1;
+            escaped = c == '\\' && !escaped;
+        }
+        return -(text.Length + 1);
     }
 
     private static int ScanPlainAuthValueEnd(string text, int start)
@@ -925,7 +947,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     }
 
     private static int RedactAuthArrayValue(
-        string text, int start, bool isJsonMember, ref int objScanBudget, ref StringBuilder? sb, ref int copied)
+        string text, int start, bool isJsonMember, ref Dictionary<int, int>? braceMap, ref StringBuilder? sb, ref int copied)
     {
         var depth = 1;
         var k = start;
@@ -941,7 +963,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             }
             if (c == '{')
             {
-                var objEnd = ScanBalancedJsonObjectEnd(text, k, ref objScanBudget);
+                var objEnd = FindBalancedJsonObjectEnd(text, k, ref braceMap);
                 if (objEnd > k)
                 {
                     sb ??= new StringBuilder(text.Length);

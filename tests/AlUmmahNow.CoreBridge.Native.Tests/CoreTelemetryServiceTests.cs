@@ -1024,6 +1024,11 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("{\"Authorization\":{\n\"token\":\"opaqueSecret123\"\n},\"status\":\"safe\"}"));
             Assert.Equal("{\"Authorization\":[\"[redacted]\"],\"status\":\"safe\"}",
                 CoreTelemetryService.SanitizeLocalPaths("{\"Authorization\":[{\"token\":\"start],opaqueSecret123\"}],\"status\":\"safe\"}"));
+            var paddedUnmatched = "Authorization: {\nAuthorization: {\nAuthorization: {\nAuthorization: {\n" +
+                new string('x', 5000) + "\n{\"Authorization\":{\n\"token\":\"opaqueSecret123\"\n},\"status\":\"safe\"}";
+            var scrubbedPadded = CoreTelemetryService.SanitizeLocalPaths(paddedUnmatched);
+            Assert.DoesNotContain("opaqueSecret123", scrubbedPadded);
+            Assert.EndsWith("{\"Authorization\":\"[redacted]\",\"status\":\"safe\"}", scrubbedPadded);
             Assert.Equal("Authorization: [[redacted]]\r\nNextHeader: safe",
                 CoreTelemetryService.SanitizeLocalPaths("Authorization: [firstValue]\r\nNextHeader: safe"));
             Assert.Equal("{\n  \"Authorization\": \"[redacted]\"\n  }",
