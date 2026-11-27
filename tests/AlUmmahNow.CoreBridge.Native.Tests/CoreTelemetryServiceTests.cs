@@ -206,6 +206,39 @@ public class CoreTelemetryServiceTests
             service.ReportCrash("Exception", "should not record");
             Assert.Equal(0, service.PendingCount);
             await service.FlushAsync();
+
+            // Also verify that revoking when the buffer's parent directory denies search permission
+            // surfaces LastPurgeFailed instead of falsely reporting success via File.Exists == false.
+            if (!OperatingSystem.IsWindows())
+            {
+                var restrictedDir = Path.Combine(dir, "restricted");
+                Directory.CreateDirectory(restrictedDir);
+                var restrictedBuf = Path.Combine(restrictedDir, "telemetry-buffer.json");
+                using var restrictedSvc = new CoreTelemetryService(
+                    platform: "linux",
+                    appVersion: "1.0.0",
+                    locale: "en",
+                    videosApiBaseUrl: null,
+                    userAgent: "AlUmmahNowLinux/1.0.0",
+                    bufferPath: restrictedBuf,
+                    initialEnabled: true);
+                restrictedSvc.Track("screen_view", new Dictionary<string, object> { ["screen"] = "home" });
+                restrictedSvc.Persist();
+                Assert.True(File.Exists(restrictedBuf));
+
+                File.SetUnixFileMode(restrictedDir, UnixFileMode.None);
+                try
+                {
+                    Assert.False(restrictedSvc.SetConsent(TelemetryConsent.Off));
+                    Assert.True(restrictedSvc.LastPurgeFailed);
+                    Assert.Equal(TelemetryConsent.Off, restrictedSvc.Consent);
+                }
+                finally
+                {
+                    File.SetUnixFileMode(restrictedDir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+                }
+                Assert.True(File.Exists(restrictedBuf));
+            }
         }
         finally
         {
@@ -407,10 +440,10 @@ public class CoreTelemetryServiceTests
                 bufferPath: bufferPath,
                 initialEnabled: true);
 
-            service.AddBreadcrumb("io", "Opened /workspace/E\u0301lodie/Very Secret Client Project Name.mov");
+            service.AddBreadcrumb("io", "Opened /workspace/E\u0301lodie/Very Secret Client Project Name.mov; /workspace/alice/O'Brien.mov; \"/Users/O'Brien/Final.mov\"");
             service.ReportCrash(
                 "IOException",
-                "Failed reading /workspace/alice/Private (Confidential).mov; \"C:\\Users\\Alice Smith\\Private Draft.mp4\"",
+                "Failed reading /Private (Client).mov; /Client Files/Private.mov; /workspace/alice/Private (Confidential).mov; \"C:\\Users\\Alice Smith\\Private Draft.mp4\"",
                 "at Foo.Open() in /workspace/Élodie/src/App.cs:line 42\nat Bar.Run() in \\\\fileserver\\share\\secret.mp4\n~/private/key.pem");
 
             Assert.True(File.Exists(bufferPath));
@@ -418,6 +451,8 @@ public class CoreTelemetryServiceTests
             Assert.DoesNotContain("alice", json, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("smith", json, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("lodie", json, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("brien", json, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("client files", json, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("name.mov", json, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("confidential", json, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("draft.mp4", json, StringComparison.OrdinalIgnoreCase);

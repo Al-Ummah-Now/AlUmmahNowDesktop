@@ -13,10 +13,11 @@ namespace AlUmmahNow.CoreBridge.Native;
 /// </summary>
 public sealed class CoreTelemetryService : ITelemetryService
 {
-    private static readonly Regex QuotedPathRegex = new(@"([""'])(?:file://|(?:[A-Za-z]:[\\/]|\\\\)|~/(?!\s)|/[^""'\r\n/]+/)[^""'\r\n]+\1", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex FileUriRegex = new(@"file://[^\r\n""'<>|;]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex WindowsPathRegex = new(@"(?:[A-Za-z]:[\\/]|\\\\)[^\r\n""'<>|;]+?(?=(?::line\b|:\d+\b|[\r\n""'<>|;]|$))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex UnixPathRegex = new(@"(?<![\p{L}\p{M}\p{N}._:/-])(?:~/|/[^\s/""'<>|;:\r\n]+/)[^\r\n""'<>|;]*?(?=(?::line\b|:\d+\b|[\r\n""'<>|;]|$))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex DoubleQuotedPathRegex = new(@"""(?:file://|(?:[A-Za-z]:[\\/]|\\\\)|~/(?!\s)|/[^""\r\n/]+)[^""\r\n]*""", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex SingleQuotedPathRegex = new(@"'(?:file://|(?:[A-Za-z]:[\\/]|\\\\)|~/(?!\s)|/[^'\r\n/]+)[^'\r\n]*'", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex FileUriRegex = new(@"file://[^\r\n""<>|;]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex WindowsPathRegex = new(@"(?:[A-Za-z]:[\\/]|\\\\)[^\r\n""<>|;]+?(?=(?::line\b|:\d+\b|[\r\n""<>|;]|$))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex UnixPathRegex = new(@"(?<![\p{L}\p{M}\p{N}._:/-])(?:~/|/[^\r\n/""<>|;:]+/|/[^\r\n/""<>|;:]+\.[\p{L}\p{N}]{1,10})[^\r\n""<>|;]*?(?=(?::line\b|:\d+\b|[\r\n""<>|;]|$))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private readonly TelemetryClient _client;
     private readonly string? _bufferPath;
@@ -131,7 +132,8 @@ public sealed class CoreTelemetryService : ITelemetryService
     internal static string SanitizeLocalPaths(string text)
     {
         if (string.IsNullOrEmpty(text)) return text;
-        var scrubbed = QuotedPathRegex.Replace(text, "[redacted-path]");
+        var scrubbed = DoubleQuotedPathRegex.Replace(text, "[redacted-path]");
+        scrubbed = SingleQuotedPathRegex.Replace(scrubbed, "[redacted-path]");
         scrubbed = FileUriRegex.Replace(scrubbed, "[redacted-path]");
         scrubbed = WindowsPathRegex.Replace(scrubbed, "[redacted-path]");
         scrubbed = UnixPathRegex.Replace(scrubbed, "[redacted-path]");
@@ -200,7 +202,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                 try
                 {
                     _client.SetConsent(TelemetryConsentState.Denied);
-                    _lastPurgeFailed = false;
+                    _lastPurgeFailed = !TryDeleteSiblingTempFiles();
                 }
                 catch (AunException ex)
                 {
@@ -545,10 +547,51 @@ public sealed class CoreTelemetryService : ITelemetryService
     private bool TryDeleteBufferFallback()
     {
         if (string.IsNullOrWhiteSpace(_bufferPath)) return true;
+        var mainOk = false;
         try
         {
-            if (!File.Exists(_bufferPath)) return !Directory.Exists(_bufferPath);
+            // Do NOT pre-check with File.Exists/Directory.Exists: both return false when directory
+            // search permission is denied, which would falsely report purge success while data remains.
             File.Delete(_bufferPath);
+            mainOk = true;
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            mainOk = false;
+        }
+        var tempsOk = TryDeleteSiblingTempFiles();
+        return mainOk && tempsOk;
+    }
+
+    private bool TryDeleteSiblingTempFiles()
+    {
+        if (string.IsNullOrWhiteSpace(_bufferPath)) return true;
+        var dir = Path.GetDirectoryName(_bufferPath);
+        var fileName = Path.GetFileName(_bufferPath);
+        if (string.IsNullOrEmpty(dir) || string.IsNullOrEmpty(fileName)) return true;
+        try
+        {
+            var pattern = $".{fileName}.*.tmp";
+            var allDeleted = true;
+            foreach (var tmp in Directory.EnumerateFiles(dir, pattern))
+            {
+                try
+                {
+                    File.Delete(tmp);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    allDeleted = false;
+                }
+            }
+            return allDeleted;
+        }
+        catch (DirectoryNotFoundException)
+        {
             return true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
