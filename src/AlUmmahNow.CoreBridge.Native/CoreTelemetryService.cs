@@ -559,7 +559,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             {
                 break;
             }
-            if (ch == ',' && (!allowCommas || ShouldStopAtUrlComma(text, p))) break;
+            if (ch == ',' && (!allowCommas || (openChars.Count == 0 && ShouldStopAtUrlComma(text, p)))) break;
             if (ch is '(' or '[')
             {
                 if (StartsEmbeddedPathInsideGroup(text, p + 1)) break;
@@ -580,7 +580,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             if (!allowCommas && openChars.Count > 0 && ch == ':') break;
             p++;
         }
-        if (openPositions.Count > 0)
+        if (!allowCommas && openPositions.Count > 0)
         {
             truncated = true;
             return openPositions[0];
@@ -875,15 +875,19 @@ public sealed class CoreTelemetryService : ITelemetryService
                 else if (span.Equals("proxy-authorization".AsSpan(), StringComparison.OrdinalIgnoreCase)) canonical = "Proxy-Authorization";
                 if (canonical == null) return false;
                 keyEnd = j + 1;
-                if (quote == '"' && !hasInvalidJsonEscape)
+                if (quote == '"')
                 {
-                    var openBrace = FindEnclosingJsonObjectStart(text, pos, cache);
-                    hasJsonPrefix = openBrace >= 0;
-                    if (openBrace >= 0)
+                    var prevDelim = SkipJsonWhitespaceBackward(text, pos - 1);
+                    hasJsonPrefix = prevDelim >= 0 && text[prevDelim] is '{' or ',';
+                    if (!hasInvalidJsonEscape)
                     {
-                        var state = ClassifyTopLevelJsonContainer(text, openBrace, cache);
-                        isJsonCandidate = state == 0;
-                        failedTopEnd = state > 0 ? state : -1;
+                        var openBrace = FindEnclosingJsonObjectStart(text, pos, cache);
+                        if (openBrace >= 0)
+                        {
+                            var state = ClassifyTopLevelJsonContainer(text, openBrace, cache);
+                            isJsonCandidate = state == 0;
+                            failedTopEnd = state > 0 ? state : -1;
+                        }
                     }
                 }
                 normalizedKey = sawEscape ? canonical : null;
