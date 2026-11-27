@@ -306,16 +306,17 @@ public sealed class CoreTelemetryService : ITelemetryService
                     tail = "'" + tail;
                 }
             }
+            var rawUrl = text.Substring(start, baseEnd - start);
             var redactedUrl = RedactUrlPathSecrets(url);
-            if (!hasQf && tail.Length == 0 && totalEnd < text.Length)
+            if (!hasQf && (tail.Length == 0 || tail == ";") && totalEnd < text.Length)
             {
                 var nextCh = text[totalEnd];
                 var canContinue = nextCh == ','
                     ? !ShouldStopAtUrlComma(text, totalEnd)
-                    : nextCh is '(' or '[' && !StartsEmbeddedPathInsideGroup(text, totalEnd + 1);
+                    : nextCh is '(' or '[' && !StartsEmbeddedFilesystemPath(text, totalEnd + 1);
                 if (canContinue)
                 {
-                    var withNext = url + nextCh;
+                    var withNext = rawUrl + nextCh;
                     var probe = RedactUrlPathSecrets(withNext);
                     if (probe != withNext && probe.EndsWith("[redacted]", StringComparison.Ordinal))
                     {
@@ -559,10 +560,17 @@ public sealed class CoreTelemetryService : ITelemetryService
             {
                 break;
             }
-            if (ch == ',' && (!allowCommas || (openChars.Count == 0 && ShouldStopAtUrlComma(text, p)))) break;
+            if (ch == ',')
+            {
+                var nextIsQf = p + 1 < text.Length && text[p + 1] is '?' or '#';
+                if (!nextIsQf && (!allowCommas || (openChars.Count == 0 && ShouldStopAtUrlComma(text, p)))) break;
+            }
             if (ch is '(' or '[')
             {
-                if (StartsEmbeddedPathInsideGroup(text, p + 1)) break;
+                var blocked = allowCommas
+                    ? StartsEmbeddedFilesystemPath(text, p + 1)
+                    : StartsEmbeddedPathInsideGroup(text, p + 1);
+                if (blocked) break;
                 openPositions.Add(p);
                 openChars.Add(ch);
                 p++;
@@ -594,20 +602,27 @@ public sealed class CoreTelemetryService : ITelemetryService
         if (nextPos >= text.Length) return true;
         var next = text[nextPos];
         if (char.IsWhiteSpace(next) ||
-            next is '"' or '\'' or '<' or '>' or '\\' or '{' or '}' or ')' or ']' or ';' or '?' or '#' or '\r' or '\n')
+            next is '"' or '\'' or '<' or '>' or '\\' or '{' or '}' or ')' or ']' or '\r' or '\n')
         {
             return true;
         }
-        return StartsEmbeddedPathInsideGroup(text, nextPos);
+        return StartsEmbeddedFilesystemPath(text, nextPos);
+    }
+
+    private static bool StartsEmbeddedFilesystemPath(string text, int nextPos)
+    {
+        if (nextPos >= text.Length) return true;
+        var ch = text[nextPos];
+        if (ch is '/' or '\\') return true;
+        if (ch == '~' && nextPos + 1 < text.Length && text[nextPos + 1] == '/') return true;
+        return IsFileSchemeAt(text, nextPos) || IsWindowsDriveAt(text, nextPos);
     }
 
     private static bool StartsEmbeddedPathInsideGroup(string text, int nextPos)
     {
         if (nextPos >= text.Length) return true;
-        var ch = text[nextPos];
-        if (ch is '/' or '\\' or ':') return true;
-        if (ch == '~' && nextPos + 1 < text.Length && text[nextPos + 1] == '/') return true;
-        return IsFileSchemeAt(text, nextPos) || IsWindowsDriveAt(text, nextPos);
+        if (text[nextPos] == ':') return true;
+        return StartsEmbeddedFilesystemPath(text, nextPos);
     }
 
     private static bool IsWindowsDriveAt(string text, int pos) =>
