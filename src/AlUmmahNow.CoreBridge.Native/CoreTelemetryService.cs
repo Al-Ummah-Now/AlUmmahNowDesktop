@@ -386,9 +386,10 @@ public sealed class CoreTelemetryService : ITelemetryService
         var webhookProbe = (probe != probeInput && probe.EndsWith("[redacted]", StringComparison.Ordinal)) ? probe : null;
         if (webhookProbe == null && totalEnd < failedContMax) return false;
         var outerQuote = urlStart > 0 && text[urlStart - 1] is '\'' or '"' ? text[urlStart - 1] : '\0';
+        var isContainerValue = outerQuote != '\0' && IsContainerValueStart(text, urlStart - 1);
         var allowDoubleQuotes = totalEnd >= unclosedDoubleQuoteEnd;
         var allowSingleQuotes = totalEnd >= unclosedSingleQuoteEnd;
-        var p = ScanUrlContinuation(text, totalEnd, allowDoubleQuotes, allowSingleQuotes, outerQuote,
+        var p = ScanUrlContinuation(text, totalEnd, allowDoubleQuotes, allowSingleQuotes, outerQuote, isContainerValue,
             stopAtSchemes: webhookProbe == null, out var sawInnerQf, out var unclosedQuote);
         var hitsQf = p > totalEnd && p < text.Length && text[p] is '?' or '#';
         if (unclosedQuote != '\0' && (unclosedQuote == outerQuote || (webhookProbe == null && !hitsQf)))
@@ -397,7 +398,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             else if (unclosedQuote == '\'' && p > unclosedSingleQuoteEnd) unclosedSingleQuoteEnd = p;
             if (unclosedQuote == '"') allowDoubleQuotes = false;
             else allowSingleQuotes = false;
-            p = ScanUrlContinuation(text, totalEnd, allowDoubleQuotes, allowSingleQuotes, outerQuote,
+            p = ScanUrlContinuation(text, totalEnd, allowDoubleQuotes, allowSingleQuotes, outerQuote, isContainerValue,
                 stopAtSchemes: webhookProbe == null, out sawInnerQf, out unclosedQuote);
         }
         if (p > totalEnd && p < text.Length && text[p] is '?' or '#')
@@ -499,8 +500,8 @@ public sealed class CoreTelemetryService : ITelemetryService
     }
 
     private static int ScanUrlContinuation(
-        string text, int start, bool allowDoubleQuotes, bool allowSingleQuotes, char outerQuote, bool stopAtSchemes,
-        out bool sawInnerQf, out char unclosedQuote)
+        string text, int start, bool allowDoubleQuotes, bool allowSingleQuotes, char outerQuote, bool isContainerValue,
+        bool stopAtSchemes, out bool sawInnerQf, out char unclosedQuote)
     {
         var p = start;
         var groupStack = new List<char>();
@@ -543,7 +544,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                 var afterNonAlphaNum = p > start && !IsAsciiAlphaNum(text[p - 1]);
                 var canOpen = allowed && groupStack.Count > 0 &&
                     (ch == '"' ? (outerQuote != '"' || afterNonAlphaNum) : afterNonAlphaNum) &&
-                    !(ch == outerQuote && IsOuterQuoteCloser(text, p, outerQuote));
+                    !(ch == outerQuote && IsOuterQuoteCloser(text, p, outerQuote, isContainerValue));
                 if (canOpen)
                 {
                     quoteChar = ch;
@@ -572,17 +573,91 @@ public sealed class CoreTelemetryService : ITelemetryService
         return p;
     }
 
-    private static bool IsOuterQuoteCloser(string text, int quotePos, char outerQuote)
+    private static bool IsContainerValueStart(string text, int quotePos)
+    {
+        var k = quotePos - 1;
+        while (k >= 0 && text[k] is ' ' or '\t') k--;
+        return k >= 0 && text[k] is '[' or '{' or ',' or ':';
+    }
+
+    private static bool IsOuterQuoteCloser(string text, int quotePos, char outerQuote, bool isContainerValue)
     {
         var k = quotePos + 1;
+        if (k >= text.Length || text[k] is '\r' or '\n') return true;
+        if (!isContainerValue) return false;
+        while (k < text.Length && text[k] is '}' or ']' or ' ' or '\t') k++;
+        if (k >= text.Length || text[k] is '\r' or '\n') return true;
+        return text[k] == ',' && HasContainerSiblingAfterComma(text, k, outerQuote);
+    }
+
+    private static bool HasContainerSiblingAfterComma(string text, int commaPos, char outerQuote)
+    {
+        var k = SkipHorizontalSpaces(text, commaPos + 1);
+        while (k < text.Length)
+        {
+            var c = text[k];
+            if (c == outerQuote || c is '{' or '[' or ']' or '}' or '\r' or '\n') return true;
+            var next = ScanContainerScalar(text, k);
+            if (next <= k) return false;
+            k = SkipHorizontalSpaces(text, next);
+            if (k >= text.Length || text[k] is ']' or '}' or '\r' or '\n') return true;
+            if (text[k] != ',') return false;
+            k = SkipHorizontalSpaces(text, k + 1);
+        }
+        return true;
+    }
+
+    private static int SkipHorizontalSpaces(string text, int pos)
+    {
+        var k = pos;
         while (k < text.Length && text[k] is ' ' or '\t') k++;
-        if (k >= text.Length) return true;
-        var c = text[k];
-        if (c is '\r' or '\n' or '}' or ']' or ')' or ';' or ':') return true;
-        if (c != ',') return false;
-        k++;
-        while (k < text.Length && text[k] is ' ' or '\t') k++;
-        return k >= text.Length || text[k] == outerQuote || text[k] is '}' or ']' or ')' or '\r' or '\n';
+        return k;
+    }
+
+    private static int ScanContainerScalar(string text, int pos)
+    {
+        var end = ScanContainerNumber(text, pos);
+        if (end < 0) end = MatchContainerKeyword(text, pos);
+        return end > pos && (end >= text.Length || text[end] is ',' or ']' or '}' or ' ' or '\t' or '\r' or '\n') ? end : -1;
+    }
+
+    private static int ScanContainerNumber(string text, int pos)
+    {
+        var i = text[pos] == '-' ? pos + 1 : pos;
+        var digitsStart = i;
+        while (i < text.Length && text[i] >= '0' && text[i] <= '9') i++;
+        if (i == digitsStart) return -1;
+        if (i < text.Length && text[i] == '.')
+        {
+            i++;
+            var fracStart = i;
+            while (i < text.Length && text[i] >= '0' && text[i] <= '9') i++;
+            if (i == fracStart) return -1;
+        }
+        if (i < text.Length && text[i] is 'e' or 'E')
+        {
+            i++;
+            if (i < text.Length && text[i] is '+' or '-') i++;
+            var expStart = i;
+            while (i < text.Length && text[i] >= '0' && text[i] <= '9') i++;
+            if (i == expStart) return -1;
+        }
+        return i;
+    }
+
+    private static int MatchContainerKeyword(string text, int pos)
+    {
+        ReadOnlySpan<char> slice = text.AsSpan(pos);
+        if (slice.StartsWith("true", StringComparison.Ordinal) || slice.StartsWith("null", StringComparison.Ordinal) ||
+            slice.StartsWith("True", StringComparison.Ordinal) || slice.StartsWith("None", StringComparison.Ordinal))
+        {
+            return pos + 4;
+        }
+        if (slice.StartsWith("false", StringComparison.Ordinal) || slice.StartsWith("False", StringComparison.Ordinal))
+        {
+            return pos + 5;
+        }
+        return -1;
     }
 
     private static bool IsContractionApostrophe(string text, int pos) =>
