@@ -1466,6 +1466,24 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("[\"https://example.com/api\\u003ftoken=opaqueSecret123\"]"));
             Assert.Equal("[\"https://example.test/webhook/[redacted]\"]",
                 CoreTelemetryService.SanitizeLocalPaths("[\"https://example.test/webhook/fake\\u0054oken\"]"));
+            Assert.Equal("[\"https://example.com/api?[redacted]\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"https://example.com/api\\u003Ftoken=prefix\\u0020opaqueSecret123\"]"));
+            Assert.Equal("[\"https://example.com/api?[redacted]\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"https://example.com/api?token=first\\u0020secondSecret\"]"));
+            Assert.Equal("[\"https://example.com/api#[redacted]\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"https://example.com/api\\u0023prefix\\u0020opaqueSecret123\"]"));
+            Assert.Equal("[\"https://example.test/webhook/[redacted]\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"https://example.test/webhook/\\u00e9PrivateToken\"]"));
+            Assert.Equal("[\"HTTP/2\"]", CoreTelemetryService.SanitizeLocalPaths("[\"HTTP/2\"]"));
+            Assert.Equal("[\"HTTP/1.1\"]", CoreTelemetryService.SanitizeLocalPaths("[\"HTTP/1.1\"]"));
+            Assert.Equal("[\"HTTP\\/2\"]", CoreTelemetryService.SanitizeLocalPaths("[\"HTTP\\/2\"]"));
+            Assert.Equal("[\"TLS/1.3\"]", CoreTelemetryService.SanitizeLocalPaths("[\"TLS/1.3\"]"));
+            Assert.Equal("[\"SSL/3.0\"]", CoreTelemetryService.SanitizeLocalPaths("[\"SSL/3.0\"]"));
+            Assert.Equal("[\"[redacted-path]\"]", CoreTelemetryService.SanitizeLocalPaths("[\"HTTP/2/Secret.mov\"]"));
+            var manyApostrophes = "file '" + string.Concat(Enumerable.Repeat("a'", 5000)) + "end'";
+            Assert.Equal("file [redacted-path]", CoreTelemetryService.SanitizeLocalPaths(manyApostrophes));
+            var manyUnclosedApostrophes = "file '" + string.Concat(Enumerable.Repeat("a'", 5000)) + "end";
+            Assert.Equal(manyUnclosedApostrophes, CoreTelemetryService.SanitizeLocalPaths(manyUnclosedApostrophes));
             var manyFileUris = string.Join("\n", Enumerable.Repeat("open file:///Users/Alice/Secret.mov", 2000));
             var expectedFileUris = string.Join("\n", Enumerable.Repeat("open [redacted-path]", 2000));
             Assert.Equal(expectedFileUris, CoreTelemetryService.SanitizeLocalPaths(manyFileUris));

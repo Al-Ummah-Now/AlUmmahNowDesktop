@@ -26,7 +26,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     private static readonly Regex QuotedSpacedRootPathRegex = new(@"[""']/[ \t]+[^\r\n\u001E\s""][^\r\n\u001E]*", RegexOptions.Compiled);
     private static readonly Regex UnixPathRegex = new(@"(?<![\p{L}\p{M}\p{N}._/-])(?:~/(?=[^\S\r\n]*[^\s""])|//+(?=[^\S\r\n]*[^\s/""])|/(?=[^\S\r\n]*[^\s/""]))[^\S\r\n]*[^\r\n\u001E\s](?:[^\r\n\u001E]*[^\r\n\u001E\s])?", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex RelativeSlashPathRegex = new(@"(^|[\s(\[{)\]}<>""'=,:;\u001F])(?!(?<!['""])(?:HTTP|TLS|SSL)/\d)(?!(?<!['""])\d+/\d+(?:$|[\s)\]},;:!?]|\.(?![A-Za-z0-9])))[^\s/\\""'<>()\[\]{}:,;=\u001E\u001F]+/[^\r\n\u001E\u001F\s""](?:[^\r\n\u001E\u001F]*[^\r\n\u001E\u001F\s])?", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex KeywordQuotedPathRegex = new(@"(\b(?:file|path|directory|folder|document)[^\S\r\n]+)(?:""(?!\u001E)[^""\r\n\u001E\u001F]+""|'(?!\u001E)[^'\r\n\u001E\u001F]+(?:(?<=[\p{L}\p{N}])'(?=[\p{L}])[^'\r\n\u001E\u001F]+)*')", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex KeywordQuotedPathRegex = new(@"\b(?:file|path|directory|folder|document)[^\S\r\n]+(?=[""'])", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex KeywordFilenamePrefixRegex = new(@"\b(?:open|opening|read|reading|write|writing|delete|deleting|remove|removing|rename|stat|create|creating|load|loading|save|saving|access|accessing|unlink|file|path|directory|folder|document|filename|filepath)\b(?:[^\S\r\n]*[:=][^\S\r\n]*|[^\S\r\n]+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly HashSet<string> SourceLineExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -350,8 +350,14 @@ public sealed class CoreTelemetryService : ITelemetryService
         return false;
     }
 
-    private static bool IsUrlStructuralEscape(char ch) =>
-        ch >= 0x20 && ch <= 0x7E && ch != '"' && ch != '\\';
+    private static bool IsUrlStructuralEscape(char ch)
+    {
+        if (ch <= 0x20 || (ch >= 0x7F && ch <= 0x9F) || (ch >= 0xD800 && ch <= 0xDFFF) || char.IsWhiteSpace(ch))
+        {
+            return false;
+        }
+        return ch is not ('"' or '\\' or '<' or '>' or '\'' or '(' or ')' or '[' or ']' or '{' or '}' or ',' or ';');
+    }
 
     private static string DecodeUrlEscapesForVault(string text, int start, int end)
     {
@@ -1370,11 +1376,11 @@ public sealed class CoreTelemetryService : ITelemetryService
 
     private static string ReplaceKeywordQuotedPaths(string text)
     {
-        if (text.IndexOf('"') < 0) return KeywordQuotedPathRegex.Replace(text, "$1[redacted-path]");
+        if (text.IndexOf('"') < 0) return ReplaceKeywordQuotedOnSource(text, text);
         var spans = CollectBalancedDoubleQuoteSpans(text);
-        if (spans.Count == 0) return KeywordQuotedPathRegex.Replace(text, "$1[redacted-path]");
+        if (spans.Count == 0) return ReplaceKeywordQuotedOnSource(text, text);
         var masked = BuildMaskedDoubleQuotes(text, spans);
-        var current = ApplyMaskedPathRegex(text, masked, KeywordQuotedPathRegex, hasPrefix: true);
+        var current = ReplaceKeywordQuotedOnSource(text, masked);
         if (!ReferenceEquals(current, text))
         {
             if (current.IndexOf('"') < 0) return current;
@@ -1388,20 +1394,125 @@ public sealed class CoreTelemetryService : ITelemetryService
             if (innerStart >= close || !ContainsQuoteOrQuoteEscape(current, innerStart, close)) continue;
             var (decoded, rawOffsets) = DecodeQuotedSpanWithOffsets(current, innerStart, close);
             if (!decoded.Contains('\'') && !decoded.Contains('"')) continue;
-            var match = KeywordQuotedPathRegex.Match(decoded);
-            while (match.Success)
-            {
-                var g1 = match.Groups[1];
-                var rawPrefixEnd = rawOffsets[g1.Index + g1.Length];
-                var rawEnd = rawOffsets[match.Index + match.Length];
-                sb ??= new StringBuilder(current.Length);
-                sb.Append(current, copied, rawPrefixEnd - copied).Append("[redacted-path]");
-                copied = rawEnd;
-                match = match.NextMatch();
-            }
+            ApplyKeywordQuotedDecoded(current, decoded, rawOffsets, ref sb, ref copied);
         }
         if (sb == null) return current;
         return sb.Append(current, copied, current.Length - copied).ToString();
+    }
+
+    private static string ReplaceKeywordQuotedOnSource(string text, string scanSource)
+    {
+        StringBuilder? sb = null;
+        var copied = 0;
+        var searchFrom = 0;
+        var unclosedSingleUntil = -1;
+        var unclosedDoubleUntil = -1;
+        while (searchFrom < scanSource.Length)
+        {
+            var match = KeywordQuotedPathRegex.Match(scanSource, searchFrom);
+            if (!match.Success) break;
+            var kwEnd = match.Index + match.Length;
+            var q = scanSource[kwEnd];
+            var unclosedUntil = q == '\'' ? unclosedSingleUntil : unclosedDoubleUntil;
+            if (kwEnd < unclosedUntil)
+            {
+                searchFrom = kwEnd + 1;
+                continue;
+            }
+            var closeEnd = FindKeywordQuotedEnd(scanSource, kwEnd, out var stopPos);
+            if (closeEnd > 0)
+            {
+                sb ??= new StringBuilder(text.Length);
+                sb.Append(text, copied, kwEnd - copied).Append("[redacted-path]");
+                copied = closeEnd;
+                searchFrom = closeEnd;
+            }
+            else
+            {
+                if (stopPos > kwEnd)
+                {
+                    if (q == '\'') unclosedSingleUntil = Math.Max(unclosedSingleUntil, stopPos);
+                    else unclosedDoubleUntil = Math.Max(unclosedDoubleUntil, stopPos);
+                }
+                searchFrom = kwEnd + 1;
+            }
+        }
+        if (sb == null) return text;
+        return sb.Append(text, copied, text.Length - copied).ToString();
+    }
+
+    private static void ApplyKeywordQuotedDecoded(
+        string text, string decoded, int[] rawOffsets, ref StringBuilder? sb, ref int copied)
+    {
+        var searchFrom = 0;
+        var unclosedSingleUntil = -1;
+        var unclosedDoubleUntil = -1;
+        while (searchFrom < decoded.Length)
+        {
+            var match = KeywordQuotedPathRegex.Match(decoded, searchFrom);
+            if (!match.Success) break;
+            var kwEnd = match.Index + match.Length;
+            var q = decoded[kwEnd];
+            var unclosedUntil = q == '\'' ? unclosedSingleUntil : unclosedDoubleUntil;
+            if (kwEnd < unclosedUntil)
+            {
+                searchFrom = kwEnd + 1;
+                continue;
+            }
+            var closeEnd = FindKeywordQuotedEnd(decoded, kwEnd, out var stopPos);
+            if (closeEnd > 0)
+            {
+                var rawPrefixEnd = rawOffsets[kwEnd];
+                var rawEnd = rawOffsets[closeEnd];
+                sb ??= new StringBuilder(text.Length);
+                sb.Append(text, copied, rawPrefixEnd - copied).Append("[redacted-path]");
+                copied = rawEnd;
+                searchFrom = closeEnd;
+            }
+            else
+            {
+                if (stopPos > kwEnd)
+                {
+                    if (q == '\'') unclosedSingleUntil = Math.Max(unclosedSingleUntil, stopPos);
+                    else unclosedDoubleUntil = Math.Max(unclosedDoubleUntil, stopPos);
+                }
+                searchFrom = kwEnd + 1;
+            }
+        }
+    }
+
+    private static int FindKeywordQuotedEnd(string source, int quotePos, out int stopPos)
+    {
+        var q = source[quotePos];
+        if (quotePos + 1 >= source.Length || source[quotePos + 1] == '\u001E')
+        {
+            stopPos = -1;
+            return -1;
+        }
+        var j = quotePos + 1;
+        while (j < source.Length)
+        {
+            var ch = source[j];
+            if (ch is '\r' or '\n' or '\u001E' or '\u001F')
+            {
+                stopPos = j;
+                return -1;
+            }
+            if (ch == q)
+            {
+                if (q == '\'' && j > quotePos + 1 && j + 1 < source.Length &&
+                    char.IsLetterOrDigit(source[j - 1]) && char.IsLetter(source[j + 1]))
+                {
+                    j++;
+                    continue;
+                }
+                stopPos = -1;
+                return j > quotePos + 1 ? j + 1 : -1;
+            }
+            j++;
+        }
+        stopPos = source.Length;
+        return -1;
     }
 
     private static string ReplaceBareFilenames(string text)
@@ -1533,6 +1644,7 @@ public sealed class CoreTelemetryService : ITelemetryService
 
     private static int FindLocalPathStartInQuoted(string text, int start, int end)
     {
+        if (IsExactProtocolVersion(text, start, end)) return -1;
         var tokenStart = -1;
         var p = start;
         while (p < end)
@@ -1593,6 +1705,57 @@ public sealed class CoreTelemetryService : ITelemetryService
                 tokenStart = p;
             }
             p += len0;
+        }
+        return -1;
+    }
+
+    private static bool IsExactProtocolVersion(string text, int start, int end)
+    {
+        var p = DecodeProtocolPrefix(text, start, end);
+        if (p < 0 || p >= end) return false;
+        var slashLen = DecodeJsonCharAt(text, p, end, out var slashCh);
+        if (slashCh != '/') return false;
+        p += slashLen;
+        var hasDigit = false;
+        var expectDigit = true;
+        while (p < end)
+        {
+            var len = DecodeJsonCharAt(text, p, end, out var ch);
+            if (ch >= '0' && ch <= '9')
+            {
+                hasDigit = true;
+                expectDigit = false;
+            }
+            else if (ch == '.' && !expectDigit)
+            {
+                expectDigit = true;
+            }
+            else
+            {
+                return false;
+            }
+            p += len;
+        }
+        return hasDigit && !expectDigit;
+    }
+
+    private static int DecodeProtocolPrefix(string text, int start, int end)
+    {
+        var p = start;
+        if (p >= end) return -1;
+        p += DecodeJsonCharAt(text, p, end, out var c0);
+        if (p >= end) return -1;
+        p += DecodeJsonCharAt(text, p, end, out var c1);
+        if (p >= end) return -1;
+        p += DecodeJsonCharAt(text, p, end, out var c2);
+        c0 = char.ToLowerInvariant(c0);
+        c1 = char.ToLowerInvariant(c1);
+        c2 = char.ToLowerInvariant(c2);
+        if ((c0 == 't' && c1 == 'l' && c2 == 's') || (c0 == 's' && c1 == 's' && c2 == 'l')) return p;
+        if (c0 == 'h' && c1 == 't' && c2 == 't' && p < end)
+        {
+            p += DecodeJsonCharAt(text, p, end, out var c3);
+            if (char.ToLowerInvariant(c3) == 'p') return p;
         }
         return -1;
     }
