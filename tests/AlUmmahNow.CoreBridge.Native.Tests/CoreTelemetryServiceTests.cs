@@ -499,7 +499,7 @@ public class CoreTelemetryServiceTests
             service.AddBreadcrumb("io", "Opened /workspace/E\u0301lodie/Very Secret Client Project Name.mov\nFailed '/data/user/0/O'Brien.mov'\nRead \"/Users/O'Brien/Final.mov\"");
             service.ReportCrash(
                 "IOException",
-                "Failed reading /Private (Client).mov\n/Private Client\n/private-key\n/Users/alice/Secret<Project>.mov\n/Users/alice/Draft:77 in open() Acquisition.mov\nFailed /home/alice/Secret\"Acquisition.mov\nFailed to open \"/ Secret/Acquisition.mov\"\nFailed to open \"/ SecretFile\"\n/ SecretFile.mov\n/ SecretFile\n/ SecretFile.abcdefghijkl\n// SecretFile\n42:/ Secret/Acquisition.mov:77\nerror 42://SecretHost/Acquisition.mov\nFailed to open path\\\\Server\\Share\\Secret.mov\nopen(pathC:\\Secret\\Acquisition.mov)\nopen(C://Secret/Acquisition.mov)\nC://Users\\Alice\\Secret.mov\nhttps://example.com(/Users/alice/Secret.mov)\nCould not find file 'Secret.mov'\nCould not find file 'private/Secret.mov'\nCould not find file './Secret.mov'\nCould not find file 'O'Brien.mov'\nCould not find file 'SecretBareName'\nCould not find file Secret.xyz\nCould not find file Secret.2026\nSecret Project.mov\nopen Acquisition.custom\nopen Secret Project.mov\nopen //storage/emulated/0/Private.mov\n/workspace/alice/Project|Acquisition.mov\nerror 42:/home/alice/private.mov\n/Client Files/Private.mov\n/workspace/alice/Project;Acquisition.mov\n'/workspace/alice/Project:2026;Acquisition.mov'\n/!Acquisition.mov\n\"/!Acquisition.mov\"\n\"C:\\Users\\Alice Smith\\Private Draft.mp4\"",
+                "Failed reading /Private (Client).mov\n/Private Client\n/private-key\n/Users/alice/Secret<Project>.mov\n/Users/alice/Draft:77 in open() Acquisition.mov\nFailed /home/alice/Secret\"Acquisition.mov\nFailed to open \"/ Secret/Acquisition.mov\"\nFailed to open \"/ SecretFile\"\n/ SecretFile.mov\n/ SecretFile\n/ SecretFile.abcdefghijkl\n// SecretFile\n42:/ Secret/Acquisition.mov:77\nerror 42://SecretHost/Acquisition.mov\nFailed to open path\\\\Server\\Share\\Secret.mov\nopen(pathC:\\Secret\\Acquisition.mov)\nopen(C://Secret/Acquisition.mov)\nC://Users\\Alice\\Secret.mov\nhttps://example.com(/Users/alice/Secret.mov)\n(https://example.com)(private/Secret.mov)\nhttps://example.com/api,open(C://Secret/Acquisition.mov)\nCould not find file 'Secret.mov'\nCould not find file 'private/Secret.mov'\nCould not find file './Secret.mov'\nCould not find file 'O'Brien.mov'\nCould not find file 'SecretBareName'\nCould not find file Secret.xyz\nCould not find file Secret.2026\nSecret Project.mov\nSecret Project.mov (missing)\nSecret.Final.mov\nopen Acquisition.custom\nopen Secret.123\nopen Secret Project.mov\nopen //storage/emulated/0/Private.mov\n/workspace/alice/Project|Acquisition.mov\nerror 42:/home/alice/private.mov\n/Client Files/Private.mov\n/workspace/alice/Project;Acquisition.mov\n'/workspace/alice/Project:2026;Acquisition.mov'\n/!Acquisition.mov\n\"/!Acquisition.mov\"\n\"C:\\Users\\Alice Smith\\Private Draft.mp4\"",
                 "System.IO.IOException: /Users/alice/Draft:99 in open()\n123 files failed under /home/alice/Draft:99\rCaused by: /Users/alice/Cause:99\n   at Foo.Open() in /workspace/Élodie/src/App.cs:line 42\n   at \"/home/alice/private:66\" while opening file\n   at file:///Users/alice/Player.cs:55\n   at Bar.Run() in \\\\fileserver\\share\\secret.mp4\n~/private/key.pem\nhttps://videos.api.alummahnow.net/v1/items");
 
             Assert.True(File.Exists(bufferPath));
@@ -538,6 +538,21 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("https://example.com/a(b)/items"));
             Assert.Equal("open(https://example.com/a(b)/items)",
                 CoreTelemetryService.SanitizeLocalPaths("open(https://example.com/a(b)/items)"));
+            Assert.Equal("https://example.com/a'b/items",
+                CoreTelemetryService.SanitizeLocalPaths("https://example.com/a'b/items"));
+            Assert.Equal("https://foo!bar.example/api",
+                CoreTelemetryService.SanitizeLocalPaths("https://foo!bar.example/api"));
+            Assert.Equal("open [redacted-path] from https://example.com/api",
+                CoreTelemetryService.SanitizeLocalPaths("open Secret.mov from https://example.com/api"));
+            Assert.Equal("open failed at MainActivity.kt:42",
+                CoreTelemetryService.SanitizeLocalPaths("open failed at MainActivity.kt:42"));
+            Assert.Equal("open([redacted-path]) Foo.Open()",
+                CoreTelemetryService.SanitizeLocalPaths("open(/Volumes/Secret/Acquisition.mov) Foo.Open()"));
+            Assert.Equal("[redacted-path] (missing)",
+                CoreTelemetryService.SanitizeLocalPaths("Secret Project.mov (missing)"));
+            Assert.DoesNotContain("Secret", CoreTelemetryService.SanitizeLocalPaths("https://example.com/api,open(C://Secret/Acquisition.mov)"));
+            Assert.NotEqual("https://[:::]/api", CoreTelemetryService.SanitizeLocalPaths("https://[:::]/api"));
+            Assert.NotEqual("https://bad%zz/api", CoreTelemetryService.SanitizeLocalPaths("https://bad%zz/api"));
             Assert.Equal("git+http2://example.com/repo",
                 CoreTelemetryService.SanitizeLocalPaths("git+http2://example.com/repo"));
             Assert.Equal("profile://example.com/repo",
