@@ -82,6 +82,7 @@ internal sealed class SettingsPage
         AutomationProperties.SetAutomationId(telemetryToggle, "SettingsTelemetryToggle");
         var initialPurgeFailed = telemetry?.LastPurgeFailed ?? false;
         var purgeWarningText = l["settings.telemetry.purgeWarning"];
+        var disableErrorText = l["settings.telemetry.disableError"];
         var telemetryNotice = new TextBlock
         {
             TextWrapping = TextWrapping.Wrap,
@@ -94,15 +95,20 @@ internal sealed class SettingsPage
             void SyncPurgeNotice()
             {
                 var failed = telemetry.LastPurgeFailed;
-                if (failed)
+                if (failed && telemetry.Consent == TelemetryConsent.Off)
                 {
-                    if (!settings.TelemetryEnabled)
+                    if (telemetryNotice.Text != disableErrorText)
                     {
+                        if (settings.TelemetryEnabled)
+                        {
+                            settings.TelemetryEnabled = false;
+                            telemetryToggle.IsOn = false;
+                        }
                         telemetryNotice.Text = purgeWarningText;
                         telemetryNotice.Visibility = Visibility.Visible;
                     }
                 }
-                else if (telemetryNotice.Text == purgeWarningText)
+                else if (!failed && telemetryNotice.Text == purgeWarningText)
                 {
                     telemetryNotice.Text = string.Empty;
                     telemetryNotice.Visibility = Visibility.Collapsed;

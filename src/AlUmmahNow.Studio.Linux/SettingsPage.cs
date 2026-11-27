@@ -75,6 +75,7 @@ public sealed class SettingsPage
         telemetryCheck.SetActive(settings.TelemetryEnabled);
         var initialPurgeFailed = telemetry?.LastPurgeFailed ?? false;
         var purgeWarningText = l["settings.telemetry.purgeWarning"];
+        var disableErrorText = l["settings.telemetry.disableError"];
         var telemetryNotice = Gtk.Label.New(initialPurgeFailed ? purgeWarningText : string.Empty);
         telemetryNotice.SetHalign(Gtk.Align.Start);
         telemetryNotice.SetWrap(true);
@@ -87,15 +88,20 @@ public sealed class SettingsPage
                 GLib.Functions.IdleAdd(GLib.Constants.PRIORITY_DEFAULT_IDLE, () =>
                 {
                     var failed = telemetry.LastPurgeFailed;
-                    if (failed)
+                    if (failed && telemetry.Consent == TelemetryConsent.Off)
                     {
-                        if (!settings.TelemetryEnabled)
+                        if (telemetryNotice.GetText() != disableErrorText)
                         {
+                            if (settings.TelemetryEnabled)
+                            {
+                                settings.TelemetryEnabled = false;
+                                telemetryCheck.SetActive(false);
+                            }
                             telemetryNotice.SetText(purgeWarningText);
                             telemetryNotice.SetVisible(true);
                         }
                     }
-                    else if (telemetryNotice.GetText() == purgeWarningText)
+                    else if (!failed && telemetryNotice.GetText() == purgeWarningText)
                     {
                         telemetryNotice.SetText(string.Empty);
                         telemetryNotice.SetVisible(false);

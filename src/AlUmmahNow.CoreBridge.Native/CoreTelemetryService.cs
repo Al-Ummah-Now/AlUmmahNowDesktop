@@ -13,15 +13,10 @@ namespace AlUmmahNow.CoreBridge.Native;
 /// </summary>
 public sealed class CoreTelemetryService : ITelemetryService
 {
-    private static readonly Regex StackFrameLineRegex = new(@"^[ \t]*(?:at[ \t]+|#?\d+[ \t]+)", RegexOptions.Compiled);
-    private const string StackSuffixLookahead = @"(?=(?::line[ \t]+\d+|:\d+(?::\d+)?)(?:[)\]]*|[ \t]+in[ \t]+[\p{L}_][\p{L}\p{N}_.$<>]*\(\))(?=\r|\n|$)|\r|\n|$)";
-    private static readonly Regex DoubleQuotedStackPathRegex = new(@"""(?:file://|(?:[A-Za-z]:[\\/]|\\\\)|~/(?!\s)|/+(?=[^\s/""]))[^""\r\n]*?((?::line[ \t]+\d+|:\d+(?::\d+)?)?)""(?=[ \t]*(?:\r|\n|$))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex FileUriRegex = new(@"file://[^\r\n]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex FileUriStackRegex = new(@"file://[^\r\n]+?" + StackSuffixLookahead, RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex WindowsPathRegex = new(@"(?:[A-Za-z]:[\\/]|\\\\)[^\r\n]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex WindowsStackPathRegex = new(@"(?:[A-Za-z]:[\\/]|\\\\)[^\r\n]+?" + StackSuffixLookahead, RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex UnixPathRegex = new(@"(?<![\p{L}\p{M}\p{N}._/-])(?:~/|(?<!:)//+(?=[^\s/])|/(?=[^\s/]))[^\r\n]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex UnixStackPathRegex = new(@"(?<![\p{L}\p{M}\p{N}._/-])(?:~/|(?<!:)//+(?=[^\s/])|/(?=[^\s/]))[^\r\n]+?" + StackSuffixLookahead, RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex WindowsPathRegex = new(@"(?<![\p{L}\p{N}])(?:[A-Za-z]:[\\/]|\\\\)[^\r\n]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex QuotedSpacedRootPathRegex = new(@"[""']/[ \t]+[^\r\n]+", RegexOptions.Compiled);
+    private static readonly Regex UnixPathRegex = new(@"(?<![\p{L}\p{M}\p{N}._/-])(?:~/|(?<![A-Za-z]:)//+(?=[^\s/])|/(?=[ \t]+[^\r\n/]+/)|/(?=[^\s/]))[^\r\n]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private readonly TelemetryClient _client;
     private readonly string? _bufferPath;
@@ -133,36 +128,14 @@ public sealed class CoreTelemetryService : ITelemetryService
 
     /// <summary>
     /// Scrubs local filesystem paths and file:// URIs before crash or breadcrumb text enters telemetry.
-    /// Line numbers are preserved only when <paramref name="preserveStackLocations"/> is <c>true</c>
-    /// (stack traces) and the location terminates the frame line.
     /// </summary>
-    internal static string SanitizeLocalPaths(string text, bool preserveStackLocations = false)
+    internal static string SanitizeLocalPaths(string text)
     {
         if (string.IsNullOrEmpty(text)) return text;
-        if (!preserveStackLocations) return SanitizeMessageLine(text);
-        var lines = text.Split('\n');
-        for (var i = 0; i < lines.Length; i++)
-        {
-            lines[i] = StackFrameLineRegex.IsMatch(lines[i])
-                ? SanitizeStackFrameLine(lines[i])
-                : SanitizeMessageLine(lines[i]);
-        }
-        return string.Join("\n", lines);
-    }
-
-    private static string SanitizeMessageLine(string text)
-    {
         var scrubbed = FileUriRegex.Replace(text, "[redacted-path]");
         scrubbed = WindowsPathRegex.Replace(scrubbed, "[redacted-path]");
+        scrubbed = QuotedSpacedRootPathRegex.Replace(scrubbed, "[redacted-path]");
         return UnixPathRegex.Replace(scrubbed, "[redacted-path]");
-    }
-
-    private static string SanitizeStackFrameLine(string line)
-    {
-        var scrubbed = DoubleQuotedStackPathRegex.Replace(line, "[redacted-path]$1");
-        scrubbed = FileUriStackRegex.Replace(scrubbed, "[redacted-path]");
-        scrubbed = WindowsStackPathRegex.Replace(scrubbed, "[redacted-path]");
-        return UnixStackPathRegex.Replace(scrubbed, "[redacted-path]");
     }
 
     public TelemetryConsent Consent
@@ -321,8 +294,8 @@ public sealed class CoreTelemetryService : ITelemetryService
 
     public void ReportCrash(string kind, string message, string? stack = null, bool fromPreviousSession = false)
     {
-        var safeMessage = string.IsNullOrWhiteSpace(message) ? "Unhandled exception" : SanitizeLocalPaths(message, preserveStackLocations: false);
-        var safeStack = stack == null ? null : SanitizeLocalPaths(stack, preserveStackLocations: true);
+        var safeMessage = string.IsNullOrWhiteSpace(message) ? "Unhandled exception" : SanitizeLocalPaths(message);
+        var safeStack = stack == null ? null : SanitizeLocalPaths(stack);
         var report = new TelemetryCrashReport(
             string.IsNullOrWhiteSpace(kind) ? "UnhandledException" : kind,
             safeMessage,

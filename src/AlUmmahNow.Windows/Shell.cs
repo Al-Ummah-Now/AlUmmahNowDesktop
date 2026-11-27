@@ -317,6 +317,7 @@ public sealed partial class Shell
         var telemetryToggle = new ToggleSwitch { Header = _localizer["settings.telemetry.toggle"], IsOn = _settings.TelemetryEnabled };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(telemetryToggle, "SettingsTelemetryToggle");
         var purgeWarningText = _localizer["settings.telemetry.purgeWarning"];
+        var disableErrorText = _localizer["settings.telemetry.disableError"];
         var telemetryNotice = new TextBlock
         {
             TextWrapping = TextWrapping.Wrap,
@@ -327,15 +328,20 @@ public sealed partial class Shell
         void SyncPurgeNotice()
         {
             var failed = _telemetry.LastPurgeFailed;
-            if (failed)
+            if (failed && _telemetry.Consent == TelemetryConsent.Off)
             {
-                if (!_settings.TelemetryEnabled)
+                if (telemetryNotice.Text != disableErrorText)
                 {
+                    if (_settings.TelemetryEnabled)
+                    {
+                        _settings.TelemetryEnabled = false;
+                        telemetryToggle.IsOn = false;
+                    }
                     telemetryNotice.Text = purgeWarningText;
                     telemetryNotice.Visibility = Visibility.Visible;
                 }
             }
-            else if (telemetryNotice.Text == purgeWarningText)
+            else if (!failed && telemetryNotice.Text == purgeWarningText)
             {
                 telemetryNotice.Text = string.Empty;
                 telemetryNotice.Visibility = Visibility.Collapsed;
