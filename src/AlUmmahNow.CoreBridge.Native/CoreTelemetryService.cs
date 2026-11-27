@@ -325,7 +325,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex SlackWebhookUrlRegex = new(
-        @"(https?://hooks\.slack\.com/(?:services|workflows|triggers)/)[^\s?#]+",
+        @"(https?://hooks\.slack(?:-gov)?\.com\.?(?::\d+)?/(?:services|workflows|triggers)/)[^\s?#]+",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex TelegramBotTokenUrlRegex = new(
@@ -938,7 +938,15 @@ public sealed class CoreTelemetryService : ITelemetryService
     {
         var p = valueStart - 1;
         while (p >= 0 && text[p] is ' ' or '\t' or '\r' or '\n') p--;
-        return p >= 0 && text[p] == ':';
+        if (p < 0 || text[p] != ':') return false;
+        var keyEnd = p - 1;
+        while (keyEnd >= 0 && text[keyEnd] is ' ' or '\t' or '\r' or '\n') keyEnd--;
+        if (keyEnd < 0 || text[keyEnd] != '"') return false;
+        var keyStart = ScanJsonStringStartBackward(text, keyEnd);
+        if (keyStart <= 0) return false;
+        var beforeKey = keyStart - 1;
+        while (beforeKey >= 0 && text[beforeKey] is ' ' or '\t' or '\r' or '\n') beforeKey--;
+        return beforeKey >= 0 && text[beforeKey] is '{' or ',';
     }
 
     private static bool IsEscapedQuote(string text, int quotePos)

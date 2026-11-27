@@ -1041,6 +1041,8 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("{\"Authorization\":\"firstValue\", \"opaqueSecret123\"}"));
             Assert.Equal("note \"hi\", \"Authorization\": \"[redacted]\" [redacted]",
                 CoreTelemetryService.SanitizeLocalPaths("note \"hi\", \"Authorization\": \"firstValue\" } opaqueSecret123"));
+            Assert.Equal("note: \"hi\", \"Authorization\": \"[redacted]\" [redacted]",
+                CoreTelemetryService.SanitizeLocalPaths("note: \"hi\", \"Authorization\": \"firstValue\" } opaqueSecret123"));
             Assert.Equal("{\"a\":{\"b\":1},\"Authorization\":\"[redacted]\"}",
                 CoreTelemetryService.SanitizeLocalPaths("{\"a\":{\"b\":1},\"Authorization\":\"opaqueSecret123\"}"));
             var repeatedMalformedBack = "\"\n" + string.Concat(Enumerable.Repeat("}, \"Authorization\": ", 2000));
@@ -1054,6 +1056,8 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("https://discord." + "com/api/webhooks/123456789/fakeWebhookToken"));
             Assert.Equal("https://hooks.slack.com/services/[redacted]",
                 CoreTelemetryService.SanitizeLocalPaths("https://hooks.slack." + "com/services/T0000/B0000/fakeWebhookToken"));
+            Assert.Equal("https://hooks.slack.com:443/services/[redacted]",
+                CoreTelemetryService.SanitizeLocalPaths("https://hooks.slack." + "com:443/services/T0000/B0000/fakeWebhookToken"));
             Assert.Equal("https://api.telegram.org/bot123456:[redacted]/getMe",
                 CoreTelemetryService.SanitizeLocalPaths("https://api.telegram." + "org/bot123456:fakeBotToken/getMe"));
             Assert.Equal("Authorization: [[redacted]]\r\nNextHeader: safe",
