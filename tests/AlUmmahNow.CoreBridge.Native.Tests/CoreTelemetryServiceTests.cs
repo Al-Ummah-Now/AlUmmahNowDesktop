@@ -742,9 +742,9 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("file:///private/Project Folder/ (https://Secret/Acquisition.mov)"));
             Assert.Equal("[redacted-path]",
                 CoreTelemetryService.SanitizeLocalPaths("file:///private/My\u00A0Acquisition"));
-            Assert.Equal("\"[redacted-path] ( https://example.com/api)",
+            Assert.Equal("\"[redacted-path]\" and ( https://example.com/api)",
                 CoreTelemetryService.SanitizeLocalPaths("\"file:///a.mov\" and ( https://example.com/api)"));
-            Assert.Equal("\"[redacted-path] (((https://example.com/api)))",
+            Assert.Equal("\"[redacted-path]\" and (((https://example.com/api)))",
                 CoreTelemetryService.SanitizeLocalPaths("\"file:///a.mov\" and (((https://example.com/api)))"));
             Assert.Equal("[redacted-path]",
                 CoreTelemetryService.SanitizeLocalPaths("file:// Secret Acquisition"));
@@ -763,6 +763,12 @@ public class CoreTelemetryServiceTests
             Assert.Equal("[redacted-path]",
                 CoreTelemetryService.SanitizeLocalPaths("/private/Transfer to (https://Secret/Acquisition.mov)"));
             Assert.Equal("[redacted-path]",
+                CoreTelemetryService.SanitizeLocalPaths("relative/Transfer to (https://Secret/Acquisition.mov)"));
+            Assert.Equal("path=[redacted-path]",
+                CoreTelemetryService.SanitizeLocalPaths("path=/private/Transfer to (https://Secret/Acquisition.mov)"));
+            Assert.Equal("[redacted-path]",
+                CoreTelemetryService.SanitizeLocalPaths("/private/Secret\u001Ehttps://Secret/Acquisition.mov"));
+            Assert.Equal("[redacted-path]",
                 CoreTelemetryService.SanitizeLocalPaths("/private/Secret\u001EAcquisition"));
             Assert.Equal("[redacted-path]",
                 CoreTelemetryService.SanitizeLocalPaths("/private/Secret^Acquisition"));
@@ -772,7 +778,7 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("HTTP/2(https://example.com/api)"));
             var manyXs = "\u001EAUNURL" + new string('X', 5000);
             Assert.Equal(manyXs, CoreTelemetryService.SanitizeLocalPaths(manyXs));
-            Assert.DoesNotContain("Secret",
+            Assert.Equal("\"[redacted-path]\"",
                 CoreTelemetryService.SanitizeLocalPaths("\"file:///private/My Folder (https://Secret/Acquisition.mov)\""));
             Assert.Equal("\"[redacted-path]\" (https://example.com/api)",
                 CoreTelemetryService.SanitizeLocalPaths("\"file:///a.mov\" (https://example.com/api)"));

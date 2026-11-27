@@ -273,7 +273,7 @@ public sealed class CoreTelemetryService : ITelemetryService
 
     private static string EscapeSentinels(string text, out bool hadSentinels)
     {
-        var first = text.AsSpan().IndexOfAny('\u001D', '\u001E', '\u001F');
+        var first = text.AsSpan().IndexOfAny('\u0018', '\u001E', '\u001F');
         if (first < 0)
         {
             hadSentinels = false;
@@ -286,9 +286,9 @@ public sealed class CoreTelemetryService : ITelemetryService
         {
             switch (text[i])
             {
-                case '\u001D': sb.Append("\u001D\u001D"); break;
-                case '\u001E': sb.Append("\u001D\u001C"); break;
-                case '\u001F': sb.Append("\u001D\u001B"); break;
+                case '\u0018': sb.Append("\u0018\u0018"); break;
+                case '\u001E': sb.Append("\u0018\u0019"); break;
+                case '\u001F': sb.Append("\u0018\u001A"); break;
                 default: sb.Append(text[i]); break;
             }
         }
@@ -297,20 +297,20 @@ public sealed class CoreTelemetryService : ITelemetryService
 
     private static string UnescapeSentinels(string text)
     {
-        var first = text.IndexOf('\u001D');
+        var first = text.IndexOf('\u0018');
         if (first < 0) return text;
         var sb = new StringBuilder(text.Length);
         sb.Append(text, 0, first);
         var i = first;
         while (i < text.Length)
         {
-            if (text[i] == '\u001D' && i + 1 < text.Length)
+            if (text[i] == '\u0018' && i + 1 < text.Length)
             {
                 switch (text[i + 1])
                 {
-                    case '\u001D': sb.Append('\u001D'); i += 2; continue;
-                    case '\u001C': sb.Append('\u001E'); i += 2; continue;
-                    case '\u001B': sb.Append('\u001F'); i += 2; continue;
+                    case '\u0018': sb.Append('\u0018'); i += 2; continue;
+                    case '\u0019': sb.Append('\u001E'); i += 2; continue;
+                    case '\u001A': sb.Append('\u001F'); i += 2; continue;
                 }
             }
             sb.Append(text[i++]);
@@ -403,6 +403,10 @@ public sealed class CoreTelemetryService : ITelemetryService
             {
                 if (!_inWrapperRun)
                 {
+                    if (_tokenHasPathSep && !IsProtocolToken(text, _tokenStart, _tokenEnd))
+                    {
+                        _hasPathOnLine = true;
+                    }
                     _tokenStart = -1;
                     _tokenEnd = -1;
                     _wsBeforeRun = true;
@@ -473,13 +477,14 @@ public sealed class CoreTelemetryService : ITelemetryService
         {
             if (IsFileSchemeAt(text, pos))
             {
+                var quote = pos > 0 && text[pos - 1] is '"' or '\'' ? text[pos - 1] : '\0';
                 var schemeEnd = pos + 7;
                 var rawEnd = schemeEnd;
                 var stoppedAtVault = false;
                 while (rawEnd < text.Length)
                 {
                     var ch = text[rawEnd];
-                    if (ch is '\r' or '\n') break;
+                    if (ch is '\r' or '\n' || (quote != '\0' && ch == quote)) break;
                     if (ch == '\u001E' &&
                         rawEnd + vaultPrefix.Length <= text.Length &&
                         text.AsSpan(rawEnd, vaultPrefix.Length).Equals(vaultPrefix, StringComparison.Ordinal))
