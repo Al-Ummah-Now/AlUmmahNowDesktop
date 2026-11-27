@@ -35,6 +35,9 @@ namespace AlUmmahNow.CoreBridge
         /// <summary>True when the most recent opt-out could not purge the on-disk buffer (collection is still blocked).</summary>
         bool LastPurgeFailed { get; }
 
+        /// <summary>Raised when <see cref="LastPurgeFailed"/> changes (including after deferred in-flight flush cleanup).</summary>
+        event Action<bool>? PurgeFailureChanged;
+
         /// <summary>
         /// Updates telemetry consent. Returns <c>true</c> when the native state change (and disk purge on opt-out)
         /// succeeded. Opting out always disables collection immediately even if disk purge fails.
@@ -58,6 +61,7 @@ namespace AlUmmahNow.CoreBridge
         public TelemetryConsent Consent => TelemetryConsent.Off;
         public int PendingCount => 0;
         public bool LastPurgeFailed => false;
+        public event Action<bool>? PurgeFailureChanged { add { } remove { } }
 
         public bool SetConsent(TelemetryConsent consent) => consent == TelemetryConsent.Off;
         public void Track(string name, IReadOnlyDictionary<string, object>? properties = null) { }

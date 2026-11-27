@@ -42,6 +42,7 @@
   "settings.telemetry.body": "Off by default. Helps fix crashes and playback issues. No personal data, file paths, or account tokens are collected. Turning this off clears any buffered reports.",
   "settings.telemetry.purgeWarning": "Diagnostics turned off, but cached diagnostic files could not be removed from disk.",
   "settings.telemetry.enableError": "Couldn't enable diagnostics on this device.",
+  "settings.telemetry.disableError": "Couldn't save your opt-out preference on this device. Diagnostics are paused now, but may re-enable on restart.",
   "updates.title": "Updates",
   "updates.settings": "Settings",
   "updates.available": "A new version, {0}, is available.",

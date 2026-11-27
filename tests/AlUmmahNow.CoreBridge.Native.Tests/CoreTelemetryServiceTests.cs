@@ -449,8 +449,8 @@ public class CoreTelemetryServiceTests
             service.AddBreadcrumb("io", "Opened /workspace/E\u0301lodie/Very Secret Client Project Name.mov\nFailed '/data/user/0/O'Brien.mov'\nRead \"/Users/O'Brien/Final.mov\"");
             service.ReportCrash(
                 "IOException",
-                "Failed reading /Private (Client).mov\n/Private Client\n/private-key\n/Client Files/Private.mov\n/workspace/alice/Project;Acquisition.mov\n'/workspace/alice/Project:2026;Acquisition.mov'\n/!Acquisition.mov\n\"/!Acquisition.mov\"\n\"C:\\Users\\Alice Smith\\Private Draft.mp4\"",
-                "at Foo.Open() in /workspace/Élodie/src/App.cs:line 42\nat Bar.Run() in \\\\fileserver\\share\\secret.mp4\n~/private/key.pem");
+                "Failed reading /Private (Client).mov\n/Private Client\n/private-key\n/Users/alice/Secret<Project>.mov\n/workspace/alice/Project|Acquisition.mov\n/Client Files/Private.mov\n/workspace/alice/Project;Acquisition.mov\n'/workspace/alice/Project:2026;Acquisition.mov'\n/!Acquisition.mov\n\"/!Acquisition.mov\"\n\"C:\\Users\\Alice Smith\\Private Draft.mp4\"",
+                "at Foo.Open() in /workspace/Élodie/src/App.cs:line 42\nfile:///Users/alice/Player.cs:55\nat /Users/alice/Player.cs:77 in open()\nat Bar.Run() in \\\\fileserver\\share\\secret.mp4\n~/private/key.pem");
 
             Assert.True(File.Exists(bufferPath));
             var json = File.ReadAllText(bufferPath);
@@ -461,6 +461,7 @@ public class CoreTelemetryServiceTests
             Assert.DoesNotContain("private", json, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("client", json, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("acquisition", json, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("project>.mov", json, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("name.mov", json, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("draft.mp4", json, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("workspace", json, StringComparison.OrdinalIgnoreCase);
@@ -468,8 +469,68 @@ public class CoreTelemetryServiceTests
             Assert.DoesNotContain("fileserver", json, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("private/key.pem", json, StringComparison.OrdinalIgnoreCase);
             Assert.Contains(":line 42", json, StringComparison.Ordinal);
+            Assert.Contains("[redacted-path]:55", json, StringComparison.Ordinal);
+            Assert.Contains("[redacted-path]:77 in open()", json, StringComparison.Ordinal);
             Assert.Contains("Bar.Run()", json, StringComparison.Ordinal);
             Assert.Contains("[redacted-path]", json, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Reenable_after_failed_opt_out_purge_deletes_leftover_buffer_before_granting_consent()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var dir = Path.Combine(Path.GetTempPath(), "aun-tel-reenable-" + Guid.NewGuid().ToString("N"));
+        var lockedDir = Path.Combine(dir, "locked");
+        Directory.CreateDirectory(lockedDir);
+        var bufferPath = Path.Combine(lockedDir, "telemetry-buffer.json");
+        try
+        {
+            using var service = new CoreTelemetryService(
+                platform: "linux",
+                appVersion: "1.0.0",
+                locale: "en",
+                videosApiBaseUrl: null,
+                userAgent: "AlUmmahNowLinux/1.0.0",
+                bufferPath: bufferPath,
+                initialEnabled: true);
+
+            var events = new List<bool>();
+            service.PurgeFailureChanged += failed => events.Add(failed);
+
+            service.Track("screen_view", new Dictionary<string, object> { ["screen"] = "revoked" });
+            service.Persist();
+            Assert.True(File.Exists(bufferPath));
+
+            // Make parent directory read-only so opt-out cannot unlink the buffer file.
+            File.SetUnixFileMode(lockedDir, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+            try
+            {
+                Assert.False(service.SetConsent(TelemetryConsent.Off));
+                Assert.True(service.LastPurgeFailed);
+                Assert.Contains(true, events);
+                Assert.True(File.Exists(bufferPath));
+
+                // While buffer still cannot be removed, re-enable must fail closed.
+                Assert.False(service.SetConsent(TelemetryConsent.Full));
+                Assert.Equal(TelemetryConsent.Off, service.Consent);
+                Assert.True(service.LastPurgeFailed);
+            }
+            finally
+            {
+                File.SetUnixFileMode(lockedDir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            }
+
+            // Once permissions recover, re-enable must purge the stale revoked buffer first so 0 old events reload.
+            Assert.True(service.SetConsent(TelemetryConsent.Full));
+            Assert.Equal(TelemetryConsent.Full, service.Consent);
+            Assert.False(service.LastPurgeFailed);
+            Assert.Contains(false, events);
+            Assert.Equal(0, service.PendingCount);
         }
         finally
         {

@@ -81,23 +81,47 @@ internal sealed class SettingsPage
         var telemetryToggle = new ToggleSwitch { Header = l["settings.telemetry.toggle"], IsOn = settings.TelemetryEnabled };
         AutomationProperties.SetAutomationId(telemetryToggle, "SettingsTelemetryToggle");
         var initialPurgeFailed = telemetry?.LastPurgeFailed ?? false;
+        var purgeWarningText = l["settings.telemetry.purgeWarning"];
         var telemetryNotice = new TextBlock
         {
             TextWrapping = TextWrapping.Wrap,
             Visibility = initialPurgeFailed ? Visibility.Visible : Visibility.Collapsed,
-            Text = initialPurgeFailed ? l["settings.telemetry.purgeWarning"] : string.Empty,
+            Text = initialPurgeFailed ? purgeWarningText : string.Empty,
         };
         AutomationProperties.SetAutomationId(telemetryNotice, "SettingsTelemetryNotice");
+        if (telemetry != null)
+        {
+            Action<bool> onPurgeChanged = failed =>
+            {
+                telemetryNotice.DispatcherQueue?.TryEnqueue(() =>
+                {
+                    if (failed)
+                    {
+                        if (!settings.TelemetryEnabled)
+                        {
+                            telemetryNotice.Text = purgeWarningText;
+                            telemetryNotice.Visibility = Visibility.Visible;
+                        }
+                    }
+                    else if (telemetryNotice.Text == purgeWarningText)
+                    {
+                        telemetryNotice.Text = string.Empty;
+                        telemetryNotice.Visibility = Visibility.Collapsed;
+                    }
+                });
+            };
+            telemetry.PurgeFailureChanged += onPurgeChanged;
+            telemetryNotice.Unloaded += (_, _) => telemetry.PurgeFailureChanged -= onPurgeChanged;
+        }
         telemetryToggle.Toggled += (_, _) =>
         {
             var enabled = telemetryToggle.IsOn;
             if (settings.TelemetryEnabled == enabled) return;
             if (enabled)
             {
-                if (!store.SaveTelemetryEnabled(true) || !(telemetry?.SetConsent(TelemetryConsent.Full) ?? true))
+                if (!(telemetry?.SetConsent(TelemetryConsent.Full) ?? true) || !store.SaveTelemetryEnabled(true))
                 {
                     telemetry?.SetConsent(TelemetryConsent.Off);
-                    store.SaveTelemetryEnabled(false);
                     settings.TelemetryEnabled = false;
                     telemetryToggle.IsOn = false;
                     telemetryNotice.Text = l["settings.telemetry.enableError"];
@@ -115,12 +139,12 @@ internal sealed class SettingsPage
                 {
                     settings.TelemetryEnabled = true;
                     telemetryToggle.IsOn = true;
-                    telemetryNotice.Text = l["settings.telemetry.purgeWarning"];
+                    telemetryNotice.Text = l["settings.telemetry.disableError"];
                     telemetryNotice.Visibility = Visibility.Visible;
                     return;
                 }
                 settings.TelemetryEnabled = false;
-                telemetryNotice.Text = purged ? string.Empty : l["settings.telemetry.purgeWarning"];
+                telemetryNotice.Text = purged ? string.Empty : purgeWarningText;
                 telemetryNotice.Visibility = purged ? Visibility.Collapsed : Visibility.Visible;
             }
         };

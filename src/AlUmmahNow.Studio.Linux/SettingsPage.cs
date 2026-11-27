@@ -74,21 +74,46 @@ public sealed class SettingsPage
         var telemetryCheck = Gtk.CheckButton.NewWithLabel(l["settings.telemetry.toggle"]);
         telemetryCheck.SetActive(settings.TelemetryEnabled);
         var initialPurgeFailed = telemetry?.LastPurgeFailed ?? false;
-        var telemetryNotice = Gtk.Label.New(initialPurgeFailed ? l["settings.telemetry.purgeWarning"] : string.Empty);
+        var purgeWarningText = l["settings.telemetry.purgeWarning"];
+        var telemetryNotice = Gtk.Label.New(initialPurgeFailed ? purgeWarningText : string.Empty);
         telemetryNotice.SetHalign(Gtk.Align.Start);
         telemetryNotice.SetWrap(true);
         telemetryNotice.AddCssClass("error");
         telemetryNotice.SetVisible(initialPurgeFailed);
+        if (telemetry != null)
+        {
+            Action<bool> onPurgeChanged = failed =>
+            {
+                GLib.Functions.IdleAdd(GLib.Constants.PRIORITY_DEFAULT_IDLE, () =>
+                {
+                    if (failed)
+                    {
+                        if (!settings.TelemetryEnabled)
+                        {
+                            telemetryNotice.SetText(purgeWarningText);
+                            telemetryNotice.SetVisible(true);
+                        }
+                    }
+                    else if (telemetryNotice.GetText() == purgeWarningText)
+                    {
+                        telemetryNotice.SetText(string.Empty);
+                        telemetryNotice.SetVisible(false);
+                    }
+                    return false;
+                });
+            };
+            telemetry.PurgeFailureChanged += onPurgeChanged;
+            telemetryNotice.OnDestroy += (_, _) => telemetry.PurgeFailureChanged -= onPurgeChanged;
+        }
         telemetryCheck.OnToggled += (_, _) =>
         {
             var enabled = telemetryCheck.GetActive();
             if (settings.TelemetryEnabled == enabled) return;
             if (enabled)
             {
-                if (!store.SaveTelemetryEnabled(true) || !(telemetry?.SetConsent(TelemetryConsent.Full) ?? true))
+                if (!(telemetry?.SetConsent(TelemetryConsent.Full) ?? true) || !store.SaveTelemetryEnabled(true))
                 {
                     telemetry?.SetConsent(TelemetryConsent.Off);
-                    store.SaveTelemetryEnabled(false);
                     settings.TelemetryEnabled = false;
                     telemetryCheck.SetActive(false);
                     telemetryNotice.SetText(l["settings.telemetry.enableError"]);
@@ -106,12 +131,12 @@ public sealed class SettingsPage
                 {
                     settings.TelemetryEnabled = true;
                     telemetryCheck.SetActive(true);
-                    telemetryNotice.SetText(l["settings.telemetry.purgeWarning"]);
+                    telemetryNotice.SetText(l["settings.telemetry.disableError"]);
                     telemetryNotice.SetVisible(true);
                     return;
                 }
                 settings.TelemetryEnabled = false;
-                telemetryNotice.SetText(purged ? string.Empty : l["settings.telemetry.purgeWarning"]);
+                telemetryNotice.SetText(purged ? string.Empty : purgeWarningText);
                 telemetryNotice.SetVisible(!purged);
             }
         };
