@@ -329,39 +329,44 @@ public sealed partial class MainWindow
         telemetryCheck.SetActive(_settings.TelemetryEnabled);
         var purgeWarningText = _localizer["settings.telemetry.purgeWarning"];
         var disableErrorText = _localizer["settings.telemetry.disableError"];
-        var telemetryNotice = Gtk.Label.New(_telemetry.LastPurgeFailed ? purgeWarningText : string.Empty);
+        var telemetryNotice = Gtk.Label.New(string.Empty);
         telemetryNotice.SetHalign(Gtk.Align.Start);
         telemetryNotice.SetWrap(true);
         telemetryNotice.AddCssClass("error");
-        telemetryNotice.SetVisible(_telemetry.LastPurgeFailed);
+        telemetryNotice.SetVisible(false);
+        void SyncPurgeNotice()
+        {
+            var failed = _telemetry.LastPurgeFailed;
+            if (failed && _telemetry.Consent == TelemetryConsent.Off)
+            {
+                if (telemetryNotice.GetText() != disableErrorText)
+                {
+                    if (_settings.TelemetryEnabled)
+                    {
+                        _settings.TelemetryEnabled = false;
+                        telemetryCheck.SetActive(false);
+                    }
+                    telemetryNotice.SetText(purgeWarningText);
+                    telemetryNotice.SetVisible(true);
+                }
+            }
+            else if (!failed && telemetryNotice.GetText() == purgeWarningText)
+            {
+                telemetryNotice.SetText(string.Empty);
+                telemetryNotice.SetVisible(false);
+            }
+        }
         Action<bool> onPurgeChanged = _ =>
         {
             GLib.Functions.IdleAdd(GLib.Constants.PRIORITY_DEFAULT_IDLE, () =>
             {
-                var failed = _telemetry.LastPurgeFailed;
-                if (failed && _telemetry.Consent == TelemetryConsent.Off)
-                {
-                    if (telemetryNotice.GetText() != disableErrorText)
-                    {
-                        if (_settings.TelemetryEnabled)
-                        {
-                            _settings.TelemetryEnabled = false;
-                            telemetryCheck.SetActive(false);
-                        }
-                        telemetryNotice.SetText(purgeWarningText);
-                        telemetryNotice.SetVisible(true);
-                    }
-                }
-                else if (!failed && telemetryNotice.GetText() == purgeWarningText)
-                {
-                    telemetryNotice.SetText(string.Empty);
-                    telemetryNotice.SetVisible(false);
-                }
+                SyncPurgeNotice();
                 return false;
             });
         };
         _telemetry.PurgeFailureChanged += onPurgeChanged;
         telemetryNotice.OnDestroy += (_, _) => _telemetry.PurgeFailureChanged -= onPurgeChanged;
+        SyncPurgeNotice();
         telemetryCheck.OnToggled += (_, _) =>
         {
             var enabled = telemetryCheck.GetActive();
