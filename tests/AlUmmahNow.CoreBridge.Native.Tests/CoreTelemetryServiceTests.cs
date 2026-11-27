@@ -596,7 +596,11 @@ public class CoreTelemetryServiceTests
             var flushTask = gen1.FlushAsync();
             await nativeStarted.Task;
 
-            // Another instance opts out and re-enables gen2, then persists a gen2 event while gen1's flush is still running.
+            // Simulate opt-out followed by re-enable to gen2 while gen1's flush is still in flight.
+            Volatile.Write(ref sharedToken, null);
+            var completed = await Task.WhenAny(flushTask, Task.Delay(2000));
+            Assert.Same(flushTask, completed);
+
             Volatile.Write(ref sharedToken, "enabled:gen2");
             string gen2BufferPath;
             using (var gen2 = new CoreTelemetryService(
@@ -615,13 +619,17 @@ public class CoreTelemetryServiceTests
                 Assert.True(File.Exists(gen2BufferPath));
             }
 
-            // Wait for gen1 to observe gen2 and revoke, then complete gen1's in-flight flush (triggers ReleaseInFlightFlush cleanup).
-            var completed = await Task.WhenAny(flushTask, Task.Delay(2000));
-            Assert.Same(flushTask, completed);
+            // Simulate a late persist rename from gen1 right before its revoked flush completes, then
+            // deterministically wait for ReleaseInFlightFlush to delete gen1BufferPath while preserving gen2BufferPath.
+            File.WriteAllText(gen1BufferPath, "{\"late\":\"gen1\"}");
             nativeRelease.TrySetResult(true);
-            await Task.Delay(50);
+            var deadline = DateTime.UtcNow.AddSeconds(2);
+            while (File.Exists(gen1BufferPath) && DateTime.UtcNow < deadline)
+            {
+                await Task.Delay(10);
+            }
 
-            // gen2's buffer must survive gen1's flush completion cleanup, AND survive a stale process constructing with initialEnabled=false.
+            Assert.False(File.Exists(gen1BufferPath));
             Assert.True(File.Exists(gen2BufferPath));
             using (var staleOffStartup = new CoreTelemetryService(
                 platform: "linux",
@@ -700,6 +708,12 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("https://[2001:db8::1]/v1/items"));
             Assert.Equal("https://example.com/a(b)/items",
                 CoreTelemetryService.SanitizeLocalPaths("https://example.com/a(b)/items"));
+            Assert.Equal("https://example.com/a(b;c)/items",
+                CoreTelemetryService.SanitizeLocalPaths("https://example.com/a(b;c)/items"));
+            Assert.Equal("https://example.com/api;[redacted-path]",
+                CoreTelemetryService.SanitizeLocalPaths("https://example.com/api;file:///storage/emulated/0/Secret.mov"));
+            Assert.Equal("Failure: Main.ts:42",
+                CoreTelemetryService.SanitizeLocalPaths("Failure: Main.ts:42"));
             Assert.Equal("open(https://example.com/a(b)/items)",
                 CoreTelemetryService.SanitizeLocalPaths("open(https://example.com/a(b)/items)"));
             Assert.Equal("https://example.com/a'b/items",

@@ -15,7 +15,7 @@ namespace AlUmmahNow.CoreBridge.Native;
 /// </summary>
 public sealed class CoreTelemetryService : ITelemetryService
 {
-    private static readonly Regex UrlVaultRegex = new(@"(?<![A-Za-z0-9+.-])[A-Za-z][A-Za-z0-9+.-]+://(?:\[([^\]\s""'<>\\{}\r\n]+)\]|(?:[A-Za-z0-9._~!$&'*+;=-]|%[0-9A-Fa-f]{2})+)(?::\d+)?(?:[/?#](?:[^\s""<>\\{},()\[\]\r\n]|\([^\s""<>\\{},;()\[\]/:\\]+\)|\[[^\s""<>\\{},;()\[\]/:\\]+\])*|(?=$|[\s""'<>\\{},;()\[\]]))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex UrlVaultRegex = new(@"(?<![A-Za-z0-9+.-])[A-Za-z][A-Za-z0-9+.-]+://(?:\[([^\]\s""'<>\\{}\r\n]+)\]|(?:[A-Za-z0-9._~!$&'*+;=-]|%[0-9A-Fa-f]{2})+)(?::\d+)?(?:[/?#](?:[^\s""<>\\{},()\[\]\r\n]|\([^\s""<>\\{},()\[\]/:\\]+\)|\[[^\s""<>\\{},()\[\]/:\\]+\])*|(?=$|[\s""'<>\\{},;()\[\]]))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex FileUriRegex = new(@"(?<![A-Za-z0-9+.-])file://[^\r\n]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex ParenPathRegex = new(@"(\()(?:/|~/|[A-Za-z]:[\\/]|\\\\)[^()\r\n]+(\))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex ParenRelativeSlashPathRegex = new(@"(\()(?!HTTP/\d)(?!TLS/\d)(?!SSL/\d)[^\s/\\""'<>()\[\]{}:,;\u001E\u001F]+/[^()\r\n]+(\))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -29,7 +29,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     private static readonly Regex KeywordQuotedPathRegex = new(@"(\b(?:file|path|directory|folder|document)\s+)([""'])(?!\u001E)[^'""\r\n]+\2", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex KeywordUnquotedFilenameRegex = new(@"(\b(?:open|opening|read|reading|write|writing|delete|deleting|remove|removing|rename|stat|create|creating|load|loading|save|saving|access|accessing|unlink|file|path|directory|folder|document|filename|filepath)\b(?:\s*[:=]\s*|\s+))(?!\u001E)[^\r\n\u001E\u001F]*\.(?!(?:kt|java|swift|cs|cpp|cc|c|h|hpp|rs|py|js|ts|go|rb|m|mm):\d+)[A-Za-z0-9]{1,16}\b(?!\()", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex KeywordAssignedPathRegex = new(@"(\b(?:file|path|filename|filepath)\s*[:=]\s*)(?!\u001E)[^\r\n\u001E\u001F]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex BareFilenameRegex = new(@"(^|[\r\n:=;\u001F])([ \t]*)[^\r\n:=;\u001E\u001F]*\.(?:mov|mp4|m4v|mkv|webm|avi|ts|m3u8|mpd|mp3|m4a|wav|aac|flac|ogg|opus|jpg|jpeg|png|gif|webp|heic|svg|pdf|txt|md|rtf|doc|docx|xls|xlsx|ppt|pptx|csv|json|xml|yaml|yml|toml|ini|cfg|conf|log|srt|vtt|ass|ssa|zip|tar|gz|tgz|bz2|xz|7z|rar|dmg|pkg|msi|exe|apk|aab|ipa|pem|key|crt|cer|p12|pfx|jks|keystore|db|sqlite|sqlite3|bin|dat|tmp|bak|proj|aun)\b(?!\()", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex BareFilenameRegex = new(@"(^|[\r\n:=;\u001F])([ \t]*)[^\r\n:=;\u001E\u001F]*\.(?!ts:\d+)(?:mov|mp4|m4v|mkv|webm|avi|ts|m3u8|mpd|mp3|m4a|wav|aac|flac|ogg|opus|jpg|jpeg|png|gif|webp|heic|svg|pdf|txt|md|rtf|doc|docx|xls|xlsx|ppt|pptx|csv|json|xml|yaml|yml|toml|ini|cfg|conf|log|srt|vtt|ass|ssa|zip|tar|gz|tgz|bz2|xz|7z|rar|dmg|pkg|msi|exe|apk|aab|ipa|pem|key|crt|cer|p12|pfx|jks|keystore|db|sqlite|sqlite3|bin|dat|tmp|bak|proj|aun)\b(?!\()", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private readonly TelemetryAppInfo _app;
     private readonly string? _ingestUrl;
@@ -99,7 +99,27 @@ public sealed class CoreTelemetryService : ITelemetryService
         var initialToken = initialEnabled && _externalConsentToken != null ? ReadExternalTokenSafe() : null;
         _activeBufferPath = ResolveBufferPathForToken(initialToken);
         _client = CreateClient(_activeBufferPath);
-        SetConsent(initialEnabled ? TelemetryConsent.Full : TelemetryConsent.Off);
+        if (initialEnabled)
+        {
+            SetConsent(TelemetryConsent.Full);
+        }
+        else
+        {
+            // Startup with telemetry disabled revokes this instance and removes only its own base
+            // buffer/temps, never sweeping foreign generation buffers owned by another live process.
+            _consent = TelemetryConsent.Off;
+            _observedExternalToken = null;
+            try
+            {
+                _client.SetConsent(TelemetryConsentState.Denied);
+                _lastPurgeFailed = !TryDeleteSingleBufferAndTemps(_activeBufferPath);
+            }
+            catch (AunException ex)
+            {
+                _lastPurgeFailed = !TryDeleteSingleBufferAndTemps(_activeBufferPath);
+                Log.For("telemetry").Error("telemetry disk purge failed on startup opt-out: " + ex.Message);
+            }
+        }
     }
 
     private TelemetryClient CreateClient(string? bufferPath)
@@ -165,13 +185,14 @@ public sealed class CoreTelemetryService : ITelemetryService
     internal static string SanitizeLocalPaths(string text)
     {
         if (string.IsNullOrEmpty(text)) return text;
+        var textWithoutFileUris = FileUriRegex.Replace(text, "[redacted-path]");
         var prefix = "\u001EAUNURL";
-        while (text.Contains(prefix, StringComparison.Ordinal))
+        while (textWithoutFileUris.Contains(prefix, StringComparison.Ordinal))
         {
             prefix += "X";
         }
         var vaultedUrls = new List<string>();
-        var scrubbed = UrlVaultRegex.Replace(text, match =>
+        var scrubbed = UrlVaultRegex.Replace(textWithoutFileUris, match =>
         {
             var raw = match.Value;
             if (raw.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
@@ -190,7 +211,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                 url = url[..^1];
                 tail = ";";
             }
-            if (match.Index > 0 && text[match.Index - 1] == '\'' && url.EndsWith('\''))
+            if (match.Index > 0 && textWithoutFileUris[match.Index - 1] == '\'' && url.EndsWith('\''))
             {
                 url = url[..^1];
                 tail = "'" + tail;
@@ -199,7 +220,6 @@ public sealed class CoreTelemetryService : ITelemetryService
             vaultedUrls.Add(url);
             return $"{prefix}{idx}\u001F{tail}";
         });
-        scrubbed = FileUriRegex.Replace(scrubbed, "[redacted-path]");
         scrubbed = ParenPathRegex.Replace(scrubbed, "$1[redacted-path]$2");
         scrubbed = ParenRelativeSlashPathRegex.Replace(scrubbed, "$1[redacted-path]$2");
         scrubbed = WindowsPathRegex.Replace(scrubbed, "[redacted-path]");
@@ -471,6 +491,7 @@ public sealed class CoreTelemetryService : ITelemetryService
 
         CancellationToken revokeToken;
         long flushEpoch;
+        string? flushBufferPath;
         CancellationTokenSource? toCancel = null;
         lock (_gate)
         {
@@ -482,6 +503,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             if (_disposeRequested || _clientDisposed || _consent == TelemetryConsent.Off) return;
             revokeToken = _flushCts.Token;
             flushEpoch = _consentEpoch;
+            flushBufferPath = _activeBufferPath;
             _inFlightFlushes++;
         }
 
@@ -506,11 +528,11 @@ public sealed class CoreTelemetryService : ITelemetryService
                 static (t, state) =>
                 {
                     _ = t.Exception;
-                    var (svc, cts, epoch) = ((CoreTelemetryService, CancellationTokenSource?, long))state!;
+                    var (svc, cts, epoch, bufPath) = ((CoreTelemetryService, CancellationTokenSource?, long, string?))state!;
                     if (cts != null) CancelQuietly(cts);
-                    svc.ReleaseInFlightFlush(epoch);
+                    svc.ReleaseInFlightFlush(epoch, bufPath);
                 },
-                (this, monitorToStop, flushEpoch),
+                (this, monitorToStop, flushEpoch, flushBufferPath),
                 CancellationToken.None,
                 TaskContinuationOptions.ExecuteSynchronously,
                 TaskScheduler.Default);
@@ -529,7 +551,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             if (nativeFlush == null)
             {
                 if (monitorCts != null) CancelQuietly(monitorCts);
-                ReleaseInFlightFlush(flushEpoch);
+                ReleaseInFlightFlush(flushEpoch, flushBufferPath);
             }
         }
         return;
@@ -595,7 +617,8 @@ public sealed class CoreTelemetryService : ITelemetryService
             "telemetry disk purge failed after cross-instance opt-out: ",
             ref purgeNotify,
             ref purgeNotifyValue,
-            ResolveForeignKeepPathLocked());
+            keepForeignGenerationPath: null,
+            ownBufferOnly: true);
         if (purgeNotify != null)
         {
             var notify = purgeNotify;
@@ -614,7 +637,8 @@ public sealed class CoreTelemetryService : ITelemetryService
         string failureLogPrefix,
         ref Action<bool>? purgeNotify,
         ref bool purgeNotifyValue,
-        string? keepForeignGenerationPath = null)
+        string? keepForeignGenerationPath = null,
+        bool ownBufferOnly = false)
     {
         _consent = TelemetryConsent.Off;
         _observedExternalToken = null;
@@ -624,19 +648,26 @@ public sealed class CoreTelemetryService : ITelemetryService
         _flushCts = new CancellationTokenSource();
         if (_clientDisposed)
         {
-            UpdatePurgeFailedLocked(!TryDeleteBufferFallback(keepForeignGenerationPath), ref purgeNotify, ref purgeNotifyValue);
+            var fallbackOk = ownBufferOnly
+                ? TryDeleteSingleBufferAndTemps(_activeBufferPath)
+                : TryDeleteBufferFallback(keepForeignGenerationPath);
+            UpdatePurgeFailedLocked(!fallbackOk, ref purgeNotify, ref purgeNotifyValue);
             return !_lastPurgeFailed;
         }
         try
         {
             _client.SetConsent(TelemetryConsentState.Denied);
-            var foreignOk = TryDeleteForeignGenerationBuffers(keepForeignGenerationPath);
-            var tempsOk = TryDeleteSiblingTempFiles(keepForeignGenerationPath);
-            UpdatePurgeFailedLocked(!(foreignOk && tempsOk), ref purgeNotify, ref purgeNotifyValue);
+            var cleanOk = ownBufferOnly
+                ? TryDeleteSingleBufferAndTemps(_activeBufferPath)
+                : TryDeleteForeignGenerationBuffers(keepForeignGenerationPath) && TryDeleteSiblingTempFiles(keepForeignGenerationPath);
+            UpdatePurgeFailedLocked(!cleanOk, ref purgeNotify, ref purgeNotifyValue);
         }
         catch (AunException ex)
         {
-            UpdatePurgeFailedLocked(!TryDeleteBufferFallback(keepForeignGenerationPath), ref purgeNotify, ref purgeNotifyValue);
+            var fallbackOk = ownBufferOnly
+                ? TryDeleteSingleBufferAndTemps(_activeBufferPath)
+                : TryDeleteBufferFallback(keepForeignGenerationPath);
+            UpdatePurgeFailedLocked(!fallbackOk, ref purgeNotify, ref purgeNotifyValue);
             Log.For("telemetry").Error(failureLogPrefix + ex.Message);
         }
         return !_lastPurgeFailed;
@@ -663,7 +694,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         }
     }
 
-    private void ReleaseInFlightFlush(long flushEpoch)
+    private void ReleaseInFlightFlush(long flushEpoch, string? flushBufferPath)
     {
         Action<bool>? purgeNotify = null;
         bool purgeNotifyValue = false;
@@ -673,14 +704,14 @@ public sealed class CoreTelemetryService : ITelemetryService
             if (flushEpoch < _consentEpoch)
             {
                 _revokedFlushesRemaining = Math.Max(0, _revokedFlushesRemaining - 1);
-                if (!string.IsNullOrWhiteSpace(_bufferPath))
+                if (!string.IsNullOrWhiteSpace(flushBufferPath))
                 {
                     // A flush already in flight when consent was revoked may finish its final
-                    // persist rename after SetConsent(Denied) deleted the file; remove any remnant.
-                    // Ordinary Dispose() without revocation does not advance _consentEpoch, so
-                    // retryable buffers survive normal shutdown.
+                    // persist rename after SetConsent(Denied) deleted the file; remove only the
+                    // revoked flush's own generation buffer and sibling temps so a concurrently
+                    // enabled newer generation in another process can never be touched.
                     UpdatePurgeFailedLocked(
-                        !TryDeleteBufferFallback(ResolveForeignKeepPathLocked()),
+                        !TryDeleteSingleBufferAndTemps(flushBufferPath),
                         ref purgeNotify,
                         ref purgeNotifyValue);
                 }
@@ -800,6 +831,32 @@ public sealed class CoreTelemetryService : ITelemetryService
         catch (DirectoryNotFoundException)
         {
             return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private static bool TryDeleteSingleBufferAndTemps(string? targetPath)
+    {
+        if (string.IsNullOrWhiteSpace(targetPath)) return true;
+        var mainOk = TryDeleteSingleFile(targetPath);
+        var dir = Path.GetDirectoryName(targetPath);
+        var fileName = Path.GetFileName(targetPath);
+        if (string.IsNullOrEmpty(dir) || string.IsNullOrEmpty(fileName)) return mainOk;
+        try
+        {
+            var allDeleted = mainOk;
+            foreach (var tmp in Directory.EnumerateFiles(dir, $".{fileName}.*.tmp"))
+            {
+                if (!TryDeleteSingleFile(tmp)) allDeleted = false;
+            }
+            return allDeleted;
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return mainOk;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
