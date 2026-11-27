@@ -25,7 +25,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     private static readonly Regex RelativeBackslashPathRegex = new(@"(^|[\s(\[{""'=,:;<>)\u001F])[^\s\\/""'<>()\[{:,;=\u001E\u001F]+\\[^\r\n\u001E\u001F\s""](?:[^\r\n\u001E\u001F]*[^\r\n\u001E\u001F\s])?", RegexOptions.Compiled);
     private static readonly Regex QuotedSpacedRootPathRegex = new(@"[""']/[ \t]+[^\r\n\u001E\s""][^\r\n\u001E]*", RegexOptions.Compiled);
     private static readonly Regex UnixPathRegex = new(@"(?<![\p{L}\p{M}\p{N}._/-])(?:~/(?=[^\S\r\n]*[^\s""])|//+(?=[^\S\r\n]*[^\s/""])|/(?=[^\S\r\n]*[^\s/""]))[^\S\r\n]*[^\r\n\u001E\s](?:[^\r\n\u001E]*[^\r\n\u001E\s])?", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex RelativeSlashPathRegex = new(@"(^|[\s(\[{)\]}<>""'=,:;\u001F])(?!(?<!['""])(?:HTTP|TLS|SSL)/\d)(?!(?<!['""])\d+/\d+(?:$|[\s)\]},;:!?]|\.(?![A-Za-z0-9])))[^\s/\\""'<>()\[\]{}:,;=\u001E\u001F]+/[^\r\n\u001E\u001F\s](?:[^\r\n\u001E\u001F]*[^\r\n\u001E\u001F\s])?", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex RelativeSlashPathRegex = new(@"(^|[\s(\[{)\]}<>""'=,:;\u001F])(?!(?<!['""])(?:HTTP|TLS|SSL)/\d)(?!(?<!['""])\d+/\d+(?:$|[\s)\]},;:!?]|\.(?![A-Za-z0-9])))[^\s/\\""'<>()\[\]{}:,;=\u001E\u001F]+/[^\r\n\u001E\u001F\s""](?:[^\r\n\u001E\u001F]*[^\r\n\u001E\u001F\s])?", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex KeywordQuotedPathRegex = new(@"(\b(?:file|path|directory|folder|document)[^\S\r\n]+)([""'])(?!\u001E)[^'""\r\n]+\2", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex KeywordFilenamePrefixRegex = new(@"\b(?:open|opening|read|reading|write|writing|delete|deleting|remove|removing|rename|stat|create|creating|load|loading|save|saving|access|accessing|unlink|file|path|directory|folder|document|filename|filepath)\b(?:[^\S\r\n]*[:=][^\S\r\n]*|[^\S\r\n]+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly HashSet<string> SourceLineExtensions = new(StringComparer.OrdinalIgnoreCase)
@@ -980,6 +980,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             var pathPos = sliceStart < close ? FindLocalPathStartInQuoted(text, sliceStart, close) : -1;
             if (pathPos >= 0)
             {
+                if (pathPos > sliceStart && IsPrecededByOddBackslashes(text, pathPos, sliceStart)) pathPos--;
                 sb ??= new StringBuilder(text.Length);
                 sb.Append(text, copied, pathPos - copied).Append("[redacted-path]");
                 copied = close;
@@ -1035,16 +1036,52 @@ public sealed class CoreTelemetryService : ITelemetryService
                 p += 2;
                 continue;
             }
-            if (IsWindowsDriveAt(text, p) && HasNonWhitespaceAfter(text, p + 3, end)) return p;
-            if (tokenStart < 0 && IsQuotedLocalPathStart(text, p, end)) return p;
+            if (IsWindowsDriveAt(text, p))
+            {
+                var next = NextNonHorizontalSpace(text, p + 3, end);
+                if (next < end && !char.IsWhiteSpace(text[next])) return p;
+                tokenStart = -1;
+                p = next;
+                continue;
+            }
+            if (ch == '/' || (ch == '\\' && p + 1 < end && text[p + 1] == '/'))
+            {
+                var step = ch == '\\' ? 2 : 1;
+                if (tokenStart >= 0)
+                {
+                    var next = NextNonHorizontalSpace(text, p + step, end);
+                    if (next < end && !char.IsWhiteSpace(text[next])) return tokenStart;
+                    tokenStart = -1;
+                    p = next;
+                    continue;
+                }
+                var nextRoot = ScanSlashRunEnd(text, p + step, end);
+                if (nextRoot < end && !char.IsWhiteSpace(text[nextRoot])) return p;
+                p = nextRoot;
+                continue;
+            }
+            if (tokenStart < 0 && ((ch == '~' && p + 1 < end && text[p + 1] == '/') ||
+                (ch == '\\' && p + 1 < end && text[p + 1] == '\\')))
+            {
+                var next = NextNonHorizontalSpace(text, p + 2, end);
+                if (next < end && !char.IsWhiteSpace(text[next])) return p;
+                p = next;
+                continue;
+            }
             if (char.IsWhiteSpace(ch) || IsQuotedPathDelimiter(ch))
             {
                 tokenStart = -1;
             }
-            else if (ch is '/' or '\\')
+            else if (ch == '\\')
             {
-                if (tokenStart >= 0 && HasNonWhitespaceAfter(text, p + 1, end)) return tokenStart;
-                tokenStart = -1;
+                if (tokenStart >= 0)
+                {
+                    var next = NextNonHorizontalSpace(text, p + 1, end);
+                    if (next < end && !char.IsWhiteSpace(text[next])) return tokenStart;
+                    tokenStart = -1;
+                    p = next;
+                    continue;
+                }
             }
             else if (tokenStart < 0)
             {
@@ -1055,26 +1092,33 @@ public sealed class CoreTelemetryService : ITelemetryService
         return -1;
     }
 
-    private static bool IsQuotedLocalPathStart(string text, int p, int end)
+    private static int ScanSlashRunEnd(string text, int pos, int end)
     {
-        var ch = text[p];
-        if (ch == '/')
+        var next = pos;
+        while (next < end)
         {
-            var next = p + 1;
-            while (next < end && text[next] == '/') next++;
-            while (next < end && text[next] is ' ' or '\t') next++;
-            return next < end && !char.IsWhiteSpace(text[next]) && text[next] != '/';
+            var c = text[next];
+            if (c == '/' || c is ' ' or '\t')
+            {
+                next++;
+            }
+            else if (c == '\\' && next + 1 < end && text[next + 1] == '/')
+            {
+                next += 2;
+            }
+            else
+            {
+                break;
+            }
         }
-        if (ch == '~' && p + 1 < end && text[p + 1] == '/') return HasNonWhitespaceAfter(text, p + 2, end);
-        if (ch == '\\' && p + 1 < end && text[p + 1] == '\\') return HasNonWhitespaceAfter(text, p + 2, end);
-        return false;
+        return next;
     }
 
-    private static bool HasNonWhitespaceAfter(string text, int pos, int end)
+    private static int NextNonHorizontalSpace(string text, int pos, int end)
     {
         var p = pos;
         while (p < end && text[p] is ' ' or '\t') p++;
-        return p < end && !char.IsWhiteSpace(text[p]);
+        return p;
     }
 
     private static bool IsQuotedPathDelimiter(char ch) =>

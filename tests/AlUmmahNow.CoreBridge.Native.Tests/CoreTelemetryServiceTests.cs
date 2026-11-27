@@ -1352,6 +1352,14 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("[\"hello \\\"world\\\"\",\"public\"]"));
             Assert.Equal("[\"/\",\"public\"]",
                 CoreTelemetryService.SanitizeLocalPaths("[\"/\",\"public\"]"));
+            Assert.Equal("[\"[redacted-path]\",\"public\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"\\/private/secret\",\"public\"]"));
+            Assert.Equal("[\"\\/\",\"public\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"\\/\",\"public\"]"));
+            Assert.Equal("[\"relative/\",\"public\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"relative/\",\"public\"]"));
+            var manySlashes = "[\"" + new string('/', 10_000) + "\",\"public\"]";
+            Assert.Equal(manySlashes, CoreTelemetryService.SanitizeLocalPaths(manySlashes));
             var repeatedRejectedSchemes = string.Concat(Enumerable.Repeat("https:// ", 2000));
             Assert.Equal("http[redacted-path] ", CoreTelemetryService.SanitizeLocalPaths(repeatedRejectedSchemes));
             var repeatedEqualsQuotedUrls = string.Join("=", Enumerable.Repeat("https://a.test/x{a:\"https://b.test/x\"}", 500));
