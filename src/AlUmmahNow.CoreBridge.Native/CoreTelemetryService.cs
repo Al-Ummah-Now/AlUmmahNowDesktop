@@ -21,11 +21,11 @@ public sealed class CoreTelemetryService : ITelemetryService
 {
     private static readonly Regex ParenPathRegex = new(@"(\()(?:/|~/|[A-Za-z]:[\\/]|\\\\)[^()\r\n\u001E]+(\))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex ParenRelativeSlashPathRegex = new(@"(\()(?![ \t]*(?:HTTP|TLS|SSL)/\d)(?![ \t]*\d+/\d+[.,;:!?\s]*\))[^\s/\\""'<>()\[\]{}:,;=\u001E\u001F]+/[^()\r\n\u001E]+(\))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex WindowsPathRegex = new(@"(?:[A-Za-z]:[\\/]|\\\\)[^\S\r\n]*[^\r\n\u001E\s]+(?:[^\S\r\n]+[^\r\n\u001E\s]+)*", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex RelativeBackslashPathRegex = new(@"(^|[\s(\[{""'=,:;\u001F])[^\s\\/""'<>()\[{:,;=\u001E\u001F]+\\[^\r\n\u001E\u001F\s]+(?:[^\S\r\n]+[^\r\n\u001E\u001F\s]+)*", RegexOptions.Compiled);
+    private static readonly Regex WindowsPathRegex = new(@"(?:[A-Za-z]:[\\/]|\\\\)[^\S\r\n]*[^\r\n\u001E\s](?:[^\r\n\u001E\u000B\u000C\u0085\u2028\u2029]*[^\r\n\u001E\s])?", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex RelativeBackslashPathRegex = new(@"(^|[\s(\[{""'=,:;\u001F])[^\s\\/""'<>()\[{:,;=\u001E\u001F]+\\[^\r\n\u001E\u001F\s](?:[^\r\n\u001E\u001F\u000B\u000C\u0085\u2028\u2029]*[^\r\n\u001E\u001F\s])?", RegexOptions.Compiled);
     private static readonly Regex QuotedSpacedRootPathRegex = new(@"[""']/[ \t]+[^\r\n\u001E]+", RegexOptions.Compiled);
-    private static readonly Regex UnixPathRegex = new(@"(?<![\p{L}\p{M}\p{N}._/-])(?:~/|//+(?=[ \t]*[^\s/])|/(?=[ \t]*[^\s/]))[^\S\r\n]*[^\r\n\u001E\s]+(?:[^\S\r\n]+[^\r\n\u001E\s]+)*", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex RelativeSlashPathRegex = new(@"(^|[\s(\[{""'=,:;\u001F])(?!(?<!['""])(?:HTTP|TLS|SSL)/\d)(?!(?<!['""])\d+/\d+(?:$|[\s)\]},;:!?]|\.(?![A-Za-z0-9])))[^\s/\\""'<>()\[\]{}:,;=\u001E\u001F]+/[^\r\n\u001E\u001F\s]+(?:[^\S\r\n]+[^\r\n\u001E\u001F\s]+)*", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex UnixPathRegex = new(@"(?<![\p{L}\p{M}\p{N}._/-])(?:~/|//+(?=[^\S\r\n]*[^\s/])|/(?=[^\S\r\n]*[^\s/]))[^\S\r\n]*[^\r\n\u001E\s](?:[^\r\n\u001E\u000B\u000C\u0085\u2028\u2029]*[^\r\n\u001E\s])?", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex RelativeSlashPathRegex = new(@"(^|[\s(\[{""'=,:;\u001F])(?!(?<!['""])(?:HTTP|TLS|SSL)/\d)(?!(?<!['""])\d+/\d+(?:$|[\s)\]},;:!?]|\.(?![A-Za-z0-9])))[^\s/\\""'<>()\[\]{}:,;=\u001E\u001F]+/[^\r\n\u001E\u001F\s](?:[^\r\n\u001E\u001F\u000B\u000C\u0085\u2028\u2029]*[^\r\n\u001E\u001F\s])?", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex KeywordQuotedPathRegex = new(@"(\b(?:file|path|directory|folder|document)[^\S\r\n]+)([""'])(?!\u001E)[^'""\r\n]+\2", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex KeywordFilenamePrefixRegex = new(@"\b(?:open|opening|read|reading|write|writing|delete|deleting|remove|removing|rename|stat|create|creating|load|loading|save|saving|access|accessing|unlink|file|path|directory|folder|document|filename|filepath)\b(?:[^\S\r\n]*[:=][^\S\r\n]*|[^\S\r\n]+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly HashSet<string> SourceLineExtensions = new(StringComparer.OrdinalIgnoreCase)
@@ -513,7 +513,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                         candidateClose = -1;
                     }
                 }
-                else if (open >= 0)
+                else if (open >= 0 && (p + 1 == segEnd || !char.IsLetterOrDigit(text[p + 1])))
                 {
                     if (EndsWithFilenameExt(text, open + 1, p))
                     {
@@ -523,7 +523,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                         open = -1;
                         candidateClose = -1;
                     }
-                    else if (p + 1 == segEnd || !char.IsLetterOrDigit(text[p + 1]))
+                    else
                     {
                         candidateClose = p;
                     }
@@ -754,7 +754,13 @@ public sealed class CoreTelemetryService : ITelemetryService
         private bool _escapedBackslash;
         private int _tokenStart;
         private int _tokenEnd;
-        private bool _tokenHasPathSep;
+        private int _tokenFirstSlash;
+        private int _tokenSlashCount;
+        private bool _tokenHasBackslash;
+        private bool _tokenAllDigitsBeforeSlash;
+        private bool _tokenHasDigitAfterSlash;
+        private bool _tokenAllDigitsAfterSlash;
+        private bool _tokenSawPunctAfterSlash;
         private bool _inWrapperRun;
         private bool _wsBeforeRun;
 
@@ -762,13 +768,16 @@ public sealed class CoreTelemetryService : ITelemetryService
         {
             _tokenStart = -1;
             _tokenEnd = -1;
+            _tokenFirstSlash = -1;
+            _tokenAllDigitsBeforeSlash = true;
+            _tokenAllDigitsAfterSlash = true;
         }
 
         public bool IsEmbeddedInPath(string text, int matchStart)
         {
             AdvanceTo(text, matchStart);
-            var curTokenIsPath = _tokenHasPathSep && !IsNonPathSlashToken(text, _tokenStart, _tokenEnd, _openQuote != '\0');
-            return _pathQuote != '\0' || curTokenIsPath || (_hasPathOnLine && (!_wsBeforeRun || _inWrapperRun));
+            if (_pathQuote != '\0' || (_hasPathOnLine && (!_wsBeforeRun || _inWrapperRun))) return true;
+            return IsCurrentTokenPath(text);
         }
 
         public void OnVaultedUrl(int matchEnd)
@@ -777,15 +786,26 @@ public sealed class CoreTelemetryService : ITelemetryService
             ResetLineState();
         }
 
+        private void ResetTokenState()
+        {
+            _tokenStart = -1;
+            _tokenEnd = -1;
+            _tokenFirstSlash = -1;
+            _tokenSlashCount = 0;
+            _tokenHasBackslash = false;
+            _tokenAllDigitsBeforeSlash = true;
+            _tokenHasDigitAfterSlash = false;
+            _tokenAllDigitsAfterSlash = true;
+            _tokenSawPunctAfterSlash = false;
+        }
+
         private void ResetLineState()
         {
             _hasPathOnLine = false;
             _openQuote = '\0';
             _pathQuote = '\0';
             _escapedBackslash = false;
-            _tokenStart = -1;
-            _tokenEnd = -1;
-            _tokenHasPathSep = false;
+            ResetTokenState();
             _inWrapperRun = false;
             _wsBeforeRun = false;
         }
@@ -817,9 +837,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                     return;
                 }
                 _openQuote = '\0';
-                _tokenStart = -1;
-                _tokenEnd = -1;
-                _tokenHasPathSep = false;
+                ResetTokenState();
                 _inWrapperRun = false;
                 _wsBeforeRun = false;
                 _escapedBackslash = false;
@@ -839,10 +857,8 @@ public sealed class CoreTelemetryService : ITelemetryService
                 if (!_inWrapperRun)
                 {
                     PromoteTokenPath(text);
-                    _tokenStart = -1;
-                    _tokenEnd = -1;
+                    ResetTokenState();
                     _wsBeforeRun = true;
-                    _tokenHasPathSep = false;
                 }
             }
             else if (IsOpeningWrapper(ch))
@@ -858,20 +874,73 @@ public sealed class CoreTelemetryService : ITelemetryService
             {
                 if (_tokenStart < 0 || _inWrapperRun)
                 {
+                    ResetTokenState();
                     _tokenStart = _cursor;
-                    _tokenHasPathSep = false;
                 }
                 _tokenEnd = _cursor + 1;
-                if (ch is '/' or '\\') _tokenHasPathSep = true;
+                TrackTokenChar(ch);
                 _inWrapperRun = false;
                 _wsBeforeRun = false;
             }
             _escapedBackslash = ch == '\\' ? !_escapedBackslash : false;
         }
 
+        private void TrackTokenChar(char ch)
+        {
+            if (ch == '\\')
+            {
+                _tokenHasBackslash = true;
+            }
+            else if (ch == '/')
+            {
+                if (_tokenSlashCount == 0) _tokenFirstSlash = _cursor;
+                _tokenSlashCount++;
+            }
+            else if (_tokenSlashCount == 0)
+            {
+                if (!char.IsAsciiDigit(ch)) _tokenAllDigitsBeforeSlash = false;
+            }
+            else if (_tokenSlashCount == 1)
+            {
+                if (ch is '.' or ',' or ';' or ':' or '!' or '?' or ')' or ']' or '}')
+                {
+                    _tokenSawPunctAfterSlash = true;
+                }
+                else if (char.IsAsciiDigit(ch))
+                {
+                    if (_tokenSawPunctAfterSlash) _tokenAllDigitsAfterSlash = false;
+                    else _tokenHasDigitAfterSlash = true;
+                }
+                else
+                {
+                    _tokenAllDigitsAfterSlash = false;
+                }
+            }
+        }
+
+        private bool IsCurrentTokenPath(string text)
+        {
+            if (_tokenSlashCount == 0 && !_tokenHasBackslash) return false;
+            if (_openQuote != '\0' || _tokenStart < 0 || _tokenSlashCount != 1 || _tokenHasBackslash) return true;
+            var beforeLen = _tokenFirstSlash - _tokenStart;
+            if (beforeLen <= 0 || _tokenFirstSlash + 1 >= _tokenEnd) return true;
+            if (_tokenAllDigitsBeforeSlash && _tokenHasDigitAfterSlash && _tokenAllDigitsAfterSlash) return false;
+            if ((beforeLen == 3 || beforeLen == 4) && char.IsAsciiDigit(text[_tokenFirstSlash + 1]))
+            {
+                var before = text.AsSpan(_tokenStart, beforeLen);
+                if (before.Equals("HTTP", StringComparison.OrdinalIgnoreCase) ||
+                    before.Equals("TLS", StringComparison.OrdinalIgnoreCase) ||
+                    before.Equals("SSL", StringComparison.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
         private void PromoteTokenPath(string text)
         {
-            if (_tokenHasPathSep && !IsNonPathSlashToken(text, _tokenStart, _tokenEnd, _openQuote != '\0'))
+            if (IsCurrentTokenPath(text))
             {
                 _hasPathOnLine = true;
                 if (_pathQuote == '\0' && _openQuote != '\0')
@@ -904,40 +973,6 @@ public sealed class CoreTelemetryService : ITelemetryService
             pos + 2 < text.Length && text[pos + 1] == ':' && text[pos + 2] is '/' or '\\';
     }
 
-    private static bool IsNonPathSlashToken(string text, int start, int end, bool insideQuote)
-    {
-        if (insideQuote || start < 0 || end <= start) return false;
-        while (end > start && text[end - 1] is '.' or ',' or ';' or ':' or '!' or '?' or ')' or ']' or '}')
-        {
-            end--;
-        }
-        if (end <= start) return false;
-        var span = text.AsSpan(start, end - start);
-        var slashIdx = span.IndexOfAny('/', '\\');
-        if (slashIdx <= 0 || slashIdx + 1 >= span.Length || span[slashIdx] != '/') return false;
-        var after = span[(slashIdx + 1)..];
-        if (after.IndexOfAny('/', '\\') >= 0) return false;
-        var before = span[..slashIdx];
-        if (char.IsAsciiDigit(after[0]) &&
-            (before.Equals("HTTP", StringComparison.OrdinalIgnoreCase) ||
-             before.Equals("TLS", StringComparison.OrdinalIgnoreCase) ||
-             before.Equals("SSL", StringComparison.OrdinalIgnoreCase)))
-        {
-            return true;
-        }
-        return IsAllAsciiDigits(before) && IsAllAsciiDigits(after);
-    }
-
-    private static bool IsAllAsciiDigits(ReadOnlySpan<char> span)
-    {
-        if (span.IsEmpty) return false;
-        foreach (var ch in span)
-        {
-            if (!char.IsAsciiDigit(ch)) return false;
-        }
-        return true;
-    }
-
     private static bool IsUrlSchemeChar(char ch) =>
         (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch is '+' or '.' or '-';
 
@@ -964,6 +999,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                 var stoppedAtVault = false;
                 var escapedBackslash = false;
                 var candidateClose = -1;
+                var nestedQuotes = 0;
                 while (rawEnd < text.Length)
                 {
                     var ch = text[rawEnd];
@@ -982,19 +1018,34 @@ public sealed class CoreTelemetryService : ITelemetryService
                             candidateClose = rawEnd;
                             break;
                         }
-                        if (candidateClose >= 0 && rawEnd > schemeEnd && !char.IsLetterOrDigit(text[rawEnd - 1]))
-                        {
-                            break;
-                        }
-                        if (rawEnd + 1 == text.Length || !char.IsLetterOrDigit(text[rawEnd + 1]))
+                        var canClose = rawEnd + 1 == text.Length || !char.IsLetterOrDigit(text[rawEnd + 1]);
+                        var prevChar = rawEnd > schemeEnd ? text[rawEnd - 1] : '\0';
+                        var prevIsWord = rawEnd > schemeEnd && char.IsLetterOrDigit(prevChar);
+                        if (canClose)
                         {
                             candidateClose = rawEnd;
+                            if (nestedQuotes > 0)
+                            {
+                                nestedQuotes--;
+                            }
+                            else if (prevChar is not ('s' or 'S'))
+                            {
+                                break;
+                            }
+                        }
+                        else if (!prevIsWord)
+                        {
+                            if (candidateClose >= 0 && nestedQuotes == 0 && IsFileSchemeAt(text, rawEnd + 1))
+                            {
+                                break;
+                            }
+                            nestedQuotes++;
                         }
                     }
                     escapedBackslash = ch == '\\' ? !escapedBackslash : false;
                     rawEnd++;
                 }
-                if (candidateClose >= 0)
+                if (candidateClose >= 0 && nestedQuotes == 0)
                 {
                     rawEnd = candidateClose;
                     stoppedAtVault = false;
@@ -1168,16 +1219,27 @@ public sealed class CoreTelemetryService : ITelemetryService
         Action<TelemetryConsent>? consentNotify = null;
         TelemetryConsent consentNotifyValue = TelemetryConsent.Off;
         bool result;
-        var needsBufferLock = !string.IsNullOrWhiteSpace(_bufferPath);
-        IDisposable? crossProcessLock = needsBufferLock ? AcquireCrossProcessBufferLock() : null;
-        if (consent != TelemetryConsent.Off && needsBufferLock && crossProcessLock == null)
+        IDisposable? externalConsentLock = null;
+        if (consent != TelemetryConsent.Off && _acquireExternalConsentLock != null)
         {
-            return false;
-        }
-        using (crossProcessLock)
-        {
-            lock (_gate)
+            externalConsentLock = _acquireExternalConsentLock();
+            if (externalConsentLock == null)
             {
+                return false;
+            }
+        }
+        using (externalConsentLock)
+        {
+            var needsBufferLock = !string.IsNullOrWhiteSpace(_bufferPath);
+            IDisposable? crossProcessLock = needsBufferLock ? AcquireCrossProcessBufferLock() : null;
+            if (consent != TelemetryConsent.Off && needsBufferLock && crossProcessLock == null)
+            {
+                return false;
+            }
+            using (crossProcessLock)
+            {
+                lock (_gate)
+                {
                 var priorConsent = _consent;
                 if (consent == TelemetryConsent.Off)
                 {
@@ -1274,6 +1336,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                     consentNotify = ConsentChanged;
                     consentNotifyValue = _consent;
                 }
+            }
             }
         }
         if (toCancel != null) CancelQuietly(toCancel);

@@ -814,6 +814,20 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("\"file:///tmp/Secret\" progress 1/2"));
             Assert.Equal("'[redacted-path]' progress 1/2 '[redacted-path]'",
                 CoreTelemetryService.SanitizeLocalPaths("'file:///tmp/a' progress 1/2 'file:///tmp/b'"));
+            Assert.Equal("'[redacted-path]' progress users' 1/2",
+                CoreTelemetryService.SanitizeLocalPaths("'file:///tmp/a' progress users' 1/2"));
+            Assert.Equal("'[redacted-path]' progress 1/2 '[redacted-path]'",
+                CoreTelemetryService.SanitizeLocalPaths("'file:///tmp/docs' progress 1/2 'file:///tmp/b'"));
+            Assert.Equal("'[redacted-path]'",
+                CoreTelemetryService.SanitizeLocalPaths("'file:///tmp/Artists' Private 'Collection'"));
+            Assert.Equal("'[redacted-path]'",
+                CoreTelemetryService.SanitizeLocalPaths("'file:///tmp/Artists' Private 'Collection' Name'"));
+            Assert.Equal("'[redacted-path]",
+                CoreTelemetryService.SanitizeLocalPaths("'file:///tmp/Artists' Private 'Collection"));
+            Assert.Equal("'[redacted-path]'",
+                CoreTelemetryService.SanitizeLocalPaths("'file:///tmp/Studio 'Private' Project'"));
+            Assert.Equal("[redacted-path]",
+                CoreTelemetryService.SanitizeLocalPaths("'Private.qzx'2 Acquisition.qzx'"));
             Assert.Equal("[redacted-path]",
                 CoreTelemetryService.SanitizeLocalPaths("'Studio 2's Acquisition.qzx'"));
             Assert.Equal("[redacted-path]",
@@ -871,6 +885,10 @@ public class CoreTelemetryServiceTests
             Assert.Equal(repeatedClosers, CoreTelemetryService.SanitizeLocalPaths(repeatedClosers));
             var embeddedQueries = "/tmp;" + string.Concat(Enumerable.Repeat("https://host?x;", 5_000));
             Assert.Equal("[redacted-path]", CoreTelemetryService.SanitizeLocalPaths(embeddedQueries));
+            var longWindowsPath = "C:\\Private" + string.Concat(Enumerable.Repeat(" folder", 20_000));
+            Assert.Equal("[redacted-path]", CoreTelemetryService.SanitizeLocalPaths(longWindowsPath));
+            var longFractionUrls = new string('1', 50_000) + "/" + string.Concat(Enumerable.Repeat("https://a;", 2_000));
+            Assert.Equal("[redacted-path]", CoreTelemetryService.SanitizeLocalPaths(longFractionUrls));
             Assert.Equal("\"[redacted-path]\" (https://example.com/api)",
                 CoreTelemetryService.SanitizeLocalPaths("\"file:///a.mov\" (https://example.com/api)"));
             Assert.Equal("[redacted-path]",
@@ -1171,5 +1189,52 @@ public class CoreTelemetryServiceTests
         {
             if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
         }
+    }
+
+    [Fact]
+    public void SetConsent_enable_acquires_external_consent_lock_and_fails_closed_when_unavailable()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "aun-tel-enable-lock-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var bufferPath = Path.Combine(dir, "telemetry-buffer.json");
+        try
+        {
+            var allowLock = false;
+            var lockCalls = 0;
+            using var service = new CoreTelemetryService(
+                platform: "linux",
+                appVersion: "1.0.0",
+                locale: "en",
+                videosApiBaseUrl: null,
+                userAgent: "AlUmmahNowLinux/1.0.0",
+                bufferPath: bufferPath,
+                initialEnabled: false,
+                externalConsentToken: () => "gen-1",
+                acquireExternalConsentLock: () =>
+                {
+                    lockCalls++;
+                    return allowLock ? new NoOpDisposable() : null;
+                });
+
+            Assert.False(service.SetConsent(TelemetryConsent.Full));
+            Assert.Equal(1, lockCalls);
+            Assert.Equal(TelemetryConsent.Off, service.Consent);
+            Assert.Equal(AlUmmahNow.Core.TelemetryConsentState.Denied, service.NativeConsentForTesting);
+
+            allowLock = true;
+            Assert.True(service.SetConsent(TelemetryConsent.Full));
+            Assert.Equal(2, lockCalls);
+            Assert.Equal(TelemetryConsent.Full, service.Consent);
+            Assert.Equal(AlUmmahNow.Core.TelemetryConsentState.Analytics, service.NativeConsentForTesting);
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    private sealed class NoOpDisposable : IDisposable
+    {
+        public void Dispose() { }
     }
 }
