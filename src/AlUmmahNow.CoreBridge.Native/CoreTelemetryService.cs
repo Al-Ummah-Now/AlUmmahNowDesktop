@@ -364,7 +364,10 @@ public sealed class CoreTelemetryService : ITelemetryService
     {
         result = default;
         var allowGroupQuotes = !(urlStart > 0 && text[urlStart - 1] == '"');
-        var p = ScanUrlContinuation(text, totalEnd, allowGroupQuotes);
+        var probeInput = rawUrl + "x";
+        var probe = RedactUrlPathSecrets(probeInput);
+        var webhookProbe = (probe != probeInput && probe.EndsWith("[redacted]", StringComparison.Ordinal)) ? probe : null;
+        var p = ScanUrlContinuation(text, totalEnd, allowGroupQuotes, stopAtSchemes: webhookProbe == null);
         if (p > totalEnd && p < text.Length && text[p] is '?' or '#')
         {
             var qfStart = p;
@@ -375,31 +378,44 @@ public sealed class CoreTelemetryService : ITelemetryService
             }
             var qf = TrimQueryOrFragmentDelimiters(text.Substring(qfStart, p - qfStart), text, urlStart, out var qfTail);
             var qfToken = qf[0] + "[redacted]";
-            var baseRedacted = RedactUrlPathSecrets(rawUrl);
-            var prefixRedacted = RedactUrlPathSecrets(text.Substring(urlStart, qfStart - urlStart));
-            if (prefixRedacted == baseRedacted || prefixRedacted == baseRedacted + "[redacted]")
+            if (webhookProbe != null)
             {
-                result = new UrlContinuationResult(true, prefixRedacted + qfToken, false, string.Empty, string.Empty, qfTail);
+                result = new UrlContinuationResult(true, webhookProbe + qfToken, false, string.Empty, string.Empty, qfTail);
             }
             else
             {
-                var middle = prefixRedacted.StartsWith(baseRedacted, StringComparison.Ordinal)
-                    ? prefixRedacted.Substring(baseRedacted.Length)
-                    : text.Substring(totalEnd, qfStart - totalEnd);
-                var keepTail = baseTail.Length > 0 && baseRedacted.EndsWith(baseTail, StringComparison.Ordinal);
-                result = new UrlContinuationResult(false, string.Empty, keepTail, middle, qfToken, qfTail);
+                var baseRedacted = RedactUrlPathSecrets(rawUrl);
+                var prefixRedacted = RedactUrlPathSecrets(text.Substring(urlStart, qfStart - urlStart));
+                if (prefixRedacted == baseRedacted || prefixRedacted == baseRedacted + "[redacted]")
+                {
+                    result = new UrlContinuationResult(true, prefixRedacted + qfToken, false, string.Empty, string.Empty, qfTail);
+                }
+                else
+                {
+                    var middle = prefixRedacted.StartsWith(baseRedacted, StringComparison.Ordinal)
+                        ? prefixRedacted.Substring(baseRedacted.Length)
+                        : text.Substring(totalEnd, qfStart - totalEnd);
+                    var keepTail = baseTail.Length > 0 && baseRedacted.EndsWith(baseTail, StringComparison.Ordinal);
+                    result = new UrlContinuationResult(false, string.Empty, keepTail, middle, qfToken, qfTail);
+                }
             }
             totalEnd = p;
             return true;
         }
-        var end = TrimWebhookContinuationEnd(text, urlStart, totalEnd, p);
+        var end = TrimWebhookContinuationEnd(text, urlStart, totalEnd, p, allowGroupQuotes);
         if (end > totalEnd)
         {
+            var extTail = text.Substring(end, p - end);
+            if (webhookProbe != null)
+            {
+                result = new UrlContinuationResult(true, webhookProbe, false, string.Empty, string.Empty, extTail);
+                totalEnd = p;
+                return true;
+            }
             var baseRedacted = RedactUrlPathSecrets(rawUrl);
             var extRedacted = RedactUrlPathSecrets(text.Substring(urlStart, end - urlStart));
             if (extRedacted != baseRedacted + text.Substring(totalEnd, end - totalEnd))
             {
-                var extTail = text.Substring(end, p - end);
                 if (extRedacted == baseRedacted || extRedacted == baseRedacted + "[redacted]")
                 {
                     result = new UrlContinuationResult(true, extRedacted, false, string.Empty, string.Empty, extTail);
@@ -420,25 +436,58 @@ public sealed class CoreTelemetryService : ITelemetryService
         return false;
     }
 
-    private static int ScanUrlContinuation(string text, int start, bool allowGroupQuotes)
+    private static int ScanUrlContinuation(string text, int start, bool allowGroupQuotes, bool stopAtSchemes)
     {
         var p = start;
-        var groupDepth = 0;
+        var groupStack = new List<char>();
+        var inQuote = false;
         while (p < text.Length)
         {
-            if (IsFileSchemeAt(text, p) || IsWindowsDriveAt(text, p)) break;
-            if (p > start && text[p - 1] is ',' or ';' or '(' or '[' or ')' or ']' or '{' or '}' or '\'' && IsUrlSchemeAt(text, p))
+            var ch = text[p];
+            if (inQuote)
+            {
+                if (ch is '\r' or '\n') break;
+                if (stopAtSchemes && text[p - 1] is '"' or ',' or ';' or '(' or '[' or ')' or ']' or '{' or '}' or '\'' && IsUrlSchemeAt(text, p))
+                {
+                    break;
+                }
+                if (ch == '\\' && p + 1 < text.Length && text[p + 1] is not ('\r' or '\n'))
+                {
+                    p += 2;
+                    continue;
+                }
+                if (ch == '"') inQuote = false;
+                p++;
+                continue;
+            }
+            if (IsFileSchemeAt(text, p) || ((p == 0 || !IsAsciiAlphaNum(text[p - 1])) && IsWindowsDriveAt(text, p))) break;
+            if (stopAtSchemes && p > start && text[p - 1] is ',' or ';' or '(' or '[' or ')' or ']' or '{' or '}' or '\'' && IsUrlSchemeAt(text, p))
             {
                 break;
             }
-            var ch = text[p];
             if (char.IsWhiteSpace(ch) || ch is '<' or '>' or '\\' or '?' or '#' or '\r' or '\n')
             {
                 break;
             }
-            if (ch == '"' && !(allowGroupQuotes && groupDepth > 0)) break;
-            if (ch is '(' or '[' or '{') groupDepth++;
-            else if (ch is ')' or ']' or '}' && groupDepth > 0) groupDepth--;
+            if (ch == '"')
+            {
+                if (!(allowGroupQuotes && groupStack.Count > 0)) break;
+                inQuote = true;
+                p++;
+                continue;
+            }
+            if (ch is '(' or '[' or '{')
+            {
+                groupStack.Add(ch);
+            }
+            else if (ch is ')' or ']' or '}')
+            {
+                var expected = ch == ')' ? '(' : (ch == ']' ? '[' : '{');
+                if (groupStack.Count > 0 && groupStack[^1] == expected)
+                {
+                    groupStack.RemoveAt(groupStack.Count - 1);
+                }
+            }
             p++;
         }
         return p;
@@ -452,19 +501,29 @@ public sealed class CoreTelemetryService : ITelemetryService
         return i - pos >= 2 && i + 2 < text.Length && text[i] == ':' && text[i + 1] == '/' && text[i + 2] == '/';
     }
 
-    private static int TrimWebhookContinuationEnd(string text, int urlStart, int minEnd, int scanEnd)
+    private static int TrimWebhookContinuationEnd(string text, int urlStart, int minEnd, int scanEnd, bool allowGroupQuotes)
     {
         var excessParens = 0;
         var excessBrackets = 0;
         var excessBraces = 0;
+        var inQuote = false;
+        var openGroups = 0;
         for (var i = urlStart; i < scanEnd; i++)
         {
-            if (text[i] == '(') excessParens--;
-            else if (text[i] == ')') excessParens++;
-            else if (text[i] == '[') excessBrackets--;
-            else if (text[i] == ']') excessBrackets++;
-            else if (text[i] == '{') excessBraces--;
-            else if (text[i] == '}') excessBraces++;
+            var c = text[i];
+            if (inQuote)
+            {
+                if (c == '\\' && i + 1 < scanEnd) { i++; continue; }
+                if (c == '"') inQuote = false;
+                continue;
+            }
+            if (c == '"' && allowGroupQuotes && openGroups > 0) { inQuote = true; continue; }
+            if (c == '(') { excessParens--; openGroups++; }
+            else if (c == ')') { excessParens++; if (openGroups > 0) openGroups--; }
+            else if (c == '[') { excessBrackets--; openGroups++; }
+            else if (c == ']') { excessBrackets++; if (openGroups > 0) openGroups--; }
+            else if (c == '{') { excessBraces--; openGroups++; }
+            else if (c == '}') { excessBraces++; if (openGroups > 0) openGroups--; }
         }
         var precededByQuote = urlStart > 0 && text[urlStart - 1] == '\'';
         var end = scanEnd;
@@ -663,9 +722,10 @@ public sealed class CoreTelemetryService : ITelemetryService
         truncated = false;
         var openPositions = new List<int>();
         var openChars = new List<char>();
+        var openBraceCount = 0;
         while (p < text.Length)
         {
-            if (IsFileSchemeAt(text, p) || IsWindowsDriveAt(text, p)) break;
+            if (IsFileSchemeAt(text, p) || ((p == 0 || !IsAsciiAlphaNum(text[p - 1])) && IsWindowsDriveAt(text, p))) break;
             var ch = text[p];
             if (char.IsWhiteSpace(ch) || ch is '"' or '<' or '>' or '\\' or '?' or '#' or '\r' or '\n')
             {
@@ -674,9 +734,10 @@ public sealed class CoreTelemetryService : ITelemetryService
             if (ch == ',') break;
             if (ch is '(' or '[' or '{')
             {
-                if (StartsEmbeddedPathInsideGroup(text, p + 1)) break;
+                if (openBraceCount > 0 || StartsEmbeddedPathInsideGroup(text, p + 1)) break;
                 openPositions.Add(p);
                 openChars.Add(ch);
+                if (ch == '{') openBraceCount++;
                 p++;
                 continue;
             }
@@ -686,10 +747,12 @@ public sealed class CoreTelemetryService : ITelemetryService
                 if (openChars.Count == 0 || openChars[^1] != expected) break;
                 openPositions.RemoveAt(openPositions.Count - 1);
                 openChars.RemoveAt(openChars.Count - 1);
+                if (ch == '}') openBraceCount--;
                 p++;
                 continue;
             }
-            if (openChars.Count > 0 && (ch == ':' || (ch == '/' && openChars.Contains('{')))) break;
+            if (openBraceCount > 0 && !(IsAsciiAlphaNum(ch) || ch is '_' or '-')) break;
+            if (openChars.Count > 0 && ch == ':') break;
             p++;
         }
         if (openPositions.Count > 0)
