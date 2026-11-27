@@ -1037,6 +1037,12 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("prefix, \"Authorization\": \"firstValue\" }opaqueSecret123"));
             Assert.Equal("{\"status\":401,\"Authorization\":\"[redacted]\"}",
                 CoreTelemetryService.SanitizeLocalPaths("{\"status\":401,\"Authorization\":\"opaqueSecret123\"}"));
+            Assert.Equal("{\"Authorization\":\"[redacted]\"[redacted]",
+                CoreTelemetryService.SanitizeLocalPaths("{\"Authorization\":\"firstValue\", \"opaqueSecret123\"}"));
+            Assert.Equal("note \"hi\", \"Authorization\": \"[redacted]\" [redacted]",
+                CoreTelemetryService.SanitizeLocalPaths("note \"hi\", \"Authorization\": \"firstValue\" } opaqueSecret123"));
+            Assert.Equal("{\"a\":{\"b\":1},\"Authorization\":\"[redacted]\"}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"a\":{\"b\":1},\"Authorization\":\"opaqueSecret123\"}"));
             Assert.Equal("Authorization: [[redacted]]\r\nNextHeader: safe",
                 CoreTelemetryService.SanitizeLocalPaths("Authorization: [firstValue]\r\nNextHeader: safe"));
             Assert.Equal("{\n  \"Authorization\": \"[redacted]\"\n  }",
