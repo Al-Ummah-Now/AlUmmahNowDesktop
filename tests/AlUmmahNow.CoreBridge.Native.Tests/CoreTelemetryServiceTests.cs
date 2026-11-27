@@ -1158,6 +1158,12 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("https://api.telegram." + "org/bot123:opaqueSecret123,/Users/alice/Secret.mov"));
             Assert.Equal("https://example.com/api,https://other.com/x?[redacted]",
                 CoreTelemetryService.SanitizeLocalPaths("https://example.com/api,https://other.com/x?token=opaqueSecret123"));
+            Assert.Equal("https://example.com/api,ssh://other.com/x?[redacted]",
+                CoreTelemetryService.SanitizeLocalPaths("https://example.com/api,ssh://other.com/x?token=opaqueSecret123"));
+            Assert.Equal("https://example.com/api)[redacted-path]?[redacted]",
+                CoreTelemetryService.SanitizeLocalPaths("https://example.com/api)private/Secret?token=opaqueSecret123"));
+            Assert.Equal("https://example.com/api][redacted-path]?[redacted]",
+                CoreTelemetryService.SanitizeLocalPaths("https://example.com/api]private/Secret?token=opaqueSecret123"));
             Assert.Equal("https://api.telegram.org/bot123:[redacted]/sendMessage",
                 CoreTelemetryService.SanitizeLocalPaths("https://api.telegram." + "org/bot123:%2FopaqueSecret123/sendMessage"));
             Assert.Equal("https://example.test/webhook%2F[redacted]",
