@@ -386,7 +386,7 @@ public sealed partial class Shell
             if (_settings.TelemetryEnabled == enabled) return;
             if (enabled)
             {
-                if (!_store.SaveTelemetryEnabled(true))
+                if (!_store.TrySaveTelemetryEnabled(true, out var writtenToken))
                 {
                     _settings.TelemetryEnabled = false;
                     telemetryToggle.IsOn = false;
@@ -396,7 +396,7 @@ public sealed partial class Shell
                 }
                 if (!_telemetry.SetConsent(TelemetryConsent.Full))
                 {
-                    var rolledBack = _store.SaveTelemetryEnabled(false);
+                    var rolledBack = _store.RollbackTelemetryEnabled(writtenToken);
                     var purged = _telemetry.SetConsent(TelemetryConsent.Off);
                     disableSaveFailed = !rolledBack;
                     if (!rolledBack)

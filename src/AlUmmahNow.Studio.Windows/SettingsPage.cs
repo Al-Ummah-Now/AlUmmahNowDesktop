@@ -154,7 +154,7 @@ internal sealed class SettingsPage
             if (settings.TelemetryEnabled == enabled) return;
             if (enabled)
             {
-                if (!store.SaveTelemetryEnabled(true))
+                if (!store.TrySaveTelemetryEnabled(true, out var writtenToken))
                 {
                     settings.TelemetryEnabled = false;
                     telemetryToggle.IsOn = false;
@@ -164,7 +164,7 @@ internal sealed class SettingsPage
                 }
                 if (!(telemetry?.SetConsent(TelemetryConsent.Full) ?? true))
                 {
-                    var rolledBack = store.SaveTelemetryEnabled(false);
+                    var rolledBack = store.RollbackTelemetryEnabled(writtenToken);
                     var purged = telemetry?.SetConsent(TelemetryConsent.Off) ?? true;
                     disableSaveFailed = !rolledBack;
                     if (!rolledBack)

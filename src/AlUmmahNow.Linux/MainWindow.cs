@@ -379,6 +379,7 @@ public sealed partial class MainWindow
         Action<TelemetryConsent> onConsentChanged = _ => scheduleSync();
         _telemetry.PurgeFailureChanged += onPurgeChanged;
         _telemetry.ConsentChanged += onConsentChanged;
+        telemetryCheck.OnMap += (_, _) => SyncPurgeNotice();
         telemetryNotice.OnDestroy += (_, _) =>
         {
             _telemetry.PurgeFailureChanged -= onPurgeChanged;
@@ -391,7 +392,7 @@ public sealed partial class MainWindow
             if (_settings.TelemetryEnabled == enabled) return;
             if (enabled)
             {
-                if (!_store.SaveTelemetryEnabled(true))
+                if (!_store.TrySaveTelemetryEnabled(true, out var writtenToken))
                 {
                     _settings.TelemetryEnabled = false;
                     telemetryCheck.SetActive(false);
@@ -401,7 +402,7 @@ public sealed partial class MainWindow
                 }
                 if (!_telemetry.SetConsent(TelemetryConsent.Full))
                 {
-                    var rolledBack = _store.SaveTelemetryEnabled(false);
+                    var rolledBack = _store.RollbackTelemetryEnabled(writtenToken);
                     var purged = _telemetry.SetConsent(TelemetryConsent.Off);
                     disableSaveFailed = !rolledBack;
                     if (!rolledBack)

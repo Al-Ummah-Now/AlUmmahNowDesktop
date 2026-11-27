@@ -17,10 +17,10 @@ namespace AlUmmahNow.CoreBridge.Native;
 /// </summary>
 public sealed class CoreTelemetryService : ITelemetryService
 {
-    private static readonly Regex UrlVaultRegex = new(@"(?<![A-Za-z0-9+.-])[A-Za-z][A-Za-z0-9+.-]+://(?:\[([^\]\s""'<>\\{}\r\n]+)\]|(?:[A-Za-z0-9._~!$&'*+;=-]|%[0-9A-Fa-f]{2})+)(?::\d+)?(?:/(?:(?!(?:file://|[A-Za-z]:[\\/]))(?:[^\s""<>\\{},()\[\]?#\r\n]|\([^\s""<>\\{},()\[\]/:\\?#]+\)|\[[^\s""<>\\{},()\[\]/:\\?#]+\]))*|(?=$|[\s""'<>\\{},;()\[\]?#]))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex UrlVaultRegex = new(@"(?<![A-Za-z0-9+.-/\\])([A-Za-z][A-Za-z0-9+.-]+://(?:\[([^\]\s""'<>\\{}\r\n]+)\]|(?:[A-Za-z0-9._~!$&'*+;=-]|%[0-9A-Fa-f]{2})+)(?::\d+)?(?:/(?:(?!(?:file://|[A-Za-z]:[\\/]))(?:[^\s""<>\\{},()\[\]?#\r\n]|\([^\s""<>\\{},()\[\]/:\\?#]+\)|\[[^\s""<>\\{},()\[\]/:\\?#]+\]))*)?)([?#][^\s""<>\\{},()\[\]\r\n]*)?(?=$|[\s""'<>\\{},;()\[\]]|file://|[A-Za-z]:[\\/])", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex FileUriRegex = new(@"(?<![A-Za-z0-9+.-])file://(?:(?!\s+\u001E)[^\r\n\u001E])+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex ParenPathRegex = new(@"(\()(?:/|~/|[A-Za-z]:[\\/]|\\\\)[^()\r\n]+(\))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex ParenRelativeSlashPathRegex = new(@"(\()(?!HTTP/\d)(?!TLS/\d)(?!SSL/\d)[^\s/\\""'<>()\[\]{}:,;\u001E\u001F]+/[^()\r\n]+(\))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex ParenPathRegex = new(@"(\()(?:/|~/|[A-Za-z]:[\\/]|\\\\)[^()\r\n\u001E]+(\))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex ParenRelativeSlashPathRegex = new(@"(\()(?!HTTP/\d)(?!TLS/\d)(?!SSL/\d)[^\s/\\""'<>()\[\]{}:,;\u001E\u001F]+/[^()\r\n\u001E]+(\))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex WindowsPathRegex = new(@"(?:[A-Za-z]:[\\/]|\\\\)(?:(?!\s+\u001E)[^\r\n\u001E])+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex RelativeBackslashPathRegex = new(@"(^|[\s(\[{""'=,:;\u001F])[^\s\\/""'<>(),;\u001E\u001F]+\\[^\r\n\u001E\u001F]+", RegexOptions.Compiled);
     private static readonly Regex QuotedSpacedRootPathRegex = new(@"[""']/[ \t]+[^\r\n\u001E]+", RegexOptions.Compiled);
@@ -32,6 +32,8 @@ public sealed class CoreTelemetryService : ITelemetryService
     private static readonly Regex KeywordUnquotedFilenameRegex = new(@"(\b(?:open|opening|read|reading|write|writing|delete|deleting|remove|removing|rename|stat|create|creating|load|loading|save|saving|access|accessing|unlink|file|path|directory|folder|document|filename|filepath)\b(?:\s*[:=]\s*|\s+))(?!\u001E)[^\r\n\u001E\u001F]*\.(?!(?:kt|java|swift|cs|cpp|cc|c|h|hpp|rs|py|js|ts|go|rb|m|mm):\d+)[A-Za-z0-9]{1,16}\b(?!\()", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex KeywordAssignedPathRegex = new(@"(\b(?:file|path|filename|filepath)\s*[:=]\s*)(?!\u001E)[^\r\n\u001E\u001F]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex BareFilenameRegex = new(@"(^|[\r\n:=;\u001F])([ \t]*)[^\r\n:=;\u001E\u001F]*\.(?!ts:\d+)(?:mov|mp4|m4v|mkv|webm|avi|ts|m3u8|mpd|mp3|m4a|wav|aac|flac|ogg|opus|jpg|jpeg|png|gif|webp|heic|svg|pdf|txt|md|rtf|doc|docx|xls|xlsx|ppt|pptx|csv|json|xml|yaml|yml|toml|ini|cfg|conf|log|srt|vtt|ass|ssa|zip|tar|gz|tgz|bz2|xz|7z|rar|dmg|pkg|msi|exe|apk|aab|ipa|pem|key|crt|cer|p12|pfx|jks|keystore|db|sqlite|sqlite3|bin|dat|tmp|bak|proj|aun)\b(?!\()", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex EmailRegex = new(@"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", RegexOptions.Compiled);
+    private static readonly Regex BearerTokenRegex = new(@"\bBearer\s+[A-Za-z0-9._~+/=-]{8,}", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private readonly TelemetryAppInfo _app;
     private readonly string? _ingestUrl;
@@ -200,22 +202,42 @@ public sealed class CoreTelemetryService : ITelemetryService
             {
                 return raw;
             }
-            if (match.Groups[1].Success &&
-                (!IPAddress.TryParse(match.Groups[1].Value, out var ip) || ip.AddressFamily != AddressFamily.InterNetworkV6))
+            if (match.Groups[2].Success &&
+                (!IPAddress.TryParse(match.Groups[2].Value, out var ip) || ip.AddressFamily != AddressFamily.InterNetworkV6))
             {
                 return raw;
             }
-            var url = raw;
             var tail = string.Empty;
-            if (url.EndsWith(';'))
+            var hasQueryOrFragment = match.Groups[3].Success && match.Groups[3].Length > 0;
+            string url;
+            if (hasQueryOrFragment)
             {
-                url = url[..^1];
-                tail = ";";
+                var qf = match.Groups[3].Value;
+                if (qf.EndsWith(';'))
+                {
+                    qf = qf[..^1];
+                    tail = ";";
+                }
+                if (match.Index > 0 && text[match.Index - 1] == '\'' && qf.EndsWith('\''))
+                {
+                    qf = qf[..^1];
+                    tail = "'" + tail;
+                }
+                url = match.Groups[1].Value + qf[0] + "[redacted]";
             }
-            if (match.Index > 0 && text[match.Index - 1] == '\'' && url.EndsWith('\''))
+            else
             {
-                url = url[..^1];
-                tail = "'" + tail;
+                url = match.Groups[1].Value;
+                if (url.EndsWith(';'))
+                {
+                    url = url[..^1];
+                    tail = ";";
+                }
+                if (match.Index > 0 && text[match.Index - 1] == '\'' && url.EndsWith('\''))
+                {
+                    url = url[..^1];
+                    tail = "'" + tail;
+                }
             }
             var idx = vaultedUrls.Count;
             vaultedUrls.Add(url);
@@ -235,6 +257,8 @@ public sealed class CoreTelemetryService : ITelemetryService
         scrubbed = KeywordUnquotedFilenameRegex.Replace(scrubbed, "$1[redacted-path]");
         scrubbed = KeywordAssignedPathRegex.Replace(scrubbed, "$1[redacted-path]");
         scrubbed = BareFilenameRegex.Replace(scrubbed, "$1$2[redacted-path]");
+        scrubbed = EmailRegex.Replace(scrubbed, "[redacted-email]");
+        scrubbed = BearerTokenRegex.Replace(scrubbed, "Bearer [redacted]");
         for (var i = 0; i < vaultedUrls.Count; i++)
         {
             scrubbed = scrubbed.Replace($"{prefix}{i}\u001F", vaultedUrls[i], StringComparison.Ordinal);
@@ -246,7 +270,18 @@ public sealed class CoreTelemetryService : ITelemetryService
     {
         get
         {
-            lock (_gate) return _disposeRequested ? TelemetryConsent.Off : _consent;
+            CancellationTokenSource? toCancel = null;
+            TelemetryConsent current;
+            lock (_gate)
+            {
+                if (!_disposeRequested && !_clientDisposed && _consent != TelemetryConsent.Off && _externalConsentToken != null)
+                {
+                    EnsureExternalConsentLocked(out toCancel);
+                }
+                current = _disposeRequested ? TelemetryConsent.Off : _consent;
+            }
+            if (toCancel != null) CancelQuietly(toCancel);
+            return current;
         }
     }
 
@@ -288,7 +323,16 @@ public sealed class CoreTelemetryService : ITelemetryService
         Action<TelemetryConsent>? consentNotify = null;
         TelemetryConsent consentNotifyValue = TelemetryConsent.Off;
         bool result;
-        using (AcquireCrossProcessBufferLock())
+        IDisposable? crossProcessLock = null;
+        if (consent != TelemetryConsent.Off && _externalConsentToken != null && !string.IsNullOrWhiteSpace(_bufferPath))
+        {
+            crossProcessLock = AcquireCrossProcessBufferLock();
+            if (crossProcessLock == null)
+            {
+                return false;
+            }
+        }
+        using (crossProcessLock)
         {
             lock (_gate)
             {
@@ -300,7 +344,8 @@ public sealed class CoreTelemetryService : ITelemetryService
                         "telemetry disk purge failed on opt-out: ",
                         ref purgeNotify,
                         ref purgeNotifyValue,
-                        ResolveForeignKeepPathLocked());
+                        keepForeignGenerationPath: null,
+                        ownBufferOnly: _externalConsentToken != null);
                 }
                 else if (_disposeRequested || _clientDisposed)
                 {

@@ -1,8 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Threading;
 
 namespace AlUmmahNow.App.Services
 {
@@ -109,47 +112,111 @@ namespace AlUmmahNow.App.Services
         /// if both delete and overwrite fail (for example due to an exclusive handle or read-only volume),
         /// returns <c>false</c> rather than treating an unreadable file as opted out.
         /// </summary>
-        public bool SaveTelemetryEnabled(bool enabled)
+        public bool SaveTelemetryEnabled(bool enabled) => TrySaveTelemetryEnabled(enabled, out _);
+
+        /// <summary>
+        /// Atomically updates the standalone telemetry consent state under a cross-process lock without
+        /// touching <c>settings.json</c>. When enabling, <paramref name="writtenToken"/> receives the
+        /// unique generation token written so a failed enable can roll back via <see cref="RollbackTelemetryEnabled"/>
+        /// without clobbering a newer opt-in from another process.
+        /// </summary>
+        public bool TrySaveTelemetryEnabled(bool enabled, out string? writtenToken)
         {
+            writtenToken = null;
+            using var crossProcessLock = TryAcquireConsentLock();
+            if (enabled && crossProcessLock == null)
+            {
+                return false;
+            }
             if (!enabled)
             {
-                try
-                {
-                    // Do NOT pre-check with File.Exists: it returns false when directory search permission is denied,
-                    // which would falsely report opt-out success while the "enabled" marker still exists on disk.
-                    File.Delete(_telemetryConsentPath);
-                    return true;
-                }
-                catch (DirectoryNotFoundException)
-                {
-                    return true;
-                }
-                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
-                {
-                    try
-                    {
-                        File.WriteAllText(_telemetryConsentPath, "disabled");
-                        return true;
-                    }
-                    catch (Exception overwriteEx) when (overwriteEx is IOException || overwriteEx is UnauthorizedAccessException)
-                    {
-                        return false;
-                    }
-                }
+                return ClearConsentSidecarUnlocked();
             }
 
             try
             {
                 var directory = Path.GetDirectoryName(_telemetryConsentPath);
                 if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
+                var token = "enabled:" + Guid.NewGuid().ToString("N");
                 var temp = _telemetryConsentPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
-                File.WriteAllText(temp, "enabled:" + Guid.NewGuid().ToString("N"));
+                File.WriteAllText(temp, token);
                 ReplaceFile(temp, _telemetryConsentPath);
+                writtenToken = token;
                 return true;
             }
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
             {
                 return false;
+            }
+        }
+
+        /// <summary>
+        /// Rolls back a failed opt-in only if the on-disk consent token still matches <paramref name="expectedToken"/>.
+        /// If another process already wrote a newer generation token, leaves the newer opt-in untouched and returns <c>true</c>.
+        /// </summary>
+        public bool RollbackTelemetryEnabled(string? expectedToken)
+        {
+            if (string.IsNullOrEmpty(expectedToken)) return SaveTelemetryEnabled(false);
+            using var crossProcessLock = TryAcquireConsentLock();
+            if (crossProcessLock == null) return false;
+            var current = LoadTelemetryConsentToken();
+            if (!string.Equals(current, expectedToken, StringComparison.Ordinal))
+            {
+                return true;
+            }
+            return ClearConsentSidecarUnlocked();
+        }
+
+        private bool ClearConsentSidecarUnlocked()
+        {
+            try
+            {
+                // Do NOT pre-check with File.Exists: it returns false when directory search permission is denied,
+                // which would falsely report opt-out success while the "enabled" marker still exists on disk.
+                File.Delete(_telemetryConsentPath);
+                return true;
+            }
+            catch (DirectoryNotFoundException)
+            {
+                return true;
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+            {
+                try
+                {
+                    File.WriteAllText(_telemetryConsentPath, "disabled");
+                    return true;
+                }
+                catch (Exception overwriteEx) when (overwriteEx is IOException || overwriteEx is UnauthorizedAccessException)
+                {
+                    return false;
+                }
+            }
+        }
+
+        private IDisposable? TryAcquireConsentLock()
+        {
+            try
+            {
+                var fullPath = Path.GetFullPath(_telemetryConsentPath);
+                var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(fullPath)))[..16];
+                var lockPath = Path.Combine(Path.GetTempPath(), $"aun-telemetry-consent-{hash}.lock");
+                var deadline = DateTime.UtcNow.AddSeconds(2);
+                while (true)
+                {
+                    try
+                    {
+                        return new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+                    }
+                    catch (IOException) when (DateTime.UtcNow < deadline)
+                    {
+                        Thread.Sleep(10);
+                    }
+                }
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+            {
+                return null;
             }
         }
 

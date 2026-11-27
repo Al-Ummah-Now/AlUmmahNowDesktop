@@ -127,6 +127,7 @@ public sealed class SettingsPage
             Action<TelemetryConsent> onConsentChanged = _ => scheduleSync();
             telemetry.PurgeFailureChanged += onPurgeChanged;
             telemetry.ConsentChanged += onConsentChanged;
+            telemetryCheck.OnMap += (_, _) => SyncPurgeNotice();
             telemetryNotice.OnDestroy += (_, _) =>
             {
                 telemetry.PurgeFailureChanged -= onPurgeChanged;
@@ -140,7 +141,7 @@ public sealed class SettingsPage
             if (settings.TelemetryEnabled == enabled) return;
             if (enabled)
             {
-                if (!store.SaveTelemetryEnabled(true))
+                if (!store.TrySaveTelemetryEnabled(true, out var writtenToken))
                 {
                     settings.TelemetryEnabled = false;
                     telemetryCheck.SetActive(false);
@@ -150,7 +151,7 @@ public sealed class SettingsPage
                 }
                 if (!(telemetry?.SetConsent(TelemetryConsent.Full) ?? true))
                 {
-                    var rolledBack = store.SaveTelemetryEnabled(false);
+                    var rolledBack = store.RollbackTelemetryEnabled(writtenToken);
                     var purged = telemetry?.SetConsent(TelemetryConsent.Off) ?? true;
                     disableSaveFailed = !rolledBack;
                     if (!rolledBack)

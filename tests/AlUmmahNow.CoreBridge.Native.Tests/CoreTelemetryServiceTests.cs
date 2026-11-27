@@ -708,16 +708,24 @@ public class CoreTelemetryServiceTests
             Assert.Contains("[redacted-path]", json, StringComparison.Ordinal);
             Assert.Equal("https://videos.api.alummahnow.net/v1/items",
                 CoreTelemetryService.SanitizeLocalPaths("https://videos.api.alummahnow.net/v1/items"));
-            Assert.Equal("https://example.com/api?page=2&sort=asc",
+            Assert.Equal("https://example.com/api?[redacted]",
                 CoreTelemetryService.SanitizeLocalPaths("https://example.com/api?page=2&sort=asc"));
-            Assert.Equal("https://example.com/?path=[redacted-path]",
+            Assert.Equal("https://example.com/api?[redacted]",
+                CoreTelemetryService.SanitizeLocalPaths("https://example.com/api?source=%2FUsers%2Falice%2FPrivateProject"));
+            Assert.Equal("https://example.com/?[redacted]",
                 CoreTelemetryService.SanitizeLocalPaths("https://example.com/?path=/Users/alice/Secret.mov"));
-            Assert.Equal("https://example.com/api?path=[redacted-path]",
+            Assert.Equal("https://example.com/api?[redacted]",
                 CoreTelemetryService.SanitizeLocalPaths("https://example.com/api?path=/storage/emulated/0/Secret.mov"));
             Assert.Equal("https://example.com/api;[redacted-path]",
                 CoreTelemetryService.SanitizeLocalPaths("https://example.com/api;C://Secret/Acquisition.mov"));
+            Assert.Equal("[redacted-path]",
+                CoreTelemetryService.SanitizeLocalPaths("file:///storage/emulated/0/https://Secret/Acquisition.mov"));
+            Assert.Equal("([redacted-path] https://example.com/api)",
+                CoreTelemetryService.SanitizeLocalPaths("(/storage/emulated/0/Secret.mov and https://example.com/api)"));
             Assert.Equal("[redacted-path] https://example.com/api",
                 CoreTelemetryService.SanitizeLocalPaths("file:///storage/emulated/0/Secret.mov and https://example.com/api"));
+            Assert.Equal("Failed for [redacted-email] with Bearer [redacted]",
+                CoreTelemetryService.SanitizeLocalPaths("Failed for alice@example.com with Bearer eyJhbGciOiJIUzI1NiJ9.payload.sig"));
             Assert.Equal("https://[2001:db8::1]/v1/items",
                 CoreTelemetryService.SanitizeLocalPaths("https://[2001:db8::1]/v1/items"));
             Assert.Equal("https://example.com/a(b)/items",
