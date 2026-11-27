@@ -814,8 +814,12 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("\"file:///tmp/Secret\" progress 1/2"));
             Assert.Equal("'[redacted-path]' progress 1/2 '[redacted-path]'",
                 CoreTelemetryService.SanitizeLocalPaths("'file:///tmp/a' progress 1/2 'file:///tmp/b'"));
-            Assert.Equal("'[redacted-path]' progress users' 1/2",
+            Assert.Equal("'[redacted-path]' progress 1/2",
+                CoreTelemetryService.SanitizeLocalPaths("'file:///tmp/a' progress 1/2"));
+            Assert.Equal("'[redacted-path]' 1/2",
                 CoreTelemetryService.SanitizeLocalPaths("'file:///tmp/a' progress users' 1/2"));
+            Assert.Equal("'[redacted-path]'",
+                CoreTelemetryService.SanitizeLocalPaths("'file:///tmp/O' Connor Private'"));
             Assert.Equal("'[redacted-path]' progress 1/2 '[redacted-path]'",
                 CoreTelemetryService.SanitizeLocalPaths("'file:///tmp/docs' progress 1/2 'file:///tmp/b'"));
             Assert.Equal("'[redacted-path]'",
@@ -826,6 +830,8 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("'file:///tmp/Artists' Private 'Collection"));
             Assert.Equal("'[redacted-path]'",
                 CoreTelemetryService.SanitizeLocalPaths("'file:///tmp/Studio 'Private' Project'"));
+            Assert.Equal("[redacted-path]",
+                CoreTelemetryService.SanitizeLocalPaths("/tmp/Private\u2028Acquisition Plan"));
             Assert.Equal("[redacted-path]",
                 CoreTelemetryService.SanitizeLocalPaths("'Private.qzx'2 Acquisition.qzx'"));
             Assert.Equal("[redacted-path]",
