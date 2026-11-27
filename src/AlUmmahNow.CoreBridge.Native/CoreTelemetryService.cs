@@ -6,13 +6,21 @@ namespace AlUmmahNow.CoreBridge.Native;
 
 /// <summary>
 /// Wraps <see cref="TelemetryClient"/> from <c>aun-core</c> behind <see cref="ITelemetryService"/>.
-/// Consent defaults to off; revoking consent purges both memory and the disk buffer immediately.
+/// Consent defaults to off; opting out immediately blocks collection in the wrapper, cancels in-flight
+/// flushes, and purges both memory and the disk buffer. Disposal defers releasing the native handle
+/// until any in-flight flush completes.
 /// </summary>
 public sealed class CoreTelemetryService : ITelemetryService
 {
     private readonly TelemetryClient _client;
+    private readonly string? _bufferPath;
     private readonly object _gate = new();
-    private bool _disposed;
+    private TelemetryConsent _consent = TelemetryConsent.Off;
+    private CancellationTokenSource _flushCts = new();
+    private int _inFlightFlushes;
+    private bool _disposeRequested;
+    private bool _clientDisposed;
+    private bool _lastPurgeFailed;
 
     public CoreTelemetryService(
         string platform,
@@ -23,6 +31,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         string? bufferPath,
         bool initialEnabled = false)
     {
+        _bufferPath = bufferPath;
         var os = AunClient.CurrentOs();
         var app = new TelemetryAppInfo(
             platform,
@@ -73,34 +82,23 @@ public sealed class CoreTelemetryService : ITelemetryService
     }
 
     /// <summary>
-    /// Resolves <c>https://&lt;host&gt;/api/v1/telemetry/batches</c> when given an HTTPS API base URL;
-    /// returns <c>null</c> (no-op sink) for empty or non-HTTPS URLs so local HTTP dev never throws.
+    /// Constructs <c>https://&lt;authority&gt;/api/v1/telemetry/batches</c> from a parsed HTTPS URI's authority,
+    /// stripping any path, query, or fragment. Returns <c>null</c> (no-op sink) for empty or non-HTTPS URLs.
     /// </summary>
     public static string? ResolveIngestUrl(string? videosApiBaseUrl)
     {
         if (string.IsNullOrWhiteSpace(videosApiBaseUrl)) return null;
-        var trimmed = videosApiBaseUrl.Trim().TrimEnd('/');
-        if (!Uri.TryCreate(trimmed, UriKind.Absolute, out var uri) || !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
-        {
-            return null;
-        }
-        return $"{trimmed}/api/v1/telemetry/batches";
+        if (!Uri.TryCreate(videosApiBaseUrl.Trim(), UriKind.Absolute, out var uri)) return null;
+        if (!string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)) return null;
+        if (string.IsNullOrEmpty(uri.Host)) return null;
+        return uri.GetLeftPart(UriPartial.Authority) + "/api/v1/telemetry/batches";
     }
 
     public TelemetryConsent Consent
     {
         get
         {
-            lock (_gate)
-            {
-                if (_disposed) return TelemetryConsent.Off;
-                return _client.Consent() switch
-                {
-                    TelemetryConsentState.Analytics => TelemetryConsent.Full,
-                    TelemetryConsentState.CrashOnly => TelemetryConsent.CrashOnly,
-                    _ => TelemetryConsent.Off,
-                };
-            }
+            lock (_gate) return _disposeRequested ? TelemetryConsent.Off : _consent;
         }
     }
 
@@ -110,12 +108,21 @@ public sealed class CoreTelemetryService : ITelemetryService
         {
             lock (_gate)
             {
-                return _disposed ? 0 : (int)_client.PendingCount();
+                if (_disposeRequested || _clientDisposed || _consent == TelemetryConsent.Off) return 0;
+                return (int)_client.PendingCount();
             }
         }
     }
 
-    public void SetConsent(TelemetryConsent consent)
+    public bool LastPurgeFailed
+    {
+        get
+        {
+            lock (_gate) return _lastPurgeFailed;
+        }
+    }
+
+    public bool SetConsent(TelemetryConsent consent)
     {
         var state = consent switch
         {
@@ -123,16 +130,43 @@ public sealed class CoreTelemetryService : ITelemetryService
             TelemetryConsent.CrashOnly => TelemetryConsentState.CrashOnly,
             _ => TelemetryConsentState.Denied,
         };
+
+        CancellationTokenSource? toCancel = null;
         lock (_gate)
         {
-            if (_disposed) return;
+            if (_disposeRequested || _clientDisposed) return consent == TelemetryConsent.Off;
+
+            if (consent == TelemetryConsent.Off)
+            {
+                // Always deny collection in the wrapper immediately, even if native disk purge fails.
+                _consent = TelemetryConsent.Off;
+                toCancel = _flushCts;
+                _flushCts = new CancellationTokenSource();
+                try
+                {
+                    _client.SetConsent(TelemetryConsentState.Denied);
+                    _lastPurgeFailed = false;
+                }
+                catch (AunException ex)
+                {
+                    _lastPurgeFailed = !TryDeleteBufferFallback();
+                    Log.For("telemetry").Error("telemetry disk purge failed on opt-out: " + ex.Message);
+                }
+                if (toCancel != null) CancelQuietly(toCancel);
+                return !_lastPurgeFailed;
+            }
+
             try
             {
                 _client.SetConsent(state);
+                _consent = consent;
+                _lastPurgeFailed = false;
+                return true;
             }
             catch (AunException ex)
             {
-                Log.For("telemetry").Warn("failed to update telemetry consent: " + ex.Message);
+                Log.For("telemetry").Warn("failed to enable telemetry consent: " + ex.Message);
+                return false;
             }
         }
     }
@@ -143,7 +177,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         var json = SerializeProperties(properties);
         lock (_gate)
         {
-            if (_disposed) return;
+            if (_disposeRequested || _clientDisposed || _consent != TelemetryConsent.Full) return;
             try
             {
                 _client.Track(name, json);
@@ -161,7 +195,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         var json = SerializeProperties(properties);
         lock (_gate)
         {
-            if (_disposed) return;
+            if (_disposeRequested || _clientDisposed || _consent != TelemetryConsent.Full) return;
             try
             {
                 _client.TrackError(code, json);
@@ -185,7 +219,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         };
         lock (_gate)
         {
-            if (_disposed) return;
+            if (_disposeRequested || _clientDisposed || _consent == TelemetryConsent.Off) return;
             _client.AddBreadcrumb(category, message ?? "", mapped);
         }
     }
@@ -201,7 +235,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             null);
         lock (_gate)
         {
-            if (_disposed) return;
+            if (_disposeRequested || _clientDisposed || _consent == TelemetryConsent.Off) return;
             try
             {
                 _client.ReportCrash(report);
@@ -218,7 +252,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     {
         lock (_gate)
         {
-            if (_disposed) return;
+            if (_disposeRequested || _clientDisposed || _consent == TelemetryConsent.Off) return;
             try
             {
                 _client.Persist();
@@ -233,28 +267,110 @@ public sealed class CoreTelemetryService : ITelemetryService
     public async Task FlushAsync(CancellationToken cancellationToken = default)
     {
         if (cancellationToken.IsCancellationRequested) return;
+
+        CancellationToken revokeToken;
         lock (_gate)
         {
-            if (_disposed || _client.Consent() is TelemetryConsentState.Unknown or TelemetryConsentState.Denied) return;
+            if (_disposeRequested || _clientDisposed || _consent == TelemetryConsent.Off) return;
+            revokeToken = _flushCts.Token;
+            _inFlightFlushes++;
         }
+
         try
         {
-            await _client.Flush().ConfigureAwait(false);
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, revokeToken);
+            if (linked.IsCancellationRequested) return;
+
+            var flushTask = _client.Flush();
+            await WaitWithCancellationAsync(flushTask, linked.Token).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is AunException or ObjectDisposedException or OperationCanceledException)
         {
-            Log.For("telemetry").Warn("telemetry flush skipped: " + ex.Message);
+            if (!cancellationToken.IsCancellationRequested && !revokeToken.IsCancellationRequested)
+            {
+                Log.For("telemetry").Warn("telemetry flush skipped: " + ex.Message);
+            }
+        }
+        finally
+        {
+            lock (_gate)
+            {
+                _inFlightFlushes--;
+                if (_disposeRequested && _inFlightFlushes == 0 && !_clientDisposed)
+                {
+                    _clientDisposed = true;
+                    _client.Dispose();
+                }
+            }
         }
     }
 
     public void Dispose()
     {
+        CancellationTokenSource toCancel;
         lock (_gate)
         {
-            if (_disposed) return;
-            _disposed = true;
-            _client.Dispose();
+            if (_disposeRequested) return;
+            _disposeRequested = true;
+            _consent = TelemetryConsent.Off;
+            toCancel = _flushCts;
+            if (_inFlightFlushes == 0 && !_clientDisposed)
+            {
+                _clientDisposed = true;
+                _client.Dispose();
+            }
         }
+        CancelQuietly(toCancel);
+    }
+
+    private bool TryDeleteBufferFallback()
+    {
+        if (string.IsNullOrWhiteSpace(_bufferPath)) return true;
+        try
+        {
+            if (!File.Exists(_bufferPath)) return !Directory.Exists(_bufferPath);
+            File.Delete(_bufferPath);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private static void CancelQuietly(CancellationTokenSource cts)
+    {
+        try
+        {
+            cts.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+        finally
+        {
+            cts.Dispose();
+        }
+    }
+
+    private static async Task WaitWithCancellationAsync(Task task, CancellationToken token)
+    {
+        if (task.IsCompleted)
+        {
+            await task.ConfigureAwait(false);
+            return;
+        }
+
+        var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var reg = token.Register(static state => ((TaskCompletionSource<bool>)state!).TrySetResult(true), tcs);
+        var winner = await Task.WhenAny(task, tcs.Task).ConfigureAwait(false);
+        if (winner == task)
+        {
+            await task.ConfigureAwait(false);
+            return;
+        }
+        // Observe any fault on the abandoned native flush task so it never escalates to UnobservedTaskException.
+        _ = task.ContinueWith(static t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
     }
 
     internal static string? SerializeProperties(IReadOnlyDictionary<string, object>? properties)

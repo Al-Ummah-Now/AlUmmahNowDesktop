@@ -24,6 +24,7 @@ public class CoreTelemetryServiceTests
                 initialEnabled: false);
 
             Assert.Equal(TelemetryConsent.Off, service.Consent);
+            Assert.False(service.LastPurgeFailed);
 
             // While off, nothing is recorded or written to disk
             service.Track("screen_view", new Dictionary<string, object> { ["screen"] = "home" });
@@ -32,7 +33,7 @@ public class CoreTelemetryServiceTests
             Assert.False(File.Exists(bufferPath));
 
             // Opting in enables recording and crash persistence
-            service.SetConsent(TelemetryConsent.Full);
+            Assert.True(service.SetConsent(TelemetryConsent.Full));
             Assert.Equal(TelemetryConsent.Full, service.Consent);
             service.AddBreadcrumb("nav", "opened settings", TelemetryBreadcrumbSeverity.Info);
             service.Track("screen_view", new Dictionary<string, object> { ["screen"] = "settings", ["count"] = 2, ["ok"] = true });
@@ -41,8 +42,9 @@ public class CoreTelemetryServiceTests
             Assert.True(File.Exists(bufferPath));
 
             // Revoking immediately purges memory AND deletes the disk buffer
-            service.SetConsent(TelemetryConsent.Off);
+            Assert.True(service.SetConsent(TelemetryConsent.Off));
             Assert.Equal(TelemetryConsent.Off, service.Consent);
+            Assert.False(service.LastPurgeFailed);
             Assert.Equal(0, service.PendingCount);
             Assert.False(File.Exists(bufferPath));
         }
@@ -72,11 +74,109 @@ public class CoreTelemetryServiceTests
     }
 
     [Fact]
-    public void ResolveIngestUrl_accepts_only_https_bases_and_CreateOrNull_returns_noop_in_demo()
+    public async Task Concurrent_revoke_and_dispose_during_flush_never_throw_and_leave_buffer_purged()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "aun-tel-race-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            for (var i = 0; i < 8; i++)
+            {
+                var bufferPath = Path.Combine(dir, $"buf-{i}.json");
+                var service = new CoreTelemetryService(
+                    platform: "linux",
+                    appVersion: "1.0.0",
+                    locale: "en",
+                    videosApiBaseUrl: null,
+                    userAgent: "AlUmmahNowLinux/1.0.0",
+                    bufferPath: bufferPath,
+                    initialEnabled: true);
+
+                for (var e = 0; e < 10; e++)
+                {
+                    service.Track("screen_view", new Dictionary<string, object> { ["idx"] = e });
+                }
+                service.Persist();
+
+                var flushTask = Task.Run(() => service.FlushAsync());
+                var revokeTask = Task.Run(() => service.SetConsent(TelemetryConsent.Off));
+                await Task.WhenAll(flushTask, revokeTask);
+
+                Assert.Equal(TelemetryConsent.Off, service.Consent);
+                Assert.Equal(0, service.PendingCount);
+                Assert.False(File.Exists(bufferPath));
+
+                // Subsequent flush with an already-cancelled token or after dispose is a clean no-op
+                using var cts = new CancellationTokenSource();
+                cts.Cancel();
+                await service.FlushAsync(cts.Token);
+                service.Dispose();
+                await service.FlushAsync();
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Opt_out_enforces_denial_and_surfaces_LastPurgeFailed_when_buffer_cannot_be_removed()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "aun-tel-purgefail-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var bufferPath = Path.Combine(dir, "telemetry-buffer.json");
+        try
+        {
+            using var service = new CoreTelemetryService(
+                platform: "windows",
+                appVersion: "1.0.0",
+                locale: "en",
+                videosApiBaseUrl: null,
+                userAgent: "AlUmmahNowWindows/1.0.0",
+                bufferPath: bufferPath,
+                initialEnabled: true);
+
+            Assert.Equal(TelemetryConsent.Full, service.Consent);
+            service.Track("screen_view", new Dictionary<string, object> { ["screen"] = "home" });
+            service.Persist();
+            Assert.True(File.Exists(bufferPath));
+
+            // Replace the buffer file with a non-empty directory so remove_file / File.Delete fails on opt-out.
+            File.Delete(bufferPath);
+            Directory.CreateDirectory(bufferPath);
+            File.WriteAllText(Path.Combine(bufferPath, "keep.txt"), "x");
+
+            // Opting out fails to remove the directory at bufferPath, surfaces LastPurgeFailed,
+            // AND still denies all further collection/flushing in the wrapper.
+            Assert.False(service.SetConsent(TelemetryConsent.Off));
+            Assert.True(service.LastPurgeFailed);
+            Assert.Equal(TelemetryConsent.Off, service.Consent);
+
+            service.Track("screen_view", new Dictionary<string, object> { ["screen"] = "home" });
+            service.ReportCrash("Exception", "should not record");
+            Assert.Equal(0, service.PendingCount);
+            await service.FlushAsync();
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ResolveIngestUrl_uses_https_authority_and_strips_paths_queries_and_fragments()
     {
         Assert.Equal("https://videos.api.alummahnow.net/api/v1/telemetry/batches",
             CoreTelemetryService.ResolveIngestUrl("https://videos.api.alummahnow.net/"));
+        Assert.Equal("https://videos.api.example/api/v1/telemetry/batches",
+            CoreTelemetryService.ResolveIngestUrl("https://videos.api.example/some/path?x=1#frag"));
+        Assert.Equal("https://videos.api.example:8443/api/v1/telemetry/batches",
+            CoreTelemetryService.ResolveIngestUrl("https://videos.api.example:8443/v2?token=abc#top"));
+        Assert.Equal("https://videos.api.example/api/v1/telemetry/batches",
+            CoreTelemetryService.ResolveIngestUrl("https://videos.api.example?x=1"));
         Assert.Null(CoreTelemetryService.ResolveIngestUrl("http://127.0.0.1:3086"));
+        Assert.Null(CoreTelemetryService.ResolveIngestUrl("http://videos.api.alummahnow.net"));
         Assert.Null(CoreTelemetryService.ResolveIngestUrl(""));
         Assert.Null(CoreTelemetryService.ResolveIngestUrl(null));
 

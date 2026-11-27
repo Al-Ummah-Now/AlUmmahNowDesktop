@@ -318,10 +318,16 @@ public sealed partial class Shell
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(telemetryToggle, "SettingsTelemetryToggle");
         telemetryToggle.Toggled += (_, _) =>
         {
-            if (_settings.TelemetryEnabled == telemetryToggle.IsOn) return;
-            _settings.TelemetryEnabled = telemetryToggle.IsOn;
+            var enabled = telemetryToggle.IsOn;
+            if (_settings.TelemetryEnabled == enabled) return;
+            var ok = _telemetry.SetConsent(enabled ? TelemetryConsent.Full : TelemetryConsent.Off);
+            if (enabled && !ok)
+            {
+                telemetryToggle.IsOn = false;
+                return;
+            }
+            _settings.TelemetryEnabled = enabled;
             _store.Save(_settings);
-            _telemetry.SetConsent(_settings.TelemetryEnabled ? TelemetryConsent.Full : TelemetryConsent.Off);
         };
         telemetryBody.Children.Add(telemetryToggle);
         var telemetryCard = Updates.Card(telemetryBody);

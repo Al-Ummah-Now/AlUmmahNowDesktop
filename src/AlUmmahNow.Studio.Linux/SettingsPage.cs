@@ -77,9 +77,14 @@ public sealed class SettingsPage
         {
             var enabled = telemetryCheck.GetActive();
             if (settings.TelemetryEnabled == enabled) return;
+            var ok = telemetry?.SetConsent(enabled ? TelemetryConsent.Full : TelemetryConsent.Off) ?? true;
+            if (enabled && !ok)
+            {
+                telemetryCheck.SetActive(false);
+                return;
+            }
             settings.TelemetryEnabled = enabled;
             store.Save(settings);
-            telemetry?.SetConsent(enabled ? TelemetryConsent.Full : TelemetryConsent.Off);
         };
         telemetryBody.Append(telemetryCheck);
         left.Append(Ui.Card(telemetryBody));

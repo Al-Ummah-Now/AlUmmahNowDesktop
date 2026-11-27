@@ -82,10 +82,16 @@ internal sealed class SettingsPage
         AutomationProperties.SetAutomationId(telemetryToggle, "SettingsTelemetryToggle");
         telemetryToggle.Toggled += (_, _) =>
         {
-            if (settings.TelemetryEnabled == telemetryToggle.IsOn) return;
-            settings.TelemetryEnabled = telemetryToggle.IsOn;
+            var enabled = telemetryToggle.IsOn;
+            if (settings.TelemetryEnabled == enabled) return;
+            var ok = telemetry?.SetConsent(enabled ? TelemetryConsent.Full : TelemetryConsent.Off) ?? true;
+            if (enabled && !ok)
+            {
+                telemetryToggle.IsOn = false;
+                return;
+            }
+            settings.TelemetryEnabled = enabled;
             store.Save(settings);
-            telemetry?.SetConsent(settings.TelemetryEnabled ? TelemetryConsent.Full : TelemetryConsent.Off);
         };
         telemetryBody.Children.Add(telemetryToggle);
         left.Children.Add(LanternGlass.Card(telemetryBody));

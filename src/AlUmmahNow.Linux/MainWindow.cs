@@ -331,9 +331,14 @@ public sealed partial class MainWindow
         {
             var enabled = telemetryCheck.GetActive();
             if (_settings.TelemetryEnabled == enabled) return;
+            var ok = _telemetry.SetConsent(enabled ? TelemetryConsent.Full : TelemetryConsent.Off);
+            if (enabled && !ok)
+            {
+                telemetryCheck.SetActive(false);
+                return;
+            }
             _settings.TelemetryEnabled = enabled;
             _store.Save(_settings);
-            _telemetry.SetConsent(enabled ? TelemetryConsent.Full : TelemetryConsent.Off);
         };
         telemetryCard.Append(telemetryCheck);
         column.Append(telemetryCard);

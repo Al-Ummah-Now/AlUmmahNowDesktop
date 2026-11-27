@@ -25,14 +25,21 @@ namespace AlUmmahNow.CoreBridge
     /// <summary>
     /// Opt-in, consent-gated telemetry and crash reporting backed by <c>aun-telemetry</c>.
     /// Nothing is recorded, persisted, or sent while <see cref="Consent"/> is <see cref="TelemetryConsent.Off"/>.
-    /// Turning consent off immediately purges any buffered events from memory and disk.
+    /// Turning consent off immediately blocks all collection and purges any buffered events from memory and disk.
     /// </summary>
     public interface ITelemetryService : IDisposable
     {
         TelemetryConsent Consent { get; }
         int PendingCount { get; }
 
-        void SetConsent(TelemetryConsent consent);
+        /// <summary>True when the most recent opt-out could not purge the on-disk buffer (collection is still blocked).</summary>
+        bool LastPurgeFailed { get; }
+
+        /// <summary>
+        /// Updates telemetry consent. Returns <c>true</c> when the native state change (and disk purge on opt-out)
+        /// succeeded. Opting out always disables collection immediately even if disk purge fails.
+        /// </summary>
+        bool SetConsent(TelemetryConsent consent);
         void Track(string name, IReadOnlyDictionary<string, object>? properties = null);
         void TrackError(string code, IReadOnlyDictionary<string, object>? properties = null);
         void AddBreadcrumb(string category, string message, TelemetryBreadcrumbSeverity level = TelemetryBreadcrumbSeverity.Info);
@@ -50,8 +57,9 @@ namespace AlUmmahNow.CoreBridge
 
         public TelemetryConsent Consent => TelemetryConsent.Off;
         public int PendingCount => 0;
+        public bool LastPurgeFailed => false;
 
-        public void SetConsent(TelemetryConsent consent) { }
+        public bool SetConsent(TelemetryConsent consent) => consent == TelemetryConsent.Off;
         public void Track(string name, IReadOnlyDictionary<string, object>? properties = null) { }
         public void TrackError(string code, IReadOnlyDictionary<string, object>? properties = null) { }
         public void AddBreadcrumb(string category, string message, TelemetryBreadcrumbSeverity level = TelemetryBreadcrumbSeverity.Info) { }
