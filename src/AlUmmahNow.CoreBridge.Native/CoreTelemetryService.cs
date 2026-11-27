@@ -622,23 +622,9 @@ public sealed class CoreTelemetryService : ITelemetryService
                 i++;
                 continue;
             }
-            var localStart = i;
-            while (localStart > copied && IsEmailLocalChar(text, localStart - 1))
-            {
-                localStart--;
-            }
-            var trimmedStart = localStart;
-            while (trimmedStart < i && IsEmailLeadingWrapper(text[trimmedStart]))
-            {
-                trimmedStart++;
-            }
-            if (trimmedStart < i)
-            {
-                localStart = trimmedStart;
-            }
-            var domStart = i + atLen;
-            var domEnd = localStart < i ? FindEmailDomainEnd(text, domStart) : -1;
-            if (domEnd > 0)
+            var domEnd = FindEmailDomainEnd(text, i + atLen);
+            var localStart = domEnd > 0 ? FindEmailLocalStart(text, i, copied) : i;
+            if (domEnd > 0 && localStart < i)
             {
                 sb ??= new StringBuilder(text.Length);
                 sb.Append(text, copied, localStart - copied);
@@ -728,8 +714,96 @@ public sealed class CoreTelemetryService : ITelemetryService
         text.AsSpan(tldStart, 4).Equals("xn--", StringComparison.OrdinalIgnoreCase) &&
         IsAsciiAlphaNum(text[tldEnd - 1]);
 
+    private static int FindEmailLocalStart(string text, int atPos, int minPos)
+    {
+        if (atPos > minPos && text[atPos - 1] == '"' && !IsPrecededByOddBackslashes(text, atPos - 1, minPos))
+        {
+            var q = atPos - 2;
+            while (q >= minPos)
+            {
+                var ch = text[q];
+                if (ch is '\r' or '\n') break;
+                if (ch == '"' && !IsPrecededByOddBackslashes(text, q, minPos))
+                {
+                    return q;
+                }
+                q--;
+            }
+            return atPos;
+        }
+        var localStart = atPos;
+        while (localStart > minPos && IsEmailLocalChar(text, localStart - 1))
+        {
+            localStart--;
+        }
+        var trimmedStart = localStart;
+        while (trimmedStart < atPos && IsEmailLeadingWrapper(text[trimmedStart]))
+        {
+            trimmedStart++;
+        }
+        return trimmedStart < atPos ? trimmedStart : localStart;
+    }
+
+    private static bool IsPrecededByOddBackslashes(string text, int pos, int minPos)
+    {
+        var count = 0;
+        var p = pos - 1;
+        while (p >= minPos && text[p] == '\\')
+        {
+            count++;
+            p--;
+        }
+        return (count & 1) == 1;
+    }
+
+    private static int FindIpLiteralDomainEnd(string text, int domStart)
+    {
+        var close = domStart + 1;
+        while (close < text.Length)
+        {
+            var ch = text[close];
+            if (ch == ']') break;
+            if (char.IsWhiteSpace(ch) || ch is '[' or '"' or '\'' or '<' or '>' or '\\' or '{' or '}' or '\r' or '\n')
+            {
+                return -1;
+            }
+            close++;
+        }
+        if (close >= text.Length || text[close] != ']' || close <= domStart + 1) return -1;
+        var inner = text.Substring(domStart + 1, close - domStart - 1);
+        if (inner.StartsWith("IPv6:", StringComparison.OrdinalIgnoreCase))
+        {
+            return IPAddress.TryParse(inner[5..], out var ip6) && ip6.AddressFamily == AddressFamily.InterNetworkV6
+                ? close + 1
+                : -1;
+        }
+        return IsStrictIpv4(inner) ? close + 1 : -1;
+    }
+
+    private static bool IsStrictIpv4(string text)
+    {
+        var parts = text.Split('.');
+        if (parts.Length != 4) return false;
+        foreach (var part in parts)
+        {
+            if (part.Length is < 1 or > 3) return false;
+            var val = 0;
+            foreach (var ch in part)
+            {
+                if (!char.IsAsciiDigit(ch)) return false;
+                val = val * 10 + (ch - '0');
+            }
+            if (val > 255) return false;
+        }
+        return true;
+    }
+
     private static int FindEmailDomainEnd(string text, int domStart)
     {
+        if (domStart < text.Length && text[domStart] == '[')
+        {
+            return FindIpLiteralDomainEnd(text, domStart);
+        }
         var k = domStart;
         var lastDot = -1;
         var lettersSinceDot = 0;
