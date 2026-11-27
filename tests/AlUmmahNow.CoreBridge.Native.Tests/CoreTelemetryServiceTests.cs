@@ -1187,6 +1187,14 @@ public class CoreTelemetryServiceTests
             Assert.Equal("https://example.test/webhook/[redacted]",
                 CoreTelemetryService.SanitizeLocalPaths("https://example.test/webhook/fakeToken{tag:\"first opaqueSecret123\"}"));
             Assert.Equal("https://example.test/webhook/[redacted]",
+                CoreTelemetryService.SanitizeLocalPaths("https://example.test/webhook/fakeToken{tag:'first opaqueSecret123'}"));
+            Assert.Equal("https://example.com/api{tag:'value)'}?[redacted]",
+                CoreTelemetryService.SanitizeLocalPaths("https://example.com/api{tag:'value)'}?token=opaqueSecret123"));
+            Assert.Equal("https://example.com/api{url:\"see https://other.com/x?[redacted]\"}?[redacted]",
+                CoreTelemetryService.SanitizeLocalPaths("https://example.com/api{url:\"see https://other.com/x?token=opaqueSecret123\"}?outer=value"));
+            Assert.Equal("https://example.com/api{url:\"see https://other.com/x?[redacted]\"}",
+                CoreTelemetryService.SanitizeLocalPaths("https://example.com/api{url:\"see https://other.com/x?token=opaqueSecret123\"}"));
+            Assert.Equal("https://example.test/webhook/[redacted]",
                 CoreTelemetryService.SanitizeLocalPaths("https://example.test/webhook/fakeToken{tag:\"a)opaqueSecret123\"}suffixSecret"));
             Assert.Equal("https://example.test/webhook/[redacted]",
                 CoreTelemetryService.SanitizeLocalPaths("https://example.test/webhook/fakeToken{abc://opaqueSecret123}"));

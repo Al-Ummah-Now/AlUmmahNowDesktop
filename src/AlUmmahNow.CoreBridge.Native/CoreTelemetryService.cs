@@ -260,12 +260,19 @@ public sealed class CoreTelemetryService : ITelemetryService
     private static string VaultNonFileUrls(string text, string prefix, out List<string> vaultedUrls)
     {
         vaultedUrls = new List<string>();
+        return VaultNonFileUrlsInto(text, prefix, vaultedUrls);
+    }
+
+    private static string VaultNonFileUrlsInto(string text, string prefix, List<string> vaultedUrls)
+    {
         if (text.IndexOf("://", StringComparison.Ordinal) < 0) return text;
         var tracker = new VaultLineTracker();
         StringBuilder? sb = null;
         var copied = 0;
         var searchFrom = 0;
         var failedContMax = 0;
+        var unclosedDoubleQuoteEnd = 0;
+        var unclosedSingleQuoteEnd = 0;
         while (searchFrom < text.Length)
         {
             var sep = text.IndexOf("://", searchFrom, StringComparison.Ordinal);
@@ -313,7 +320,8 @@ public sealed class CoreTelemetryService : ITelemetryService
             sb.Append(text, copied, start - copied);
             if (!hasQf && totalEnd >= failedContMax && totalEnd < text.Length &&
                 text[totalEnd] is ',' or '(' or '[' or ')' or ']' or '{' or '}' &&
-                TryExtendUrlContinuation(text, rawUrl, tail, start, ref totalEnd, ref failedContMax, out var ext))
+                TryExtendUrlContinuation(text, rawUrl, tail, start, ref totalEnd, ref failedContMax,
+                    ref unclosedDoubleQuoteEnd, ref unclosedSingleQuoteEnd, out var ext))
             {
                 EmitUrlContinuation(sb, prefix, vaultedUrls, redactedUrl, tail, ext);
             }
@@ -349,7 +357,9 @@ public sealed class CoreTelemetryService : ITelemetryService
         vaultedUrls.Add(redactedUrl);
         sb.Append(prefix).Append(baseIdx).Append('\u001F');
         if (ext.KeepBaseTail) sb.Append(baseTail);
-        sb.Append(ext.Middle);
+        sb.Append(ext.Middle.IndexOf("://", StringComparison.Ordinal) >= 0
+            ? VaultNonFileUrlsInto(ext.Middle, prefix, vaultedUrls)
+            : ext.Middle);
         if (ext.QfToken.Length > 0)
         {
             var qfIdx = vaultedUrls.Count;
@@ -360,14 +370,17 @@ public sealed class CoreTelemetryService : ITelemetryService
     }
 
     private static bool TryExtendUrlContinuation(
-        string text, string rawUrl, string baseTail, int urlStart, ref int totalEnd, ref int failedContMax, out UrlContinuationResult result)
+        string text, string rawUrl, string baseTail, int urlStart, ref int totalEnd, ref int failedContMax,
+        ref int unclosedDoubleQuoteEnd, ref int unclosedSingleQuoteEnd, out UrlContinuationResult result)
     {
         result = default;
-        var allowGroupQuotes = !(urlStart > 0 && text[urlStart - 1] == '"');
+        var allowDoubleQuotes = totalEnd >= unclosedDoubleQuoteEnd && !(urlStart > 0 && text[urlStart - 1] == '"');
+        var allowSingleQuotes = totalEnd >= unclosedSingleQuoteEnd && !(urlStart > 0 && text[urlStart - 1] == '\'');
         var probeInput = rawUrl + "x";
         var probe = RedactUrlPathSecrets(probeInput);
         var webhookProbe = (probe != probeInput && probe.EndsWith("[redacted]", StringComparison.Ordinal)) ? probe : null;
-        var p = ScanUrlContinuation(text, totalEnd, allowGroupQuotes, stopAtSchemes: webhookProbe == null);
+        var p = ScanUrlContinuation(text, totalEnd, allowDoubleQuotes, allowSingleQuotes,
+            stopAtSchemes: webhookProbe == null, out var sawInnerScheme, out var unclosedQuote);
         if (p > totalEnd && p < text.Length && text[p] is '?' or '#')
         {
             var qfStart = p;
@@ -402,7 +415,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             totalEnd = p;
             return true;
         }
-        var end = TrimWebhookContinuationEnd(text, urlStart, totalEnd, p, allowGroupQuotes);
+        var end = TrimWebhookContinuationEnd(text, urlStart, totalEnd, p, allowDoubleQuotes, allowSingleQuotes);
         if (end > totalEnd)
         {
             var extTail = text.Substring(end, p - end);
@@ -432,31 +445,36 @@ public sealed class CoreTelemetryService : ITelemetryService
                 return true;
             }
         }
-        if (p > failedContMax) failedContMax = p;
+        if (unclosedQuote == '"' && p > unclosedDoubleQuoteEnd) unclosedDoubleQuoteEnd = p;
+        else if (unclosedQuote == '\'' && p > unclosedSingleQuoteEnd) unclosedSingleQuoteEnd = p;
+        if (!sawInnerScheme && p > failedContMax) failedContMax = p;
         return false;
     }
 
-    private static int ScanUrlContinuation(string text, int start, bool allowGroupQuotes, bool stopAtSchemes)
+    private static int ScanUrlContinuation(
+        string text, int start, bool allowDoubleQuotes, bool allowSingleQuotes, bool stopAtSchemes,
+        out bool sawInnerScheme, out char unclosedQuote)
     {
         var p = start;
         var groupStack = new List<char>();
-        var inQuote = false;
+        var quoteChar = '\0';
+        sawInnerScheme = false;
         while (p < text.Length)
         {
             var ch = text[p];
-            if (inQuote)
+            if (quoteChar != '\0')
             {
                 if (ch is '\r' or '\n') break;
-                if (stopAtSchemes && text[p - 1] is '"' or ',' or ';' or '(' or '[' or ')' or ']' or '{' or '}' or '\'' && IsUrlSchemeAt(text, p))
+                if (ch == ':' && p + 2 < text.Length && text[p + 1] == '/' && text[p + 2] == '/')
                 {
-                    break;
+                    sawInnerScheme = true;
                 }
                 if (ch == '\\' && p + 1 < text.Length && text[p + 1] is not ('\r' or '\n'))
                 {
                     p += 2;
                     continue;
                 }
-                if (ch == '"') inQuote = false;
+                if (ch == quoteChar) quoteChar = '\0';
                 p++;
                 continue;
             }
@@ -469,10 +487,16 @@ public sealed class CoreTelemetryService : ITelemetryService
             {
                 break;
             }
-            if (ch == '"')
+            if (ch is '"' or '\'')
             {
-                if (!(allowGroupQuotes && groupStack.Count > 0)) break;
-                inQuote = true;
+                var allowed = ch == '"' ? allowDoubleQuotes : allowSingleQuotes;
+                if (allowed && groupStack.Count > 0)
+                {
+                    quoteChar = ch;
+                    p++;
+                    continue;
+                }
+                if (ch == '"') break;
                 p++;
                 continue;
             }
@@ -490,6 +514,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             }
             p++;
         }
+        unclosedQuote = quoteChar;
         return p;
     }
 
@@ -501,23 +526,28 @@ public sealed class CoreTelemetryService : ITelemetryService
         return i - pos >= 2 && i + 2 < text.Length && text[i] == ':' && text[i + 1] == '/' && text[i + 2] == '/';
     }
 
-    private static int TrimWebhookContinuationEnd(string text, int urlStart, int minEnd, int scanEnd, bool allowGroupQuotes)
+    private static int TrimWebhookContinuationEnd(
+        string text, int urlStart, int minEnd, int scanEnd, bool allowDoubleQuotes, bool allowSingleQuotes)
     {
         var excessParens = 0;
         var excessBrackets = 0;
         var excessBraces = 0;
-        var inQuote = false;
+        var quoteChar = '\0';
         var openGroups = 0;
         for (var i = urlStart; i < scanEnd; i++)
         {
             var c = text[i];
-            if (inQuote)
+            if (quoteChar != '\0')
             {
                 if (c == '\\' && i + 1 < scanEnd) { i++; continue; }
-                if (c == '"') inQuote = false;
+                if (c == quoteChar) quoteChar = '\0';
                 continue;
             }
-            if (c == '"' && allowGroupQuotes && openGroups > 0) { inQuote = true; continue; }
+            if (openGroups > 0 && ((c == '"' && allowDoubleQuotes) || (c == '\'' && allowSingleQuotes)))
+            {
+                quoteChar = c;
+                continue;
+            }
             if (c == '(') { excessParens--; openGroups++; }
             else if (c == ')') { excessParens++; if (openGroups > 0) openGroups--; }
             else if (c == '[') { excessBrackets--; openGroups++; }
