@@ -19,8 +19,8 @@ namespace AlUmmahNow.CoreBridge.Native;
 /// </summary>
 public sealed class CoreTelemetryService : ITelemetryService
 {
-    private static readonly Regex ParenPathRegex = new(@"(\()(?:/|~/|[A-Za-z]:[\\/]|\\\\)[^()\r\n\u001E]+(\))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex ParenRelativeSlashPathRegex = new(@"(\()(?![ \t]*(?:HTTP|TLS|SSL)/\d)(?![ \t]*\d+/\d+[.,;:!?\s]*\))[^\s/\\""'<>()\[\]{}:,;=\u001E\u001F]+/[^()\r\n\u001E]+(\))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex ParenPathRegex = new(@"(?<!['""])(\()(?:/|~/|[A-Za-z]:[\\/]|\\\\)[^()\r\n\u001E]+(\))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex ParenRelativeSlashPathRegex = new(@"(?<!['""])(\()(?![ \t]*(?:HTTP|TLS|SSL)/\d)(?![ \t]*\d+/\d+[.,;:!?\s]*\))[^\s/\\""'<>()\[\]{}:,;=\u001E\u001F]+/[^()\r\n\u001E]+(\))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex WindowsPathRegex = new(@"(?:[A-Za-z]:[\\/]|\\\\)[^\S\r\n]*[^\r\n\u001E\s](?:[^\r\n\u001E]*[^\r\n\u001E\s])?", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex RelativeBackslashPathRegex = new(@"(^|[\s(\[{""'=,:;\u001F])[^\s\\/""'<>()\[{:,;=\u001E\u001F]+\\[^\r\n\u001E\u001F\s](?:[^\r\n\u001E\u001F]*[^\r\n\u001E\u001F\s])?", RegexOptions.Compiled);
     private static readonly Regex QuotedSpacedRootPathRegex = new(@"[""']/[ \t]+[^\r\n\u001E]+", RegexOptions.Compiled);
@@ -647,11 +647,16 @@ public sealed class CoreTelemetryService : ITelemetryService
         return sb.ToString();
     }
 
+    private static bool IsUnicodeCombiningMark(char ch) =>
+        char.GetUnicodeCategory(ch) is System.Globalization.UnicodeCategory.NonSpacingMark
+            or System.Globalization.UnicodeCategory.SpacingCombiningMark
+            or System.Globalization.UnicodeCategory.EnclosingMark;
+
     private static bool IsEmailLocalChar(string text, int pos)
     {
         var ch = text[pos];
-        if ((ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') ||
-            ch is '.' or '_' or '+' or '-')
+        if (char.IsLetterOrDigit(ch) || ch is '.' or '_' or '+' or '-' ||
+            IsUnicodeCombiningMark(ch) || char.IsSurrogate(ch))
         {
             return true;
         }
@@ -667,18 +672,19 @@ public sealed class CoreTelemetryService : ITelemetryService
         while (k < text.Length)
         {
             var ch = text[k];
-            var isLetter = (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z');
-            var isDigit = ch >= '0' && ch <= '9';
-            if (isLetter)
+            if (char.IsLetter(ch) || IsUnicodeCombiningMark(ch) || char.IsSurrogate(ch))
             {
-                lettersSinceDot = lastDot >= 0 ? lettersSinceDot + 1 : 0;
+                if (lastDot >= 0 && lettersSinceDot >= 0 && !IsUnicodeCombiningMark(ch) && !char.IsLowSurrogate(ch))
+                {
+                    lettersSinceDot++;
+                }
             }
             else if (ch == '.')
             {
                 lastDot = k > domStart ? k : -1;
                 lettersSinceDot = 0;
             }
-            else if (isDigit || ch == '-')
+            else if (char.IsDigit(ch) || ch == '-')
             {
                 lettersSinceDot = -1;
             }
@@ -687,7 +693,8 @@ public sealed class CoreTelemetryService : ITelemetryService
                 break;
             }
             k++;
-            if (lastDot > domStart && lettersSinceDot >= 2 && (k == text.Length || !IsAsciiWordChar(text[k])))
+            if (lastDot > domStart && lettersSinceDot >= 2 &&
+                (k == text.Length || !(char.IsLetterOrDigit(text[k]) || text[k] == '_' || IsUnicodeCombiningMark(text[k]))))
             {
                 bestEnd = k;
             }
@@ -831,6 +838,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         {
             if (!_escapedBackslash && _openQuote != '\0' && ch == _openQuote && !IsInnerApostrophe(text, _cursor, ch))
             {
+                PromoteTokenPath(text);
                 if (ch == '\'' && _hasPathOnLine)
                 {
                     // Single-quoted paths may contain unescaped apostrophes; fail closed on this line.
