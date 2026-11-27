@@ -1526,6 +1526,44 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("[\"see <https://example.com/api?token=first secondSecret> public\"]"));
             Assert.Equal("[\"https://example.com/docs/[redacted] public\",\"sibling\"]",
                 CoreTelemetryService.SanitizeLocalPaths("[\"https://example.com/docs/[redacted] public\",\"sibling\"]"));
+            Assert.Equal("[\"[redacted-email] ok\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"alice\\u0040exa\\u0301mple.com ok\"]"));
+            Assert.Equal("{\"detail\":\"[redacted-email] failed\"}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"detail\":\"alice@exa\\u0301mple.test failed\"}"));
+            Assert.Equal("{\"detail\":\"[redacted-email] failed\"}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"detail\":\"\\\"Jane Doe\\\"@example.test failed\"}"));
+            Assert.Equal("{\"detail\":\"[redacted-email] failed\"}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"detail\":\"\\u0022Jane Doe\\u0022\\u0040exa\\u0301mple.test failed\"}"));
+            Assert.Equal("[\"see \\u003chttps://example.com/api?[redacted]\\u003e public\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"see \\u003chttps://example.com/api?token=first secondSecret\\u003e public\"]"));
+            Assert.Equal("{\"detail\":\"<https://example.test/webhook/[redacted]>\"}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"detail\":\"<https://example.test/webhook/SECRET TAIL>\"}"));
+            Assert.Equal("{\"detail\":\"see <https://example.test/webhook/[redacted]> public\"}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"detail\":\"see <https://example.test/webhook/SECRET TAIL> public\"}"));
+            Assert.Equal("{\"detail\":\"see \\u003chttps://example.test/webhook/[redacted]\\u003e public\"}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"detail\":\"see \\u003chttps://example.test/webhook/SECRET TAIL\\u003e public\"}"));
+            Assert.Equal("{\"message\":\"Authorization: Bearer [redacted]\",\"status\":\"ok\"}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"message\":\"Authorization: Bearer secret\",\"status\":\"ok\"}"));
+            Assert.Equal("{\"message\":\"Authorization:\\u0020Bearer [redacted]\",\"status\":\"ok\"}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"message\":\"Authorization:\\u0020Bearer\\u0020secret\",\"status\":\"ok\"}"));
+            Assert.Equal("{\"message\":\"Bearer [redacted]\"}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"message\":\"Bearer\\u0020secret\"}"));
+            Assert.Equal("{\"message\":\"Bearer [redacted]\"}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"message\":\"Bearer\\tsecret\"}"));
+            Assert.Equal("{\"message\":\"Bearer [redacted]\"}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"message\":\"Bearer\\u00A0secret\"}"));
+            Assert.Equal("{\"message\":\"Authorization: Bearer [redacted]\\nX-Public: ok\",\"status\":\"ok\"}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"message\":\"Authorization: Bearer secret\\nX-Public: ok\",\"status\":\"ok\"}"));
+            Assert.Equal("{\"message\":\"Basic [redacted]\"}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"message\":\"Basic\\u0020dXNlcjpwYXNz\"}"));
+            Assert.Equal("{\"message\":\"https://example.com/path name?[redacted]\"}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"message\":\"https://example.com/path name?token=private\"}"));
+            Assert.Equal("{\"message\":\"https://example.com/path\\u0020name?[redacted]\"}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"message\":\"https://example.com/path\\u0020name?token=private\"}"));
+            Assert.Equal("{\"message\":\"see https://example.com/public Why did it fail?\"}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"message\":\"see https://example.com/public Why did it fail?\"}"));
+            Assert.Equal("{\"message\":\"see https://example.com/public issue #123\"}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"message\":\"see https://example.com/public issue #123\"}"));
             var manyFileUris = string.Join("\n", Enumerable.Repeat("open file:///Users/Alice/Secret.mov", 2000));
             var expectedFileUris = string.Join("\n", Enumerable.Repeat("open [redacted-path]", 2000));
             Assert.Equal(expectedFileUris, CoreTelemetryService.SanitizeLocalPaths(manyFileUris));

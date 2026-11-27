@@ -39,7 +39,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         "Bearer", "Basic", "Digest", "Token", "Api-Key", "ApiKey",
         "OAuth", "Negotiate", "Mutual", "HOBA", "Vapid", "SCRAM-SHA-256", "AWS4-HMAC-SHA256"
     };
-    private static readonly Regex BearerTokenRegex = new(@"\b(Bearer)\s+(?!\[redacted\](?=$|[\s""',;)\]}]))(?:\\[^\r\n\s]|[^\s\\""',;)\]}]|\\(?=$|[\s\r\n]))+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex BearerTokenRegex = new(@"\b(Bearer)\s+(?!\[redacted\](?=$|[\s""',;)\]}]|\\(?:[nrtbf""]|u00(?:20|09|0[aAdD]|[aA]0))))(?:\\[^\r\n\s]|[^\s\\""',;)\]}]|\\(?=$|[\s\r\n]))+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex BasicTokenRegex = new(@"\b(Basic)\s+([A-Za-z0-9+/_-]{2,}={0,2})(?![A-Za-z0-9+/_=-])", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly System.Text.UTF8Encoding StrictUtf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
 
@@ -411,6 +411,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         var quoteCursor = 0;
         var quoteState = 0;
         var failedContMax = 0;
+        var failedSpacedContMax = 0;
         var unclosedDoubleQuoteEnd = 0;
         var unclosedSingleQuoteEnd = 0;
         while (searchFrom < text.Length)
@@ -469,26 +470,25 @@ public sealed class CoreTelemetryService : ITelemetryService
             sb.Append(text, copied, start - copied);
             var finalTail = tail;
             if (!hasQf && totalEnd < text.Length &&
-                IsUrlContinuationStarter(text, totalEnd, inDoubleQuote || (start > 0 && text[start - 1] == '"')) &&
-                TryExtendUrlContinuation(text, rawUrl, tail, start, quoteState, ref totalEnd, ref failedContMax,
-                    ref unclosedDoubleQuoteEnd, ref unclosedSingleQuoteEnd, out var ext))
+                ((IsUrlContinuationStarter(text, totalEnd, inDoubleQuote || (start > 0 && text[start - 1] == '"')) &&
+                  TryExtendUrlContinuation(text, rawUrl, tail, start, quoteState, ref totalEnd, ref failedContMax,
+                      ref unclosedDoubleQuoteEnd, ref unclosedSingleQuoteEnd, out var ext)) ||
+                 TryExtendSpacedQuotedUrlQuery(text, rawUrl, tail, start, quoteState, ref totalEnd,
+                     ref failedSpacedContMax, out ext)))
             {
                 EmitUrlContinuation(sb, prefix, vaultedUrls, redactedUrl, tail, ext);
                 finalTail = ext.Tail;
             }
             else
             {
-                if (!hasQf && inDoubleQuote && !(start > 0 && text[start - 1] == '<') &&
-                    totalEnd < text.Length && text[totalEnd] is not ('"' or '\r' or '\n'))
+                if (!hasQf && totalEnd < text.Length &&
+                    TryResolveQuotedSecretUrlTail(text, start, totalEnd, inDoubleQuote, rawUrl, redactedUrl,
+                        out var secretRedacted, out var secretEnd))
                 {
-                    var secretRedacted = ResolveQuotedSecretUrlRedaction(rawUrl, redactedUrl);
-                    if (secretRedacted != null)
-                    {
-                        redactedUrl = secretRedacted;
-                        totalEnd = ScanToClosingDoubleQuote(text, totalEnd);
-                        tail = string.Empty;
-                        finalTail = string.Empty;
-                    }
+                    redactedUrl = secretRedacted;
+                    totalEnd = secretEnd;
+                    tail = string.Empty;
+                    finalTail = string.Empty;
                 }
                 var idx = vaultedUrls.Count;
                 vaultedUrls.Add(redactedUrl);
@@ -920,9 +920,93 @@ public sealed class CoreTelemetryService : ITelemetryService
     {
         start = sep;
         while (start > minStart && IsUrlSchemeChar(text[start - 1])) start--;
+        var steppedJsonEscape = false;
+        while (start < sep && start > minStart && text[start - 1] == '\\' && !IsPrecededByOddBackslashes(text, start - 1, minStart))
+        {
+            var esc = text[start];
+            if (esc is 'n' or 'r' or 't' or 'b' or 'f')
+            {
+                start += 1;
+                steppedJsonEscape = true;
+                continue;
+            }
+            if (esc == 'u' && start + 5 <= sep && TryParseHex4(text, start + 1, out var code))
+            {
+                var decoded = (char)code;
+                if (!IsUrlSchemeChar(decoded) && decoded is not ('/' or '\\'))
+                {
+                    start += 5;
+                    steppedJsonEscape = true;
+                    continue;
+                }
+            }
+            break;
+        }
         if (sep - start < 2 || !char.IsAsciiLetter(text[start])) return false;
-        if (start > 0 && (IsUrlSchemeChar(text[start - 1]) || text[start - 1] is '/' or '\\')) return false;
+        if (!steppedJsonEscape && start > 0 && (IsUrlSchemeChar(text[start - 1]) || text[start - 1] is '/' or '\\')) return false;
         return !text.AsSpan(start, sep - start).Equals("file", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsAngleWrappedBefore(string text, int urlStart)
+    {
+        if (urlStart > 0 && text[urlStart - 1] == '<') return true;
+        return urlStart >= 6 &&
+            text[urlStart - 6] == '\\' &&
+            text[urlStart - 5] == 'u' &&
+            text[urlStart - 4] == '0' &&
+            text[urlStart - 3] == '0' &&
+            text[urlStart - 2] == '3' &&
+            text[urlStart - 1] is 'c' or 'C' &&
+            !IsPrecededByOddBackslashes(text, urlStart - 6, 0);
+    }
+
+    private static bool IsEscapedGreaterAt(string text, int pos) =>
+        pos + 5 < text.Length &&
+        text[pos] == '\\' &&
+        text[pos + 1] == 'u' &&
+        text[pos + 2] == '0' &&
+        text[pos + 3] == '0' &&
+        text[pos + 4] == '3' &&
+        text[pos + 5] is 'e' or 'E' &&
+        !IsPrecededByOddBackslashes(text, pos, 0);
+
+    private static bool TryResolveQuotedSecretUrlTail(
+        string text, int urlStart, int totalEnd, bool inDoubleQuote, string rawUrl, string redactedUrl,
+        out string secretRedacted, out int secretEnd)
+    {
+        secretRedacted = string.Empty;
+        secretEnd = totalEnd;
+        var wrappedInAngle = IsAngleWrappedBefore(text, urlStart);
+        if (!inDoubleQuote && !wrappedInAngle) return false;
+        var nextCh = text[totalEnd];
+        if (nextCh is '\r' or '\n' ||
+            (inDoubleQuote && nextCh == '"') ||
+            (wrappedInAngle && (nextCh == '>' || IsEscapedGreaterAt(text, totalEnd))))
+        {
+            return false;
+        }
+        var resolved = ResolveQuotedSecretUrlRedaction(rawUrl, redactedUrl);
+        if (resolved == null) return false;
+        var p = totalEnd;
+        var escaped = false;
+        var stoppedAtAngle = false;
+        while (p < text.Length)
+        {
+            var ch = text[p];
+            if (ch is '\r' or '\n') break;
+            if (inDoubleQuote && ch == '"' && !escaped) break;
+            if (wrappedInAngle && !escaped && (ch == '>' || IsEscapedGreaterAt(text, p)))
+            {
+                stoppedAtAngle = true;
+                break;
+            }
+            escaped = inDoubleQuote && ch == '\\' && !escaped;
+            p++;
+        }
+        if (!inDoubleQuote && !stoppedAtAngle) return false;
+        secretRedacted = resolved;
+        secretEnd = p;
+        return true;
     }
 
     private static string? ResolveQuotedSecretUrlRedaction(string rawUrl, string redactedUrl)
@@ -933,28 +1017,153 @@ public sealed class CoreTelemetryService : ITelemetryService
         return probe != probeInput && probe.EndsWith("[redacted]", StringComparison.Ordinal) ? probe : null;
     }
 
-    private static int ScanToClosingDoubleQuote(string text, int start)
+    private static bool TryExtendSpacedQuotedUrlQuery(
+        string text, string rawUrl, string baseTail, int urlStart, int quoteState, ref int totalEnd,
+        ref int failedSpacedContMax, out UrlContinuationResult result)
     {
-        var p = start;
-        var escaped = false;
+        result = default;
+        var inDoubleQuote = (quoteState & 2) != 0;
+        var wrappedInAngle = IsAngleWrappedBefore(text, urlStart);
+        if ((!inDoubleQuote && !wrappedInAngle) || totalEnd >= text.Length) return false;
+        var firstCh = text[totalEnd];
+        if (firstCh is '\r' or '\n' ||
+            (inDoubleQuote && firstCh == '"') ||
+            (wrappedInAngle && (firstCh == '>' || IsEscapedGreaterAt(text, totalEnd))))
+        {
+            return false;
+        }
+        if (totalEnd < failedSpacedContMax) return false;
+        var inSingleQuote = (quoteState & 1) != 0;
+        var p = totalEnd;
         while (p < text.Length)
         {
             var ch = text[p];
             if (ch is '\r' or '\n') break;
-            if (ch == '"' && !escaped) break;
-            escaped = ch == '\\' && !escaped;
+            if (inDoubleQuote && ch == '"') break;
+            if (wrappedInAngle && (ch == '>' || IsEscapedGreaterAt(text, p))) break;
+            if (IsFileSchemeAt(text, p) || ((p == 0 || !IsAsciiAlphaNum(text[p - 1])) && IsWindowsDriveAt(text, p))) break;
+            if (p > totalEnd &&
+                !IsUrlSchemeChar(text[p - 1]) && text[p - 1] is not ('/' or '\\') && IsUrlSchemeAt(text, p))
+            {
+                break;
+            }
+            if (inDoubleQuote && ch == '\\' && p + 1 < text.Length)
+            {
+                var esc = text[p + 1];
+                if (esc is 'r' or 'n') break;
+                if (esc == 'u' && p + 5 < text.Length && TryParseHex4(text, p + 2, out var code))
+                {
+                    if (code is '\r' or '\n' || (wrappedInAngle && code == '>')) break;
+                    p += 6;
+                    continue;
+                }
+                p += 2;
+                continue;
+            }
+            if (ch is '?' or '#' && IsValidSpacedUrlQueryStart(text, p, urlStart, totalEnd, inDoubleQuote, wrappedInAngle))
+            {
+                var angleStopMask = ComputeQueryAngleStopMask(text, urlStart, inDoubleQuote);
+                var qfEnd = ScanQueryOrFragment(text, p, angleStopMask);
+                var qf = TrimQueryOrFragmentDelimiters(
+                    text.Substring(p, qfEnd - p), text, urlStart, out var qfTail, inSingleQuote);
+                var qfToken = qf[0] + "[redacted]";
+                var secretPrefix = ResolveQuotedSecretUrlRedaction(rawUrl, RedactUrlPathSecrets(rawUrl));
+                if (secretPrefix != null)
+                {
+                    result = new UrlContinuationResult(true, secretPrefix + qfToken, false, string.Empty, string.Empty, qfTail);
+                }
+                else
+                {
+                    result = new UrlContinuationResult(
+                        false, string.Empty, baseTail.Length > 0, text.Substring(totalEnd, p - totalEnd), qfToken, qfTail);
+                }
+                totalEnd = qfEnd;
+                return true;
+            }
             p++;
         }
-        return p;
+        if (p > failedSpacedContMax) failedSpacedContMax = p;
+        return false;
+    }
+
+    private static bool IsValidSpacedUrlQueryStart(
+        string text, int qfPos, int urlStart, int minPos, bool inDoubleQuote, bool wrappedInAngle)
+    {
+        var nextPos = qfPos + 1;
+        if (nextPos >= text.Length) return false;
+        var nextCh = text[nextPos];
+        if (nextCh is '\r' or '\n' ||
+            (inDoubleQuote && nextCh == '"') ||
+            (wrappedInAngle && (nextCh == '>' || IsEscapedGreaterAt(text, nextPos))))
+        {
+            return false;
+        }
+        var urlStartsSpan = wrappedInAngle || IsUrlAtDoubleQuoteStart(text, urlStart);
+        var nextIsWs = char.IsWhiteSpace(nextCh) || (inDoubleQuote && IsJsonWhitespaceEscapeAt(text, nextPos));
+        if (text[qfPos] == '?') return !nextIsWs || urlStartsSpan;
+        return !nextIsWs && (urlStartsSpan || !IsPrecededBySpaceOrEscape(text, qfPos, minPos, inDoubleQuote));
+    }
+
+    private static bool IsUrlAtDoubleQuoteStart(string text, int urlStart)
+    {
+        var p = urlStart;
+        while (p > 0)
+        {
+            var prev = text[p - 1];
+            if (prev is ' ' or '\t' || (char.IsWhiteSpace(prev) && prev is not ('\r' or '\n')))
+            {
+                p--;
+                continue;
+            }
+            if (p >= 2 && text[p - 2] == '\\' && prev == 't' && !IsPrecededByOddBackslashes(text, p - 2, 0))
+            {
+                p -= 2;
+                continue;
+            }
+            if (p >= 6 && text[p - 6] == '\\' && text[p - 5] == 'u' &&
+                !IsPrecededByOddBackslashes(text, p - 6, 0) &&
+                TryParseHex4(text, p - 4, out var code) &&
+                char.IsWhiteSpace((char)code) && code is not ('\r' or '\n'))
+            {
+                p -= 6;
+                continue;
+            }
+            return prev == '"' && !IsPrecededByOddBackslashes(text, p - 1, 0);
+        }
+        return false;
+    }
+
+    private static bool IsJsonWhitespaceEscapeAt(string text, int pos)
+    {
+        if (text[pos] != '\\' || pos + 1 >= text.Length) return false;
+        var esc = text[pos + 1];
+        if (esc is 't' or 'r' or 'n') return true;
+        return esc == 'u' && pos + 5 < text.Length && TryParseHex4(text, pos + 2, out var code) && char.IsWhiteSpace((char)code);
+    }
+
+    private static bool IsPrecededBySpaceOrEscape(string text, int pos, int minPos, bool inDoubleQuote)
+    {
+        if (pos <= minPos) return false;
+        if (char.IsWhiteSpace(text[pos - 1])) return true;
+        if (!inDoubleQuote) return false;
+        if (pos - 2 >= minPos && text[pos - 2] == '\\' && text[pos - 1] == 't' &&
+            !IsPrecededByOddBackslashes(text, pos - 2, minPos))
+        {
+            return true;
+        }
+        return pos - 6 >= minPos && text[pos - 6] == '\\' && text[pos - 5] == 'u' &&
+            !IsPrecededByOddBackslashes(text, pos - 6, minPos) &&
+            TryParseHex4(text, pos - 4, out var code) && char.IsWhiteSpace((char)code);
     }
 
     private static int ComputeQueryAngleStopMask(string text, int urlStart, bool inDoubleQuote)
     {
-        var wrappedInAngle = urlStart > 0 && text[urlStart - 1] == '<';
+        var wrappedInAngle = IsAngleWrappedBefore(text, urlStart);
         var stopOnLess = !inDoubleQuote && !wrappedInAngle;
         var stopOnGreater = !inDoubleQuote || wrappedInAngle;
         var allowInlineSpace = inDoubleQuote;
-        return (stopOnLess ? 1 : 0) | (stopOnGreater ? 2 : 0) | (allowInlineSpace ? 4 : 0);
+        var stopOnEscapedGreater = wrappedInAngle;
+        return (stopOnLess ? 1 : 0) | (stopOnGreater ? 2 : 0) | (allowInlineSpace ? 4 : 0) | (stopOnEscapedGreater ? 8 : 0);
     }
 
     private static bool TryScanUrlAfterScheme(
@@ -997,7 +1206,8 @@ public sealed class CoreTelemetryService : ITelemetryService
             if (ch is '\r' or '\n' ||
                 ((angleStopMask & 4) == 0 && char.IsWhiteSpace(ch)) ||
                 (ch == '<' && (angleStopMask & 1) != 0) ||
-                (ch == '>' && (angleStopMask & 2) != 0))
+                (ch == '>' && (angleStopMask & 2) != 0) ||
+                ((angleStopMask & 8) != 0 && ch == '\\' && IsEscapedGreaterAt(text, p)))
             {
                 break;
             }
@@ -2202,10 +2412,128 @@ public sealed class CoreTelemetryService : ITelemetryService
     {
         var result = RedactAuthHeaders(text);
         result = BearerTokenRegex.Replace(result, "$1 [redacted]");
-        return BasicTokenRegex.Replace(result, match =>
+        result = BasicTokenRegex.Replace(result, match =>
             IsBasicCredentialToken(match.Groups[2].Value)
                 ? $"{match.Groups[1].Value} [redacted]"
                 : match.Value);
+        return RedactEscapedBearerAndBasicInBalancedQuotes(result);
+    }
+
+    private static string RedactEscapedBearerAndBasicInBalancedQuotes(string text)
+    {
+        if (text.IndexOf('"') < 0 || text.IndexOf('\\') < 0) return text;
+        var current = RedactEscapedTokenInBalancedQuotes(text, isBasic: false);
+        return RedactEscapedTokenInBalancedQuotes(current, isBasic: true);
+    }
+
+    private static string RedactEscapedTokenInBalancedQuotes(string text, bool isBasic)
+    {
+        var spans = CollectBalancedDoubleQuoteSpans(text);
+        if (spans.Count == 0) return text;
+        StringBuilder? sb = null;
+        var copied = 0;
+        var regex = isBasic ? BasicTokenRegex : BearerTokenRegex;
+        var keyword = isBasic ? "basic" : "bearer";
+        foreach (var (open, close) in spans)
+        {
+            var innerStart = open + 1;
+            if (innerStart >= close || text.IndexOf('\\', innerStart, close - innerStart) < 0) continue;
+            var (decoded, rawOffsets) = DecodeQuotedSpanWithOffsets(text, innerStart, close);
+            if (decoded.IndexOf(keyword, StringComparison.OrdinalIgnoreCase) < 0) continue;
+            var match = regex.Match(decoded);
+            while (match.Success)
+            {
+                if (!isBasic || IsBasicCredentialToken(match.Groups[2].Value))
+                {
+                    var rawStart = rawOffsets[match.Index];
+                    var rawEnd = rawOffsets[match.Index + match.Length];
+                    if (rawStart >= copied)
+                    {
+                        sb ??= new StringBuilder(text.Length);
+                        sb.Append(text, copied, rawStart - copied)
+                            .Append(match.Groups[1].Value)
+                            .Append(" [redacted]");
+                        copied = rawEnd;
+                    }
+                }
+                match = match.NextMatch();
+            }
+        }
+        if (sb == null) return text;
+        return sb.Append(text, copied, text.Length - copied).ToString();
+    }
+
+    private sealed class AuthHeaderWriter
+    {
+        private readonly string _text;
+        private readonly List<(int Start, int End, string Replacement)>? _edits;
+        private StringBuilder? _sb;
+        public int Copied;
+
+        public AuthHeaderWriter(string text, List<(int Start, int End, string Replacement)>? edits = null)
+        {
+            _text = text;
+            _edits = edits;
+        }
+
+        public void AppendRedacted(int start, int end, string replacement)
+        {
+            if (_edits != null)
+            {
+                _edits.Add((start, end, replacement));
+                Copied = end;
+                return;
+            }
+            _sb ??= new StringBuilder(_text.Length);
+            _sb.Append(_text, Copied, start - Copied).Append(replacement);
+            Copied = end;
+        }
+
+        public string Finish()
+        {
+            if (_sb == null) return _text;
+            _sb.Append(_text, Copied, _text.Length - Copied);
+            return _sb.ToString();
+        }
+    }
+
+    private static string EscapeJsonStringContent(string text)
+    {
+        StringBuilder? sb = null;
+        var copied = 0;
+        for (var i = 0; i < text.Length; i++)
+        {
+            var ch = text[i];
+            if (ch is '"' or '\\' || ch < 0x20)
+            {
+                sb ??= new StringBuilder(text.Length + 8);
+                sb.Append(text, copied, i - copied);
+                switch (ch)
+                {
+                    case '"': sb.Append("\\\""); break;
+                    case '\\': sb.Append("\\\\"); break;
+                    case '\b': sb.Append("\\b"); break;
+                    case '\f': sb.Append("\\f"); break;
+                    case '\n': sb.Append("\\n"); break;
+                    case '\r': sb.Append("\\r"); break;
+                    case '\t': sb.Append("\\t"); break;
+                    default: sb.Append($"\\u{(int)ch:x4}"); break;
+                }
+                copied = i + 1;
+            }
+        }
+        return sb == null ? text : sb.Append(text, copied, text.Length - copied).ToString();
+    }
+
+    private static bool ContainsAuthHeaderCandidate(string text, int start, int end)
+    {
+        for (var i = start; i < end; i++)
+        {
+            var ch = text[i];
+            if (ch is ':' or '=') return true;
+            if (ch == '\\' && i + 5 < end && text[i + 1] == 'u') return true;
+        }
+        return false;
     }
 
     private sealed class AuthJsonScanCache
@@ -2219,11 +2547,17 @@ public sealed class CoreTelemetryService : ITelemetryService
         public int FailedContainerBack = -1;
     }
 
-    private static string RedactAuthHeaders(string text)
+    private static string RedactAuthHeaders(string text, int maxDepth = 4)
     {
         if (text.IndexOf(':') < 0 && text.IndexOf('=') < 0) return text;
-        StringBuilder? sb = null;
-        var copied = 0;
+        var writer = new AuthHeaderWriter(text);
+        ScanAuthHeaders(text, maxDepth, writer);
+        return writer.Finish();
+    }
+
+    private static void ScanAuthHeaders(string text, int maxDepth, AuthHeaderWriter writer)
+    {
+        if (text.IndexOf(':') < 0 && text.IndexOf('=') < 0) return;
         var cache = new AuthJsonScanCache();
         var i = 0;
         while (i < text.Length)
@@ -2231,6 +2565,16 @@ public sealed class CoreTelemetryService : ITelemetryService
             if (!TryMatchAuthHeaderKey(
                 text, i, cache, out var keyEnd, out var isJsonCandidate, out var hasJsonPrefix, out var failedTopEnd, out var normalizedKey))
             {
+                if (maxDepth > 0 && text[i] == '"' && !IsPrecededByOddBackslashes(text, i, writer.Copied))
+                {
+                    var close = FindDoubleQuotedPathEnd(text, i + 1, out _, out _);
+                    if (close > i && IsJsonStringSpanBoundary(text, i, close))
+                    {
+                        RedactAuthHeadersInBalancedSpan(text, i + 1, close, maxDepth - 1, writer);
+                        i = close + 1;
+                        continue;
+                    }
+                }
                 i++;
                 continue;
             }
@@ -2251,15 +2595,44 @@ public sealed class CoreTelemetryService : ITelemetryService
             }
             if (normalizedKey != null)
             {
-                sb ??= new StringBuilder(text.Length);
-                sb.Append(text, copied, i - copied).Append(text[i]).Append(normalizedKey).Append(text[i]);
-                copied = keyEnd;
+                writer.AppendRedacted(i, keyEnd, text[i] + normalizedKey + text[i]);
             }
-            i = RedactAuthHeaderValue(text, valStart, isJsonMember, allowTruncatedObject, containerTrailingEnd, cache, ref sb, ref copied);
+            i = RedactAuthHeaderValue(text, valStart, isJsonMember, allowTruncatedObject, containerTrailingEnd, cache, writer);
         }
-        if (sb == null) return text;
-        sb.Append(text, copied, text.Length - copied);
-        return sb.ToString();
+    }
+
+    private static bool IsJsonStringSpanBoundary(string text, int open, int close)
+    {
+        var prev = SkipJsonWhitespaceBackward(text, open - 1);
+        if (prev >= 0 && text[prev] is not (':' or '[' or ',' or '{')) return false;
+        var after = SkipJsonWhitespaceForward(text, close + 1);
+        return after >= text.Length || text[after] is ',' or '}' or ']' or ':';
+    }
+
+    private static void RedactAuthHeadersInBalancedSpan(
+        string text, int innerStart, int close, int nextDepth, AuthHeaderWriter writer)
+    {
+        if (innerStart >= close || !ContainsAuthHeaderCandidate(text, innerStart, close)) return;
+        var hasBackslash = text.IndexOf('\\', innerStart, close - innerStart) >= 0;
+        string decoded;
+        int[]? rawOffsets = null;
+        if (hasBackslash)
+        {
+            (decoded, rawOffsets) = DecodeQuotedSpanWithOffsets(text, innerStart, close);
+        }
+        else
+        {
+            decoded = text.Substring(innerStart, close - innerStart);
+        }
+        if (decoded.IndexOf(':') < 0 && decoded.IndexOf('=') < 0) return;
+        var edits = new List<(int Start, int End, string Replacement)>();
+        ScanAuthHeaders(decoded, nextDepth, new AuthHeaderWriter(decoded, edits));
+        foreach (var (eStart, eEnd, eRepl) in edits)
+        {
+            var rawStart = rawOffsets != null ? rawOffsets[eStart] : innerStart + eStart;
+            var rawEnd = rawOffsets != null ? rawOffsets[eEnd] : innerStart + eEnd;
+            writer.AppendRedacted(rawStart, rawEnd, EscapeJsonStringContent(eRepl));
+        }
     }
 
     private static bool TryMatchAuthHeaderKey(
@@ -2362,48 +2735,44 @@ public sealed class CoreTelemetryService : ITelemetryService
 
     private static int RedactAuthHeaderValue(
         string text, int valStart, bool isJsonMember, bool allowTruncatedObject, int failedTopEnd,
-        AuthJsonScanCache cache, ref StringBuilder? sb, ref int copied)
+        AuthJsonScanCache cache, AuthHeaderWriter writer)
     {
         var ch = text[valStart];
         if (ch is '"' or '\'')
         {
-            var afterQuote = RedactQuotedAuthString(text, valStart, ch, ref sb, ref copied);
+            var afterQuote = RedactQuotedAuthString(text, valStart, ch, writer);
             var validJsonStr = isJsonMember && ch == '"' && ScanJsonStringEnd(text, valStart + 1) == afterQuote;
-            return RedactTrailingPlainAuthContinuation(text, afterQuote, validJsonStr, failedTopEnd, ref sb, ref copied);
+            return RedactTrailingPlainAuthContinuation(text, afterQuote, validJsonStr, failedTopEnd, writer);
         }
         if (ch == '[')
         {
-            var afterArray = RedactAuthArrayValue(text, valStart + 1, isJsonMember, allowTruncatedObject, cache, ref sb, ref copied);
+            var afterArray = RedactAuthArrayValue(text, valStart + 1, isJsonMember, allowTruncatedObject, cache, writer);
             var validJsonArr = isJsonMember && TryParseJsonValue(text, valStart, ref cache.ValidJsonValueEnd) == afterArray;
-            return RedactTrailingPlainAuthContinuation(text, afterArray, validJsonArr, failedTopEnd, ref sb, ref copied);
+            return RedactTrailingPlainAuthContinuation(text, afterArray, validJsonArr, failedTopEnd, writer);
         }
         if (ch == '{')
         {
             var objEnd = TryParseJsonValue(text, valStart, ref cache.ValidJsonValueEnd);
             if (objEnd > valStart)
             {
-                sb ??= new StringBuilder(text.Length);
-                sb.Append(text, copied, valStart - copied).Append(isJsonMember ? "\"[redacted]\"" : "[redacted]");
-                copied = objEnd;
-                return RedactTrailingPlainAuthContinuation(text, objEnd, isJsonMember, failedTopEnd, ref sb, ref copied);
+                writer.AppendRedacted(valStart, objEnd, isJsonMember ? "\"[redacted]\"" : "[redacted]");
+                return RedactTrailingPlainAuthContinuation(text, objEnd, isJsonMember, failedTopEnd, writer);
             }
             if (isJsonMember || allowTruncatedObject)
             {
-                sb ??= new StringBuilder(text.Length);
-                sb.Append(text, copied, valStart - copied).Append("\"[redacted]\"");
-                copied = text.Length;
+                writer.AppendRedacted(valStart, text.Length, "\"[redacted]\"");
                 return text.Length;
             }
         }
-        if (isJsonMember && TryRedactJsonPrimitiveAuthValue(text, valStart, ref sb, ref copied, out var afterPrim))
+        if (isJsonMember && TryRedactJsonPrimitiveAuthValue(text, valStart, writer, out var afterPrim))
         {
             return afterPrim;
         }
-        return RedactPlainAuthSpan(text, valStart, failedTopEnd, ref sb, ref copied);
+        return RedactPlainAuthSpan(text, valStart, failedTopEnd, writer);
     }
 
     private static bool TryRedactJsonPrimitiveAuthValue(
-        string text, int valStart, ref StringBuilder? sb, ref int copied, out int endPos)
+        string text, int valStart, AuthHeaderWriter writer, out int endPos)
     {
         endPos = valStart;
         var tokenEnd = valStart;
@@ -2423,9 +2792,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         if (next < text.Length && !IsJsonMemberContinuationDelimiter(text, next)) return false;
         if (!isNull)
         {
-            sb ??= new StringBuilder(text.Length);
-            sb.Append(text, copied, valStart - copied).Append("\"[redacted]\"");
-            copied = tokenEnd;
+            writer.AppendRedacted(valStart, tokenEnd, "\"[redacted]\"");
         }
         endPos = tokenEnd;
         return true;
@@ -2454,29 +2821,27 @@ public sealed class CoreTelemetryService : ITelemetryService
         return i == span.Length;
     }
 
-    private static int RedactPlainAuthSpan(string text, int valStart, int minEnd, ref StringBuilder? sb, ref int copied)
+    private static int RedactPlainAuthSpan(string text, int valStart, int minEnd, AuthHeaderWriter writer)
     {
         var lineEnd = ScanPlainAuthValueEnd(text, valStart);
         if (minEnd > lineEnd) lineEnd = ScanPlainAuthValueEnd(text, minEnd);
         var redacted = RedactAuthValueBody(text, valStart, lineEnd);
         if (redacted != null)
         {
-            sb ??= new StringBuilder(text.Length);
-            sb.Append(text, copied, valStart - copied).Append(redacted);
-            copied = lineEnd;
+            writer.AppendRedacted(valStart, lineEnd, redacted);
         }
         return lineEnd;
     }
 
     private static int RedactTrailingPlainAuthContinuation(
-        string text, int afterPos, bool allowNewlines, int failedTopEnd, ref StringBuilder? sb, ref int copied)
+        string text, int afterPos, bool allowNewlines, int failedTopEnd, AuthHeaderWriter writer)
     {
         var tailStart = FindTrailingPlainAuthStart(text, afterPos, allowNewlines);
-        if (tailStart >= 0) return RedactPlainAuthSpan(text, tailStart, failedTopEnd, ref sb, ref copied);
+        if (tailStart >= 0) return RedactPlainAuthSpan(text, tailStart, failedTopEnd, writer);
         if (!allowNewlines && failedTopEnd > afterPos)
         {
             var nextStart = SkipJsonWhitespaceForward(text, afterPos);
-            if (nextStart < text.Length) return RedactPlainAuthSpan(text, nextStart, failedTopEnd, ref sb, ref copied);
+            if (nextStart < text.Length) return RedactPlainAuthSpan(text, nextStart, failedTopEnd, writer);
         }
         return afterPos;
     }
@@ -2957,7 +3322,7 @@ public sealed class CoreTelemetryService : ITelemetryService
 
     private static int RedactAuthArrayValue(
         string text, int start, bool isJsonMember, bool allowTruncatedObject,
-        AuthJsonScanCache cache, ref StringBuilder? sb, ref int copied)
+        AuthJsonScanCache cache, AuthHeaderWriter writer)
     {
         var depth = 1;
         var k = start;
@@ -2968,7 +3333,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             if (c == ']') { depth--; k++; continue; }
             if (c is '"' or '\'')
             {
-                k = RedactQuotedAuthString(text, k, c, ref sb, ref copied);
+                k = RedactQuotedAuthString(text, k, c, writer);
                 continue;
             }
             if (c == '{')
@@ -2976,17 +3341,13 @@ public sealed class CoreTelemetryService : ITelemetryService
                 var objEnd = TryParseJsonValue(text, k, ref cache.ValidJsonValueEnd);
                 if (objEnd > k)
                 {
-                    sb ??= new StringBuilder(text.Length);
-                    sb.Append(text, copied, k - copied).Append(isJsonMember ? "\"[redacted]\"" : "[redacted]");
-                    copied = objEnd;
+                    writer.AppendRedacted(k, objEnd, isJsonMember ? "\"[redacted]\"" : "[redacted]");
                     k = objEnd;
                     continue;
                 }
                 if (isJsonMember || allowTruncatedObject)
                 {
-                    sb ??= new StringBuilder(text.Length);
-                    sb.Append(text, copied, k - copied).Append("\"[redacted]\"");
-                    copied = text.Length;
+                    writer.AppendRedacted(k, text.Length, "\"[redacted]\"");
                     return text.Length;
                 }
             }
@@ -3008,9 +3369,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                 if (redacted != null)
                 {
                     var replacement = isJsonMember ? "\"" + redacted + "\"" : redacted;
-                    sb ??= new StringBuilder(text.Length);
-                    sb.Append(text, copied, k - copied).Append(replacement).Append(text, trimEnd, elemEnd - trimEnd);
-                    copied = elemEnd;
+                    writer.AppendRedacted(k, elemEnd, replacement + text.Substring(trimEnd, elemEnd - trimEnd));
                 }
             }
             k = elemEnd;
@@ -3019,7 +3378,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     }
 
     private static int RedactQuotedAuthString(
-        string text, int quotePos, char quote, ref StringBuilder? sb, ref int copied)
+        string text, int quotePos, char quote, AuthHeaderWriter writer)
     {
         var j = quotePos + 1;
         var escaped = false;
@@ -3035,9 +3394,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         var redacted = RedactAuthValueBody(text, innerStart, j);
         if (redacted != null)
         {
-            sb ??= new StringBuilder(text.Length);
-            sb.Append(text, copied, innerStart - copied).Append(redacted);
-            copied = j;
+            writer.AppendRedacted(innerStart, j, redacted);
         }
         return j < text.Length && text[j] == quote ? j + 1 : j;
     }
@@ -3237,6 +3594,12 @@ public sealed class CoreTelemetryService : ITelemetryService
 
     private static string RedactQuotedEmails(string text)
     {
+        var current = RedactQuotedEmailsRaw(text);
+        return RedactEmailsInEscapedDoubleQuotes(current, quotedOnly: true);
+    }
+
+    private static string RedactQuotedEmailsRaw(string text)
+    {
         if (text.IndexOf('"') < 0 || !HasEmailAt(text))
         {
             return text;
@@ -3286,6 +3649,111 @@ public sealed class CoreTelemetryService : ITelemetryService
     }
 
     private static string RedactEmails(string text)
+    {
+        var current = RedactEmailsRaw(text);
+        return RedactEmailsInEscapedDoubleQuotes(current, quotedOnly: false);
+    }
+
+    private static string RedactEmailsInEscapedDoubleQuotes(string text, bool quotedOnly)
+    {
+        if (text.IndexOf('"') < 0 || text.IndexOf('\\') < 0 ||
+            (!HasEmailAt(text) && !text.Contains("\\u", StringComparison.Ordinal)))
+        {
+            return text;
+        }
+        var spans = CollectBalancedDoubleQuoteSpans(text);
+        if (spans.Count == 0) return text;
+        StringBuilder? sb = null;
+        var copied = 0;
+        foreach (var (open, close) in spans)
+        {
+            var innerStart = open + 1;
+            if (innerStart >= close || text.IndexOf('\\', innerStart, close - innerStart) < 0) continue;
+            var (decoded, rawOffsets) = DecodeQuotedSpanWithOffsets(text, innerStart, close);
+            if (!HasEmailAt(decoded) || (quotedOnly && decoded.IndexOf('"') < 0)) continue;
+            var matches = FindEmailMatchRanges(decoded, quotedOnly);
+            foreach (var (mStart, mEnd) in matches)
+            {
+                var rawStart = rawOffsets[mStart];
+                var rawEnd = rawOffsets[mEnd];
+                if (rawStart < copied) continue;
+                sb ??= new StringBuilder(text.Length);
+                sb.Append(text, copied, rawStart - copied).Append("[redacted-email]");
+                copied = rawEnd;
+            }
+        }
+        if (sb == null) return text;
+        return sb.Append(text, copied, text.Length - copied).ToString();
+    }
+
+    private static List<(int Start, int End)> FindEmailMatchRanges(string text, bool quotedOnly)
+    {
+        var ranges = new List<(int Start, int End)>();
+        var copied = 0;
+        var i = 0;
+        var quoteCacheUntil = -1;
+        var cachedNextQuote = -1;
+        while (i < text.Length)
+        {
+            if (text[i] == '"' && !IsPrecededByOddBackslashes(text, i, copied))
+            {
+                int closeQuote;
+                if (i < quoteCacheUntil)
+                {
+                    closeQuote = cachedNextQuote;
+                }
+                else
+                {
+                    closeQuote = FindNextEmailClosingQuote(text, i + 1, out var stopPos);
+                    cachedNextQuote = closeQuote;
+                    quoteCacheUntil = closeQuote >= 0 ? closeQuote : stopPos;
+                }
+                if (closeQuote > i)
+                {
+                    var qAtPos = closeQuote + 1;
+                    var qAtLen = qAtPos < text.Length ? EmailAtLength(text, qAtPos) : 0;
+                    var qDomEnd = qAtLen > 0 ? FindEmailDomainEnd(text, qAtPos + qAtLen) : -1;
+                    if (qDomEnd > 0)
+                    {
+                        ranges.Add((i, qDomEnd));
+                        copied = qDomEnd;
+                        i = qDomEnd;
+                        quoteCacheUntil = -1;
+                        continue;
+                    }
+                }
+                i++;
+                continue;
+            }
+            if (quotedOnly)
+            {
+                i++;
+                continue;
+            }
+            var atLen = EmailAtLength(text, i);
+            if (atLen == 0)
+            {
+                i++;
+                continue;
+            }
+            var domEnd = FindEmailDomainEnd(text, i + atLen);
+            var localStart = domEnd > 0 ? FindEmailLocalStart(text, i, copied) : i;
+            if (domEnd > 0 && localStart < i)
+            {
+                ranges.Add((localStart, domEnd));
+                copied = domEnd;
+                i = domEnd;
+                quoteCacheUntil = -1;
+            }
+            else
+            {
+                i += atLen;
+            }
+        }
+        return ranges;
+    }
+
+    private static string RedactEmailsRaw(string text)
     {
         if (!HasEmailAt(text))
         {
@@ -3588,6 +4056,20 @@ public sealed class CoreTelemetryService : ITelemetryService
     private static bool IsEmailDomainDot(char ch) =>
         ch is '.' or '\u3002' or '\uFF0E' or '\uFF61';
 
+    private static DomainCharKind ClassifyUnicodeCategory(System.Globalization.UnicodeCategory cat) => cat switch
+    {
+        System.Globalization.UnicodeCategory.UppercaseLetter
+            or System.Globalization.UnicodeCategory.LowercaseLetter
+            or System.Globalization.UnicodeCategory.TitlecaseLetter
+            or System.Globalization.UnicodeCategory.ModifierLetter
+            or System.Globalization.UnicodeCategory.OtherLetter
+            or System.Globalization.UnicodeCategory.NonSpacingMark
+            or System.Globalization.UnicodeCategory.SpacingCombiningMark
+            or System.Globalization.UnicodeCategory.EnclosingMark => DomainCharKind.Letter,
+        System.Globalization.UnicodeCategory.DecimalDigitNumber => DomainCharKind.Digit,
+        _ => DomainCharKind.Other
+    };
+
     private static DomainCharKind ClassifyDomainCharAt(string text, int pos, out int step)
     {
         step = 1;
@@ -3604,9 +4086,18 @@ public sealed class CoreTelemetryService : ITelemetryService
                 return ch == '-' ? DomainCharKind.Hyphen : DomainCharKind.Other;
             }
             if (IsEmailDomainDot(ch)) return DomainCharKind.Dot;
-            if (char.IsLetter(ch)) return DomainCharKind.Letter;
-            if (char.IsDigit(ch)) return DomainCharKind.Digit;
-            return DomainCharKind.Other;
+            if (char.IsHighSurrogate(ch))
+            {
+                if (pos + 11 < text.Length && text[pos + 6] == '\\' && text[pos + 7] == 'u' &&
+                    TryParseHex4(text, pos + 8, out var low) && char.IsLowSurrogate((char)low))
+                {
+                    step = 12;
+                    return ClassifyUnicodeCategory(
+                        System.Globalization.CharUnicodeInfo.GetUnicodeCategory(char.ConvertToUtf32(ch, (char)low)));
+                }
+                return DomainCharKind.Other;
+            }
+            return char.IsLowSurrogate(ch) ? DomainCharKind.Other : ClassifyUnicodeCategory(char.GetUnicodeCategory(ch));
         }
         if (ch < 0x80)
         {
@@ -3632,19 +4123,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         {
             cat = char.GetUnicodeCategory(ch);
         }
-        return cat switch
-        {
-            System.Globalization.UnicodeCategory.UppercaseLetter
-                or System.Globalization.UnicodeCategory.LowercaseLetter
-                or System.Globalization.UnicodeCategory.TitlecaseLetter
-                or System.Globalization.UnicodeCategory.ModifierLetter
-                or System.Globalization.UnicodeCategory.OtherLetter
-                or System.Globalization.UnicodeCategory.NonSpacingMark
-                or System.Globalization.UnicodeCategory.SpacingCombiningMark
-                or System.Globalization.UnicodeCategory.EnclosingMark => DomainCharKind.Letter,
-            System.Globalization.UnicodeCategory.DecimalDigitNumber => DomainCharKind.Digit,
-            _ => DomainCharKind.Other
-        };
+        return ClassifyUnicodeCategory(cat);
     }
 
     private static bool IsEmailBoundaryBlockedAt(string text, int pos)
@@ -3662,6 +4141,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         var k = domStart;
         var labelStart = domStart;
         var labelHasLetter = false;
+        var lastKind = DomainCharKind.Other;
         var bestEnd = -1;
         while (k < text.Length)
         {
@@ -3672,8 +4152,8 @@ public sealed class CoreTelemetryService : ITelemetryService
             }
             else if (kind == DomainCharKind.Dot)
             {
-                if (k == labelStart || text[k - 1] == '-') break;
-                labelStart = k + 1;
+                if (k == labelStart || lastKind == DomainCharKind.Hyphen) break;
+                labelStart = k + step;
                 labelHasLetter = false;
             }
             else if (kind == DomainCharKind.Digit)
@@ -3688,11 +4168,14 @@ public sealed class CoreTelemetryService : ITelemetryService
             {
                 break;
             }
+            lastKind = kind;
             k += step;
             var atBoundary = k == text.Length || !IsEmailBoundaryBlockedAt(text, k);
-            var continuesDomain = k + 1 < text.Length && IsEmailDomainDot(text[k]) &&
-                ClassifyDomainCharAt(text, k + 1, out _) is DomainCharKind.Letter or DomainCharKind.Digit;
-            if (k > labelStart && labelHasLetter && text[k - 1] != '-' && atBoundary && !continuesDomain)
+            var continuesDomain = k < text.Length &&
+                ClassifyDomainCharAt(text, k, out var dotStep) == DomainCharKind.Dot &&
+                k + dotStep < text.Length &&
+                ClassifyDomainCharAt(text, k + dotStep, out _) is DomainCharKind.Letter or DomainCharKind.Digit;
+            if (k > labelStart && labelHasLetter && lastKind != DomainCharKind.Hyphen && atBoundary && !continuesDomain)
             {
                 bestEnd = k;
             }
@@ -3902,9 +4385,15 @@ public sealed class CoreTelemetryService : ITelemetryService
         {
             if (ch == '\\')
             {
-                var isEscapedDoubleQuote = _openQuote == '"' && !_escapedBackslash &&
-                    _cursor + 1 < text.Length && text[_cursor + 1] == '"';
-                if (!isEscapedDoubleQuote) _tokenHasBackslash = true;
+                var isNonPathJsonEscape = false;
+                if (_openQuote == '"' && !_escapedBackslash && _cursor + 1 < text.Length)
+                {
+                    var next = text[_cursor + 1];
+                    isNonPathJsonEscape = next is '"' or 'n' or 'r' or 't' or 'b' or 'f' ||
+                        (next == 'u' && _cursor + 5 < text.Length && TryParseHex4(text, _cursor + 2, out var code) &&
+                         code is not ('\\' or '/'));
+                }
+                if (!isNonPathJsonEscape) _tokenHasBackslash = true;
             }
             else if (ch == '/')
             {
