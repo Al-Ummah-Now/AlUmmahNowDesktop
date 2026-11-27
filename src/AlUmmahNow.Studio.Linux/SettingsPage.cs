@@ -132,12 +132,15 @@ public sealed class SettingsPage
                 }
                 if (!(telemetry?.SetConsent(TelemetryConsent.Full) ?? true))
                 {
-                    telemetry?.SetConsent(TelemetryConsent.Off);
-                    if (!store.SaveTelemetryEnabled(false))
+                    var rolledBack = store.SaveTelemetryEnabled(false);
+                    var purged = telemetry?.SetConsent(TelemetryConsent.Off) ?? true;
+                    if (!rolledBack)
                     {
                         settings.TelemetryEnabled = true;
                         telemetryCheck.SetActive(true);
-                        telemetryNotice.SetText(l["settings.telemetry.disableError"]);
+                        telemetryNotice.SetText(purged
+                            ? l["settings.telemetry.disableError"]
+                            : l["settings.telemetry.disableError"] + "\n" + purgeWarningText);
                         telemetryNotice.SetVisible(true);
                         return;
                     }
@@ -153,12 +156,15 @@ public sealed class SettingsPage
             }
             else
             {
+                var saved = store.SaveTelemetryEnabled(false);
                 var purged = telemetry?.SetConsent(TelemetryConsent.Off) ?? true;
-                if (!store.SaveTelemetryEnabled(false))
+                if (!saved)
                 {
                     settings.TelemetryEnabled = true;
                     telemetryCheck.SetActive(true);
-                    telemetryNotice.SetText(l["settings.telemetry.disableError"]);
+                    telemetryNotice.SetText(purged
+                        ? l["settings.telemetry.disableError"]
+                        : l["settings.telemetry.disableError"] + "\n" + purgeWarningText);
                     telemetryNotice.SetVisible(true);
                     return;
                 }

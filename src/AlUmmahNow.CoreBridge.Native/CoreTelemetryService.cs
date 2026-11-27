@@ -15,21 +15,21 @@ namespace AlUmmahNow.CoreBridge.Native;
 /// </summary>
 public sealed class CoreTelemetryService : ITelemetryService
 {
-    private static readonly Regex UrlVaultRegex = new(@"(?<![A-Za-z0-9+.-])[A-Za-z][A-Za-z0-9+.-]+://(?:\[([^\]\s""'<>\\{}\r\n]+)\]|(?:[A-Za-z0-9._~!$&'*+=-]|%[0-9A-Fa-f]{2})+)(?::\d+)?(?:[/?#](?:[^\s""<>\\{},;()\[\]\r\n]|\([^\s""<>\\{},;()\[\]/:\\]+\)|\[[^\s""<>\\{},;()\[\]/:\\]+\])*|(?=$|[\s""'<>\\{},;()\[\]]))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex UrlVaultRegex = new(@"(?<![A-Za-z0-9+.-])[A-Za-z][A-Za-z0-9+.-]+://(?:\[([^\]\s""'<>\\{}\r\n]+)\]|(?:[A-Za-z0-9._~!$&'*+;=-]|%[0-9A-Fa-f]{2})+)(?::\d+)?(?:[/?#](?:[^\s""<>\\{},()\[\]\r\n]|\([^\s""<>\\{},;()\[\]/:\\]+\)|\[[^\s""<>\\{},;()\[\]/:\\]+\])*|(?=$|[\s""'<>\\{},;()\[\]]))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex FileUriRegex = new(@"(?<![A-Za-z0-9+.-])file://[^\r\n]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex ParenPathRegex = new(@"(\()(?:/|~/|[A-Za-z]:[\\/]|\\\\)[^()\r\n]+(\))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex ParenRelativeSlashPathRegex = new(@"(\()(?!HTTP/\d)(?!TLS/\d)(?!SSL/\d)[^\s/\\""'<>()\[\]{}:\u001E\u001F]+/[^()\r\n]+(\))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex ParenRelativeSlashPathRegex = new(@"(\()(?!HTTP/\d)(?!TLS/\d)(?!SSL/\d)[^\s/\\""'<>()\[\]{}:,;\u001E\u001F]+/[^()\r\n]+(\))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex WindowsPathRegex = new(@"(?:[A-Za-z]:[\\/]|\\\\)[^\r\n]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex RelativeBackslashPathRegex = new(@"(^|[\s(\[{""'=,:;])[^\s\\/""'<>]+\\[^\r\n]+", RegexOptions.Compiled);
+    private static readonly Regex RelativeBackslashPathRegex = new(@"(^|[\s(\[{""'=,:;\u001F])[^\s\\/""'<>(),;\u001E\u001F]+\\[^\r\n\u001E\u001F]+", RegexOptions.Compiled);
     private static readonly Regex QuotedSpacedRootPathRegex = new(@"[""']/[ \t]+[^\r\n]+", RegexOptions.Compiled);
     private static readonly Regex UnixPathRegex = new(@"(?<![\p{L}\p{M}\p{N}._/-])(?:~/|//+(?=[ \t]*[^\s/])|/(?=[ \t]*[^\s/]))[^\r\n]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex RelativeSlashPathRegex = new(@"(^|[\s(\[{""'=,:;])(?!HTTP/\d)(?!TLS/\d)(?!SSL/\d)[^\s/\\""'<>()\[\]{}:]+/[^\r\n]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex RelativeSlashPathRegex = new(@"(^|[\s(\[{""'=,:;\u001F])(?!HTTP/\d)(?!TLS/\d)(?!SSL/\d)[^\s/\\""'<>()\[\]{}:,;\u001E\u001F]+/[^\r\n\u001E\u001F]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex DoubleQuotedFilenameRegex = new(@"""[^""\r\n/\\]*\.[A-Za-z0-9]{1,16}""", RegexOptions.Compiled);
     private static readonly Regex SingleQuotedFilenameRegex = new(@"'(?:[^'\r\n/\\]|'(?=\p{L}))*\.[A-Za-z0-9]{1,16}'", RegexOptions.Compiled);
     private static readonly Regex KeywordQuotedPathRegex = new(@"(\b(?:file|path|directory|folder|document)\s+)([""'])(?!\u001E)[^'""\r\n]+\2", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex KeywordUnquotedFilenameRegex = new(@"(\b(?:open|opening|read|reading|write|writing|delete|deleting|remove|removing|rename|stat|create|creating|load|loading|save|saving|access|accessing|unlink|file|path|directory|folder|document|filename|filepath)\b(?:\s*[:=]\s*|\s+))(?!\u001E)[^\r\n\u001E\u001F]*\.[A-Za-z0-9]{1,16}\b(?!\(|:\d+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex KeywordUnquotedFilenameRegex = new(@"(\b(?:open|opening|read|reading|write|writing|delete|deleting|remove|removing|rename|stat|create|creating|load|loading|save|saving|access|accessing|unlink|file|path|directory|folder|document|filename|filepath)\b(?:\s*[:=]\s*|\s+))(?!\u001E)[^\r\n\u001E\u001F]*\.(?!(?:kt|java|swift|cs|cpp|cc|c|h|hpp|rs|py|js|ts|go|rb|m|mm):\d+)[A-Za-z0-9]{1,16}\b(?!\()", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex KeywordAssignedPathRegex = new(@"(\b(?:file|path|filename|filepath)\s*[:=]\s*)(?!\u001E)[^\r\n\u001E\u001F]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex BareFilenameRegex = new(@"(^|[\r\n:=;\u001F])([ \t]*)[^\r\n:=;\u001E\u001F]*\.(?:mov|mp4|m4v|mkv|webm|avi|ts|m3u8|mpd|mp3|m4a|wav|aac|flac|ogg|opus|jpg|jpeg|png|gif|webp|heic|svg|pdf|txt|md|rtf|doc|docx|xls|xlsx|ppt|pptx|csv|json|xml|yaml|yml|toml|ini|cfg|conf|log|srt|vtt|ass|ssa|zip|tar|gz|tgz|bz2|xz|7z|rar|dmg|pkg|msi|exe|apk|aab|ipa|pem|key|crt|cer|p12|pfx|jks|keystore|db|sqlite|sqlite3|bin|dat|tmp|bak|proj|aun)\b(?!\(|:\d+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex BareFilenameRegex = new(@"(^|[\r\n:=;\u001F])([ \t]*)[^\r\n:=;\u001E\u001F]*\.(?:mov|mp4|m4v|mkv|webm|avi|ts|m3u8|mpd|mp3|m4a|wav|aac|flac|ogg|opus|jpg|jpeg|png|gif|webp|heic|svg|pdf|txt|md|rtf|doc|docx|xls|xlsx|ppt|pptx|csv|json|xml|yaml|yml|toml|ini|cfg|conf|log|srt|vtt|ass|ssa|zip|tar|gz|tgz|bz2|xz|7z|rar|dmg|pkg|msi|exe|apk|aab|ipa|pem|key|crt|cer|p12|pfx|jks|keystore|db|sqlite|sqlite3|bin|dat|tmp|bak|proj|aun)\b(?!\()", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private readonly TelemetryClient _client;
     private readonly string? _bufferPath;
@@ -166,10 +166,15 @@ public sealed class CoreTelemetryService : ITelemetryService
             }
             var url = raw;
             var tail = string.Empty;
+            if (url.EndsWith(';'))
+            {
+                url = url[..^1];
+                tail = ";";
+            }
             if (match.Index > 0 && text[match.Index - 1] == '\'' && url.EndsWith('\''))
             {
                 url = url[..^1];
-                tail = "'";
+                tail = "'" + tail;
             }
             var idx = vaultedUrls.Count;
             vaultedUrls.Add(url);
@@ -267,6 +272,10 @@ public sealed class CoreTelemetryService : ITelemetryService
                         externalToken = null;
                     }
                     if (string.IsNullOrEmpty(externalToken))
+                    {
+                        return false;
+                    }
+                    if (!EnsureBufferGenerationMatchesLocked(externalToken))
                     {
                         return false;
                     }
@@ -655,6 +664,69 @@ public sealed class CoreTelemetryService : ITelemetryService
         CancelQuietly(toCancel);
     }
 
+    private string? BufferGenerationPath =>
+        string.IsNullOrWhiteSpace(_bufferPath) ? null : _bufferPath + ".generation";
+
+    private bool EnsureBufferGenerationMatchesLocked(string expectedToken)
+    {
+        var genPath = BufferGenerationPath;
+        if (genPath == null) return true;
+        string? existing = null;
+        try
+        {
+            if (File.Exists(genPath))
+            {
+                existing = File.ReadAllText(genPath).Trim();
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            existing = null;
+        }
+        if (string.Equals(existing, expectedToken, StringComparison.Ordinal))
+        {
+            return true;
+        }
+        // Any buffer on disk belongs to a different or unverified consent generation: purge it before opening.
+        if (!TryDeleteBufferFallback())
+        {
+            return false;
+        }
+        try
+        {
+            var dir = Path.GetDirectoryName(genPath);
+            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+            var tmp = genPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            File.WriteAllText(tmp, expectedToken);
+            if (File.Exists(genPath)) File.Replace(tmp, genPath, null);
+            else File.Move(tmp, genPath);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private bool TryDeleteGenerationFile()
+    {
+        var genPath = BufferGenerationPath;
+        if (genPath == null) return true;
+        try
+        {
+            File.Delete(genPath);
+            return true;
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
     private bool TryDeleteBufferFallback()
     {
         if (string.IsNullOrWhiteSpace(_bufferPath)) return true;
@@ -681,13 +753,14 @@ public sealed class CoreTelemetryService : ITelemetryService
     private bool TryDeleteSiblingTempFiles()
     {
         if (string.IsNullOrWhiteSpace(_bufferPath)) return true;
+        var genOk = TryDeleteGenerationFile();
         var dir = Path.GetDirectoryName(_bufferPath);
         var fileName = Path.GetFileName(_bufferPath);
-        if (string.IsNullOrEmpty(dir) || string.IsNullOrEmpty(fileName)) return true;
+        if (string.IsNullOrEmpty(dir) || string.IsNullOrEmpty(fileName)) return genOk;
         try
         {
             var pattern = $".{fileName}.*.tmp";
-            var allDeleted = true;
+            var allDeleted = genOk;
             foreach (var tmp in Directory.EnumerateFiles(dir, pattern))
             {
                 try
@@ -703,7 +776,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         }
         catch (DirectoryNotFoundException)
         {
-            return true;
+            return genOk;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {

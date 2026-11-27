@@ -480,6 +480,70 @@ public class CoreTelemetryServiceTests
     }
 
     [Fact]
+    public void Fresh_instance_purges_stale_generation_buffer_on_startup_but_keeps_same_generation_buffer()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "aun-tel-gen-startup-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var bufferPath = Path.Combine(dir, "telemetry-buffer.json");
+        string? sharedToken = "enabled:gen1";
+        try
+        {
+            using (var gen1Instance = new CoreTelemetryService(
+                platform: "linux",
+                appVersion: "1.0.0",
+                locale: "en",
+                videosApiBaseUrl: null,
+                userAgent: "AlUmmahNowLinux/1.0.0",
+                bufferPath: bufferPath,
+                initialEnabled: true,
+                externalConsentToken: () => Volatile.Read(ref sharedToken)))
+            {
+                gen1Instance.Track("screen_view", new Dictionary<string, object> { ["screen"] = "gen1-old" });
+                gen1Instance.Persist();
+                Assert.True(File.Exists(bufferPath));
+            }
+
+            // Simulate opt-out + re-enable creating a new generation while a stale gen1 buffer remained on disk.
+            Volatile.Write(ref sharedToken, "enabled:gen2");
+
+            using (var freshGen2 = new CoreTelemetryService(
+                platform: "linux",
+                appVersion: "1.0.0",
+                locale: "en",
+                videosApiBaseUrl: null,
+                userAgent: "AlUmmahNowLinux/1.0.0",
+                bufferPath: bufferPath,
+                initialEnabled: true,
+                externalConsentToken: () => Volatile.Read(ref sharedToken)))
+            {
+                Assert.Equal(TelemetryConsent.Full, freshGen2.Consent);
+                Assert.Equal(0, freshGen2.PendingCount);
+
+                // Persist a new event under gen2; a normal restart within gen2 must keep it.
+                freshGen2.Track("screen_view", new Dictionary<string, object> { ["screen"] = "gen2-new" });
+                freshGen2.Persist();
+                Assert.Equal(1, freshGen2.PendingCount);
+            }
+
+            using var restartedGen2 = new CoreTelemetryService(
+                platform: "linux",
+                appVersion: "1.0.0",
+                locale: "en",
+                videosApiBaseUrl: null,
+                userAgent: "AlUmmahNowLinux/1.0.0",
+                bufferPath: bufferPath,
+                initialEnabled: true,
+                externalConsentToken: () => Volatile.Read(ref sharedToken));
+            Assert.Equal(TelemetryConsent.Full, restartedGen2.Consent);
+            Assert.Equal(1, restartedGen2.PendingCount);
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
     public void ReportCrash_and_breadcrumb_redact_local_file_paths()
     {
         var dir = Path.Combine(Path.GetTempPath(), "aun-tel-paths-" + Guid.NewGuid().ToString("N"));
@@ -542,6 +606,14 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("https://example.com/a'b/items"));
             Assert.Equal("https://foo!bar.example/api",
                 CoreTelemetryService.SanitizeLocalPaths("https://foo!bar.example/api"));
+            Assert.Equal("https://example.com/v1;version=2/items",
+                CoreTelemetryService.SanitizeLocalPaths("https://example.com/v1;version=2/items"));
+            Assert.Equal("https://one;two.example/api",
+                CoreTelemetryService.SanitizeLocalPaths("https://one;two.example/api"));
+            Assert.Equal("https://example.com/api,[redacted-path]",
+                CoreTelemetryService.SanitizeLocalPaths("https://example.com/api,private/Secret.mov"));
+            Assert.Equal("open [redacted-path]:42",
+                CoreTelemetryService.SanitizeLocalPaths("open Secret.mov:42"));
             Assert.Equal("open [redacted-path] from https://example.com/api",
                 CoreTelemetryService.SanitizeLocalPaths("open Secret.mov from https://example.com/api"));
             Assert.Equal("open failed at MainActivity.kt:42",

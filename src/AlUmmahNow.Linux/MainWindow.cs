@@ -383,12 +383,15 @@ public sealed partial class MainWindow
                 }
                 if (!_telemetry.SetConsent(TelemetryConsent.Full))
                 {
-                    _telemetry.SetConsent(TelemetryConsent.Off);
-                    if (!_store.SaveTelemetryEnabled(false))
+                    var rolledBack = _store.SaveTelemetryEnabled(false);
+                    var purged = _telemetry.SetConsent(TelemetryConsent.Off);
+                    if (!rolledBack)
                     {
                         _settings.TelemetryEnabled = true;
                         telemetryCheck.SetActive(true);
-                        telemetryNotice.SetText(_localizer["settings.telemetry.disableError"]);
+                        telemetryNotice.SetText(purged
+                            ? _localizer["settings.telemetry.disableError"]
+                            : _localizer["settings.telemetry.disableError"] + "\n" + purgeWarningText);
                         telemetryNotice.SetVisible(true);
                         return;
                     }
@@ -404,12 +407,15 @@ public sealed partial class MainWindow
             }
             else
             {
+                var saved = _store.SaveTelemetryEnabled(false);
                 var purged = _telemetry.SetConsent(TelemetryConsent.Off);
-                if (!_store.SaveTelemetryEnabled(false))
+                if (!saved)
                 {
                     _settings.TelemetryEnabled = true;
                     telemetryCheck.SetActive(true);
-                    telemetryNotice.SetText(_localizer["settings.telemetry.disableError"]);
+                    telemetryNotice.SetText(purged
+                        ? _localizer["settings.telemetry.disableError"]
+                        : _localizer["settings.telemetry.disableError"] + "\n" + purgeWarningText);
                     telemetryNotice.SetVisible(true);
                     return;
                 }
