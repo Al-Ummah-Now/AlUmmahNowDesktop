@@ -323,6 +323,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         private int _cursor;
         private bool _hasPathOnLine;
         private char _pathQuote;
+        private bool _escapedBackslash;
         private int _tokenStart;
         private int _tokenEnd;
         private bool _tokenHasPathSep;
@@ -338,7 +339,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         public bool IsEmbeddedInPath(string text, int matchStart)
         {
             AdvanceTo(text, matchStart);
-            var curTokenIsPath = _tokenHasPathSep && !IsProtocolToken(text, _tokenStart, _tokenEnd);
+            var curTokenIsPath = _tokenHasPathSep && !IsNonPathSlashToken(text, _tokenStart, _tokenEnd);
             return _pathQuote != '\0' || curTokenIsPath || (_hasPathOnLine && (!_wsBeforeRun || _inWrapperRun));
         }
 
@@ -352,6 +353,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         {
             _hasPathOnLine = false;
             _pathQuote = '\0';
+            _escapedBackslash = false;
             _tokenStart = -1;
             _tokenEnd = -1;
             _tokenHasPathSep = false;
@@ -378,23 +380,17 @@ public sealed class CoreTelemetryService : ITelemetryService
 
         private void ProcessLineChar(string text, char ch)
         {
-            var closedQuote = _pathQuote != '\0' && ch == _pathQuote;
+            var closedQuote = _pathQuote != '\0' && ch == _pathQuote && !_escapedBackslash;
             if (closedQuote)
             {
-                _pathQuote = '\0';
-                _hasPathOnLine = false;
-                _tokenStart = -1;
-                _tokenEnd = -1;
-                _tokenHasPathSep = false;
-                _inWrapperRun = false;
-                _wsBeforeRun = false;
+                ResetLineState();
                 return;
             }
             var atTokenStart = _tokenStart < 0 || _inWrapperRun;
             if (IsFileSchemeAt(text, _cursor) || StartsLocalPathAt(text, _cursor, atTokenStart))
             {
                 _hasPathOnLine = true;
-                if (_cursor > 0 && text[_cursor - 1] is '"' or '\'')
+                if (_pathQuote == '\0' && _cursor > 0 && text[_cursor - 1] is '"' or '\'')
                 {
                     _pathQuote = text[_cursor - 1];
                 }
@@ -403,9 +399,13 @@ public sealed class CoreTelemetryService : ITelemetryService
             {
                 if (!_inWrapperRun)
                 {
-                    if (_tokenHasPathSep && !IsProtocolToken(text, _tokenStart, _tokenEnd))
+                    if (_tokenHasPathSep && !IsNonPathSlashToken(text, _tokenStart, _tokenEnd))
                     {
                         _hasPathOnLine = true;
+                        if (_pathQuote == '\0' && _tokenStart > 0 && text[_tokenStart - 1] is '"' or '\'')
+                        {
+                            _pathQuote = text[_tokenStart - 1];
+                        }
                     }
                     _tokenStart = -1;
                     _tokenEnd = -1;
@@ -429,6 +429,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                 _inWrapperRun = false;
                 _wsBeforeRun = false;
             }
+            _escapedBackslash = ch == '\\' ? !_escapedBackslash : false;
         }
     }
 
@@ -443,18 +444,33 @@ public sealed class CoreTelemetryService : ITelemetryService
             pos + 2 < text.Length && text[pos + 1] == ':' && text[pos + 2] is '/' or '\\';
     }
 
-    private static bool IsProtocolToken(string text, int start, int end)
+    private static bool IsNonPathSlashToken(string text, int start, int end)
     {
         if (start < 0 || end <= start) return false;
         var span = text.AsSpan(start, end - start);
         var slashIdx = span.IndexOfAny('/', '\\');
         if (slashIdx <= 0 || slashIdx + 1 >= span.Length || span[slashIdx] != '/') return false;
-        if (span[(slashIdx + 1)..].IndexOfAny('/', '\\') >= 0) return false;
-        if (!char.IsAsciiDigit(span[slashIdx + 1])) return false;
-        var proto = span[..slashIdx];
-        return proto.Equals("HTTP", StringComparison.OrdinalIgnoreCase) ||
-            proto.Equals("TLS", StringComparison.OrdinalIgnoreCase) ||
-            proto.Equals("SSL", StringComparison.OrdinalIgnoreCase);
+        var after = span[(slashIdx + 1)..];
+        if (after.IndexOfAny('/', '\\') >= 0) return false;
+        var before = span[..slashIdx];
+        if (char.IsAsciiDigit(after[0]) &&
+            (before.Equals("HTTP", StringComparison.OrdinalIgnoreCase) ||
+             before.Equals("TLS", StringComparison.OrdinalIgnoreCase) ||
+             before.Equals("SSL", StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+        return IsAllAsciiDigits(before) && IsAllAsciiDigits(after);
+    }
+
+    private static bool IsAllAsciiDigits(ReadOnlySpan<char> span)
+    {
+        if (span.IsEmpty) return false;
+        foreach (var ch in span)
+        {
+            if (!char.IsAsciiDigit(ch)) return false;
+        }
+        return true;
     }
 
     private static bool IsUrlSchemeChar(char ch) =>
@@ -481,10 +497,11 @@ public sealed class CoreTelemetryService : ITelemetryService
                 var schemeEnd = pos + 7;
                 var rawEnd = schemeEnd;
                 var stoppedAtVault = false;
+                var escapedBackslash = false;
                 while (rawEnd < text.Length)
                 {
                     var ch = text[rawEnd];
-                    if (ch is '\r' or '\n' || (quote != '\0' && ch == quote)) break;
+                    if (ch is '\r' or '\n' || (quote != '\0' && ch == quote && !escapedBackslash)) break;
                     if (ch == '\u001E' &&
                         rawEnd + vaultPrefix.Length <= text.Length &&
                         text.AsSpan(rawEnd, vaultPrefix.Length).Equals(vaultPrefix, StringComparison.Ordinal))
@@ -492,6 +509,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                         stoppedAtVault = true;
                         break;
                     }
+                    escapedBackslash = ch == '\\' ? !escapedBackslash : false;
                     rawEnd++;
                 }
                 var trimmedEnd = rawEnd;

@@ -780,6 +780,12 @@ public class CoreTelemetryServiceTests
             Assert.Equal(manyXs, CoreTelemetryService.SanitizeLocalPaths(manyXs));
             Assert.Equal("\"[redacted-path]\"",
                 CoreTelemetryService.SanitizeLocalPaths("\"file:///private/My Folder (https://Secret/Acquisition.mov)\""));
+            Assert.Equal("\"[redacted-path]\"",
+                CoreTelemetryService.SanitizeLocalPaths("\"file:///private/Client \\\"Internal\\\" Acquisition\""));
+            Assert.Contains("https://example.com/api",
+                CoreTelemetryService.SanitizeLocalPaths("\"relative/My Clip.mov\" and (https://example.com/api)"));
+            Assert.Contains("https://example.com/api",
+                CoreTelemetryService.SanitizeLocalPaths("progress 1/2 (https://example.com/api)"));
             Assert.Equal("\"[redacted-path]\" (https://example.com/api)",
                 CoreTelemetryService.SanitizeLocalPaths("\"file:///a.mov\" (https://example.com/api)"));
             Assert.Equal("[redacted-path]",
