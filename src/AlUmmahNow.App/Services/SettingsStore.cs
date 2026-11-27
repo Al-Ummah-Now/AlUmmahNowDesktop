@@ -250,14 +250,25 @@ namespace AlUmmahNow.App.Services
 
         private static void ReplaceFile(string temp, string destination)
         {
-            if (File.Exists(destination))
+#if NETSTANDARD2_0
+            try
             {
                 File.Replace(temp, destination, null);
             }
-            else
+            catch (FileNotFoundException)
             {
-                File.Move(temp, destination);
+                try
+                {
+                    File.Move(temp, destination);
+                }
+                catch (IOException) when (File.Exists(destination))
+                {
+                    File.Replace(temp, destination, null);
+                }
             }
+#else
+            File.Move(temp, destination, overwrite: true);
+#endif
         }
     }
 }

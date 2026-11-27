@@ -19,8 +19,8 @@ namespace AlUmmahNow.CoreBridge.Native;
 /// </summary>
 public sealed class CoreTelemetryService : ITelemetryService
 {
-    private static readonly Regex ParenPathRegex = new(@"(?<!['""])(\()(?:/|~/|[A-Za-z]:[\\/]|\\\\)[^()\r\n\u001E]+(\))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex ParenRelativeSlashPathRegex = new(@"(?<!['""])(\()(?![ \t]*(?:HTTP|TLS|SSL)/\d)(?![ \t]*\d+/\d+[.,;:!?\s]*\))[^\s/\\""'<>()\[\]{}:,;=\u001E\u001F]+/[^()\r\n\u001E]+(\))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex ParenPathRegex = new(@"(\()(?:/|~/|[A-Za-z]:[\\/]|\\\\)[^()\r\n\u001E]+(\))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex ParenRelativeSlashPathRegex = new(@"(\()(?![ \t]*(?:HTTP|TLS|SSL)/\d)(?![ \t]*\d+/\d+[.,;:!?\s]*\))[^\s/\\""'<>()\[\]{}:,;=\u001E\u001F]+/[^()\r\n\u001E]+(\))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex WindowsPathRegex = new(@"(?:[A-Za-z]:[\\/]|\\\\)[^\S\r\n]*[^\r\n\u001E\s](?:[^\r\n\u001E]*[^\r\n\u001E\s])?", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex RelativeBackslashPathRegex = new(@"(^|[\s(\[{""'=,:;\u001F])[^\s\\/""'<>()\[{:,;=\u001E\u001F]+\\[^\r\n\u001E\u001F\s](?:[^\r\n\u001E\u001F]*[^\r\n\u001E\u001F\s])?", RegexOptions.Compiled);
     private static readonly Regex QuotedSpacedRootPathRegex = new(@"[""']/[ \t]+[^\r\n\u001E]+", RegexOptions.Compiled);
@@ -221,8 +221,8 @@ public sealed class CoreTelemetryService : ITelemetryService
         var escaped = EscapeSentinels(text, out var hadSentinels);
         var scrubbed = VaultNonFileUrls(escaped, VaultPrefix, out var vaultedUrls);
         scrubbed = RedactFileUris(scrubbed, VaultPrefix);
-        scrubbed = ParenPathRegex.Replace(scrubbed, "$1[redacted-path]$2");
-        scrubbed = ParenRelativeSlashPathRegex.Replace(scrubbed, "$1[redacted-path]$2");
+        scrubbed = ReplaceUnquotedParenPaths(scrubbed, ParenPathRegex);
+        scrubbed = ReplaceUnquotedParenPaths(scrubbed, ParenRelativeSlashPathRegex);
         scrubbed = WindowsPathRegex.Replace(scrubbed, "[redacted-path]");
         scrubbed = RelativeBackslashPathRegex.Replace(scrubbed, "$1[redacted-path]");
         scrubbed = QuotedSpacedRootPathRegex.Replace(scrubbed, "[redacted-path]");
@@ -647,6 +647,40 @@ public sealed class CoreTelemetryService : ITelemetryService
         return sb.ToString();
     }
 
+    private static string ReplaceUnquotedParenPaths(string text, Regex regex)
+    {
+        if (text.IndexOf('(') < 0) return text;
+        var cursor = 0;
+        var openQuote = '\0';
+        var escapedBackslash = false;
+        return regex.Replace(text, match =>
+        {
+            while (cursor < match.Index)
+            {
+                var ch = text[cursor];
+                if (ch is '\r' or '\n')
+                {
+                    openQuote = '\0';
+                    escapedBackslash = false;
+                }
+                else if (!escapedBackslash && openQuote != '\0' && ch == openQuote &&
+                    !(ch == '\'' && cursor > 0 && cursor + 1 < text.Length &&
+                      char.IsLetterOrDigit(text[cursor - 1]) && char.IsLetter(text[cursor + 1])))
+                {
+                    openQuote = '\0';
+                }
+                else if (!escapedBackslash && openQuote == '\0' &&
+                    (ch == '"' || (ch == '\'' && (cursor == 0 || !char.IsLetterOrDigit(text[cursor - 1])))))
+                {
+                    openQuote = ch;
+                }
+                escapedBackslash = ch == '\\' && !escapedBackslash;
+                cursor++;
+            }
+            return openQuote != '\0' ? match.Value : "([redacted-path])";
+        });
+    }
+
     private static bool IsUnicodeCombiningMark(char ch) =>
         char.GetUnicodeCategory(ch) is System.Globalization.UnicodeCategory.NonSpacingMark
             or System.Globalization.UnicodeCategory.SpacingCombiningMark
@@ -655,7 +689,8 @@ public sealed class CoreTelemetryService : ITelemetryService
     private static bool IsEmailLocalChar(string text, int pos)
     {
         var ch = text[pos];
-        if (char.IsLetterOrDigit(ch) || ch is '.' or '_' or '+' or '-' ||
+        if (char.IsLetterOrDigit(ch) ||
+            ch is '.' or '_' or '+' or '-' or '!' or '#' or '$' or '&' or '*' or '^' or '`' or '|' or '~' ||
             IsUnicodeCombiningMark(ch) || char.IsSurrogate(ch))
         {
             return true;
@@ -663,17 +698,24 @@ public sealed class CoreTelemetryService : ITelemetryService
         return ch == '%' && !(pos + 2 < text.Length && text[pos + 1] == '4' && text[pos + 2] == '0');
     }
 
+    private static bool IsPunycodeTld(string text, int tldStart, int tldEnd, bool allAscii) =>
+        allAscii && tldEnd - tldStart >= 6 &&
+        text.AsSpan(tldStart, 4).Equals("xn--", StringComparison.OrdinalIgnoreCase) &&
+        IsAsciiAlphaNum(text[tldEnd - 1]);
+
     private static int FindEmailDomainEnd(string text, int domStart)
     {
         var k = domStart;
         var lastDot = -1;
         var lettersSinceDot = 0;
+        var tldAllAscii = true;
         var bestEnd = -1;
         while (k < text.Length)
         {
             var ch = text[k];
             if (char.IsLetter(ch) || IsUnicodeCombiningMark(ch) || char.IsSurrogate(ch))
             {
+                if (ch >= 0x80) tldAllAscii = false;
                 if (lastDot >= 0 && lettersSinceDot >= 0 && !IsUnicodeCombiningMark(ch) && !char.IsLowSurrogate(ch))
                 {
                     lettersSinceDot++;
@@ -683,9 +725,11 @@ public sealed class CoreTelemetryService : ITelemetryService
             {
                 lastDot = k > domStart ? k : -1;
                 lettersSinceDot = 0;
+                tldAllAscii = true;
             }
             else if (char.IsDigit(ch) || ch == '-')
             {
+                if (ch >= 0x80) tldAllAscii = false;
                 lettersSinceDot = -1;
             }
             else
@@ -693,7 +737,9 @@ public sealed class CoreTelemetryService : ITelemetryService
                 break;
             }
             k++;
-            if (lastDot > domStart && lettersSinceDot >= 2 &&
+            var validTld = lastDot > domStart &&
+                (lettersSinceDot >= 2 || IsPunycodeTld(text, lastDot + 1, k, tldAllAscii));
+            if (validTld &&
                 (k == text.Length || !(char.IsLetterOrDigit(text[k]) || text[k] == '_' || IsUnicodeCombiningMark(text[k]))))
             {
                 bestEnd = k;

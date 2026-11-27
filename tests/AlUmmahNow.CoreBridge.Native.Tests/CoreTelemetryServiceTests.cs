@@ -832,6 +832,12 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("'relative/Artists' Private (https://private.example/Acquisition.mov)'"));
             Assert.Equal("'([redacted-path]",
                 CoreTelemetryService.SanitizeLocalPaths("'(/tmp/Client) Acquisition Plan'"));
+            Assert.Equal("' ([redacted-path]",
+                CoreTelemetryService.SanitizeLocalPaths("' (/tmp/Client) Acquisition Plan'"));
+            Assert.Equal("\" ([redacted-path]",
+                CoreTelemetryService.SanitizeLocalPaths("\" (/tmp/Client) Acquisition Plan\""));
+            Assert.Equal("\"My ([redacted-path]",
+                CoreTelemetryService.SanitizeLocalPaths("\"My (/tmp/Client) Acquisition Plan\""));
             Assert.Equal("\"([redacted-path]",
                 CoreTelemetryService.SanitizeLocalPaths("\"(relative/Client) Acquisition Plan\""));
             Assert.Equal("status 'ready' (https://example.com/api)",
@@ -935,8 +941,8 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("file:///storage/emulated/0/Secret.mov and https://example.com/api"));
             Assert.Equal("Failed for [redacted-email] with Bearer [redacted]",
                 CoreTelemetryService.SanitizeLocalPaths("Failed for alice@example.com with Bearer eyJhbGciOiJIUzI1NiJ9.payload.sig"));
-            Assert.Equal("Failed for [redacted-email], [redacted-email], [redacted-email], 「[redacted-email]」",
-                CoreTelemetryService.SanitizeLocalPaths("Failed for 李@example.com, محمد@مثال.مصر, user@bücher.example, 「李@例え.jp」"));
+            Assert.Equal("Failed for [redacted-email], [redacted-email], [redacted-email], 「[redacted-email]」, [redacted-email], [redacted-email]",
+                CoreTelemetryService.SanitizeLocalPaths("Failed for 李@example.com, محمد@مثال.مصر, user@bücher.example, 「李@例え.jp」, 李@例え.xn--p1ai, 李!明@example.com"));
             Assert.Equal("https://[2001:db8::1]/v1/items",
                 CoreTelemetryService.SanitizeLocalPaths("https://[2001:db8::1]/v1/items"));
             Assert.Equal("https://example.com/a(b)/items",
