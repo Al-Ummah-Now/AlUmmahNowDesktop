@@ -746,7 +746,63 @@ public sealed class CoreTelemetryService : ITelemetryService
             var afterArray = RedactAuthArrayValue(text, valStart + 1, allowNewlines, ref sb, ref copied);
             return RedactTrailingPlainAuthContinuation(text, afterArray, allowNewlines, ref sb, ref copied);
         }
+        if (allowNewlines && TryRedactJsonPrimitiveAuthValue(text, valStart, ref sb, ref copied, out var afterPrim))
+        {
+            return afterPrim;
+        }
         return RedactPlainAuthSpan(text, valStart, ref sb, ref copied);
+    }
+
+    private static bool TryRedactJsonPrimitiveAuthValue(
+        string text, int valStart, ref StringBuilder? sb, ref int copied, out int endPos)
+    {
+        endPos = valStart;
+        var tokenEnd = valStart;
+        while (tokenEnd < text.Length && text[tokenEnd] is not (' ' or '\t' or '\r' or '\n' or ',' or '}' or ']'))
+        {
+            tokenEnd++;
+        }
+        var len = tokenEnd - valStart;
+        if (len == 0) return false;
+        var span = text.AsSpan(valStart, len);
+        var isNull = span.Equals("null".AsSpan(), StringComparison.Ordinal);
+        var isBool = span.Equals("true".AsSpan(), StringComparison.Ordinal) ||
+            span.Equals("false".AsSpan(), StringComparison.Ordinal);
+        var isNumber = !isNull && !isBool && IsJsonNumberSpan(span);
+        if (!isNull && !isBool && !isNumber) return false;
+        var next = SkipAuthWhitespace(text, tokenEnd, allowNewlines: true);
+        if (next < text.Length && text[next] is not (',' or '}' or ']')) return false;
+        if (!isNull)
+        {
+            sb ??= new StringBuilder(text.Length);
+            sb.Append(text, copied, valStart - copied).Append("\"[redacted]\"");
+            copied = tokenEnd;
+        }
+        endPos = tokenEnd;
+        return true;
+    }
+
+    private static bool IsJsonNumberSpan(ReadOnlySpan<char> span)
+    {
+        var i = 0;
+        if (span[i] == '-') i++;
+        if (i >= span.Length || span[i] < '0' || span[i] > '9') return false;
+        if (span[i] == '0') i++;
+        else while (i < span.Length && span[i] >= '0' && span[i] <= '9') i++;
+        if (i < span.Length && span[i] == '.')
+        {
+            i++;
+            if (i >= span.Length || span[i] < '0' || span[i] > '9') return false;
+            while (i < span.Length && span[i] >= '0' && span[i] <= '9') i++;
+        }
+        if (i < span.Length && span[i] is 'e' or 'E')
+        {
+            i++;
+            if (i < span.Length && span[i] is '+' or '-') i++;
+            if (i >= span.Length || span[i] < '0' || span[i] > '9') return false;
+            while (i < span.Length && span[i] >= '0' && span[i] <= '9') i++;
+        }
+        return i == span.Length;
     }
 
     private static int RedactPlainAuthSpan(string text, int valStart, ref StringBuilder? sb, ref int copied)
@@ -773,23 +829,19 @@ public sealed class CoreTelemetryService : ITelemetryService
     private static int FindTrailingPlainAuthStart(string text, int afterPos, bool allowNewlines)
     {
         var p = afterPos;
-        var sawFold = false;
         while (p < text.Length)
         {
             while (p < text.Length && text[p] is ' ' or '\t') p++;
             var fold = AdvanceObsFold(text, p);
             if (fold > p)
             {
-                sawFold = true;
                 p = fold;
                 continue;
             }
             break;
         }
         if (p >= text.Length || text[p] is '\r' or '\n') return -1;
-        var next = text[p];
-        if (sawFold) return allowNewlines && next is '}' or ']' ? -1 : p;
-        if (next is '}' or ']' || (allowNewlines && next == ',')) return -1;
+        if (allowNewlines && text[p] is '}' or ']' or ',') return -1;
         return p;
     }
 
@@ -846,8 +898,9 @@ public sealed class CoreTelemetryService : ITelemetryService
                 var redacted = RedactAuthValueBody(text, k, trimEnd);
                 if (redacted != null)
                 {
+                    var replacement = allowNewlines ? "\"" + redacted + "\"" : redacted;
                     sb ??= new StringBuilder(text.Length);
-                    sb.Append(text, copied, k - copied).Append(redacted).Append(text, trimEnd, elemEnd - trimEnd);
+                    sb.Append(text, copied, k - copied).Append(replacement).Append(text, trimEnd, elemEnd - trimEnd);
                     copied = elemEnd;
                 }
             }
