@@ -13,14 +13,10 @@ namespace AlUmmahNow.CoreBridge.Native;
 /// </summary>
 public sealed class CoreTelemetryService : ITelemetryService
 {
-    private const string PathAtom = @"[\p{L}\p{M}\p{N}._@+-]+";
-    private const string PathSegment = PathAtom + @"(?: " + PathAtom + @"){0,3}";
     private static readonly Regex QuotedPathRegex = new(@"([""'])(?:file://|(?:[A-Za-z]:[\\/]|\\\\)|~/(?!\s)|/[^""'\r\n/]+/)[^""'\r\n]+\1", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex FileUriRegex = new(@"file://[^\s""'<>|)\]]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex WindowsMultiSegmentPathRegex = new(@"(?:[A-Za-z]:[\\/]|\\\\)(?:" + PathSegment + @"[\\/])+" + PathSegment, RegexOptions.Compiled);
-    private static readonly Regex WindowsPathRegex = new(@"(?:[A-Za-z]:[\\/]|\\\\)[^\s""'<>|)\]]+", RegexOptions.Compiled);
-    private static readonly Regex UnixMultiSegmentPathRegex = new(@"(?<![\p{L}\p{M}\p{N}._:/-])(?:~/|/)(?:" + PathSegment + @"/)+" + PathSegment, RegexOptions.Compiled);
-    private static readonly Regex UnixHomePathRegex = new(@"(?<![\p{L}\p{M}\p{N}._:/-])~/[^\s""'<>|,;:)\]]+", RegexOptions.Compiled);
+    private static readonly Regex FileUriRegex = new(@"file://[^\r\n""'<>|;]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex WindowsPathRegex = new(@"(?:[A-Za-z]:[\\/]|\\\\)[^\r\n""'<>|;]+?(?=(?::line\b|:\d+\b|[\r\n""'<>|;]|$))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex UnixPathRegex = new(@"(?<![\p{L}\p{M}\p{N}._:/-])(?:~/|/[^\s/""'<>|;:\r\n]+/)[^\r\n""'<>|;]*?(?=(?::line\b|:\d+\b|[\r\n""'<>|;]|$))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private readonly TelemetryClient _client;
     private readonly string? _bufferPath;
@@ -137,10 +133,8 @@ public sealed class CoreTelemetryService : ITelemetryService
         if (string.IsNullOrEmpty(text)) return text;
         var scrubbed = QuotedPathRegex.Replace(text, "[redacted-path]");
         scrubbed = FileUriRegex.Replace(scrubbed, "[redacted-path]");
-        scrubbed = WindowsMultiSegmentPathRegex.Replace(scrubbed, "[redacted-path]");
         scrubbed = WindowsPathRegex.Replace(scrubbed, "[redacted-path]");
-        scrubbed = UnixMultiSegmentPathRegex.Replace(scrubbed, "[redacted-path]");
-        scrubbed = UnixHomePathRegex.Replace(scrubbed, "[redacted-path]");
+        scrubbed = UnixPathRegex.Replace(scrubbed, "[redacted-path]");
         return scrubbed;
     }
 

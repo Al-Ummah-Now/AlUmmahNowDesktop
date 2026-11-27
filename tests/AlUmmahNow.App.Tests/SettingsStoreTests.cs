@@ -110,6 +110,19 @@ public class SettingsStoreTests
                 }
                 // Once readable again, the original "enabled" marker is still intact on disk.
                 Assert.True(store.LoadTelemetryEnabled());
+
+                // Remove search permission on the parent directory so File.Exists returns false even though
+                // the "enabled" marker exists: SaveTelemetryEnabled(false) MUST return false, not true.
+                File.SetUnixFileMode(dir, UnixFileMode.None);
+                try
+                {
+                    Assert.False(store.SaveTelemetryEnabled(false));
+                }
+                finally
+                {
+                    File.SetUnixFileMode(dir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+                }
+                Assert.True(store.LoadTelemetryEnabled());
             }
             else
             {

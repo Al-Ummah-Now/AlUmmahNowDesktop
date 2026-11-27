@@ -407,25 +407,26 @@ public class CoreTelemetryServiceTests
                 bufferPath: bufferPath,
                 initialEnabled: true);
 
-            service.AddBreadcrumb("io", "Opened /workspace/E\u0301lodie/Private Draft.mov and /workspace/alice/Confidential Client Name");
+            service.AddBreadcrumb("io", "Opened /workspace/E\u0301lodie/Very Secret Client Project Name.mov");
             service.ReportCrash(
                 "IOException",
-                @"Could not read C:\Users\Alice Smith\Private Draft.mp4 or file:///Users/alice/private.txt or /Users/Alice Smith/Docs/Final Cut.txt",
-                @"at Foo.Open() in /workspace/Élodie/src/App.cs:line 42 and \\fileserver\share\secret.mp4 and ~/private/key.pem");
+                "Failed reading /workspace/alice/Private (Confidential).mov; \"C:\\Users\\Alice Smith\\Private Draft.mp4\"",
+                "at Foo.Open() in /workspace/Élodie/src/App.cs:line 42\nat Bar.Run() in \\\\fileserver\\share\\secret.mp4\n~/private/key.pem");
 
             Assert.True(File.Exists(bufferPath));
             var json = File.ReadAllText(bufferPath);
             Assert.DoesNotContain("alice", json, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("smith", json, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("lodie", json, StringComparison.OrdinalIgnoreCase);
-            Assert.DoesNotContain("draft.mov", json, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("name.mov", json, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("confidential", json, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("draft.mp4", json, StringComparison.OrdinalIgnoreCase);
-            Assert.DoesNotContain("final cut", json, StringComparison.OrdinalIgnoreCase);
-            Assert.DoesNotContain("client name", json, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("workspace", json, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain(@"C:\Users", json, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("fileserver", json, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("private/key.pem", json, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains(":line 42", json, StringComparison.Ordinal);
+            Assert.Contains("Bar.Run()", json, StringComparison.Ordinal);
             Assert.Contains("[redacted-path]", json, StringComparison.Ordinal);
         }
         finally

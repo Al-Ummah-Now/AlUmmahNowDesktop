@@ -103,9 +103,14 @@ namespace AlUmmahNow.App.Services
             {
                 try
                 {
-                    if (!File.Exists(_telemetryConsentPath)) return true;
+                    // Do NOT pre-check with File.Exists: it returns false when directory search permission is denied,
+                    // which would falsely report opt-out success while the "enabled" marker still exists on disk.
                     File.Delete(_telemetryConsentPath);
-                    return !File.Exists(_telemetryConsentPath);
+                    return true;
+                }
+                catch (DirectoryNotFoundException)
+                {
+                    return true;
                 }
                 catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
                 {
