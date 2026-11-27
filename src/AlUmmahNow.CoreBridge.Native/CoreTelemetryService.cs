@@ -13,7 +13,7 @@ namespace AlUmmahNow.CoreBridge.Native;
 /// </summary>
 public sealed class CoreTelemetryService : ITelemetryService
 {
-    private static readonly Regex UrlVaultRegex = new(@"(?<![A-Za-z0-9+.-])[A-Za-z][A-Za-z0-9+.-]*://[^\s""'<>()\[\]{}\r\n]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex UrlVaultRegex = new(@"(?<![A-Za-z0-9+.-])[A-Za-z][A-Za-z0-9+.-]+://(?!\S*\\)[^\s""'<>\\{}\r\n]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex FileUriRegex = new(@"(?<![A-Za-z0-9+.-])file://[^\r\n]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex WindowsPathRegex = new(@"(?:[A-Za-z]:[\\/]|\\\\)[^\r\n]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex RelativeBackslashPathRegex = new(@"(^|[\s(\[{""'=,:;])[^\s\\/""'<>]+\\[^\r\n]+", RegexOptions.Compiled);
@@ -23,6 +23,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     private static readonly Regex DoubleQuotedFilenameRegex = new(@"""[^""\r\n/\\]*\.[A-Za-z0-9]{1,16}""", RegexOptions.Compiled);
     private static readonly Regex SingleQuotedFilenameRegex = new(@"'(?:[^'\r\n/\\]|'(?=\p{L}))*\.[A-Za-z0-9]{1,16}'", RegexOptions.Compiled);
     private static readonly Regex KeywordQuotedPathRegex = new(@"(\b(?:file|path|directory|folder|document)\s+)([""'])(?!\u001E)[^'""\r\n]+\2", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex KeywordUnquotedFilenameRegex = new(@"(\b(?:open|opening|read|reading|write|writing|delete|deleting|remove|removing|rename|stat|create|creating|load|loading|save|saving|access|accessing|unlink|file|path|directory|folder|document|filename|filepath)\b(?:\s*[:=]\s*|\s+))(?!\u001E)(?=[^\r\n]*\.[A-Za-z][A-Za-z0-9]{0,15}\b(?!\s*\())[^\r\n]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex KeywordAssignedPathRegex = new(@"(\b(?:file|path|filename|filepath)\s*[:=]\s*)(?!\u001E)[^\r\n]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex BareFilenameRegex = new(@"(?<![\p{L}\p{N}._-])[\p{L}\p{N}_-]+\.(?:mov|mp4|m4v|mkv|webm|avi|ts|m3u8|mpd|mp3|m4a|wav|aac|flac|ogg|opus|jpg|jpeg|png|gif|webp|heic|svg|pdf|txt|md|rtf|doc|docx|xls|xlsx|ppt|pptx|csv|json|xml|yaml|yml|toml|ini|cfg|conf|log|srt|vtt|ass|ssa|zip|tar|gz|tgz|bz2|xz|7z|rar|dmg|pkg|msi|exe|apk|aab|ipa|pem|key|crt|cer|p12|pfx|jks|keystore|db|sqlite|sqlite3|bin|dat|tmp|bak|proj|aun)\b(?!\s*\()", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
@@ -149,13 +150,15 @@ public sealed class CoreTelemetryService : ITelemetryService
         var vaultedUrls = new List<string>();
         var scrubbed = UrlVaultRegex.Replace(text, match =>
         {
-            if (match.Value.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
+            var raw = match.Value;
+            if (raw.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
             {
-                return match.Value;
+                return raw;
             }
+            var (url, tail) = SplitUnmatchedUrlClosers(raw);
             var idx = vaultedUrls.Count;
-            vaultedUrls.Add(match.Value);
-            return $"{prefix}{idx}\u001F";
+            vaultedUrls.Add(url);
+            return $"{prefix}{idx}\u001F{tail}";
         });
         scrubbed = FileUriRegex.Replace(scrubbed, "[redacted-path]");
         scrubbed = WindowsPathRegex.Replace(scrubbed, "[redacted-path]");
@@ -166,6 +169,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         scrubbed = DoubleQuotedFilenameRegex.Replace(scrubbed, "[redacted-path]");
         scrubbed = SingleQuotedFilenameRegex.Replace(scrubbed, "[redacted-path]");
         scrubbed = KeywordQuotedPathRegex.Replace(scrubbed, "$1[redacted-path]");
+        scrubbed = KeywordUnquotedFilenameRegex.Replace(scrubbed, "$1[redacted-path]");
         scrubbed = KeywordAssignedPathRegex.Replace(scrubbed, "$1[redacted-path]");
         scrubbed = BareFilenameRegex.Replace(scrubbed, "[redacted-path]");
         for (var i = 0; i < vaultedUrls.Count; i++)
@@ -173,6 +177,41 @@ public sealed class CoreTelemetryService : ITelemetryService
             scrubbed = scrubbed.Replace($"{prefix}{i}\u001F", vaultedUrls[i], StringComparison.Ordinal);
         }
         return scrubbed;
+    }
+
+    private static (string Url, string Tail) SplitUnmatchedUrlClosers(string raw)
+    {
+        var openParens = 0;
+        var closeParens = 0;
+        var openBrackets = 0;
+        var closeBrackets = 0;
+        foreach (var ch in raw)
+        {
+            if (ch == '(') openParens++;
+            else if (ch == ')') closeParens++;
+            else if (ch == '[') openBrackets++;
+            else if (ch == ']') closeBrackets++;
+        }
+        var end = raw.Length;
+        while (end > 0)
+        {
+            var last = raw[end - 1];
+            if (last == ')' && closeParens > openParens)
+            {
+                closeParens--;
+                end--;
+            }
+            else if (last == ']' && closeBrackets > openBrackets)
+            {
+                closeBrackets--;
+                end--;
+            }
+            else
+            {
+                break;
+            }
+        }
+        return (raw[..end], raw[end..]);
     }
 
     public TelemetryConsent Consent

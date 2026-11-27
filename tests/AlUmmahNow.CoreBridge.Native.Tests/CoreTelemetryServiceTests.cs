@@ -497,7 +497,7 @@ public class CoreTelemetryServiceTests
             service.AddBreadcrumb("io", "Opened /workspace/E\u0301lodie/Very Secret Client Project Name.mov\nFailed '/data/user/0/O'Brien.mov'\nRead \"/Users/O'Brien/Final.mov\"");
             service.ReportCrash(
                 "IOException",
-                "Failed reading /Private (Client).mov\n/Private Client\n/private-key\n/Users/alice/Secret<Project>.mov\n/Users/alice/Draft:77 in open() Acquisition.mov\nFailed /home/alice/Secret\"Acquisition.mov\nFailed to open \"/ Secret/Acquisition.mov\"\nFailed to open \"/ SecretFile\"\n/ SecretFile.mov\n/ SecretFile\n/ SecretFile.abcdefghijkl\n// SecretFile\n42:/ Secret/Acquisition.mov:77\nerror 42://SecretHost/Acquisition.mov\nFailed to open path\\\\Server\\Share\\Secret.mov\nopen(pathC:\\Secret\\Acquisition.mov)\nCould not find file 'Secret.mov'\nCould not find file 'private/Secret.mov'\nCould not find file './Secret.mov'\nCould not find file 'O'Brien.mov'\nCould not find file 'SecretBareName'\nopen //storage/emulated/0/Private.mov\n/workspace/alice/Project|Acquisition.mov\nerror 42:/home/alice/private.mov\n/Client Files/Private.mov\n/workspace/alice/Project;Acquisition.mov\n'/workspace/alice/Project:2026;Acquisition.mov'\n/!Acquisition.mov\n\"/!Acquisition.mov\"\n\"C:\\Users\\Alice Smith\\Private Draft.mp4\"",
+                "Failed reading /Private (Client).mov\n/Private Client\n/private-key\n/Users/alice/Secret<Project>.mov\n/Users/alice/Draft:77 in open() Acquisition.mov\nFailed /home/alice/Secret\"Acquisition.mov\nFailed to open \"/ Secret/Acquisition.mov\"\nFailed to open \"/ SecretFile\"\n/ SecretFile.mov\n/ SecretFile\n/ SecretFile.abcdefghijkl\n// SecretFile\n42:/ Secret/Acquisition.mov:77\nerror 42://SecretHost/Acquisition.mov\nFailed to open path\\\\Server\\Share\\Secret.mov\nopen(pathC:\\Secret\\Acquisition.mov)\nopen(C://Secret/Acquisition.mov)\nC://Users\\Alice\\Secret.mov\nCould not find file 'Secret.mov'\nCould not find file 'private/Secret.mov'\nCould not find file './Secret.mov'\nCould not find file 'O'Brien.mov'\nCould not find file 'SecretBareName'\nCould not find file Secret.xyz\nopen Acquisition.custom\nopen Secret Project.mov\nopen //storage/emulated/0/Private.mov\n/workspace/alice/Project|Acquisition.mov\nerror 42:/home/alice/private.mov\n/Client Files/Private.mov\n/workspace/alice/Project;Acquisition.mov\n'/workspace/alice/Project:2026;Acquisition.mov'\n/!Acquisition.mov\n\"/!Acquisition.mov\"\n\"C:\\Users\\Alice Smith\\Private Draft.mp4\"",
                 "System.IO.IOException: /Users/alice/Draft:99 in open()\n123 files failed under /home/alice/Draft:99\rCaused by: /Users/alice/Cause:99\n   at Foo.Open() in /workspace/Élodie/src/App.cs:line 42\n   at \"/home/alice/private:66\" while opening file\n   at file:///Users/alice/Player.cs:55\n   at Bar.Run() in \\\\fileserver\\share\\secret.mp4\n~/private/key.pem\nhttps://videos.api.alummahnow.net/v1/items");
 
             Assert.True(File.Exists(bufferPath));
@@ -530,12 +530,18 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("https://videos.api.alummahnow.net/v1/items"));
             Assert.Equal("https://example.com/?path=/api/items",
                 CoreTelemetryService.SanitizeLocalPaths("https://example.com/?path=/api/items"));
+            Assert.Equal("https://[2001:db8::1]/v1/items",
+                CoreTelemetryService.SanitizeLocalPaths("https://[2001:db8::1]/v1/items"));
+            Assert.Equal("https://example.com/a(b)/items",
+                CoreTelemetryService.SanitizeLocalPaths("https://example.com/a(b)/items"));
+            Assert.Equal("open(https://example.com/a(b)/items)",
+                CoreTelemetryService.SanitizeLocalPaths("open(https://example.com/a(b)/items)"));
             Assert.Equal("git+http2://example.com/repo",
                 CoreTelemetryService.SanitizeLocalPaths("git+http2://example.com/repo"));
             Assert.Equal("profile://example.com/repo",
                 CoreTelemetryService.SanitizeLocalPaths("profile://example.com/repo"));
-            Assert.Equal("x://example.com/repo",
-                CoreTelemetryService.SanitizeLocalPaths("x://example.com/repo"));
+            Assert.Equal("https://[::1]:8443/api",
+                CoreTelemetryService.SanitizeLocalPaths("https://[::1]:8443/api"));
             Assert.Equal("a123456789012345678901234567890123://example.com/repo",
                 CoreTelemetryService.SanitizeLocalPaths("a123456789012345678901234567890123://example.com/repo"));
             Assert.Equal("HTTP/1.1 503 Service Unavailable",

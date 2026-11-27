@@ -140,4 +140,42 @@ public class SettingsStoreTests
             if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
         }
     }
+
+    [Fact]
+    public void SaveTelemetryEnabled_writes_distinct_generation_tokens_and_loads_legacy_marker()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "aun-settings-gen-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var settingsPath = Path.Combine(dir, "settings.json");
+            var consentPath = Path.Combine(dir, "telemetry-consent");
+            var storeA = new SettingsStore(settingsPath);
+            var storeB = new SettingsStore(settingsPath);
+
+            // Legacy marker containing bare "enabled" still loads as enabled.
+            File.WriteAllText(consentPath, "enabled");
+            Assert.Equal("enabled", storeB.LoadTelemetryConsentToken());
+            Assert.True(storeB.LoadTelemetryEnabled());
+
+            // Opt-in -> opt-out -> opt-in writes distinct generation tokens across instances.
+            Assert.True(storeA.SaveTelemetryEnabled(true));
+            var gen1 = storeB.LoadTelemetryConsentToken();
+            Assert.False(string.IsNullOrEmpty(gen1));
+            Assert.StartsWith("enabled:", gen1);
+
+            Assert.True(storeA.SaveTelemetryEnabled(false));
+            Assert.Null(storeB.LoadTelemetryConsentToken());
+            Assert.False(storeB.LoadTelemetryEnabled());
+
+            Assert.True(storeA.SaveTelemetryEnabled(true));
+            var gen2 = storeB.LoadTelemetryConsentToken();
+            Assert.False(string.IsNullOrEmpty(gen2));
+            Assert.NotEqual(gen1, gen2);
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+    }
 }
