@@ -720,12 +720,14 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("(https://example.com/api?q=(PrivateProject))"));
             Assert.Equal("https://example.com/api#[redacted]",
                 CoreTelemetryService.SanitizeLocalPaths("https://example.com/api#first,PrivateProject"));
-            Assert.Equal("https://example.com/users/[redacted-email]",
+            Assert.Equal("https://[redacted-email]",
                 CoreTelemetryService.SanitizeLocalPaths("https://example.com/users/alice@example.com"));
-            Assert.Equal("https://example.com/users/[redacted-email]",
+            Assert.Equal("https://[redacted-email]",
                 CoreTelemetryService.SanitizeLocalPaths("https://example.com/users/alice%40example.com"));
-            Assert.Equal("https://example.com/users/[redacted-email]",
+            Assert.Equal("https://[redacted-email]",
                 CoreTelemetryService.SanitizeLocalPaths("https://example.com/users/alice%team@example.com"));
+            Assert.Equal("https://[redacted-email]",
+                CoreTelemetryService.SanitizeLocalPaths("https://example.com/users/alice/bob@example.org"));
             Assert.Equal("[redacted-email]",
                 CoreTelemetryService.SanitizeLocalPaths("alice%notes@example.com"));
             Assert.Equal("https://example.com/?[redacted]",
@@ -950,6 +952,26 @@ public class CoreTelemetryServiceTests
             Assert.Equal("[redacted-path]", CoreTelemetryService.SanitizeLocalPaths("alice/bob@example.com"));
             Assert.Equal("file [redacted-email]", CoreTelemetryService.SanitizeLocalPaths("file \"private name\"@localhost"));
             Assert.Equal("document [redacted-email]", CoreTelemetryService.SanitizeLocalPaths("document \"private name\"%40intranet"));
+            Assert.Equal("[redacted-email]",
+                CoreTelemetryService.SanitizeLocalPaths("\"Private Name https://example.com/api?q=secret\\\" tail\"@example.com"));
+            Assert.Equal("alice@example.123😀", CoreTelemetryService.SanitizeLocalPaths("alice@example.123😀"));
+            Assert.Equal("alice@😀", CoreTelemetryService.SanitizeLocalPaths("alice@😀"));
+            Assert.Equal("[redacted-email]😀", CoreTelemetryService.SanitizeLocalPaths("alice@x😀"));
+            Assert.Equal("[redacted-email]", CoreTelemetryService.SanitizeLocalPaths("alice@example.𐐷"));
+            Assert.Equal("[redacted-email]", CoreTelemetryService.SanitizeLocalPaths("alice@123。example.com"));
+            Assert.Equal("[redacted-email]", CoreTelemetryService.SanitizeLocalPaths("alice@example。com"));
+            Assert.Equal("[redacted-email]", CoreTelemetryService.SanitizeLocalPaths("alice@example．com"));
+            Assert.Equal("[redacted-email]", CoreTelemetryService.SanitizeLocalPaths("alice@example｡com"));
+            Assert.Equal("[redacted-email]。", CoreTelemetryService.SanitizeLocalPaths("alice@example.com。"));
+            Assert.Equal("[redacted-email]", CoreTelemetryService.SanitizeLocalPaths("alice.txt@example.com"));
+            Assert.Equal("[redacted-email]", CoreTelemetryService.SanitizeLocalPaths("alice.txt+tag@example.com"));
+            Assert.Equal("Failed for [redacted-email]", CoreTelemetryService.SanitizeLocalPaths("Failed for alice.txt@example.com"));
+            Assert.Equal("[redacted-path] and [redacted-email]",
+                CoreTelemetryService.SanitizeLocalPaths("Private Project.pdf and alice.txt@example.com"));
+            Assert.Equal("file [redacted-path]", CoreTelemetryService.SanitizeLocalPaths("file alice.txt@example.com"));
+            Assert.Equal("file [redacted-email]", CoreTelemetryService.SanitizeLocalPaths("file alice.txt@localhost"));
+            Assert.Equal("file [redacted-path]", CoreTelemetryService.SanitizeLocalPaths("file Private Project alice.txt@example.com"));
+            Assert.Equal("[redacted-path]", CoreTelemetryService.SanitizeLocalPaths("'alice.txt'@example.com"));
             Assert.Equal("https://[2001:db8::1]/v1/items",
                 CoreTelemetryService.SanitizeLocalPaths("https://[2001:db8::1]/v1/items"));
             Assert.Equal("https://example.com/a(b)/items",

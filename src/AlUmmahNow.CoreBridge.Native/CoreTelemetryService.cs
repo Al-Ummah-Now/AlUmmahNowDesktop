@@ -219,8 +219,8 @@ public sealed class CoreTelemetryService : ITelemetryService
     {
         if (string.IsNullOrEmpty(text)) return text;
         var escaped = EscapeSentinels(text, out var hadSentinels);
-        var scrubbed = VaultNonFileUrls(escaped, VaultPrefix, out var vaultedUrls);
-        scrubbed = RedactQuotedEmails(scrubbed);
+        var scrubbed = RedactQuotedEmails(escaped);
+        scrubbed = VaultNonFileUrls(scrubbed, VaultPrefix, out var vaultedUrls);
         scrubbed = RedactFileUris(scrubbed, VaultPrefix);
         scrubbed = ReplaceUnquotedParenPaths(scrubbed, ParenPathRegex);
         scrubbed = ReplaceUnquotedParenPaths(scrubbed, ParenRelativeSlashPathRegex);
@@ -233,10 +233,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         scrubbed = KeywordQuotedPathRegex.Replace(scrubbed, "$1[redacted-path]");
         scrubbed = RedactKeywordUnquotedFilenames(scrubbed);
         scrubbed = KeywordAssignedPathRegex.Replace(scrubbed, "$1[redacted-path]");
-        if (scrubbed.Contains('.'))
-        {
-            scrubbed = BareFilenameRegex.Replace(scrubbed, "$1$2[redacted-path]");
-        }
+        scrubbed = RedactBareFilenames(scrubbed);
         scrubbed = RestoreVaultedUrls(scrubbed, VaultPrefix, vaultedUrls);
         scrubbed = RedactEmails(scrubbed);
         scrubbed = BearerTokenRegex.Replace(scrubbed, "Bearer [redacted]");
@@ -495,6 +492,7 @@ public sealed class CoreTelemetryService : ITelemetryService
 
     private static string RedactSingleQuotedFilenames(string text)
     {
+        var hasAt = HasEmailAt(text);
         StringBuilder? sb = null;
         var copied = 0;
         var segStart = 0;
@@ -506,7 +504,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             var candidateClose = -1;
             for (var p = segStart; p < segEnd; p++)
             {
-                if (text[p] != '\'') continue;
+                if (p < copied || text[p] != '\'') continue;
                 var isOpener = p == segStart || !char.IsLetterOrDigit(text[p - 1]);
                 if (isOpener)
                 {
@@ -520,9 +518,10 @@ public sealed class CoreTelemetryService : ITelemetryService
                 {
                     if (EndsWithFilenameExt(text, open + 1, p))
                     {
+                        var emailEnd = hasAt ? FindEmailTailEnd(text, p + 1) : -1;
                         sb ??= new StringBuilder(text.Length);
                         sb.Append(text, copied, open - copied).Append("[redacted-path]");
-                        copied = p + 1;
+                        copied = emailEnd > p + 1 ? emailEnd : p + 1;
                         open = -1;
                         candidateClose = -1;
                     }
@@ -532,7 +531,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                     }
                 }
             }
-            segStart = segEnd + 1;
+            segStart = Math.Max(segEnd + 1, copied);
         }
         if (sb == null) return text;
         return sb.Append(text, copied, text.Length - copied).ToString();
@@ -549,6 +548,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     private static string RedactKeywordUnquotedFilenames(string text)
     {
         if (!text.Contains('.')) return text;
+        var hasAt = HasEmailAt(text);
         StringBuilder? sb = null;
         var copied = 0;
         var segStart = 0;
@@ -566,17 +566,85 @@ public sealed class CoreTelemetryService : ITelemetryService
                 if (kwMatch.Success)
                 {
                     var kwEnd = kwMatch.Index + kwMatch.Length;
+                    var emailEnd = hasAt ? FindEmailTailEnd(text, lastExtEnd) : -1;
+                    if (emailEnd > 0 && !ContainsWhitespace(text, kwEnd, lastDot))
+                    {
+                        segStart = segEnd + 1;
+                        continue;
+                    }
                     sb ??= new StringBuilder(text.Length);
                     sb.Append(text, copied, kwEnd - copied);
                     sb.Append("[redacted-path]");
-                    copied = lastExtEnd;
+                    copied = emailEnd > lastExtEnd ? emailEnd : lastExtEnd;
                 }
             }
-            segStart = segEnd + 1;
+            segStart = Math.Max(segEnd + 1, copied);
         }
         if (sb == null) return text;
         sb.Append(text, copied, text.Length - copied);
         return sb.ToString();
+    }
+
+    private static string RedactBareFilenames(string text)
+    {
+        if (!text.Contains('.')) return text;
+        if (!HasEmailAt(text))
+        {
+            return BareFilenameRegex.Replace(text, "$1$2[redacted-path]");
+        }
+        StringBuilder? sb = null;
+        var copied = 0;
+        foreach (Match match in BareFilenameRegex.Matches(text))
+        {
+            if (match.Index < copied) continue;
+            var current = match;
+            while (current.Success)
+            {
+                var currentEnd = current.Index + current.Length;
+                var emailAt = FindEmailTailAt(text, currentEnd);
+                if (emailAt < 0)
+                {
+                    sb ??= new StringBuilder(text.Length);
+                    sb.Append(text, copied, current.Index - copied);
+                    sb.Append(current.Groups[1].Value).Append(current.Groups[2].Value).Append("[redacted-path]");
+                    copied = currentEnd;
+                    break;
+                }
+                var localStart = FindEmailLocalStart(text, emailAt, match.Index);
+                if (localStart <= match.Index) break;
+                current = BareFilenameRegex.Match(text, match.Index, localStart - match.Index);
+            }
+        }
+        if (sb == null) return text;
+        sb.Append(text, copied, text.Length - copied);
+        return sb.ToString();
+    }
+
+    private static bool HasEmailAt(string text) =>
+        text.IndexOf('@') >= 0 || text.IndexOf("%40", StringComparison.Ordinal) >= 0;
+
+    private static bool ContainsWhitespace(string text, int start, int end)
+    {
+        for (var i = start; i < end; i++)
+        {
+            if (char.IsWhiteSpace(text[i])) return true;
+        }
+        return false;
+    }
+
+    private static int FindEmailTailAt(string text, int pos)
+    {
+        var p = pos;
+        while (p < text.Length && IsEmailLocalChar(text, p)) p++;
+        if (p >= text.Length) return -1;
+        var atLen = EmailAtLength(text, p);
+        return atLen > 0 && FindEmailDomainEnd(text, p + atLen) > 0 ? p : -1;
+    }
+
+    private static int FindEmailTailEnd(string text, int pos)
+    {
+        var atPos = FindEmailTailAt(text, pos);
+        return atPos >= 0 ? FindEmailDomainEnd(text, atPos + EmailAtLength(text, atPos)) : -1;
     }
 
     private static (int Dot, int ExtEnd) FindLastUnquotedFilenameExt(string text, int segStart, int segEnd)
@@ -799,11 +867,6 @@ public sealed class CoreTelemetryService : ITelemetryService
         });
     }
 
-    private static bool IsUnicodeCombiningMark(char ch) =>
-        char.GetUnicodeCategory(ch) is System.Globalization.UnicodeCategory.NonSpacingMark
-            or System.Globalization.UnicodeCategory.SpacingCombiningMark
-            or System.Globalization.UnicodeCategory.EnclosingMark;
-
     private static bool IsEmailLeadingWrapper(char ch)
     {
         if (ch is '\'' or '{' or '}') return true;
@@ -824,13 +887,16 @@ public sealed class CoreTelemetryService : ITelemetryService
     {
         var ch = text[pos];
         if (IsAsciiAlphaNum(ch) ||
-            ch is '.' or '_' or '+' or '-' or '!' or '#' or '$' or '&' or '\'' or '*' or '=' or '?' or '^' or '`' or '{' or '|' or '}' or '~' ||
+            ch is '.' or '_' or '+' or '-' or '/' or '!' or '#' or '$' or '&' or '\'' or '*' or '=' or '?' or '^' or '`' or '{' or '|' or '}' or '~' ||
             IsNonAsciiEmailLocalChar(ch))
         {
             return true;
         }
         return ch == '%' && !(pos + 2 < text.Length && text[pos + 1] == '4' && text[pos + 2] == '0');
     }
+
+    private static bool IsSchemeSlash(string text, int pos) =>
+        text[pos] == '/' && pos >= 2 && text[pos - 1] == '/' && text[pos - 2] == ':';
 
     private static int FindEmailLocalStart(string text, int atPos, int minPos)
     {
@@ -850,7 +916,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             return atPos;
         }
         var localStart = atPos;
-        while (localStart > minPos && IsEmailLocalChar(text, localStart - 1))
+        while (localStart > minPos && IsEmailLocalChar(text, localStart - 1) && !IsSchemeSlash(text, localStart - 1))
         {
             localStart--;
         }
@@ -916,6 +982,67 @@ public sealed class CoreTelemetryService : ITelemetryService
         return true;
     }
 
+    private enum DomainCharKind
+    {
+        Other,
+        Letter,
+        Digit,
+        Dot,
+        Hyphen
+    }
+
+    private static bool IsEmailDomainDot(char ch) =>
+        ch is '.' or '\u3002' or '\uFF0E' or '\uFF61';
+
+    private static DomainCharKind ClassifyDomainCharAt(string text, int pos, out int step)
+    {
+        step = 1;
+        var ch = text[pos];
+        if (ch < 0x80)
+        {
+            if (char.IsAsciiLetter(ch)) return DomainCharKind.Letter;
+            if (char.IsAsciiDigit(ch)) return DomainCharKind.Digit;
+            if (ch == '.') return DomainCharKind.Dot;
+            if (ch == '-') return DomainCharKind.Hyphen;
+            return DomainCharKind.Other;
+        }
+        if (IsEmailDomainDot(ch)) return DomainCharKind.Dot;
+        System.Globalization.UnicodeCategory cat;
+        if (char.IsHighSurrogate(ch))
+        {
+            if (pos + 1 >= text.Length || !char.IsLowSurrogate(text[pos + 1])) return DomainCharKind.Other;
+            step = 2;
+            cat = System.Globalization.CharUnicodeInfo.GetUnicodeCategory(text, pos);
+        }
+        else if (char.IsLowSurrogate(ch))
+        {
+            return DomainCharKind.Other;
+        }
+        else
+        {
+            cat = char.GetUnicodeCategory(ch);
+        }
+        return cat switch
+        {
+            System.Globalization.UnicodeCategory.UppercaseLetter
+                or System.Globalization.UnicodeCategory.LowercaseLetter
+                or System.Globalization.UnicodeCategory.TitlecaseLetter
+                or System.Globalization.UnicodeCategory.ModifierLetter
+                or System.Globalization.UnicodeCategory.OtherLetter
+                or System.Globalization.UnicodeCategory.NonSpacingMark
+                or System.Globalization.UnicodeCategory.SpacingCombiningMark
+                or System.Globalization.UnicodeCategory.EnclosingMark => DomainCharKind.Letter,
+            System.Globalization.UnicodeCategory.DecimalDigitNumber => DomainCharKind.Digit,
+            _ => DomainCharKind.Other
+        };
+    }
+
+    private static bool IsEmailBoundaryBlockedAt(string text, int pos)
+    {
+        var kind = ClassifyDomainCharAt(text, pos, out _);
+        return kind is DomainCharKind.Letter or DomainCharKind.Digit or DomainCharKind.Hyphen || text[pos] == '_';
+    }
+
     private static int FindEmailDomainEnd(string text, int domStart)
     {
         if (domStart < text.Length && text[domStart] == '[')
@@ -928,22 +1055,22 @@ public sealed class CoreTelemetryService : ITelemetryService
         var bestEnd = -1;
         while (k < text.Length)
         {
-            var ch = text[k];
-            if (char.IsLetter(ch) || IsUnicodeCombiningMark(ch) || char.IsSurrogate(ch))
+            var kind = ClassifyDomainCharAt(text, k, out var step);
+            if (kind == DomainCharKind.Letter)
             {
                 labelHasLetter = true;
             }
-            else if (ch == '.')
+            else if (kind == DomainCharKind.Dot)
             {
                 if (k == labelStart || text[k - 1] == '-') break;
                 labelStart = k + 1;
                 labelHasLetter = false;
             }
-            else if (char.IsDigit(ch))
+            else if (kind == DomainCharKind.Digit)
             {
                 // Digits are allowed inside domain labels (e.g. 3com, 123.example.com, xn--p1ai).
             }
-            else if (ch == '-')
+            else if (kind == DomainCharKind.Hyphen)
             {
                 if (k == labelStart) break;
             }
@@ -951,11 +1078,10 @@ public sealed class CoreTelemetryService : ITelemetryService
             {
                 break;
             }
-            k++;
-            var atBoundary = k == text.Length ||
-                !(char.IsLetterOrDigit(text[k]) || text[k] is '_' or '-' || IsUnicodeCombiningMark(text[k]) || char.IsSurrogate(text[k]));
-            var continuesDomain = k + 1 < text.Length && text[k] == '.' &&
-                (char.IsLetterOrDigit(text[k + 1]) || char.IsSurrogate(text[k + 1]));
+            k += step;
+            var atBoundary = k == text.Length || !IsEmailBoundaryBlockedAt(text, k);
+            var continuesDomain = k + 1 < text.Length && IsEmailDomainDot(text[k]) &&
+                ClassifyDomainCharAt(text, k + 1, out _) is DomainCharKind.Letter or DomainCharKind.Digit;
             if (k > labelStart && labelHasLetter && text[k - 1] != '-' && atBoundary && !continuesDomain)
             {
                 bestEnd = k;
