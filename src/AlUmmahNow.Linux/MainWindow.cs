@@ -333,10 +333,11 @@ public sealed partial class MainWindow
         telemetryNotice.SetWrap(true);
         telemetryNotice.AddCssClass("error");
         telemetryNotice.SetVisible(_telemetry.LastPurgeFailed);
-        Action<bool> onPurgeChanged = failed =>
+        Action<bool> onPurgeChanged = _ =>
         {
             GLib.Functions.IdleAdd(GLib.Constants.PRIORITY_DEFAULT_IDLE, () =>
             {
+                var failed = _telemetry.LastPurgeFailed;
                 if (failed)
                 {
                     if (!_settings.TelemetryEnabled)
@@ -361,9 +362,25 @@ public sealed partial class MainWindow
             if (_settings.TelemetryEnabled == enabled) return;
             if (enabled)
             {
-                if (!_telemetry.SetConsent(TelemetryConsent.Full) || !_store.SaveTelemetryEnabled(true))
+                if (!_store.SaveTelemetryEnabled(true))
+                {
+                    _settings.TelemetryEnabled = false;
+                    telemetryCheck.SetActive(false);
+                    telemetryNotice.SetText(_localizer["settings.telemetry.enableError"]);
+                    telemetryNotice.SetVisible(true);
+                    return;
+                }
+                if (!_telemetry.SetConsent(TelemetryConsent.Full))
                 {
                     _telemetry.SetConsent(TelemetryConsent.Off);
+                    if (!_store.SaveTelemetryEnabled(false))
+                    {
+                        _settings.TelemetryEnabled = true;
+                        telemetryCheck.SetActive(true);
+                        telemetryNotice.SetText(_localizer["settings.telemetry.disableError"]);
+                        telemetryNotice.SetVisible(true);
+                        return;
+                    }
                     _settings.TelemetryEnabled = false;
                     telemetryCheck.SetActive(false);
                     telemetryNotice.SetText(_localizer["settings.telemetry.enableError"]);

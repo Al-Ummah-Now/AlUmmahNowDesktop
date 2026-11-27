@@ -449,8 +449,8 @@ public class CoreTelemetryServiceTests
             service.AddBreadcrumb("io", "Opened /workspace/E\u0301lodie/Very Secret Client Project Name.mov\nFailed '/data/user/0/O'Brien.mov'\nRead \"/Users/O'Brien/Final.mov\"");
             service.ReportCrash(
                 "IOException",
-                "Failed reading /Private (Client).mov\n/Private Client\n/private-key\n/Users/alice/Secret<Project>.mov\n/Users/alice/Draft:77 in open() Acquisition.mov\n/workspace/alice/Project|Acquisition.mov\nerror 42:/home/alice/private.mov\n/Client Files/Private.mov\n/workspace/alice/Project;Acquisition.mov\n'/workspace/alice/Project:2026;Acquisition.mov'\n/!Acquisition.mov\n\"/!Acquisition.mov\"\n\"C:\\Users\\Alice Smith\\Private Draft.mp4\"",
-                "at Foo.Open() in /workspace/Élodie/src/App.cs:line 42\n\"/home/alice/source.cs:88\"\nfile:///Users/alice/Player.cs:55\nat /Users/alice/Player.cs:77 in open()\nat Bar.Run() in \\\\fileserver\\share\\secret.mp4\n~/private/key.pem");
+                "Failed reading /Private (Client).mov\n/Private Client\n/private-key\n/Users/alice/Secret<Project>.mov\n/Users/alice/Draft:77 in open() Acquisition.mov\nFailed /home/alice/Secret\"Acquisition.mov\nopen //storage/emulated/0/Private.mov\n/workspace/alice/Project|Acquisition.mov\nerror 42:/home/alice/private.mov\n/Client Files/Private.mov\n/workspace/alice/Project;Acquisition.mov\n'/workspace/alice/Project:2026;Acquisition.mov'\n/!Acquisition.mov\n\"/!Acquisition.mov\"\n\"C:\\Users\\Alice Smith\\Private Draft.mp4\"",
+                "System.IO.IOException: /Users/alice/Draft:99 in open()\n   at Foo.Open() in /workspace/Élodie/src/App.cs:line 42\n   at \"/home/alice/source.cs:88\"\n   at \"/home/alice/private:66\" while opening file\n   at file:///Users/alice/Player.cs:55\n   at /Users/alice/Player.cs:77 in open()\n   at Bar.Run() in \\\\fileserver\\share\\secret.mp4\n~/private/key.pem");
 
             Assert.True(File.Exists(bufferPath));
             var json = File.ReadAllText(bufferPath);
@@ -462,7 +462,10 @@ public class CoreTelemetryServiceTests
             Assert.DoesNotContain("client", json, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("acquisition", json, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("project>.mov", json, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("storage", json, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("source.cs", json, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain(":99 in open()", json, StringComparison.Ordinal);
+            Assert.DoesNotContain(":66", json, StringComparison.Ordinal);
             Assert.DoesNotContain("name.mov", json, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("draft.mp4", json, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("workspace", json, StringComparison.OrdinalIgnoreCase);

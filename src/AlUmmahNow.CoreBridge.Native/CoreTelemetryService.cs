@@ -13,16 +13,15 @@ namespace AlUmmahNow.CoreBridge.Native;
 /// </summary>
 public sealed class CoreTelemetryService : ITelemetryService
 {
-    private const string StackSuffixLookahead = @"(?=(?::line\s+\d+|:\d+(?::\d+)?)(?:[)\]]*|\s+in\s+[\p{L}_][\p{L}\p{N}_.$<>]*\(\))(?=\r|\n|$)|[\r\n""]|$)";
-    private const string WinStackSuffixLookahead = @"(?=(?::line\s+\d+|:\d+(?::\d+)?)(?:[)\]]*|\s+in\s+[\p{L}_][\p{L}\p{N}_.$<>]*\(\))(?=\r|\n|$)|[\r\n""<>|]|$)";
-    private static readonly Regex DoubleQuotedPathRegex = new(@"""(?:file://|(?:[A-Za-z]:[\\/]|\\\\)|~/(?!\s)|/(?=[^\s/""]))[^""\r\n]*""", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex DoubleQuotedStackPathRegex = new(@"""(?:file://|(?:[A-Za-z]:[\\/]|\\\\)|~/(?!\s)|/(?=[^\s/""]))[^""\r\n]*?((?::line\s+\d+|:\d+(?::\d+)?)?)""", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex FileUriRegex = new(@"file://[^\r\n""]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex FileUriStackRegex = new(@"file://[^\r\n""]+?" + StackSuffixLookahead, RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex WindowsPathRegex = new(@"(?:[A-Za-z]:[\\/]|\\\\)[^\r\n""<>|]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex WindowsStackPathRegex = new(@"(?:[A-Za-z]:[\\/]|\\\\)[^\r\n""<>|]+?" + WinStackSuffixLookahead, RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex UnixPathRegex = new(@"(?<![\p{L}\p{M}\p{N}._/-])(?:~/|/(?=[^\s/""]))[^\r\n""]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex UnixStackPathRegex = new(@"(?<![\p{L}\p{M}\p{N}._/-])(?:~/|/(?=[^\s/""]))[^\r\n""]+?" + StackSuffixLookahead, RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex StackFrameLineRegex = new(@"^[ \t]*(?:at[ \t]+|#?\d+[ \t]+)", RegexOptions.Compiled);
+    private const string StackSuffixLookahead = @"(?=(?::line[ \t]+\d+|:\d+(?::\d+)?)(?:[)\]]*|[ \t]+in[ \t]+[\p{L}_][\p{L}\p{N}_.$<>]*\(\))(?=\r|\n|$)|\r|\n|$)";
+    private static readonly Regex DoubleQuotedStackPathRegex = new(@"""(?:file://|(?:[A-Za-z]:[\\/]|\\\\)|~/(?!\s)|/+(?=[^\s/""]))[^""\r\n]*?((?::line[ \t]+\d+|:\d+(?::\d+)?)?)""(?=[ \t]*(?:\r|\n|$))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex FileUriRegex = new(@"file://[^\r\n]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex FileUriStackRegex = new(@"file://[^\r\n]+?" + StackSuffixLookahead, RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex WindowsPathRegex = new(@"(?:[A-Za-z]:[\\/]|\\\\)[^\r\n]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex WindowsStackPathRegex = new(@"(?:[A-Za-z]:[\\/]|\\\\)[^\r\n]+?" + StackSuffixLookahead, RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex UnixPathRegex = new(@"(?<![\p{L}\p{M}\p{N}._/-])(?:~/|(?<!:)//+(?=[^\s/])|/(?=[^\s/]))[^\r\n]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex UnixStackPathRegex = new(@"(?<![\p{L}\p{M}\p{N}._/-])(?:~/|(?<!:)//+(?=[^\s/])|/(?=[^\s/]))[^\r\n]+?" + StackSuffixLookahead, RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private readonly TelemetryClient _client;
     private readonly string? _bufferPath;
@@ -140,19 +139,30 @@ public sealed class CoreTelemetryService : ITelemetryService
     internal static string SanitizeLocalPaths(string text, bool preserveStackLocations = false)
     {
         if (string.IsNullOrEmpty(text)) return text;
-        if (preserveStackLocations)
+        if (!preserveStackLocations) return SanitizeMessageLine(text);
+        var lines = text.Split('\n');
+        for (var i = 0; i < lines.Length; i++)
         {
-            var scrubbedStack = DoubleQuotedStackPathRegex.Replace(text, "[redacted-path]$1");
-            scrubbedStack = FileUriStackRegex.Replace(scrubbedStack, "[redacted-path]");
-            scrubbedStack = WindowsStackPathRegex.Replace(scrubbedStack, "[redacted-path]");
-            scrubbedStack = UnixStackPathRegex.Replace(scrubbedStack, "[redacted-path]");
-            return scrubbedStack;
+            lines[i] = StackFrameLineRegex.IsMatch(lines[i])
+                ? SanitizeStackFrameLine(lines[i])
+                : SanitizeMessageLine(lines[i]);
         }
-        var scrubbed = DoubleQuotedPathRegex.Replace(text, "[redacted-path]");
-        scrubbed = FileUriRegex.Replace(scrubbed, "[redacted-path]");
+        return string.Join("\n", lines);
+    }
+
+    private static string SanitizeMessageLine(string text)
+    {
+        var scrubbed = FileUriRegex.Replace(text, "[redacted-path]");
         scrubbed = WindowsPathRegex.Replace(scrubbed, "[redacted-path]");
-        scrubbed = UnixPathRegex.Replace(scrubbed, "[redacted-path]");
-        return scrubbed;
+        return UnixPathRegex.Replace(scrubbed, "[redacted-path]");
+    }
+
+    private static string SanitizeStackFrameLine(string line)
+    {
+        var scrubbed = DoubleQuotedStackPathRegex.Replace(line, "[redacted-path]$1");
+        scrubbed = FileUriStackRegex.Replace(scrubbed, "[redacted-path]");
+        scrubbed = WindowsStackPathRegex.Replace(scrubbed, "[redacted-path]");
+        return UnixStackPathRegex.Replace(scrubbed, "[redacted-path]");
     }
 
     public TelemetryConsent Consent

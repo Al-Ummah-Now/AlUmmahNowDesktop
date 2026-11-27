@@ -324,36 +324,67 @@ public sealed partial class Shell
             Text = _telemetry.LastPurgeFailed ? purgeWarningText : string.Empty,
         };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(telemetryNotice, "SettingsTelemetryNotice");
-        Action<bool> onPurgeChanged = failed =>
+        void SyncPurgeNotice()
         {
-            telemetryNotice.DispatcherQueue?.TryEnqueue(() =>
+            var failed = _telemetry.LastPurgeFailed;
+            if (failed)
             {
-                if (failed)
+                if (!_settings.TelemetryEnabled)
                 {
-                    if (!_settings.TelemetryEnabled)
-                    {
-                        telemetryNotice.Text = purgeWarningText;
-                        telemetryNotice.Visibility = Visibility.Visible;
-                    }
+                    telemetryNotice.Text = purgeWarningText;
+                    telemetryNotice.Visibility = Visibility.Visible;
                 }
-                else if (telemetryNotice.Text == purgeWarningText)
-                {
-                    telemetryNotice.Text = string.Empty;
-                    telemetryNotice.Visibility = Visibility.Collapsed;
-                }
-            });
+            }
+            else if (telemetryNotice.Text == purgeWarningText)
+            {
+                telemetryNotice.Text = string.Empty;
+                telemetryNotice.Visibility = Visibility.Collapsed;
+            }
+        }
+        Action<bool> onPurgeChanged = _ => telemetryNotice.DispatcherQueue?.TryEnqueue(SyncPurgeNotice);
+        var purgeSubscribed = false;
+        telemetryNotice.Loaded += (_, _) =>
+        {
+            if (!purgeSubscribed)
+            {
+                _telemetry.PurgeFailureChanged += onPurgeChanged;
+                purgeSubscribed = true;
+            }
+            SyncPurgeNotice();
         };
-        _telemetry.PurgeFailureChanged += onPurgeChanged;
-        telemetryNotice.Unloaded += (_, _) => _telemetry.PurgeFailureChanged -= onPurgeChanged;
+        telemetryNotice.Unloaded += (_, _) =>
+        {
+            if (purgeSubscribed)
+            {
+                _telemetry.PurgeFailureChanged -= onPurgeChanged;
+                purgeSubscribed = false;
+            }
+        };
         telemetryToggle.Toggled += (_, _) =>
         {
             var enabled = telemetryToggle.IsOn;
             if (_settings.TelemetryEnabled == enabled) return;
             if (enabled)
             {
-                if (!_telemetry.SetConsent(TelemetryConsent.Full) || !_store.SaveTelemetryEnabled(true))
+                if (!_store.SaveTelemetryEnabled(true))
+                {
+                    _settings.TelemetryEnabled = false;
+                    telemetryToggle.IsOn = false;
+                    telemetryNotice.Text = _localizer["settings.telemetry.enableError"];
+                    telemetryNotice.Visibility = Visibility.Visible;
+                    return;
+                }
+                if (!_telemetry.SetConsent(TelemetryConsent.Full))
                 {
                     _telemetry.SetConsent(TelemetryConsent.Off);
+                    if (!_store.SaveTelemetryEnabled(false))
+                    {
+                        _settings.TelemetryEnabled = true;
+                        telemetryToggle.IsOn = true;
+                        telemetryNotice.Text = _localizer["settings.telemetry.disableError"];
+                        telemetryNotice.Visibility = Visibility.Visible;
+                        return;
+                    }
                     _settings.TelemetryEnabled = false;
                     telemetryToggle.IsOn = false;
                     telemetryNotice.Text = _localizer["settings.telemetry.enableError"];

@@ -82,10 +82,11 @@ public sealed class SettingsPage
         telemetryNotice.SetVisible(initialPurgeFailed);
         if (telemetry != null)
         {
-            Action<bool> onPurgeChanged = failed =>
+            Action<bool> onPurgeChanged = _ =>
             {
                 GLib.Functions.IdleAdd(GLib.Constants.PRIORITY_DEFAULT_IDLE, () =>
                 {
+                    var failed = telemetry.LastPurgeFailed;
                     if (failed)
                     {
                         if (!settings.TelemetryEnabled)
@@ -111,9 +112,25 @@ public sealed class SettingsPage
             if (settings.TelemetryEnabled == enabled) return;
             if (enabled)
             {
-                if (!(telemetry?.SetConsent(TelemetryConsent.Full) ?? true) || !store.SaveTelemetryEnabled(true))
+                if (!store.SaveTelemetryEnabled(true))
+                {
+                    settings.TelemetryEnabled = false;
+                    telemetryCheck.SetActive(false);
+                    telemetryNotice.SetText(l["settings.telemetry.enableError"]);
+                    telemetryNotice.SetVisible(true);
+                    return;
+                }
+                if (!(telemetry?.SetConsent(TelemetryConsent.Full) ?? true))
                 {
                     telemetry?.SetConsent(TelemetryConsent.Off);
+                    if (!store.SaveTelemetryEnabled(false))
+                    {
+                        settings.TelemetryEnabled = true;
+                        telemetryCheck.SetActive(true);
+                        telemetryNotice.SetText(l["settings.telemetry.disableError"]);
+                        telemetryNotice.SetVisible(true);
+                        return;
+                    }
                     settings.TelemetryEnabled = false;
                     telemetryCheck.SetActive(false);
                     telemetryNotice.SetText(l["settings.telemetry.enableError"]);
