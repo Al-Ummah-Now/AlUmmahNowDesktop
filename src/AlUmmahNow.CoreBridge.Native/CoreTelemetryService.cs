@@ -927,9 +927,10 @@ public sealed class CoreTelemetryService : ITelemetryService
 
     private static string? ResolveQuotedSecretUrlRedaction(string rawUrl, string redactedUrl)
     {
-        if (redactedUrl.EndsWith("[redacted]", StringComparison.Ordinal)) return redactedUrl;
-        var probe = RedactUrlPathSecrets(rawUrl + "x");
-        return probe.EndsWith("[redacted]", StringComparison.Ordinal) ? probe : null;
+        if (redactedUrl != rawUrl && redactedUrl.EndsWith("[redacted]", StringComparison.Ordinal)) return redactedUrl;
+        var probeInput = rawUrl + "x";
+        var probe = RedactUrlPathSecrets(probeInput);
+        return probe != probeInput && probe.EndsWith("[redacted]", StringComparison.Ordinal) ? probe : null;
     }
 
     private static int ScanToClosingDoubleQuote(string text, int start)
@@ -952,7 +953,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         var wrappedInAngle = urlStart > 0 && text[urlStart - 1] == '<';
         var stopOnLess = !inDoubleQuote && !wrappedInAngle;
         var stopOnGreater = !inDoubleQuote || wrappedInAngle;
-        var allowInlineSpace = inDoubleQuote && !wrappedInAngle;
+        var allowInlineSpace = inDoubleQuote;
         return (stopOnLess ? 1 : 0) | (stopOnGreater ? 2 : 0) | (allowInlineSpace ? 4 : 0);
     }
 
@@ -3185,7 +3186,9 @@ public sealed class CoreTelemetryService : ITelemetryService
     }
 
     private static bool HasEmailAt(string text) =>
-        text.IndexOf('@') >= 0 || text.IndexOf("%40", StringComparison.Ordinal) >= 0;
+        text.IndexOf('@') >= 0 ||
+        text.IndexOf("%40", StringComparison.Ordinal) >= 0 ||
+        text.IndexOf("\\u0040", StringComparison.Ordinal) >= 0;
 
     private static bool ContainsWhitespace(string text, int start, int end)
     {
@@ -3234,7 +3237,7 @@ public sealed class CoreTelemetryService : ITelemetryService
 
     private static string RedactQuotedEmails(string text)
     {
-        if (text.IndexOf('"') < 0 || (text.IndexOf('@') < 0 && text.IndexOf("%40", StringComparison.Ordinal) < 0))
+        if (text.IndexOf('"') < 0 || !HasEmailAt(text))
         {
             return text;
         }
@@ -3284,7 +3287,7 @@ public sealed class CoreTelemetryService : ITelemetryService
 
     private static string RedactEmails(string text)
     {
-        if (text.IndexOf('@') < 0 && text.IndexOf("%40", StringComparison.Ordinal) < 0)
+        if (!HasEmailAt(text))
         {
             return text;
         }
@@ -3354,10 +3357,19 @@ public sealed class CoreTelemetryService : ITelemetryService
         return sb.ToString();
     }
 
-    private static int EmailAtLength(string text, int pos) =>
-        text[pos] == '@'
-            ? 1
-            : (text[pos] == '%' && pos + 2 < text.Length && text[pos + 1] == '4' && text[pos + 2] == '0' ? 3 : 0);
+    private static int EmailAtLength(string text, int pos)
+    {
+        var ch = text[pos];
+        if (ch == '@') return 1;
+        if (ch == '%' && pos + 2 < text.Length && text[pos + 1] == '4' && text[pos + 2] == '0') return 3;
+        if (ch == '\\' && pos + 5 < text.Length &&
+            text.AsSpan(pos, 6).Equals("\\u0040", StringComparison.Ordinal) &&
+            !IsPrecededByOddBackslashes(text, pos, 0))
+        {
+            return 6;
+        }
+        return 0;
+    }
 
     private static int FindNextEmailClosingQuote(string text, int start, out int stopPos)
     {
@@ -3580,6 +3592,22 @@ public sealed class CoreTelemetryService : ITelemetryService
     {
         step = 1;
         var ch = text[pos];
+        if (ch == '\\' && pos + 5 < text.Length && text[pos + 1] == 'u' && TryParseHex4(text, pos + 2, out var code))
+        {
+            step = 6;
+            ch = (char)code;
+            if (ch < 0x80)
+            {
+                if (char.IsAsciiLetter(ch)) return DomainCharKind.Letter;
+                if (char.IsAsciiDigit(ch)) return DomainCharKind.Digit;
+                if (ch == '.') return DomainCharKind.Dot;
+                return ch == '-' ? DomainCharKind.Hyphen : DomainCharKind.Other;
+            }
+            if (IsEmailDomainDot(ch)) return DomainCharKind.Dot;
+            if (char.IsLetter(ch)) return DomainCharKind.Letter;
+            if (char.IsDigit(ch)) return DomainCharKind.Digit;
+            return DomainCharKind.Other;
+        }
         if (ch < 0x80)
         {
             if (char.IsAsciiLetter(ch)) return DomainCharKind.Letter;
