@@ -129,7 +129,8 @@ namespace AlUmmahNow.App.Services
             using var crossProcessLock = TryAcquireConsentLock(
                 createDirectory: enabled,
                 out var directoryMissing,
-                timeoutMs: enabled ? 2000 : 10000);
+                timeoutMs: enabled ? 2000 : 10000,
+                serializeMutation: true);
             if (!enabled && directoryMissing)
             {
                 return true;
@@ -168,7 +169,10 @@ namespace AlUmmahNow.App.Services
         public bool RollbackTelemetryEnabled(string? expectedToken)
         {
             if (string.IsNullOrEmpty(expectedToken)) return false;
-            using var crossProcessLock = TryAcquireConsentLock(createDirectory: false, out var directoryMissing);
+            using var crossProcessLock = TryAcquireConsentLock(
+                createDirectory: false,
+                out var directoryMissing,
+                serializeMutation: true);
             if (directoryMissing) return true;
             if (crossProcessLock == null) return false;
             var current = LoadTelemetryConsentToken();
@@ -212,9 +216,13 @@ namespace AlUmmahNow.App.Services
         /// must fail closed and skip dispatching telemetry flushes when <c>null</c> is returned.
         /// </summary>
         public IDisposable? TryAcquireTelemetryConsentLock() =>
-            TryAcquireConsentLock(createDirectory: false, out _);
+            TryAcquireConsentLock(createDirectory: false, out _, serializeMutation: false);
 
-        private IDisposable? TryAcquireConsentLock(bool createDirectory, out bool directoryMissing, int timeoutMs = 2000)
+        private IDisposable? TryAcquireConsentLock(
+            bool createDirectory,
+            out bool directoryMissing,
+            int timeoutMs = 2000,
+            bool serializeMutation = false)
         {
             directoryMissing = false;
             string lockPath;
@@ -245,37 +253,41 @@ namespace AlUmmahNow.App.Services
                 entry.Waiters++;
             }
 
+            ProcessConsentLockLease? lease = null;
             try
             {
                 lock (entry.Gate)
                 {
                     if (entry.RefCount > 0)
                     {
-                        entry.RefCount++;
-                        return new ProcessConsentLockLease(lockPath, entry);
+                        Volatile.Write(ref entry.RefCount, entry.RefCount + 1);
+                        lease = new ProcessConsentLockLease(lockPath, entry);
                     }
-
-                    var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
-                    while (true)
+                    else
                     {
-                        try
+                        var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+                        while (true)
                         {
-                            entry.Stream = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
-                            entry.RefCount = 1;
-                            return new ProcessConsentLockLease(lockPath, entry);
-                        }
-                        catch (DirectoryNotFoundException) when (!createDirectory)
-                        {
-                            directoryMissing = true;
-                            return null;
-                        }
-                        catch (IOException) when (DateTime.UtcNow < deadline)
-                        {
-                            Thread.Sleep(10);
-                        }
-                        catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
-                        {
-                            return null;
+                            try
+                            {
+                                entry.Stream = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+                                Volatile.Write(ref entry.RefCount, 1);
+                                lease = new ProcessConsentLockLease(lockPath, entry);
+                                break;
+                            }
+                            catch (DirectoryNotFoundException) when (!createDirectory)
+                            {
+                                directoryMissing = true;
+                                return null;
+                            }
+                            catch (IOException) when (DateTime.UtcNow < deadline)
+                            {
+                                Thread.Sleep(10);
+                            }
+                            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+                            {
+                                return null;
+                            }
                         }
                     }
                 }
@@ -285,21 +297,66 @@ namespace AlUmmahNow.App.Services
                 lock (ProcessLocksGate)
                 {
                     entry.Waiters--;
-                    if (entry.RefCount == 0 && entry.Waiters == 0 &&
+                    if (Volatile.Read(ref entry.RefCount) == 0 && entry.Waiters == 0 &&
                         ProcessLocks.TryGetValue(lockPath, out var current) && ReferenceEquals(current, entry))
                     {
                         ProcessLocks.Remove(lockPath);
                     }
                 }
             }
+
+            if (lease == null || !serializeMutation)
+            {
+                return lease;
+            }
+
+            // Serialize same-process sidecar mutations (save / compare-and-delete rollback) separately from
+            // flush leases so rollback is atomic while opt-out never blocks on an in-flight flush.
+            try
+            {
+                Monitor.Enter(entry.MutationGate);
+                return new SidecarMutationLease(lease, entry.MutationGate);
+            }
+            catch
+            {
+                lease.Dispose();
+                throw;
+            }
         }
 
         private sealed class ProcessConsentLockEntry
         {
             public readonly object Gate = new object();
+            public readonly object MutationGate = new object();
             public FileStream? Stream;
             public int RefCount;
             public int Waiters;
+        }
+
+        private sealed class SidecarMutationLease : IDisposable
+        {
+            private IDisposable? _processLease;
+            private object? _mutationGate;
+
+            public SidecarMutationLease(IDisposable processLease, object mutationGate)
+            {
+                _processLease = processLease;
+                _mutationGate = mutationGate;
+            }
+
+            public void Dispose()
+            {
+                var gate = Interlocked.Exchange(ref _mutationGate, null);
+                var lease = Interlocked.Exchange(ref _processLease, null);
+                try
+                {
+                    if (gate != null) Monitor.Exit(gate);
+                }
+                finally
+                {
+                    lease?.Dispose();
+                }
+            }
         }
 
         private sealed class ProcessConsentLockLease : IDisposable
@@ -322,8 +379,9 @@ namespace AlUmmahNow.App.Services
                 {
                     if (entry.RefCount > 0)
                     {
-                        entry.RefCount--;
-                        if (entry.RefCount == 0)
+                        var remaining = entry.RefCount - 1;
+                        Volatile.Write(ref entry.RefCount, remaining);
+                        if (remaining == 0)
                         {
                             toDispose = entry.Stream;
                             entry.Stream = null;
@@ -333,7 +391,7 @@ namespace AlUmmahNow.App.Services
                 toDispose?.Dispose();
                 lock (ProcessLocksGate)
                 {
-                    if (entry.RefCount == 0 && entry.Waiters == 0 &&
+                    if (Volatile.Read(ref entry.RefCount) == 0 && entry.Waiters == 0 &&
                         ProcessLocks.TryGetValue(_lockPath, out var current) && ReferenceEquals(current, entry))
                     {
                         ProcessLocks.Remove(_lockPath);

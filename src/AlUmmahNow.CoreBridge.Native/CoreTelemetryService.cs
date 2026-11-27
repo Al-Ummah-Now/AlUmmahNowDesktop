@@ -738,12 +738,19 @@ public sealed class CoreTelemetryService : ITelemetryService
         var ch = text[valStart];
         if (ch is '"' or '\'')
         {
-            return RedactQuotedAuthString(text, valStart, ch, ref sb, ref copied);
+            var afterQuote = RedactQuotedAuthString(text, valStart, ch, ref sb, ref copied);
+            return RedactTrailingPlainAuthContinuation(text, afterQuote, allowNewlines, ref sb, ref copied);
         }
         if (ch == '[')
         {
-            return RedactAuthArrayValue(text, valStart + 1, allowNewlines, ref sb, ref copied);
+            var afterArray = RedactAuthArrayValue(text, valStart + 1, allowNewlines, ref sb, ref copied);
+            return RedactTrailingPlainAuthContinuation(text, afterArray, allowNewlines, ref sb, ref copied);
         }
+        return RedactPlainAuthSpan(text, valStart, ref sb, ref copied);
+    }
+
+    private static int RedactPlainAuthSpan(string text, int valStart, ref StringBuilder? sb, ref int copied)
+    {
         var lineEnd = ScanPlainAuthValueEnd(text, valStart);
         var redacted = RedactAuthValueBody(text, valStart, lineEnd);
         if (redacted != null)
@@ -753,6 +760,37 @@ public sealed class CoreTelemetryService : ITelemetryService
             copied = lineEnd;
         }
         return lineEnd;
+    }
+
+    private static int RedactTrailingPlainAuthContinuation(
+        string text, int afterPos, bool allowNewlines, ref StringBuilder? sb, ref int copied)
+    {
+        var tailStart = FindTrailingPlainAuthStart(text, afterPos, allowNewlines);
+        if (tailStart < 0) return afterPos;
+        return RedactPlainAuthSpan(text, tailStart, ref sb, ref copied);
+    }
+
+    private static int FindTrailingPlainAuthStart(string text, int afterPos, bool allowNewlines)
+    {
+        var p = afterPos;
+        var sawFold = false;
+        while (p < text.Length)
+        {
+            while (p < text.Length && text[p] is ' ' or '\t') p++;
+            var fold = AdvanceObsFold(text, p);
+            if (fold > p)
+            {
+                sawFold = true;
+                p = fold;
+                continue;
+            }
+            break;
+        }
+        if (p >= text.Length || text[p] is '\r' or '\n') return -1;
+        var next = text[p];
+        if (sawFold) return allowNewlines && next is '}' or ']' ? -1 : p;
+        if (next is '}' or ']' || (allowNewlines && next == ',')) return -1;
+        return p;
     }
 
     private static int ScanPlainAuthValueEnd(string text, int start)

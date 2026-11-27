@@ -216,4 +216,51 @@ public class SettingsStoreTests
             if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
         }
     }
+
+    [Fact]
+    public async Task RollbackTelemetryEnabled_is_serialized_against_concurrent_same_process_opt_in()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "aun-settings-rollback-race-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var settingsPath = Path.Combine(dir, "settings.json");
+            var storeA = new SettingsStore(settingsPath);
+            var storeB = new SettingsStore(settingsPath);
+            Assert.True(storeA.TrySaveTelemetryEnabled(true, out var initialToken));
+            Assert.False(string.IsNullOrEmpty(initialToken));
+
+            using var flushLease = storeA.TryAcquireTelemetryConsentLock();
+            Assert.NotNull(flushLease);
+
+            for (var i = 0; i < 64; i++)
+            {
+                Assert.True(storeA.TrySaveTelemetryEnabled(true, out var oldToken));
+                string? newerToken = null;
+                var start = new ManualResetEventSlim(false);
+                var tRollback = Task.Run(() =>
+                {
+                    start.Wait();
+                    return storeA.RollbackTelemetryEnabled(oldToken);
+                });
+                var tEnable = Task.Run(() =>
+                {
+                    start.Wait();
+                    return storeB.TrySaveTelemetryEnabled(true, out newerToken);
+                });
+                start.Set();
+                var results = await Task.WhenAll(tRollback, tEnable);
+                Assert.True(results[0]);
+                Assert.True(results[1]);
+                Assert.False(string.IsNullOrEmpty(newerToken));
+                // Regardless of serialization order (rollback->enable or enable->rollback),
+                // the newer opt-in token must always survive on disk.
+                Assert.Equal(newerToken, storeA.LoadTelemetryConsentToken());
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+    }
 }
