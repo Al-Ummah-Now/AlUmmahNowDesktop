@@ -1145,25 +1145,51 @@ public sealed class CoreTelemetryService : ITelemetryService
         {
             var innerStart = open + 1;
             var innerLen = close - innerStart;
-            if (innerLen <= 0 || !ContainsAssignDelimiter(current, innerStart, close)) continue;
-            var inner = current.Substring(innerStart, innerLen);
-            var scrubbedInner = KeywordAssignedPathRegex.Replace(inner, "$1[redacted-path]");
-            if (ReferenceEquals(scrubbedInner, inner) || scrubbedInner == inner) continue;
-            sb ??= new StringBuilder(current.Length);
-            sb.Append(current, copied, innerStart - copied).Append(scrubbedInner);
-            copied = close;
+            if (innerLen <= 0 || !ContainsAssignCandidate(current, innerStart, close)) continue;
+            var (decoded, rawOffsets) = DecodeQuotedSpanWithOffsets(current, innerStart, close);
+            var match = KeywordAssignedPathRegex.Match(decoded);
+            if (!match.Success) continue;
+            while (match.Success)
+            {
+                var g1 = match.Groups[1];
+                var rawG1End = rawOffsets[g1.Index + g1.Length];
+                var rawEnd = rawOffsets[match.Index + match.Length];
+                sb ??= new StringBuilder(current.Length);
+                sb.Append(current, copied, rawG1End - copied).Append("[redacted-path]");
+                copied = rawEnd;
+                match = match.NextMatch();
+            }
         }
         if (sb == null) return current;
         return sb.Append(current, copied, current.Length - copied).ToString();
     }
 
-    private static bool ContainsAssignDelimiter(string text, int start, int end)
+    private static bool ContainsAssignCandidate(string text, int start, int end)
     {
         for (var i = start; i < end; i++)
         {
-            if (text[i] is ':' or '=') return true;
+            var ch = text[i];
+            if (ch is ':' or '=' || (ch == '\\' && i + 5 < end && text[i + 1] == 'u')) return true;
         }
         return false;
+    }
+
+    private static (string Decoded, int[] RawOffsets) DecodeQuotedSpanWithOffsets(string text, int start, int end)
+    {
+        var len = end - start;
+        var chars = new char[len];
+        var offsets = new int[len + 1];
+        var count = 0;
+        var pos = start;
+        while (pos < end)
+        {
+            offsets[count] = pos;
+            var step = DecodeJsonCharAt(text, pos, end, out var decoded);
+            chars[count++] = decoded;
+            pos += step;
+        }
+        offsets[count] = end;
+        return (new string(chars, 0, count), offsets);
     }
 
     private static int FindDoubleQuotedPathEnd(string text, int start, out bool hasVault, out int stopPos)
@@ -1255,7 +1281,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                     }
                 }
             }
-            if (c0 == '/')
+            if (c0 == '/' || (c0 == '\\' && (tokenStart >= 0 || len0 > 1)))
             {
                 if (tokenStart >= 0)
                 {
@@ -1265,16 +1291,16 @@ public sealed class CoreTelemetryService : ITelemetryService
                     p = next;
                     continue;
                 }
-                var nextRoot = ScanSlashRunEnd(text, p + len0, end, out var rootCh);
+                var nextRoot = ScanCharRunEnd(text, p + len0, end, c0, out var rootCh);
                 if (nextRoot < end && !IsDecodedWhitespace(rootCh)) return p;
                 p = nextRoot;
                 continue;
             }
-            if (tokenStart < 0 && c0 is '~' or '\\' && p + len0 < end)
+            if (tokenStart < 0 && c0 == '~' && p + len0 < end)
             {
                 var p1 = p + len0;
                 var len1 = DecodeJsonCharAt(text, p1, end, out var c1);
-                if ((c0 == '~' && c1 == '/') || (c0 == '\\' && c1 == '\\'))
+                if (c1 == '/')
                 {
                     var next = NextNonHorizontalSpaceDecoded(text, p1 + len1, end, out var nextCh);
                     if (next < end && !IsDecodedWhitespace(nextCh)) return p;
@@ -1286,17 +1312,6 @@ public sealed class CoreTelemetryService : ITelemetryService
             {
                 tokenStart = -1;
             }
-            else if (c0 == '\\')
-            {
-                if (tokenStart >= 0)
-                {
-                    var next = NextNonHorizontalSpaceDecoded(text, p + len0, end, out var nextCh);
-                    if (next < end && !IsDecodedWhitespace(nextCh)) return tokenStart;
-                    tokenStart = -1;
-                    p = next;
-                    continue;
-                }
-            }
             else if (tokenStart < 0)
             {
                 tokenStart = p;
@@ -1306,14 +1321,14 @@ public sealed class CoreTelemetryService : ITelemetryService
         return -1;
     }
 
-    private static int ScanSlashRunEnd(string text, int pos, int end, out char stopChar)
+    private static int ScanCharRunEnd(string text, int pos, int end, char runChar, out char stopChar)
     {
         var next = pos;
         stopChar = '\0';
         while (next < end)
         {
             var len = DecodeJsonCharAt(text, next, end, out var c);
-            if (c == '/' || c is ' ' or '\t')
+            if (c == runChar || c is ' ' or '\t')
             {
                 next += len;
             }
@@ -1395,7 +1410,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         while (segStart < text.Length)
         {
             var segEnd = segStart;
-            while (segEnd < text.Length && text[segEnd] is not ('\r' or '\n' or '/' or '\\' or '\u001E' or '\u001F')) segEnd++;
+            while (segEnd < text.Length && text[segEnd] is not ('\r' or '\n' or '/' or '\\' or '\u001E' or '\u001F' or '"')) segEnd++;
             var open = -1;
             var candidateClose = -1;
             for (var p = segStart; p < segEnd; p++)
@@ -1451,7 +1466,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         while (segStart < text.Length)
         {
             var segEnd = segStart;
-            while (segEnd < text.Length && text[segEnd] is not ('\r' or '\n' or '\u001E' or '\u001F'))
+            while (segEnd < text.Length && text[segEnd] is not ('\r' or '\n' or '\u001E' or '\u001F' or '"'))
             {
                 segEnd++;
             }

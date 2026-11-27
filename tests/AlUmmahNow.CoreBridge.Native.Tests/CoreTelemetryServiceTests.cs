@@ -1388,6 +1388,24 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("{\"message\":\"see report.pdf now\",\"keep\":\"public\"}"));
             Assert.Equal("{\"status\":\"[redacted-path] pending\"}",
                 CoreTelemetryService.SanitizeLocalPaths("{\"status\":\"secret.mov pending\"}"));
+            Assert.Equal("[\"path=[redacted-path]\",{\"keep\":\"[redacted-path] attached\"}]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"path=alpha\",{\"keep\":\"beta.pdf attached\"}]"));
+            Assert.Equal("[\"read this\",{\"x\":\"[redacted-path] attached\"}]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"read this\",{\"x\":\"report.pdf attached\"}]"));
+            Assert.Equal("{\"'\":\"[redacted-path]' pending\"}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"'\":\"secret.pdf' pending\"}"));
+            Assert.Equal("[\"hello\\npath=[redacted-path]\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"hello\\npath=Acquisition\"]"));
+            Assert.Equal("[\"hello\\npath=[redacted-path]\\npath=[redacted-path]\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"hello\\npath=alpha\\npath=beta\"]"));
+            Assert.Equal("[\"path\\u003d[redacted-path]\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"path\\u003dAcquisition\"]"));
+            Assert.Equal("[\"[redacted-path]\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"\\\\Secret\"]"));
+            Assert.Equal("[\"[redacted-path]\",\"public\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"\\u005CSecret\",\"public\"]"));
+            Assert.Equal("[\"\\\\\",\"public\"]",
+                CoreTelemetryService.SanitizeLocalPaths("[\"\\\\\",\"public\"]"));
             var manyPublic = "[" + string.Join(",", Enumerable.Repeat("\"public\"", 2000)) + "]";
             Assert.Equal(manyPublic, CoreTelemetryService.SanitizeLocalPaths(manyPublic));
             var manyNewlines = "[" + string.Join(",", Enumerable.Repeat("\"hello\\nworld\"", 2000)) + "]";
