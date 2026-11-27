@@ -309,7 +309,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             sb ??= new StringBuilder(text.Length);
             sb.Append(text, copied, start - copied);
             var idx = vaultedUrls.Count;
-            vaultedUrls.Add(url);
+            vaultedUrls.Add(RedactUrlPathSecrets(url));
             tracker.OnVaultedUrl(totalEnd);
             sb.Append(prefix).Append(idx).Append('\u001F').Append(tail);
             copied = totalEnd;
@@ -318,6 +318,26 @@ public sealed class CoreTelemetryService : ITelemetryService
         if (sb == null) return text;
         sb.Append(text, copied, text.Length - copied);
         return sb.ToString();
+    }
+
+    private static readonly Regex WebhookPathTokenRegex = new(
+        @"((?:^|/)webhooks?/[^/\s?#]+/)[^/\s?#]+",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex SlackWebhookUrlRegex = new(
+        @"(https?://hooks\.slack\.com/(?:services|workflows|triggers)/)[^\s?#]+",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex TelegramBotTokenUrlRegex = new(
+        @"(/bot\d+:)[^/\s?#]+",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static string RedactUrlPathSecrets(string url)
+    {
+        var result = WebhookPathTokenRegex.Replace(url, "$1[redacted]");
+        result = SlackWebhookUrlRegex.Replace(result, "$1[redacted]");
+        result = TelegramBotTokenUrlRegex.Replace(result, "$1[redacted]");
+        return result;
     }
 
     private static bool TryFindNonFileSchemeStart(string text, int sep, int minStart, out int start)
@@ -618,13 +638,15 @@ public sealed class CoreTelemetryService : ITelemetryService
         StringBuilder? sb = null;
         var copied = 0;
         Dictionary<int, int>? braceMap = null;
+        Dictionary<int, int>? closeToOpenMap = null;
         var failedBraceBack = -1;
         var failedBracketBack = -1;
         var i = 0;
         while (i < text.Length)
         {
             if (!TryMatchAuthHeaderKey(
-                text, i, ref failedBraceBack, ref failedBracketBack, out var keyEnd, out var isJsonCandidate, out var normalizedKey))
+                text, i, ref closeToOpenMap, ref failedBraceBack, ref failedBracketBack,
+                out var keyEnd, out var isJsonCandidate, out var normalizedKey))
             {
                 i++;
                 continue;
@@ -656,7 +678,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     }
 
     private static bool TryMatchAuthHeaderKey(
-        string text, int pos, ref int failedBraceBack, ref int failedBracketBack,
+        string text, int pos, ref Dictionary<int, int>? closeToOpenMap, ref int failedBraceBack, ref int failedBracketBack,
         out int keyEnd, out bool allowNewlines, out string? normalizedKey)
     {
         keyEnd = pos;
@@ -666,7 +688,8 @@ public sealed class CoreTelemetryService : ITelemetryService
         if (ch is '"' or '\'')
         {
             return TryMatchQuotedAuthKey(
-                text, pos, ch, ref failedBraceBack, ref failedBracketBack, out keyEnd, out allowNewlines, out normalizedKey);
+                text, pos, ch, ref closeToOpenMap, ref failedBraceBack, ref failedBracketBack,
+                out keyEnd, out allowNewlines, out normalizedKey);
         }
         if (pos > 0 && IsAuthKeyWordChar(text[pos - 1])) return false;
         if (MatchesAsciiIgnoreCase(text, pos, "proxy-authorization") &&
@@ -685,7 +708,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     }
 
     private static bool TryMatchQuotedAuthKey(
-        string text, int pos, char quote, ref int failedBraceBack, ref int failedBracketBack,
+        string text, int pos, char quote, ref Dictionary<int, int>? closeToOpenMap, ref int failedBraceBack, ref int failedBracketBack,
         out int keyEnd, out bool allowNewlines, out string? normalizedKey)
     {
         keyEnd = pos;
@@ -707,7 +730,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                 {
                     keyEnd = j + 1;
                     allowNewlines = quote == '"' &&
-                        IsPrecededByJsonMemberDelimiter(text, pos, ref failedBraceBack, ref failedBracketBack);
+                        IsPrecededByJsonMemberDelimiter(text, pos, ref closeToOpenMap, ref failedBraceBack, ref failedBracketBack);
                     normalizedKey = sawEscape ? "Authorization" : null;
                     return true;
                 }
@@ -715,7 +738,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                 {
                     keyEnd = j + 1;
                     allowNewlines = quote == '"' &&
-                        IsPrecededByJsonMemberDelimiter(text, pos, ref failedBraceBack, ref failedBracketBack);
+                        IsPrecededByJsonMemberDelimiter(text, pos, ref closeToOpenMap, ref failedBraceBack, ref failedBracketBack);
                     normalizedKey = sawEscape ? "Proxy-Authorization" : null;
                     return true;
                 }
@@ -874,7 +897,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     }
 
     private static bool IsPrecededByJsonMemberDelimiter(
-        string text, int pos, ref int failedBraceBack, ref int failedBracketBack)
+        string text, int pos, ref Dictionary<int, int>? closeToOpenMap, ref int failedBraceBack, ref int failedBracketBack)
     {
         var p = pos - 1;
         while (p >= 0 && text[p] is ' ' or '\t' or '\r' or '\n') p--;
@@ -892,12 +915,12 @@ public sealed class CoreTelemetryService : ITelemetryService
         }
         if (ch == '}')
         {
-            var objStart = ScanBalancedJsonContainerStartBackward(text, prev, '{', '}', ref failedBraceBack);
+            var objStart = ScanBalancedJsonContainerStartBackward(text, prev, '{', '}', ref closeToOpenMap, ref failedBraceBack);
             return objStart >= 0 && IsPrecededByColon(text, objStart);
         }
         if (ch == ']')
         {
-            var arrStart = ScanBalancedJsonContainerStartBackward(text, prev, '[', ']', ref failedBracketBack);
+            var arrStart = ScanBalancedJsonContainerStartBackward(text, prev, '[', ']', ref closeToOpenMap, ref failedBracketBack);
             return arrStart >= 0 && IsPrecededByColon(text, arrStart);
         }
         if (ch >= '0' && ch <= '9')
@@ -937,9 +960,12 @@ public sealed class CoreTelemetryService : ITelemetryService
     }
 
     private static int ScanBalancedJsonContainerStartBackward(
-        string text, int closePos, char openChar, char closeChar, ref int failedFloor)
+        string text, int closePos, char openChar, char closeChar,
+        ref Dictionary<int, int>? closeToOpenMap, ref int failedFloor)
     {
-        var depth = 0;
+        closeToOpenMap ??= new Dictionary<int, int>();
+        if (closeToOpenMap.TryGetValue(closePos, out var cached)) return cached;
+        var stack = new Stack<int>();
         var i = closePos;
         while (i > failedFloor)
         {
@@ -951,14 +977,25 @@ public sealed class CoreTelemetryService : ITelemetryService
                 i = strStart - 1;
                 continue;
             }
-            if (c == closeChar) depth++;
-            else if (c == openChar)
+            if (c == closeChar)
             {
-                depth--;
-                if (depth == 0) return i;
+                if (closeToOpenMap.TryGetValue(i, out var innerOpen))
+                {
+                    if (innerOpen < 0) break;
+                    i = innerOpen - 1;
+                    continue;
+                }
+                stack.Push(i);
+            }
+            else if (c == openChar && stack.Count > 0)
+            {
+                var matchedClose = stack.Pop();
+                closeToOpenMap[matchedClose] = i;
+                if (stack.Count == 0) return i;
             }
             i--;
         }
+        while (stack.Count > 0) closeToOpenMap[stack.Pop()] = -1;
         failedFloor = Math.Max(failedFloor, closePos);
         return -1;
     }
