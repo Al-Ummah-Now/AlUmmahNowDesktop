@@ -2951,7 +2951,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                     continue;
                 }
                 if (len >= 64) return -1;
-                decoded[len++] = next;
+                decoded[len++] = DecodeSimpleJsonEscape(next);
                 j += 2;
                 continue;
             }
@@ -3001,9 +3001,87 @@ public sealed class CoreTelemetryService : ITelemetryService
         {
             return RedactEscapedAuthArrayValue(text, valStart + 1, writer);
         }
+        if (!isTuple && text[valStart] == '{')
+        {
+            var objEnd = ScanEscapedJsonObjectEnd(text, valStart);
+            if (objEnd > valStart)
+            {
+                writer.AppendRedacted(valStart, objEnd, "\\\"[redacted]\\\"");
+                return objEnd;
+            }
+        }
+        if (TryRedactEscapedJsonPrimitive(text, valStart, isTuple, writer, out var primEnd))
+        {
+            return primEnd;
+        }
         if (!isTuple)
         {
             return RedactPlainAuthSpan(text, valStart, -1, writer);
+        }
+        return -1;
+    }
+
+    private static char DecodeSimpleJsonEscape(char next) => next switch
+    {
+        't' => '\t',
+        'n' => '\n',
+        'r' => '\r',
+        'b' => '\b',
+        'f' => '\f',
+        _ => next,
+    };
+
+    private static bool TryRedactEscapedJsonPrimitive(
+        string text, int valStart, bool isTuple, AuthHeaderWriter writer, out int endPos)
+    {
+        endPos = valStart;
+        var tokEnd = valStart;
+        while (tokEnd < text.Length && text[tokEnd] is not (' ' or '\t' or '\r' or '\n' or ',' or '}' or ']' or '"'))
+        {
+            tokEnd++;
+        }
+        if (tokEnd == valStart) return false;
+        var span = text.AsSpan(valStart, tokEnd - valStart);
+        var isNull = span.Equals("null".AsSpan(), StringComparison.Ordinal);
+        var isBool = span.Equals("true".AsSpan(), StringComparison.Ordinal) ||
+            span.Equals("false".AsSpan(), StringComparison.Ordinal);
+        if (!isNull && !isBool && !IsJsonNumberSpan(span)) return false;
+        var after = SkipAuthWhitespace(text, tokEnd, allowNewlines: false);
+        if (isTuple)
+        {
+            if (after >= text.Length || text[after] != ']') return false;
+        }
+        else if (after < text.Length && text[after] is not (',' or '}' or ']' or '\r' or '\n'))
+        {
+            return false;
+        }
+        if (!isNull) writer.AppendRedacted(valStart, tokEnd, "\\\"[redacted]\\\"");
+        endPos = tokEnd;
+        return true;
+    }
+
+    private static int ScanEscapedJsonObjectEnd(string text, int start)
+    {
+        var p = start;
+        var depth = 0;
+        while (p < text.Length)
+        {
+            var ch = text[p];
+            if (ch is '\r' or '\n' or '"') return -1;
+            if (ch == '\\' && p + 1 < text.Length && text[p + 1] == '"')
+            {
+                var closeVal = ScanEscapedQuotedAuthValueEnd(text, p + 2);
+                if (closeVal + 1 >= text.Length || text[closeVal] != '\\' || text[closeVal + 1] != '"') return -1;
+                p = closeVal + 2;
+                continue;
+            }
+            if (ch == '{') depth++;
+            else if (ch == '}')
+            {
+                depth--;
+                if (depth == 0) return p + 1;
+            }
+            p++;
         }
         return -1;
     }
@@ -3033,11 +3111,28 @@ public sealed class CoreTelemetryService : ITelemetryService
     private static int RedactEscapedAuthArrayValue(string text, int start, AuthHeaderWriter writer)
     {
         var p = start;
-        while (p < text.Length)
+        var depth = 1;
+        while (p < text.Length && depth > 0)
         {
             var ch = text[p];
-            if (ch is '\r' or '\n') return p;
-            if (ch == ']') return p + 1;
+            if (ch is '\r' or '\n' or '"') return p;
+            if (ch is ' ' or '\t' or ',')
+            {
+                p++;
+                continue;
+            }
+            if (ch == '[')
+            {
+                depth++;
+                p++;
+                continue;
+            }
+            if (ch == ']')
+            {
+                depth--;
+                p++;
+                continue;
+            }
             if (ch == '\\' && p + 1 < text.Length && text[p + 1] == '"')
             {
                 var closeVal = ScanEscapedQuotedAuthValueEnd(text, p + 2);
@@ -3046,6 +3141,30 @@ public sealed class CoreTelemetryService : ITelemetryService
                 p = closeVal + 1 < text.Length && text[closeVal] == '\\' && text[closeVal + 1] == '"'
                     ? closeVal + 2
                     : closeVal;
+                continue;
+            }
+            if (ch == '{')
+            {
+                var objEnd = ScanEscapedJsonObjectEnd(text, p);
+                if (objEnd > p)
+                {
+                    writer.AppendRedacted(p, objEnd, "\\\"[redacted]\\\"");
+                    p = objEnd;
+                    continue;
+                }
+            }
+            var elemEnd = p;
+            while (elemEnd < text.Length && text[elemEnd] is not (' ' or '\t' or '\r' or '\n' or ',' or ']' or '[' or '}' or '"'))
+            {
+                elemEnd++;
+            }
+            if (elemEnd > p)
+            {
+                if (!text.AsSpan(p, elemEnd - p).Equals("null".AsSpan(), StringComparison.Ordinal))
+                {
+                    writer.AppendRedacted(p, elemEnd, "\\\"[redacted]\\\"");
+                }
+                p = elemEnd;
                 continue;
             }
             p++;
@@ -3195,8 +3314,16 @@ public sealed class CoreTelemetryService : ITelemetryService
                     continue;
                 }
                 if (j + 1 >= text.Length) return false;
-                hasInvalidJsonEscape = true;
-                decoded[len++] = text[j + 1];
+                var esc = text[j + 1];
+                if (esc is 't' or 'n' or 'r' or 'b' or 'f' or '"' or '\\' or '/')
+                {
+                    decoded[len++] = DecodeSimpleJsonEscape(esc);
+                }
+                else
+                {
+                    hasInvalidJsonEscape = true;
+                    decoded[len++] = esc;
+                }
                 j += 2;
                 continue;
             }
