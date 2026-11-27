@@ -1040,6 +1040,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         }
         if (totalEnd < failedSpacedContMax) return false;
         var inSingleQuote = (quoteState & 1) != 0;
+        var urlStartsSpan = wrappedInAngle || IsUrlAtDoubleQuoteStart(text, urlStart);
         var p = totalEnd;
         while (p < text.Length)
         {
@@ -1066,7 +1067,8 @@ public sealed class CoreTelemetryService : ITelemetryService
                 p += 2;
                 continue;
             }
-            if (ch is '?' or '#' && IsValidSpacedUrlQueryStart(text, p, urlStart, totalEnd, inDoubleQuote, wrappedInAngle))
+            if (ch is '?' or '#' &&
+                IsValidSpacedUrlQueryStart(text, p, totalEnd, inDoubleQuote, wrappedInAngle, urlStartsSpan))
             {
                 var angleStopMask = ComputeQueryAngleStopMask(text, urlStart, inDoubleQuote);
                 var qfEnd = ScanQueryOrFragment(text, p, angleStopMask);
@@ -1093,7 +1095,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     }
 
     private static bool IsValidSpacedUrlQueryStart(
-        string text, int qfPos, int urlStart, int minPos, bool inDoubleQuote, bool wrappedInAngle)
+        string text, int qfPos, int minPos, bool inDoubleQuote, bool wrappedInAngle, bool urlStartsSpan)
     {
         var nextPos = qfPos + 1;
         if (nextPos >= text.Length) return false;
@@ -1104,7 +1106,6 @@ public sealed class CoreTelemetryService : ITelemetryService
         {
             return false;
         }
-        var urlStartsSpan = wrappedInAngle || IsUrlAtDoubleQuoteStart(text, urlStart);
         var nextIsWs = char.IsWhiteSpace(nextCh) || (inDoubleQuote && IsJsonWhitespaceEscapeAt(text, nextPos));
         if (text[qfPos] == '?') return !nextIsWs || urlStartsSpan;
         return !nextIsWs && (urlStartsSpan || !IsPrecededBySpaceOrEscape(text, qfPos, minPos, inDoubleQuote));
@@ -2615,9 +2616,10 @@ public sealed class CoreTelemetryService : ITelemetryService
     private static bool IsJsonStringSpanBoundary(string text, int open, int close)
     {
         var prev = SkipJsonWhitespaceBackward(text, open - 1);
-        if (prev >= 0 && text[prev] is not (':' or '[' or ',' or '{')) return false;
+        if (prev >= 0 && text[prev] is not (':' or '=' or '[' or ',' or '{')) return false;
+        if (close + 1 >= text.Length || char.IsWhiteSpace(text[close + 1])) return true;
         var after = SkipJsonWhitespaceForward(text, close + 1);
-        return after >= text.Length || text[after] is ',' or '}' or ']' or ':';
+        return after >= text.Length || text[after] is ',' or '}' or ']' or ':' or ';' or ')';
     }
 
     private static void RedactAuthHeadersInBalancedSpan(
@@ -5695,33 +5697,36 @@ public sealed class CoreTelemetryService : ITelemetryService
         foreach (var kv in properties)
         {
             if (string.IsNullOrWhiteSpace(kv.Key) || kv.Value == null) continue;
-            if (IsAuthHeaderPropertyKey(kv.Key))
+            var isAuthKey = IsAuthHeaderPropertyKey(kv.Key);
+            var safeKey = isAuthKey ? kv.Key : SanitizeLocalPaths(kv.Key);
+            if (string.IsNullOrWhiteSpace(safeKey)) continue;
+            if (isAuthKey)
             {
-                flat[kv.Key] = "[redacted]";
+                flat[safeKey] = "[redacted]";
                 continue;
             }
             switch (kv.Value)
             {
                 case string s:
-                    flat[kv.Key] = SanitizeLocalPaths(s);
+                    flat[safeKey] = SanitizeLocalPaths(s);
                     break;
                 case bool b:
-                    flat[kv.Key] = b;
+                    flat[safeKey] = b;
                     break;
                 case int i:
-                    flat[kv.Key] = i;
+                    flat[safeKey] = i;
                     break;
                 case long l:
-                    flat[kv.Key] = l;
+                    flat[safeKey] = l;
                     break;
                 case double d when double.IsFinite(d):
-                    flat[kv.Key] = d;
+                    flat[safeKey] = d;
                     break;
                 case float f when float.IsFinite(f):
-                    flat[kv.Key] = (double)f;
+                    flat[safeKey] = (double)f;
                     break;
                 default:
-                    flat[kv.Key] = SanitizeLocalPaths(kv.Value.ToString() ?? "");
+                    flat[safeKey] = SanitizeLocalPaths(kv.Value.ToString() ?? "");
                     break;
             }
         }

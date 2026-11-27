@@ -1568,13 +1568,20 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("\"Authorization\\u003a secret\""));
             Assert.Equal("\"Authorization\\u003d[redacted]\"",
                 CoreTelemetryService.SanitizeLocalPaths("\"Authorization\\u003dsecret\""));
+            Assert.Equal("headers=\"Authorization\\u003a [redacted]\"",
+                CoreTelemetryService.SanitizeLocalPaths("headers=\"Authorization\\u003a opaqueSecret123\""));
+            Assert.Equal("headers=\"Authorization\\u003d [redacted]\" status=ok",
+                CoreTelemetryService.SanitizeLocalPaths("headers=\"Authorization\\u003d opaqueSecret123\" status=ok"));
             var repeatedUnclosedAngles = string.Concat(Enumerable.Repeat("<https://example.test/webhooks/token ", 500));
             var expectedUnclosedAngles = string.Concat(Enumerable.Repeat("<https://example.test/webhooks/[redacted] ", 500));
             Assert.Equal(expectedUnclosedAngles, CoreTelemetryService.SanitizeLocalPaths(repeatedUnclosedAngles));
+            var spacedHashes = "\"" + new string(' ', 2000) + "https://example.test/path " + string.Concat(Enumerable.Repeat("# ", 2000)) + "\"";
+            Assert.Equal(spacedHashes, CoreTelemetryService.SanitizeLocalPaths(spacedHashes));
             var scrubbedProps = CoreTelemetryService.SerializeProperties(new Dictionary<string, object>
             {
                 ["detail"] = "Authorization: Bearer secret",
                 ["path"] = "/Users/Alice/Secret.mov",
+                ["/Users/Alice/Acquisition.mov"] = 1,
                 ["Authorization"] = "opaqueSecret123",
                 ["uri"] = new Uri("https://example.com/api?token=secret"),
                 ["count"] = 2,
@@ -1583,6 +1590,8 @@ public class CoreTelemetryServiceTests
             Assert.NotNull(scrubbedProps);
             Assert.DoesNotContain("secret", scrubbedProps!, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("Alice", scrubbedProps!, StringComparison.Ordinal);
+            Assert.DoesNotContain("Acquisition", scrubbedProps!, StringComparison.Ordinal);
+            Assert.Contains("\"[redacted-path]\":1", scrubbedProps!, StringComparison.Ordinal);
             Assert.Contains("\"detail\":\"Authorization: Bearer [redacted]\"", scrubbedProps!, StringComparison.Ordinal);
             Assert.Contains("\"path\":\"[redacted-path]\"", scrubbedProps!, StringComparison.Ordinal);
             Assert.Contains("\"Authorization\":\"[redacted]\"", scrubbedProps!, StringComparison.Ordinal);
