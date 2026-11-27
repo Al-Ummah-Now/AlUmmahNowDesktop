@@ -617,21 +617,23 @@ public sealed class CoreTelemetryService : ITelemetryService
         if (text.IndexOf(':') < 0 && text.IndexOf('=') < 0) return text;
         StringBuilder? sb = null;
         var copied = 0;
+        var objScanBudget = Math.Max(text.Length * 2, 4096);
         var i = 0;
         while (i < text.Length)
         {
-            if (!TryMatchAuthHeaderKey(text, i, out var keyEnd, out var allowNewlines, out var normalizedKey))
+            if (!TryMatchAuthHeaderKey(text, i, out var keyEnd, out var isJsonCandidate, out var normalizedKey))
             {
                 i++;
                 continue;
             }
-            var sep = SkipAuthWhitespace(text, keyEnd, allowNewlines);
+            var sep = SkipAuthWhitespace(text, keyEnd, isJsonCandidate);
             if (sep >= text.Length || text[sep] is not (':' or '='))
             {
                 i = keyEnd;
                 continue;
             }
-            var valStart = SkipAuthWhitespace(text, sep + 1, allowNewlines);
+            var isJsonMember = isJsonCandidate && text[sep] == ':';
+            var valStart = SkipAuthWhitespace(text, sep + 1, isJsonMember);
             if (valStart >= text.Length || text[valStart] is '\r' or '\n')
             {
                 i = sep + 1;
@@ -643,7 +645,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                 sb.Append(text, copied, i - copied).Append(text[i]).Append(normalizedKey).Append(text[i]);
                 copied = keyEnd;
             }
-            i = RedactAuthHeaderValue(text, valStart, allowNewlines, ref sb, ref copied);
+            i = RedactAuthHeaderValue(text, valStart, isJsonMember, ref objScanBudget, ref sb, ref copied);
         }
         if (sb == null) return text;
         sb.Append(text, copied, text.Length - copied);
@@ -698,14 +700,14 @@ public sealed class CoreTelemetryService : ITelemetryService
                 if (span.Equals("authorization".AsSpan(), StringComparison.OrdinalIgnoreCase))
                 {
                     keyEnd = j + 1;
-                    allowNewlines = true;
+                    allowNewlines = quote == '"' && IsPrecededByJsonMemberDelimiter(text, pos);
                     normalizedKey = sawEscape ? "Authorization" : null;
                     return true;
                 }
                 if (span.Equals("proxy-authorization".AsSpan(), StringComparison.OrdinalIgnoreCase))
                 {
                     keyEnd = j + 1;
-                    allowNewlines = true;
+                    allowNewlines = quote == '"' && IsPrecededByJsonMemberDelimiter(text, pos);
                     normalizedKey = sawEscape ? "Proxy-Authorization" : null;
                     return true;
                 }
@@ -733,20 +735,31 @@ public sealed class CoreTelemetryService : ITelemetryService
     }
 
     private static int RedactAuthHeaderValue(
-        string text, int valStart, bool allowNewlines, ref StringBuilder? sb, ref int copied)
+        string text, int valStart, bool isJsonMember, ref int objScanBudget, ref StringBuilder? sb, ref int copied)
     {
         var ch = text[valStart];
         if (ch is '"' or '\'')
         {
             var afterQuote = RedactQuotedAuthString(text, valStart, ch, ref sb, ref copied);
-            return RedactTrailingPlainAuthContinuation(text, afterQuote, allowNewlines, ref sb, ref copied);
+            return RedactTrailingPlainAuthContinuation(text, afterQuote, isJsonMember, ref sb, ref copied);
         }
         if (ch == '[')
         {
-            var afterArray = RedactAuthArrayValue(text, valStart + 1, allowNewlines, ref sb, ref copied);
-            return RedactTrailingPlainAuthContinuation(text, afterArray, allowNewlines, ref sb, ref copied);
+            var afterArray = RedactAuthArrayValue(text, valStart + 1, isJsonMember, ref objScanBudget, ref sb, ref copied);
+            return RedactTrailingPlainAuthContinuation(text, afterArray, isJsonMember, ref sb, ref copied);
         }
-        if (allowNewlines && TryRedactJsonPrimitiveAuthValue(text, valStart, ref sb, ref copied, out var afterPrim))
+        if (ch == '{')
+        {
+            var objEnd = ScanBalancedJsonObjectEnd(text, valStart, ref objScanBudget);
+            if (objEnd > valStart)
+            {
+                sb ??= new StringBuilder(text.Length);
+                sb.Append(text, copied, valStart - copied).Append(isJsonMember ? "\"[redacted]\"" : "[redacted]");
+                copied = objEnd;
+                return RedactTrailingPlainAuthContinuation(text, objEnd, isJsonMember, ref sb, ref copied);
+            }
+        }
+        if (isJsonMember && TryRedactJsonPrimitiveAuthValue(text, valStart, ref sb, ref copied, out var afterPrim))
         {
             return afterPrim;
         }
@@ -771,7 +784,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         var isNumber = !isNull && !isBool && IsJsonNumberSpan(span);
         if (!isNull && !isBool && !isNumber) return false;
         var next = SkipAuthWhitespace(text, tokenEnd, allowNewlines: true);
-        if (next < text.Length && text[next] is not (',' or '}' or ']')) return false;
+        if (next < text.Length && !IsJsonMemberContinuationDelimiter(text, next)) return false;
         if (!isNull)
         {
             sb ??= new StringBuilder(text.Length);
@@ -826,7 +839,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         return RedactPlainAuthSpan(text, tailStart, ref sb, ref copied);
     }
 
-    private static int FindTrailingPlainAuthStart(string text, int afterPos, bool allowNewlines)
+    private static int FindTrailingPlainAuthStart(string text, int afterPos, bool isJsonMember)
     {
         var p = afterPos;
         while (p < text.Length)
@@ -841,8 +854,53 @@ public sealed class CoreTelemetryService : ITelemetryService
             break;
         }
         if (p >= text.Length || text[p] is '\r' or '\n') return -1;
-        if (allowNewlines && text[p] is '}' or ']' or ',') return -1;
+        if (isJsonMember && IsJsonMemberContinuationDelimiter(text, p)) return -1;
         return p;
+    }
+
+    private static bool IsPrecededByJsonMemberDelimiter(string text, int pos)
+    {
+        var p = pos - 1;
+        while (p >= 0 && text[p] is ' ' or '\t' or '\r' or '\n') p--;
+        return p >= 0 && text[p] is '{' or ',';
+    }
+
+    private static bool IsJsonMemberContinuationDelimiter(string text, int pos)
+    {
+        if (text[pos] == '}') return true;
+        if (text[pos] != ',') return false;
+        var next = SkipAuthWhitespace(text, pos + 1, allowNewlines: true);
+        return next < text.Length && text[next] == '"';
+    }
+
+    private static int ScanBalancedJsonObjectEnd(string text, int bracePos, ref int objScanBudget)
+    {
+        if (objScanBudget <= 0 || bracePos >= text.Length || text[bracePos] != '{') return -1;
+        var depth = 0;
+        var inString = false;
+        var escaped = false;
+        var i = bracePos;
+        for (; i < text.Length; i++)
+        {
+            var c = text[i];
+            if (inString)
+            {
+                if (c is '\r' or '\n') break;
+                if (escaped) { escaped = false; continue; }
+                if (c == '\\') { escaped = true; continue; }
+                if (c == '"') { inString = false; continue; }
+                continue;
+            }
+            if (c == '"') { inString = true; continue; }
+            if (c == '{') { depth++; continue; }
+            if (c == '}')
+            {
+                depth--;
+                if (depth == 0) return i + 1;
+            }
+        }
+        objScanBudget -= Math.Max(1, i - bracePos);
+        return -1;
     }
 
     private static int ScanPlainAuthValueEnd(string text, int start)
@@ -867,7 +925,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     }
 
     private static int RedactAuthArrayValue(
-        string text, int start, bool allowNewlines, ref StringBuilder? sb, ref int copied)
+        string text, int start, bool isJsonMember, ref int objScanBudget, ref StringBuilder? sb, ref int copied)
     {
         var depth = 1;
         var k = start;
@@ -881,10 +939,22 @@ public sealed class CoreTelemetryService : ITelemetryService
                 k = RedactQuotedAuthString(text, k, c, ref sb, ref copied);
                 continue;
             }
+            if (c == '{')
+            {
+                var objEnd = ScanBalancedJsonObjectEnd(text, k, ref objScanBudget);
+                if (objEnd > k)
+                {
+                    sb ??= new StringBuilder(text.Length);
+                    sb.Append(text, copied, k - copied).Append(isJsonMember ? "\"[redacted]\"" : "[redacted]");
+                    copied = objEnd;
+                    k = objEnd;
+                    continue;
+                }
+            }
             if (c is ' ' or '\t' or ',') { k++; continue; }
             if (c is '\r' or '\n')
             {
-                if (allowNewlines) { k++; continue; }
+                if (isJsonMember) { k++; continue; }
                 var fold = AdvanceObsFold(text, k);
                 if (fold > k) { k = fold; continue; }
                 return k;
@@ -898,7 +968,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                 var redacted = RedactAuthValueBody(text, k, trimEnd);
                 if (redacted != null)
                 {
-                    var replacement = allowNewlines ? "\"" + redacted + "\"" : redacted;
+                    var replacement = isJsonMember ? "\"" + redacted + "\"" : redacted;
                     sb ??= new StringBuilder(text.Length);
                     sb.Append(text, copied, k - copied).Append(replacement).Append(text, trimEnd, elemEnd - trimEnd);
                     copied = elemEnd;

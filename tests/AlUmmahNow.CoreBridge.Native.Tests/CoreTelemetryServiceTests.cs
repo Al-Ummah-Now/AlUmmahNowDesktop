@@ -1016,6 +1016,14 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("{\"Authorization\":12345,\"status\":\"safe\"}"));
             Assert.Equal("{\"Authorization\":null,\"status\":\"safe\"}",
                 CoreTelemetryService.SanitizeLocalPaths("{\"Authorization\":null,\"status\":\"safe\"}"));
+            Assert.Equal("\"Authorization\": \"[redacted]\" [redacted]",
+                CoreTelemetryService.SanitizeLocalPaths("\"Authorization\": \"firstValue\" ]opaqueSecret123"));
+            Assert.Equal("{\"Authorization\":\"[redacted]\",\"status\":\"safe\"}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"Authorization\":{\"token\":\"secret\"},\"status\":\"safe\"}"));
+            Assert.Equal("{\"Authorization\":\"[redacted]\",\"status\":\"safe\"}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"Authorization\":{\n\"token\":\"opaqueSecret123\"\n},\"status\":\"safe\"}"));
+            Assert.Equal("{\"Authorization\":[\"[redacted]\"],\"status\":\"safe\"}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"Authorization\":[{\"token\":\"start],opaqueSecret123\"}],\"status\":\"safe\"}"));
             Assert.Equal("Authorization: [[redacted]]\r\nNextHeader: safe",
                 CoreTelemetryService.SanitizeLocalPaths("Authorization: [firstValue]\r\nNextHeader: safe"));
             Assert.Equal("{\n  \"Authorization\": \"[redacted]\"\n  }",
