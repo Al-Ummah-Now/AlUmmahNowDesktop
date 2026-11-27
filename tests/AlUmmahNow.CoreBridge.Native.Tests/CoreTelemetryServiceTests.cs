@@ -972,6 +972,20 @@ public class CoreTelemetryServiceTests
             Assert.Equal("file [redacted-email]", CoreTelemetryService.SanitizeLocalPaths("file alice.txt@localhost"));
             Assert.Equal("file [redacted-path]", CoreTelemetryService.SanitizeLocalPaths("file Private Project alice.txt@example.com"));
             Assert.Equal("[redacted-path]", CoreTelemetryService.SanitizeLocalPaths("'alice.txt'@example.com"));
+            Assert.Equal("[redacted-email]", CoreTelemetryService.SanitizeLocalPaths("alice@internal.pdf.example.org"));
+            Assert.Equal("[redacted-email]", CoreTelemetryService.SanitizeLocalPaths("alice.txt@example.zip.private"));
+            Assert.Equal("Authorization: Basic [redacted]",
+                CoreTelemetryService.SanitizeLocalPaths("Authorization: Basic YWxpY2U6c2VjcmV0"));
+            Assert.Equal("Proxy-Authorization: Basic [redacted]",
+                CoreTelemetryService.SanitizeLocalPaths("Proxy-Authorization: Basic YWxpY2U6c2VjcmV0"));
+            Assert.Equal("Authorization: Digest [redacted]",
+                CoreTelemetryService.SanitizeLocalPaths("Authorization: Digest username=\"alice\", response=\"deadbeef\""));
+            Assert.Equal("{\"Authorization\": \"Basic [redacted]\"}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"Authorization\": \"Basic YWxpY2U6c2VjcmV0\"}"));
+            Assert.Equal("Basic auth failed", CoreTelemetryService.SanitizeLocalPaths("Basic auth failed"));
+            var repeatedFilenameEmails = string.Concat(Enumerable.Repeat("alice.txt@example.org ", 5_000));
+            Assert.Equal(string.Concat(Enumerable.Repeat("[redacted-email] ", 5_000)),
+                CoreTelemetryService.SanitizeLocalPaths(repeatedFilenameEmails));
             Assert.Equal("https://[2001:db8::1]/v1/items",
                 CoreTelemetryService.SanitizeLocalPaths("https://[2001:db8::1]/v1/items"));
             Assert.Equal("https://example.com/a(b)/items",

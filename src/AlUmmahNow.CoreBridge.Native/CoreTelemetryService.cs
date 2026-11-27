@@ -34,7 +34,9 @@ public sealed class CoreTelemetryService : ITelemetryService
     };
     private static readonly Regex KeywordAssignedPathRegex = new(@"(\b(?:file|path|filename|filepath)\s*[:=]\s*)(?!\u001E)[^\r\n\u001E\u001F]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex BareFilenameRegex = new(@"(^|[\r\n:=;\u001F])([ \t]*)(?=[^\r\n:=;\u001E\u001F \t])[^\r\n:=;\u001E\u001F]*\.(?!ts:\d+)(?:mov|mp4|m4v|mkv|webm|avi|ts|m3u8|mpd|mp3|m4a|wav|aac|flac|ogg|opus|jpg|jpeg|png|gif|webp|heic|svg|pdf|txt|md|rtf|doc|docx|xls|xlsx|ppt|pptx|csv|json|xml|yaml|yml|toml|ini|cfg|conf|log|srt|vtt|ass|ssa|zip|tar|gz|tgz|bz2|xz|7z|rar|dmg|pkg|msi|exe|apk|aab|ipa|pem|key|crt|cer|p12|pfx|jks|keystore|db|sqlite|sqlite3|bin|dat|tmp|bak|proj|aun)\b(?!\()", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex AuthHeaderRegex = new(@"(\b(?:Proxy-)?Authorization\s*:\s*(?:[A-Za-z0-9._-]+\s+)?)[^\r\n]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex BearerTokenRegex = new(@"\bBearer\s+\S+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex BasicTokenRegex = new(@"\b[Bb]asic\s+(?=[A-Za-z0-9+/]{8,}={0,2}(?=$|[\s""',;)\]}]))(?=[A-Za-z0-9+/]*[0-9+/A-Z])[A-Za-z0-9+/]+={0,2}", RegexOptions.Compiled);
 
     private readonly TelemetryAppInfo _app;
     private readonly string? _ingestUrl;
@@ -233,10 +235,19 @@ public sealed class CoreTelemetryService : ITelemetryService
         scrubbed = KeywordQuotedPathRegex.Replace(scrubbed, "$1[redacted-path]");
         scrubbed = RedactKeywordUnquotedFilenames(scrubbed);
         scrubbed = KeywordAssignedPathRegex.Replace(scrubbed, "$1[redacted-path]");
-        scrubbed = RedactBareFilenames(scrubbed);
-        scrubbed = RestoreVaultedUrls(scrubbed, VaultPrefix, vaultedUrls);
         scrubbed = RedactEmails(scrubbed);
+        if (scrubbed.Contains('.'))
+        {
+            scrubbed = BareFilenameRegex.Replace(scrubbed, "$1$2[redacted-path]");
+        }
+        scrubbed = RestoreVaultedUrls(scrubbed, VaultPrefix, vaultedUrls);
+        if (vaultedUrls.Count > 0)
+        {
+            scrubbed = RedactEmails(scrubbed);
+        }
+        scrubbed = AuthHeaderRegex.Replace(scrubbed, "$1[redacted]");
         scrubbed = BearerTokenRegex.Replace(scrubbed, "Bearer [redacted]");
+        scrubbed = BasicTokenRegex.Replace(scrubbed, "Basic [redacted]");
         return hadSentinels ? UnescapeSentinels(scrubbed) : scrubbed;
     }
 
@@ -585,41 +596,6 @@ public sealed class CoreTelemetryService : ITelemetryService
         return sb.ToString();
     }
 
-    private static string RedactBareFilenames(string text)
-    {
-        if (!text.Contains('.')) return text;
-        if (!HasEmailAt(text))
-        {
-            return BareFilenameRegex.Replace(text, "$1$2[redacted-path]");
-        }
-        StringBuilder? sb = null;
-        var copied = 0;
-        foreach (Match match in BareFilenameRegex.Matches(text))
-        {
-            if (match.Index < copied) continue;
-            var current = match;
-            while (current.Success)
-            {
-                var currentEnd = current.Index + current.Length;
-                var emailAt = FindEmailTailAt(text, currentEnd);
-                if (emailAt < 0)
-                {
-                    sb ??= new StringBuilder(text.Length);
-                    sb.Append(text, copied, current.Index - copied);
-                    sb.Append(current.Groups[1].Value).Append(current.Groups[2].Value).Append("[redacted-path]");
-                    copied = currentEnd;
-                    break;
-                }
-                var localStart = FindEmailLocalStart(text, emailAt, match.Index);
-                if (localStart <= match.Index) break;
-                current = BareFilenameRegex.Match(text, match.Index, localStart - match.Index);
-            }
-        }
-        if (sb == null) return text;
-        sb.Append(text, copied, text.Length - copied);
-        return sb.ToString();
-    }
-
     private static bool HasEmailAt(string text) =>
         text.IndexOf('@') >= 0 || text.IndexOf("%40", StringComparison.Ordinal) >= 0;
 
@@ -632,19 +608,13 @@ public sealed class CoreTelemetryService : ITelemetryService
         return false;
     }
 
-    private static int FindEmailTailAt(string text, int pos)
+    private static int FindEmailTailEnd(string text, int pos)
     {
         var p = pos;
         while (p < text.Length && IsEmailLocalChar(text, p)) p++;
         if (p >= text.Length) return -1;
         var atLen = EmailAtLength(text, p);
-        return atLen > 0 && FindEmailDomainEnd(text, p + atLen) > 0 ? p : -1;
-    }
-
-    private static int FindEmailTailEnd(string text, int pos)
-    {
-        var atPos = FindEmailTailAt(text, pos);
-        return atPos >= 0 ? FindEmailDomainEnd(text, atPos + EmailAtLength(text, atPos)) : -1;
+        return atLen > 0 ? FindEmailDomainEnd(text, p + atLen) : -1;
     }
 
     private static (int Dot, int ExtEnd) FindLastUnquotedFilenameExt(string text, int segStart, int segEnd)
@@ -1801,6 +1771,10 @@ public sealed class CoreTelemetryService : ITelemetryService
     public void AddBreadcrumb(string category, string message, TelemetryBreadcrumbSeverity level = TelemetryBreadcrumbSeverity.Info)
     {
         if (string.IsNullOrWhiteSpace(category)) return;
+        lock (_gate)
+        {
+            if (_disposeRequested || _clientDisposed || _consent == TelemetryConsent.Off) return;
+        }
         var mapped = level switch
         {
             TelemetryBreadcrumbSeverity.Debug => TelemetryBreadcrumbLevel.Debug,
@@ -1823,6 +1797,10 @@ public sealed class CoreTelemetryService : ITelemetryService
 
     public void ReportCrash(string kind, string message, string? stack = null, bool fromPreviousSession = false)
     {
+        lock (_gate)
+        {
+            if (_disposeRequested || _clientDisposed || _consent == TelemetryConsent.Off) return;
+        }
         var safeMessage = string.IsNullOrWhiteSpace(message) ? "Unhandled exception" : SanitizeLocalPaths(message);
         var safeStack = stack == null ? null : SanitizeLocalPaths(stack);
         var report = new TelemetryCrashReport(
