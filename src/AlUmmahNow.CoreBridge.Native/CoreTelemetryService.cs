@@ -265,6 +265,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         StringBuilder? sb = null;
         var copied = 0;
         var searchFrom = 0;
+        var failedContMax = 0;
         while (searchFrom < text.Length)
         {
             var sep = text.IndexOf("://", searchFrom, StringComparison.Ordinal);
@@ -308,13 +309,10 @@ public sealed class CoreTelemetryService : ITelemetryService
             }
             var rawUrl = text.Substring(start, baseEnd - start);
             var redactedUrl = RedactUrlPathSecrets(url);
-            if (!hasQf && (tail.Length == 0 || tail == ";") && totalEnd < text.Length &&
+            if (!hasQf && totalEnd >= failedContMax && totalEnd < text.Length &&
                 text[totalEnd] is ',' or '(' or '[' or ')' or ']')
             {
-                var withNext = rawUrl + text[totalEnd];
-                var probe = RedactUrlPathSecrets(withNext);
-                if (probe != withNext && probe.EndsWith("[redacted]", StringComparison.Ordinal) &&
-                    TryExtendRedactedWebhookContinuation(text, probe, start, ref totalEnd, out var extUrl, out var extTail))
+                if (TryExtendUrlContinuation(text, rawUrl, start, ref totalEnd, ref failedContMax, out var extUrl, out var extTail))
                 {
                     redactedUrl = extUrl;
                     tail = extTail;
@@ -334,12 +332,12 @@ public sealed class CoreTelemetryService : ITelemetryService
         return sb.ToString();
     }
 
-    private static bool TryExtendRedactedWebhookContinuation(
-        string text, string probeUrl, int urlStart, ref int totalEnd, out string resultUrl, out string tail)
+    private static bool TryExtendUrlContinuation(
+        string text, string rawUrl, int urlStart, ref int totalEnd, ref int failedContMax, out string resultUrl, out string tail)
     {
-        resultUrl = probeUrl;
+        resultUrl = string.Empty;
         tail = string.Empty;
-        var p = ScanWebhookContinuation(text, totalEnd);
+        var p = ScanUrlContinuation(text, totalEnd);
         if (p > totalEnd && p < text.Length && text[p] is '?' or '#')
         {
             var qfStart = p;
@@ -349,32 +347,56 @@ public sealed class CoreTelemetryService : ITelemetryService
                 p++;
             }
             var qf = TrimQueryOrFragmentDelimiters(text.Substring(qfStart, p - qfStart), text, urlStart, out tail);
+            resultUrl = RedactUrlPathSecrets(text.Substring(urlStart, qfStart - urlStart)) + qf[0] + "[redacted]";
             totalEnd = p;
-            resultUrl = probeUrl + qf[0] + "[redacted]";
             return true;
         }
         var end = TrimWebhookContinuationEnd(text, urlStart, totalEnd, p);
-        if (end <= totalEnd) return false;
-        tail = text.Substring(end, p - end);
-        totalEnd = p;
-        return true;
+        if (end > totalEnd)
+        {
+            var baseRedacted = RedactUrlPathSecrets(rawUrl);
+            var extCandidate = text.Substring(urlStart, end - urlStart);
+            var extRedacted = RedactUrlPathSecrets(extCandidate);
+            if (extRedacted != baseRedacted + text.Substring(totalEnd, end - totalEnd))
+            {
+                resultUrl = extRedacted;
+                tail = text.Substring(end, p - end);
+                totalEnd = p;
+                return true;
+            }
+        }
+        if (p > failedContMax) failedContMax = p;
+        return false;
     }
 
-    private static int ScanWebhookContinuation(string text, int start)
+    private static int ScanUrlContinuation(string text, int start)
     {
         var p = start;
         while (p < text.Length)
         {
             if (IsFileSchemeAt(text, p) || IsWindowsDriveAt(text, p)) break;
+            if (p > start && text[p - 1] is ',' or ';' or '(' or '[' or ')' or ']' or '\'' && IsWebUrlSchemeAt(text, p))
+            {
+                break;
+            }
             var ch = text[p];
             if (char.IsWhiteSpace(ch) || ch is '"' or '<' or '>' or '\\' or '{' or '}' or '?' or '#' or '\r' or '\n')
             {
                 break;
             }
-            if (ch is '(' or '[' or ',' && p + 1 < text.Length && StartsEmbeddedFilesystemPath(text, p + 1)) break;
             p++;
         }
         return p;
+    }
+
+    private static bool IsWebUrlSchemeAt(string text, int pos)
+    {
+        var span = text.AsSpan(pos);
+        return span.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ||
+            span.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+            span.StartsWith("wss://", StringComparison.OrdinalIgnoreCase) ||
+            span.StartsWith("ws://", StringComparison.OrdinalIgnoreCase) ||
+            span.StartsWith("ftp://", StringComparison.OrdinalIgnoreCase);
     }
 
     private static int TrimWebhookContinuationEnd(string text, int urlStart, int minEnd, int scanEnd)
@@ -403,26 +425,26 @@ public sealed class CoreTelemetryService : ITelemetryService
     }
 
     private static readonly Regex WebhookPathTokenRegex = new(
-        @"((?:^|/)webhooks?/)[^\s?#]+",
+        @"((?:^|/|%2[fF])webhooks?(?:/|%2[fF]))[^\s?#]+",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex SlackWebhookUrlRegex = new(
-        @"(https?://hooks\.slack(?:-gov)?\.com\.?(?::\d+)?/(?:services|workflows|triggers)/)[^\s?#]+",
+        @"(https?://hooks\.slack(?:-gov)?\.com\.?(?::\d+)?(?:/|%2[fF])(?:services|workflows|triggers)(?:/|%2[fF]))[^\s?#]+",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex TelegramBotTokenUrlRegex = new(
-        @"(/bot\d+:)[^/\s?#]+",
+        @"((?:/|%2[fF])bot\d+:)[^/\s?#]+",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static string RedactUrlPathSecrets(string url)
     {
-        var result = ReplaceUrlPathSecret(url, WebhookPathTokenRegex, stopAtLiteralSlash: false);
-        result = ReplaceUrlPathSecret(result, SlackWebhookUrlRegex, stopAtLiteralSlash: false);
-        result = ReplaceUrlPathSecret(result, TelegramBotTokenUrlRegex, stopAtLiteralSlash: true);
+        var result = ReplaceUrlPathSecret(url, WebhookPathTokenRegex);
+        result = ReplaceUrlPathSecret(result, SlackWebhookUrlRegex);
+        result = ReplaceUrlPathSecret(result, TelegramBotTokenUrlRegex);
         return result;
     }
 
-    private static string ReplaceUrlPathSecret(string url, Regex regex, bool stopAtLiteralSlash)
+    private static string ReplaceUrlPathSecret(string url, Regex regex)
     {
         if (url.IndexOf('%') < 0) return regex.Replace(url, "$1[redacted]");
         var (decoded, origOffsets) = DecodeUrlForPathSecretMatch(url);
@@ -436,13 +458,6 @@ public sealed class CoreTelemetryService : ITelemetryService
             var secretStart = origOffsets[g1.Index + g1.Length];
             if (secretStart < copied) continue;
             var secretEnd = origOffsets[m.Index + m.Length];
-            if (stopAtLiteralSlash)
-            {
-                while (secretEnd < url.Length && url[secretEnd] is not ('/' or '?' or '#') && !char.IsWhiteSpace(url[secretEnd]))
-                {
-                    secretEnd++;
-                }
-            }
             sb.Append(url, copied, secretStart - copied).Append("[redacted]");
             copied = secretEnd;
         }
@@ -461,7 +476,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         {
             offsets[outLen++] = i;
             if (url[i] == '%' && i + 2 < url.Length && TryParseHexByte(url[i + 1], url[i + 2], out var b) &&
-                b >= 0x21 && b <= 0x7E && b is not ((byte)'?' or (byte)'#'))
+                b >= 0x21 && b <= 0x7E && b is not ((byte)'/' or (byte)'?' or (byte)'#'))
             {
                 decoded.Append((char)b);
                 i += 3;
@@ -599,7 +614,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             {
                 break;
             }
-            if (ch == ',' && !(p + 1 < text.Length && text[p + 1] is '?' or '#')) break;
+            if (ch == ',') break;
             if (ch is '(' or '[')
             {
                 if (StartsEmbeddedPathInsideGroup(text, p + 1)) break;
