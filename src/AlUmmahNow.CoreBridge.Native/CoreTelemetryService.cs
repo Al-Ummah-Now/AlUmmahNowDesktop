@@ -383,7 +383,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             var closedQuote =
                 !_escapedBackslash &&
                 ((_pathQuote != '\0' && ch == _pathQuote) ||
-                 (!_inWrapperRun && _tokenStart > 0 && ch is '"' or '\'' && text[_tokenStart - 1] == ch));
+                 (!_hasPathOnLine && !_inWrapperRun && _tokenStart > 0 && ch is '"' or '\'' && text[_tokenStart - 1] == ch));
             if (closedQuote)
             {
                 ResetLineState();
@@ -402,14 +402,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             {
                 if (!_inWrapperRun)
                 {
-                    if (_tokenHasPathSep && !IsNonPathSlashToken(text, _tokenStart, _tokenEnd))
-                    {
-                        _hasPathOnLine = true;
-                        if (_pathQuote == '\0' && _tokenStart > 0 && text[_tokenStart - 1] is '"' or '\'')
-                        {
-                            _pathQuote = text[_tokenStart - 1];
-                        }
-                    }
+                    PromoteTokenPath(text);
                     _tokenStart = -1;
                     _tokenEnd = -1;
                     _wsBeforeRun = true;
@@ -418,6 +411,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             }
             else if (IsOpeningWrapper(ch))
             {
+                if (!_inWrapperRun) PromoteTokenPath(text);
                 _inWrapperRun = true;
             }
             else
@@ -433,6 +427,18 @@ public sealed class CoreTelemetryService : ITelemetryService
                 _wsBeforeRun = false;
             }
             _escapedBackslash = ch == '\\' ? !_escapedBackslash : false;
+        }
+
+        private void PromoteTokenPath(string text)
+        {
+            if (_tokenHasPathSep && !IsNonPathSlashToken(text, _tokenStart, _tokenEnd))
+            {
+                _hasPathOnLine = true;
+                if (_pathQuote == '\0' && _tokenStart > 0 && text[_tokenStart - 1] is '"' or '\'')
+                {
+                    _pathQuote = text[_tokenStart - 1];
+                }
+            }
         }
     }
 
