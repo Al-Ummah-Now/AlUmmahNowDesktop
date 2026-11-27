@@ -220,6 +220,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         if (string.IsNullOrEmpty(text)) return text;
         var escaped = EscapeSentinels(text, out var hadSentinels);
         var scrubbed = VaultNonFileUrls(escaped, VaultPrefix, out var vaultedUrls);
+        scrubbed = RedactQuotedEmails(scrubbed);
         scrubbed = RedactFileUris(scrubbed, VaultPrefix);
         scrubbed = ReplaceUnquotedParenPaths(scrubbed, ParenPathRegex);
         scrubbed = ReplaceUnquotedParenPaths(scrubbed, ParenRelativeSlashPathRegex);
@@ -605,6 +606,56 @@ public sealed class CoreTelemetryService : ITelemetryService
     private static bool IsAsciiAlphaNum(char ch) =>
         (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9');
 
+    private static string RedactQuotedEmails(string text)
+    {
+        if (text.IndexOf('"') < 0 || (text.IndexOf('@') < 0 && text.IndexOf("%40", StringComparison.Ordinal) < 0))
+        {
+            return text;
+        }
+        StringBuilder? sb = null;
+        var copied = 0;
+        var i = 0;
+        var quoteCacheUntil = -1;
+        var cachedNextQuote = -1;
+        while (i < text.Length)
+        {
+            if (text[i] == '"' && !IsPrecededByOddBackslashes(text, i, copied))
+            {
+                int closeQuote;
+                if (i < quoteCacheUntil)
+                {
+                    closeQuote = cachedNextQuote;
+                }
+                else
+                {
+                    closeQuote = FindNextEmailClosingQuote(text, i + 1, out var stopPos);
+                    cachedNextQuote = closeQuote;
+                    quoteCacheUntil = closeQuote >= 0 ? closeQuote : stopPos;
+                }
+                if (closeQuote > i)
+                {
+                    var qAtPos = closeQuote + 1;
+                    var qAtLen = qAtPos < text.Length ? EmailAtLength(text, qAtPos) : 0;
+                    var qDomEnd = qAtLen > 0 ? FindEmailDomainEnd(text, qAtPos + qAtLen) : -1;
+                    if (qDomEnd > 0)
+                    {
+                        sb ??= new StringBuilder(text.Length);
+                        sb.Append(text, copied, i - copied);
+                        sb.Append("[redacted-email]");
+                        copied = qDomEnd;
+                        i = qDomEnd;
+                        quoteCacheUntil = -1;
+                        continue;
+                    }
+                }
+            }
+            i++;
+        }
+        if (sb == null) return text;
+        sb.Append(text, copied, text.Length - copied);
+        return sb.ToString();
+    }
+
     private static string RedactEmails(string text)
     {
         if (text.IndexOf('@') < 0 && text.IndexOf("%40", StringComparison.Ordinal) < 0)
@@ -781,11 +832,6 @@ public sealed class CoreTelemetryService : ITelemetryService
         return ch == '%' && !(pos + 2 < text.Length && text[pos + 1] == '4' && text[pos + 2] == '0');
     }
 
-    private static bool IsPunycodeTld(string text, int tldStart, int tldEnd, bool allAscii) =>
-        allAscii && tldEnd - tldStart >= 6 &&
-        text.AsSpan(tldStart, 4).Equals("xn--", StringComparison.OrdinalIgnoreCase) &&
-        IsAsciiAlphaNum(text[tldEnd - 1]);
-
     private static int FindEmailLocalStart(string text, int atPos, int minPos)
     {
         if (atPos > minPos && text[atPos - 1] == '"' && !IsPrecededByOddBackslashes(text, atPos - 1, minPos))
@@ -877,31 +923,29 @@ public sealed class CoreTelemetryService : ITelemetryService
             return FindIpLiteralDomainEnd(text, domStart);
         }
         var k = domStart;
-        var lastDot = -1;
-        var lettersSinceDot = 0;
-        var tldAllAscii = true;
+        var labelStart = domStart;
+        var labelHasLetter = false;
         var bestEnd = -1;
         while (k < text.Length)
         {
             var ch = text[k];
             if (char.IsLetter(ch) || IsUnicodeCombiningMark(ch) || char.IsSurrogate(ch))
             {
-                if (ch >= 0x80) tldAllAscii = false;
-                if (lastDot >= 0 && lettersSinceDot >= 0 && !IsUnicodeCombiningMark(ch) && !char.IsLowSurrogate(ch))
-                {
-                    lettersSinceDot++;
-                }
+                labelHasLetter = true;
             }
             else if (ch == '.')
             {
-                lastDot = k > domStart ? k : -1;
-                lettersSinceDot = 0;
-                tldAllAscii = true;
+                if (k == labelStart || text[k - 1] == '-') break;
+                labelStart = k + 1;
+                labelHasLetter = false;
             }
-            else if (char.IsDigit(ch) || ch == '-')
+            else if (char.IsDigit(ch))
             {
-                if (ch >= 0x80) tldAllAscii = false;
-                lettersSinceDot = -1;
+                // Digits are allowed inside domain labels (e.g. 3com, 123.example.com, xn--p1ai).
+            }
+            else if (ch == '-')
+            {
+                if (k == labelStart) break;
             }
             else
             {
@@ -909,14 +953,10 @@ public sealed class CoreTelemetryService : ITelemetryService
             }
             k++;
             var atBoundary = k == text.Length ||
-                !(char.IsLetterOrDigit(text[k]) || text[k] is '_' or '-' || IsUnicodeCombiningMark(text[k]));
-            var validMultiLabel = lastDot > domStart &&
-                (lettersSinceDot >= 2 || IsPunycodeTld(text, lastDot + 1, k, tldAllAscii));
-            var validSingleLabel = lastDot < 0 && k - domStart >= 2 &&
-                (char.IsLetter(text[domStart]) || char.IsSurrogate(text[domStart])) &&
-                text[k - 1] != '-' &&
-                !(k + 1 < text.Length && text[k] == '.' && (char.IsLetter(text[k + 1]) || char.IsSurrogate(text[k + 1])));
-            if (atBoundary && (validMultiLabel || validSingleLabel))
+                !(char.IsLetterOrDigit(text[k]) || text[k] is '_' or '-' || IsUnicodeCombiningMark(text[k]) || char.IsSurrogate(text[k]));
+            var continuesDomain = k + 1 < text.Length && text[k] == '.' &&
+                (char.IsLetterOrDigit(text[k + 1]) || char.IsSurrogate(text[k + 1]));
+            if (k > labelStart && labelHasLetter && text[k - 1] != '-' && atBoundary && !continuesDomain)
             {
                 bestEnd = k;
             }
