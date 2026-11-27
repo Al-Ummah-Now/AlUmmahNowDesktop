@@ -101,9 +101,8 @@ internal sealed class SettingsPage
                 telemetry?.SetConsent(TelemetryConsent.Off);
                 if (!store.SaveTelemetryEnabled(false))
                 {
-                    var persisted = store.LoadTelemetryEnabled();
-                    settings.TelemetryEnabled = persisted;
-                    telemetryToggle.IsOn = persisted;
+                    settings.TelemetryEnabled = true;
+                    telemetryToggle.IsOn = true;
                     return;
                 }
                 settings.TelemetryEnabled = false;

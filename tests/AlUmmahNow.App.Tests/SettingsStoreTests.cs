@@ -93,6 +93,33 @@ public class SettingsStoreTests
                     File.SetUnixFileMode(dir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
                     File.SetUnixFileMode(consentPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
                 }
+
+                // Also test an unreadable + undeletable sidecar (simulating an exclusive lock where readback fails):
+                // SaveTelemetryEnabled(false) MUST still return false instead of trusting LoadTelemetryEnabled() == false.
+                Assert.True(store.SaveTelemetryEnabled(true));
+                File.SetUnixFileMode(consentPath, UnixFileMode.None);
+                File.SetUnixFileMode(dir, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+                try
+                {
+                    Assert.False(store.SaveTelemetryEnabled(false));
+                }
+                finally
+                {
+                    File.SetUnixFileMode(dir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+                    File.SetUnixFileMode(consentPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+                }
+                // Once readable again, the original "enabled" marker is still intact on disk.
+                Assert.True(store.LoadTelemetryEnabled());
+            }
+            else
+            {
+                // On Windows, hold an exclusive lock on the sidecar: delete, overwrite, and readback all fail,
+                // and SaveTelemetryEnabled(false) MUST return false rather than treating readback failure as opted out.
+                using (var locked = new FileStream(consentPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+                {
+                    Assert.False(store.SaveTelemetryEnabled(false));
+                }
+                Assert.True(store.LoadTelemetryEnabled());
             }
         }
         finally

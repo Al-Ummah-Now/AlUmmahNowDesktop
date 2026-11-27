@@ -348,9 +348,8 @@ public sealed partial class MainWindow
                 _telemetry.SetConsent(TelemetryConsent.Off);
                 if (!_store.SaveTelemetryEnabled(false))
                 {
-                    var persisted = _store.LoadTelemetryEnabled();
-                    _settings.TelemetryEnabled = persisted;
-                    telemetryCheck.SetActive(persisted);
+                    _settings.TelemetryEnabled = true;
+                    telemetryCheck.SetActive(true);
                     return;
                 }
                 _settings.TelemetryEnabled = false;

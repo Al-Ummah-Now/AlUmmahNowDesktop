@@ -71,7 +71,7 @@ namespace AlUmmahNow.App.Services
             if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
             var temp = _path + "." + Guid.NewGuid().ToString("N") + ".tmp";
             File.WriteAllText(temp, JsonSerializer.Serialize(settings));
-            File.Move(temp, _path, overwrite: true);
+            ReplaceFile(temp, _path);
         }
 
         /// <summary>
@@ -92,8 +92,10 @@ namespace AlUmmahNow.App.Services
 
         /// <summary>
         /// Atomically updates the standalone telemetry consent state without touching <c>settings.json</c>.
-        /// Returns <c>true</c> only when the on-disk state reflects <paramref name="enabled"/>.
-        /// When opting out, falls back to overwriting the sidecar with <c>disabled</c> if deletion fails.
+        /// Returns <c>true</c> only when the on-disk state was confirmed updated to <paramref name="enabled"/>.
+        /// When opting out, falls back to overwriting the sidecar with <c>disabled</c> if deletion fails;
+        /// if both delete and overwrite fail (for example due to an exclusive handle or read-only volume),
+        /// returns <c>false</c> rather than treating an unreadable file as opted out.
         /// </summary>
         public bool SaveTelemetryEnabled(bool enabled)
         {
@@ -101,22 +103,22 @@ namespace AlUmmahNow.App.Services
             {
                 try
                 {
-                    if (File.Exists(_telemetryConsentPath)) File.Delete(_telemetryConsentPath);
+                    if (!File.Exists(_telemetryConsentPath)) return true;
+                    File.Delete(_telemetryConsentPath);
+                    return !File.Exists(_telemetryConsentPath);
                 }
                 catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
                 {
-                    // Deletion can fail when the file is locked or delete-restricted; overwrite in place so
-                    // LoadTelemetryEnabled() still reads false across all instances and restarts.
                     try
                     {
                         File.WriteAllText(_telemetryConsentPath, "disabled");
+                        return true;
                     }
                     catch (Exception overwriteEx) when (overwriteEx is IOException || overwriteEx is UnauthorizedAccessException)
                     {
-                        return !LoadTelemetryEnabled();
+                        return false;
                     }
                 }
-                return !LoadTelemetryEnabled();
             }
 
             try
@@ -125,12 +127,24 @@ namespace AlUmmahNow.App.Services
                 if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
                 var temp = _telemetryConsentPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
                 File.WriteAllText(temp, "enabled");
-                File.Move(temp, _telemetryConsentPath, overwrite: true);
+                ReplaceFile(temp, _telemetryConsentPath);
                 return true;
             }
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
             {
                 return false;
+            }
+        }
+
+        private static void ReplaceFile(string temp, string destination)
+        {
+            if (File.Exists(destination))
+            {
+                File.Replace(temp, destination, null);
+            }
+            else
+            {
+                File.Move(temp, destination);
             }
         }
     }

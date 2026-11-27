@@ -337,9 +337,8 @@ public sealed partial class Shell
                 _telemetry.SetConsent(TelemetryConsent.Off);
                 if (!_store.SaveTelemetryEnabled(false))
                 {
-                    var persisted = _store.LoadTelemetryEnabled();
-                    _settings.TelemetryEnabled = persisted;
-                    telemetryToggle.IsOn = persisted;
+                    _settings.TelemetryEnabled = true;
+                    telemetryToggle.IsOn = true;
                     return;
                 }
                 _settings.TelemetryEnabled = false;

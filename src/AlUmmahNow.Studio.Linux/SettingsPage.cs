@@ -94,9 +94,8 @@ public sealed class SettingsPage
                 telemetry?.SetConsent(TelemetryConsent.Off);
                 if (!store.SaveTelemetryEnabled(false))
                 {
-                    var persisted = store.LoadTelemetryEnabled();
-                    settings.TelemetryEnabled = persisted;
-                    telemetryCheck.SetActive(persisted);
+                    settings.TelemetryEnabled = true;
+                    telemetryCheck.SetActive(true);
                     return;
                 }
                 settings.TelemetryEnabled = false;
