@@ -1295,6 +1295,12 @@ public class CoreTelemetryServiceTests
             Assert.Equal("[\"https://example.com/api?[redacted]\"]",
                 CoreTelemetryService.SanitizeLocalPaths(
                     "[\"https://example.com/api?token=opaqueSecret123\\\"moreSecret\"]"));
+            Assert.Equal("[\"https://example.com/api?[redacted]\",\"public\"]",
+                CoreTelemetryService.SanitizeLocalPaths(
+                    "[\"https://example.com/api?token=first\\\",opaqueSecret123\",\"public\"]"));
+            Assert.Equal("[\"https://example.com/api{1:\\\"see https://other.com/x?[redacted]\\\"}\"]",
+                CoreTelemetryService.SanitizeLocalPaths(
+                    "[\"https://example.com/api{1:\\\"see https://other.com/x?token=opaqueSecret123\\\"}\"]"));
             var repeatedEqualsQuotedUrls = string.Join("=", Enumerable.Repeat("https://a.test/x{a:\"https://b.test/x\"}", 500));
             Assert.Equal(repeatedEqualsQuotedUrls, CoreTelemetryService.SanitizeLocalPaths(repeatedEqualsQuotedUrls));
             Assert.Equal("https://example.test/webhook/[redacted]",
