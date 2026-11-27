@@ -335,6 +335,62 @@ public class CoreTelemetryServiceTests
     }
 
     [Fact]
+    public async Task External_opt_out_mid_flush_revokes_native_and_managed_consent_immediately()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "aun-tel-midflush-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var bufferPath = Path.Combine(dir, "telemetry-buffer.json");
+        var sharedEnabled = true;
+        try
+        {
+            var nativeStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var nativeRelease = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var service = new CoreTelemetryService(
+                platform: "linux",
+                appVersion: "1.0.0",
+                locale: "en",
+                videosApiBaseUrl: null,
+                userAgent: "AlUmmahNowLinux/1.0.0",
+                bufferPath: bufferPath,
+                initialEnabled: true,
+                isExternallyEnabled: () => Volatile.Read(ref sharedEnabled))
+            {
+                ExternalPollIntervalMsForTesting = 15,
+                FlushOverrideForTesting = () =>
+                {
+                    nativeStarted.TrySetResult(true);
+                    return nativeRelease.Task;
+                }
+            };
+
+            service.Track("screen_view", new Dictionary<string, object> { ["screen"] = "home" });
+            service.Persist();
+            Assert.True(File.Exists(bufferPath));
+
+            var flushTask = service.FlushAsync();
+            await nativeStarted.Task;
+
+            // Another instance opts out while B's flush is ALREADY in flight.
+            Volatile.Write(ref sharedEnabled, false);
+
+            // FlushAsync must observe the external opt-out and revoke BOTH managed and native consent
+            // before nativeRelease even completes.
+            var completed = await Task.WhenAny(flushTask, Task.Delay(2000));
+            Assert.Same(flushTask, completed);
+            Assert.Equal(TelemetryConsent.Off, service.Consent);
+            Assert.Equal(AlUmmahNow.Core.TelemetryConsentState.Denied, service.NativeConsentForTesting);
+            Assert.False(File.Exists(bufferPath));
+
+            nativeRelease.TrySetResult(true);
+            service.Dispose();
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
     public void ReportCrash_and_breadcrumb_redact_local_file_paths()
     {
         var dir = Path.Combine(Path.GetTempPath(), "aun-tel-paths-" + Guid.NewGuid().ToString("N"));
@@ -351,15 +407,17 @@ public class CoreTelemetryServiceTests
                 bufferPath: bufferPath,
                 initialEnabled: true);
 
-            service.AddBreadcrumb("io", @"Opened C:\Users\alice\Videos\clip.mp4 and /home/alice/secret.mov");
+            service.AddBreadcrumb("io", @"Opened /workspace/alice/private.mov and ""C:\Users\Alice Smith\Private\draft.mov""");
             service.ReportCrash(
                 "IOException",
-                @"Could not read C:\Users\alice\Videos\draft.mp4 or file:///Users/alice/private.txt",
-                @"at Foo.Open() in /Users/alice/src/App.cs:line 42 and \\fileserver\share\secret.mp4 and ~/private/key.pem");
+                @"Could not read C:\Users\Alice Smith\Private\draft.mp4 or file:///Users/alice/private.txt or /Users/Alice Smith/Docs/note.txt",
+                @"at Foo.Open() in /workspace/alice/src/App.cs:line 42 and \\fileserver\share\secret.mp4 and ~/private/key.pem");
 
             Assert.True(File.Exists(bufferPath));
             var json = File.ReadAllText(bufferPath);
             Assert.DoesNotContain("alice", json, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("smith", json, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("workspace", json, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain(@"C:\Users", json, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("fileserver", json, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("private/key.pem", json, StringComparison.OrdinalIgnoreCase);

@@ -84,7 +84,7 @@ public sealed class SettingsPage
                 return;
             }
             settings.TelemetryEnabled = enabled;
-            store.Save(settings);
+            store.SaveTelemetryEnabled(enabled);
         };
         telemetryBody.Append(telemetryCheck);
         left.Append(Ui.Card(telemetryBody));

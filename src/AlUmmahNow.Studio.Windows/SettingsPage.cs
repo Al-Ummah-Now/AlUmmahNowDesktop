@@ -91,7 +91,7 @@ internal sealed class SettingsPage
                 return;
             }
             settings.TelemetryEnabled = enabled;
-            store.Save(settings);
+            store.SaveTelemetryEnabled(enabled);
         };
         telemetryBody.Children.Add(telemetryToggle);
         left.Children.Add(LanternGlass.Card(telemetryBody));

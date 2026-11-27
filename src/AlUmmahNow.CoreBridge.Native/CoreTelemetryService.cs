@@ -13,9 +13,12 @@ namespace AlUmmahNow.CoreBridge.Native;
 /// </summary>
 public sealed class CoreTelemetryService : ITelemetryService
 {
+    private static readonly Regex QuotedPathRegex = new(@"([""'])(?:file://|(?:[A-Za-z]:[\\/]|\\\\)|~/(?!\s)|/[^""'\r\n/]+/)[^""'\r\n]+\1", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex FileUriRegex = new(@"file://[^\s""'<>|)\]]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex WindowsMultiSegmentPathRegex = new(@"(?:[A-Za-z]:[\\/]|\\\\)(?:[A-Za-z0-9._@+()-]+(?: [A-Za-z0-9._@+()-]+){0,2}[\\/])+[A-Za-z0-9._@+()-]+", RegexOptions.Compiled);
     private static readonly Regex WindowsPathRegex = new(@"(?:[A-Za-z]:[\\/]|\\\\)[^\s""'<>|)\]]+", RegexOptions.Compiled);
-    private static readonly Regex UnixPathRegex = new(@"(?<![A-Za-z0-9._-])(?:~/(?:[^\s""'<>|,;:)\]]+)|/(?:Users|home|var|tmp|private|etc|opt|mnt|media|Volumes|run|srv|root|proc|sys|data|storage|sdcard|Library|Applications|System|usr)/[^\s""'<>|,;:)\]]+)", RegexOptions.Compiled);
+    private static readonly Regex UnixMultiSegmentPathRegex = new(@"(?<![A-Za-z0-9._:/-])(?:~/|/)(?:[A-Za-z0-9._@+()-]+(?: [A-Za-z0-9._@+()-]+){0,2}/)+[A-Za-z0-9._@+()-]+", RegexOptions.Compiled);
+    private static readonly Regex UnixHomePathRegex = new(@"(?<![A-Za-z0-9._:/-])~/[^\s""'<>|,;:)\]]+", RegexOptions.Compiled);
 
     private readonly TelemetryClient _client;
     private readonly string? _bufferPath;
@@ -29,6 +32,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     private bool _clientDisposed;
     private bool _lastPurgeFailed;
     internal Func<Task>? FlushOverrideForTesting { get; set; }
+    internal int ExternalPollIntervalMsForTesting { get; set; } = 50;
     internal bool IsClientDisposedForTesting
     {
         get
@@ -129,9 +133,12 @@ public sealed class CoreTelemetryService : ITelemetryService
     internal static string SanitizeLocalPaths(string text)
     {
         if (string.IsNullOrEmpty(text)) return text;
-        var scrubbed = FileUriRegex.Replace(text, "[redacted-path]");
+        var scrubbed = QuotedPathRegex.Replace(text, "[redacted-path]");
+        scrubbed = FileUriRegex.Replace(scrubbed, "[redacted-path]");
+        scrubbed = WindowsMultiSegmentPathRegex.Replace(scrubbed, "[redacted-path]");
         scrubbed = WindowsPathRegex.Replace(scrubbed, "[redacted-path]");
-        scrubbed = UnixPathRegex.Replace(scrubbed, "[redacted-path]");
+        scrubbed = UnixMultiSegmentPathRegex.Replace(scrubbed, "[redacted-path]");
+        scrubbed = UnixHomePathRegex.Replace(scrubbed, "[redacted-path]");
         return scrubbed;
     }
 
@@ -381,6 +388,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         }
 
         Task? nativeFlush = null;
+        CancellationTokenSource? monitorCts = null;
         try
         {
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, revokeToken);
@@ -388,15 +396,23 @@ public sealed class CoreTelemetryService : ITelemetryService
 
             var flushOverride = FlushOverrideForTesting;
             nativeFlush = flushOverride != null ? flushOverride() : _client.Flush();
+            if (_isExternallyEnabled != null)
+            {
+                monitorCts = new CancellationTokenSource();
+                _ = MonitorExternalConsentWhileFlushingAsync(monitorCts.Token);
+            }
+            var monitorToStop = monitorCts;
             // Defer decrementing `_inFlightFlushes` (and any pending native `_client.Dispose()`) until
             // `nativeFlush` actually finishes, even if `WaitWithCancellationAsync` returns early on cancel/revoke.
             _ = nativeFlush.ContinueWith(
                 static (t, state) =>
                 {
                     _ = t.Exception;
-                    ((CoreTelemetryService)state!).ReleaseInFlightFlush();
+                    var (svc, cts) = ((CoreTelemetryService, CancellationTokenSource?))state!;
+                    if (cts != null) CancelQuietly(cts);
+                    svc.ReleaseInFlightFlush();
                 },
-                this,
+                (this, monitorToStop),
                 CancellationToken.None,
                 TaskContinuationOptions.ExecuteSynchronously,
                 TaskScheduler.Default);
@@ -414,12 +430,38 @@ public sealed class CoreTelemetryService : ITelemetryService
         {
             if (nativeFlush == null)
             {
+                if (monitorCts != null) CancelQuietly(monitorCts);
                 ReleaseInFlightFlush();
             }
         }
         return;
     CancelAndReturn:
         CancelQuietly(toCancel);
+    }
+
+    private async Task MonitorExternalConsentWhileFlushingAsync(CancellationToken stopToken)
+    {
+        var intervalMs = Math.Max(10, ExternalPollIntervalMsForTesting);
+        while (!stopToken.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(intervalMs, stopToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            if (stopToken.IsCancellationRequested) return;
+            CancellationTokenSource? toCancel = null;
+            bool revokedNow;
+            lock (_gate)
+            {
+                revokedNow = !EnsureExternalConsentLocked(out toCancel);
+            }
+            if (toCancel != null) CancelQuietly(toCancel);
+            if (revokedNow) return;
+        }
     }
 
     /// <summary>

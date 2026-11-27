@@ -338,7 +338,7 @@ public sealed partial class MainWindow
                 return;
             }
             _settings.TelemetryEnabled = enabled;
-            _store.Save(_settings);
+            _store.SaveTelemetryEnabled(enabled);
         };
         telemetryCard.Append(telemetryCheck);
         column.Append(telemetryCard);

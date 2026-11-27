@@ -327,7 +327,7 @@ public sealed partial class Shell
                 return;
             }
             _settings.TelemetryEnabled = enabled;
-            _store.Save(_settings);
+            _store.SaveTelemetryEnabled(enabled);
         };
         telemetryBody.Children.Add(telemetryToggle);
         var telemetryCard = Updates.Card(telemetryBody);
