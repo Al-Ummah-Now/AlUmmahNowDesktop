@@ -19,16 +19,13 @@ namespace AlUmmahNow.CoreBridge.Native;
 /// </summary>
 public sealed class CoreTelemetryService : ITelemetryService
 {
-    private static readonly Regex UrlVaultRegex = new(@"(?<![A-Za-z0-9+.-/\\])([A-Za-z][A-Za-z0-9+.-]+://(?:\[([^\]\s""'<>\\{}\r\n]+)\]|(?:[A-Za-z0-9._~!$&'*+;=-]|%[0-9A-Fa-f]{2})+)(?::\d+)?(?:/(?:(?!(?:file://|[A-Za-z]:[\\/]))(?:[^\s""<>\\{},()\[\]?#\r\n]|\([^\s""<>\\{},()\[\]:\\?#]+\)|\[[^\s""<>\\{},()\[\]:\\?#]+\]))*)?)([?#][^\s""<>\r\n]*)?(?=$|[\s""'<>\\{},;()\[\]]|file://|[A-Za-z]:[\\/])", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex ParenPathRegex = new(@"(\()(?:/|~/|[A-Za-z]:[\\/]|\\\\)[^()\r\n\u001E]+(\))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex ParenRelativeSlashPathRegex = new(@"(\()(?![ \t]*(?:HTTP|TLS|SSL)/\d)(?![ \t]*\d+/\d+[.,;:!?\s]*\))[^\s/\\""'<>()\[\]{}:,;=\u001E\u001F]+/[^()\r\n\u001E]+(\))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex WindowsPathRegex = new(@"(?:[A-Za-z]:[\\/]|\\\\)[^\S\r\n]*[^\r\n\u001E\s]+(?:[^\S\r\n]+[^\r\n\u001E\s]+)*", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex RelativeBackslashPathRegex = new(@"(^|[\s(\[{""'=,:;\u001F])[^\s\\/""'<>()\[\]{}:,;=\u001E\u001F]+\\[^\r\n\u001E\u001F\s]+(?:[^\S\r\n]+[^\r\n\u001E\u001F\s]+)*", RegexOptions.Compiled);
+    private static readonly Regex RelativeBackslashPathRegex = new(@"(^|[\s(\[{""'=,:;\u001F])[^\s\\/""'<>()\[{:,;=\u001E\u001F]+\\[^\r\n\u001E\u001F\s]+(?:[^\S\r\n]+[^\r\n\u001E\u001F\s]+)*", RegexOptions.Compiled);
     private static readonly Regex QuotedSpacedRootPathRegex = new(@"[""']/[ \t]+[^\r\n\u001E]+", RegexOptions.Compiled);
     private static readonly Regex UnixPathRegex = new(@"(?<![\p{L}\p{M}\p{N}._/-])(?:~/|//+(?=[ \t]*[^\s/])|/(?=[ \t]*[^\s/]))[^\S\r\n]*[^\r\n\u001E\s]+(?:[^\S\r\n]+[^\r\n\u001E\s]+)*", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex RelativeSlashPathRegex = new(@"(^|[\s(\[{""'=,:;\u001F])(?!(?<!['""])(?:HTTP|TLS|SSL)/\d)(?!(?<!['""])\d+/\d+(?:$|[\s)\]},;:!?]|\.(?![A-Za-z0-9])))[^\s/\\""'<>()\[\]{}:,;=\u001E\u001F]+/[^\r\n\u001E\u001F\s]+(?:[^\S\r\n]+[^\r\n\u001E\u001F\s]+)*", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex DoubleQuotedFilenameRegex = new(@"""[^""\r\n/\\]*\.[A-Za-z0-9]{1,16}""", RegexOptions.Compiled);
-    private static readonly Regex SingleQuotedFilenameRegex = new(@"(?<![\p{L}\p{N}])'(?:[^'\r\n/\\]|(?<=[\p{L}\p{N}])'(?=\p{L}))*\.[A-Za-z0-9]{1,16}'", RegexOptions.Compiled);
     private static readonly Regex KeywordQuotedPathRegex = new(@"(\b(?:file|path|directory|folder|document)[^\S\r\n]+)([""'])(?!\u001E)[^'""\r\n]+\2", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex KeywordFilenamePrefixRegex = new(@"\b(?:open|opening|read|reading|write|writing|delete|deleting|remove|removing|rename|stat|create|creating|load|loading|save|saving|access|accessing|unlink|file|path|directory|folder|document|filename|filepath)\b(?:[^\S\r\n]*[:=][^\S\r\n]*|[^\S\r\n]+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly HashSet<string> SourceLineExtensions = new(StringComparer.OrdinalIgnoreCase)
@@ -222,47 +219,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     {
         if (string.IsNullOrEmpty(text)) return text;
         var escaped = EscapeSentinels(text, out var hadSentinels);
-        var vaultedUrls = new List<string>();
-        var tracker = new VaultLineTracker();
-        var scrubbed = UrlVaultRegex.Replace(escaped, match =>
-        {
-            var raw = match.Value;
-            if (raw.StartsWith("file://", StringComparison.OrdinalIgnoreCase) || tracker.IsEmbeddedInPath(escaped, match.Index))
-            {
-                return raw;
-            }
-            if (match.Groups[2].Success &&
-                (!IPAddress.TryParse(match.Groups[2].Value, out var ip) || ip.AddressFamily != AddressFamily.InterNetworkV6))
-            {
-                return raw;
-            }
-            var tail = string.Empty;
-            var hasQueryOrFragment = match.Groups[3].Success && match.Groups[3].Length > 0;
-            string url;
-            if (hasQueryOrFragment)
-            {
-                var qf = TrimQueryOrFragmentDelimiters(match.Groups[3].Value, escaped, match.Index, out tail);
-                url = match.Groups[1].Value + qf[0] + "[redacted]";
-            }
-            else
-            {
-                url = match.Groups[1].Value;
-                if (url.EndsWith(';'))
-                {
-                    url = url[..^1];
-                    tail = ";";
-                }
-                if (match.Index > 0 && escaped[match.Index - 1] == '\'' && url.EndsWith('\''))
-                {
-                    url = url[..^1];
-                    tail = "'" + tail;
-                }
-            }
-            var idx = vaultedUrls.Count;
-            vaultedUrls.Add(url);
-            tracker.OnVaultedUrl(match.Index + match.Length);
-            return $"{VaultPrefix}{idx}\u001F{tail}";
-        });
+        var scrubbed = VaultNonFileUrls(escaped, VaultPrefix, out var vaultedUrls);
         scrubbed = RedactFileUris(scrubbed, VaultPrefix);
         scrubbed = ParenPathRegex.Replace(scrubbed, "$1[redacted-path]$2");
         scrubbed = ParenRelativeSlashPathRegex.Replace(scrubbed, "$1[redacted-path]$2");
@@ -271,11 +228,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         scrubbed = QuotedSpacedRootPathRegex.Replace(scrubbed, "[redacted-path]");
         scrubbed = UnixPathRegex.Replace(scrubbed, "[redacted-path]");
         scrubbed = RelativeSlashPathRegex.Replace(scrubbed, "$1[redacted-path]");
-        if (scrubbed.Contains('.'))
-        {
-            scrubbed = DoubleQuotedFilenameRegex.Replace(scrubbed, "[redacted-path]");
-            scrubbed = SingleQuotedFilenameRegex.Replace(scrubbed, "[redacted-path]");
-        }
+        scrubbed = RedactQuotedFilenames(scrubbed);
         scrubbed = KeywordQuotedPathRegex.Replace(scrubbed, "$1[redacted-path]");
         scrubbed = RedactKeywordUnquotedFilenames(scrubbed);
         scrubbed = KeywordAssignedPathRegex.Replace(scrubbed, "$1[redacted-path]");
@@ -287,6 +240,287 @@ public sealed class CoreTelemetryService : ITelemetryService
         scrubbed = RedactEmails(scrubbed);
         scrubbed = BearerTokenRegex.Replace(scrubbed, "Bearer [redacted]");
         return hadSentinels ? UnescapeSentinels(scrubbed) : scrubbed;
+    }
+
+    private static string VaultNonFileUrls(string text, string prefix, out List<string> vaultedUrls)
+    {
+        vaultedUrls = new List<string>();
+        if (text.IndexOf("://", StringComparison.Ordinal) < 0) return text;
+        var tracker = new VaultLineTracker();
+        StringBuilder? sb = null;
+        var copied = 0;
+        var searchFrom = 0;
+        while (searchFrom < text.Length)
+        {
+            var sep = text.IndexOf("://", searchFrom, StringComparison.Ordinal);
+            if (sep < 0) break;
+            if (!TryScanNonFileUrl(text, sep, copied, out var start, out var baseEnd, out var totalEnd, out var hasQf))
+            {
+                searchFrom = sep + 3;
+                continue;
+            }
+            if (tracker.IsEmbeddedInPath(text, start))
+            {
+                searchFrom = sep + 3;
+                continue;
+            }
+            string url;
+            string tail;
+            if (hasQf)
+            {
+                var qf = TrimQueryOrFragmentDelimiters(text.Substring(baseEnd, totalEnd - baseEnd), text, start, out tail);
+                url = text.Substring(start, baseEnd - start) + qf[0] + "[redacted]";
+            }
+            else
+            {
+                url = text.Substring(start, baseEnd - start);
+                tail = string.Empty;
+                if (url.EndsWith(';'))
+                {
+                    url = url[..^1];
+                    tail = ";";
+                }
+                if (start > 0 && text[start - 1] == '\'' && url.EndsWith('\''))
+                {
+                    url = url[..^1];
+                    tail = "'" + tail;
+                }
+            }
+            sb ??= new StringBuilder(text.Length);
+            sb.Append(text, copied, start - copied);
+            var idx = vaultedUrls.Count;
+            vaultedUrls.Add(url);
+            tracker.OnVaultedUrl(totalEnd);
+            sb.Append(prefix).Append(idx).Append('\u001F').Append(tail);
+            copied = totalEnd;
+            searchFrom = totalEnd;
+        }
+        if (sb == null) return text;
+        sb.Append(text, copied, text.Length - copied);
+        return sb.ToString();
+    }
+
+    private static bool TryScanNonFileUrl(
+        string text, int sep, int minStart, out int start, out int baseEnd, out int totalEnd, out bool hasQf)
+    {
+        start = sep;
+        baseEnd = 0;
+        totalEnd = 0;
+        hasQf = false;
+        while (start > minStart && IsUrlSchemeChar(text[start - 1])) start--;
+        if (sep - start < 2 || !char.IsAsciiLetter(text[start])) return false;
+        if (start > 0 && (IsUrlSchemeChar(text[start - 1]) || text[start - 1] is '/' or '\\')) return false;
+        if (text.AsSpan(start, sep - start).Equals("file", StringComparison.OrdinalIgnoreCase)) return false;
+
+        var p = sep + 3;
+        if (!TryScanUrlHost(text, ref p)) return false;
+        if (p < text.Length && text[p] == ':')
+        {
+            var portStart = p + 1;
+            var portEnd = portStart;
+            while (portEnd < text.Length && char.IsAsciiDigit(text[portEnd])) portEnd++;
+            if (portEnd == portStart) return false;
+            p = portEnd;
+        }
+        var truncatedPath = false;
+        if (p < text.Length && text[p] == '/')
+        {
+            p = ScanUrlPath(text, p, out truncatedPath);
+        }
+        baseEnd = p;
+        if (!truncatedPath && p < text.Length && text[p] is '?' or '#')
+        {
+            hasQf = true;
+            p++;
+            while (p < text.Length && !char.IsWhiteSpace(text[p]) && text[p] is not ('"' or '<' or '>' or '\r' or '\n'))
+            {
+                p++;
+            }
+        }
+        totalEnd = p;
+        return totalEnd == text.Length || IsUrlEndBoundary(text, totalEnd);
+    }
+
+    private static bool TryScanUrlHost(string text, ref int p)
+    {
+        if (p >= text.Length) return false;
+        if (text[p] == '[')
+        {
+            var close = p + 1;
+            while (close < text.Length)
+            {
+                var ch = text[close];
+                if (ch == ']') break;
+                if (char.IsWhiteSpace(ch) || ch is '[' or '"' or '\'' or '<' or '>' or '\\' or '{' or '}' or '\r' or '\n')
+                {
+                    return false;
+                }
+                close++;
+            }
+            if (close >= text.Length || text[close] != ']' || close == p + 1) return false;
+            var ipv6 = text.Substring(p + 1, close - p - 1);
+            if (!IPAddress.TryParse(ipv6, out var ip) || ip.AddressFamily != AddressFamily.InterNetworkV6) return false;
+            p = close + 1;
+            return true;
+        }
+        var hostStart = p;
+        while (p < text.Length)
+        {
+            var ch = text[p];
+            if (IsUrlHostChar(ch))
+            {
+                p++;
+            }
+            else if (ch == '%' && p + 2 < text.Length && char.IsAsciiHexDigit(text[p + 1]) && char.IsAsciiHexDigit(text[p + 2]))
+            {
+                p += 3;
+            }
+            else
+            {
+                break;
+            }
+        }
+        return p > hostStart;
+    }
+
+    private static bool IsUrlHostChar(char ch) =>
+        IsAsciiAlphaNum(ch) || ch is '.' or '_' or '~' or '!' or '$' or '&' or '\'' or '*' or '+' or ';' or '=' or '-';
+
+    private static int ScanUrlPath(string text, int p, out bool truncated)
+    {
+        truncated = false;
+        var openPositions = new List<int>();
+        var openChars = new List<char>();
+        while (p < text.Length)
+        {
+            if (IsFileSchemeAt(text, p) || IsWindowsDriveAt(text, p)) break;
+            var ch = text[p];
+            if (char.IsWhiteSpace(ch) || ch is '"' or '<' or '>' or '\\' or '{' or '}' or ',' or '?' or '#' or '\r' or '\n')
+            {
+                break;
+            }
+            if (ch is '(' or '[')
+            {
+                if (StartsEmbeddedPathInsideGroup(text, p + 1)) break;
+                openPositions.Add(p);
+                openChars.Add(ch);
+                p++;
+                continue;
+            }
+            if (ch is ')' or ']')
+            {
+                var expected = ch == ')' ? '(' : '[';
+                if (openChars.Count == 0 || openChars[^1] != expected) break;
+                openPositions.RemoveAt(openPositions.Count - 1);
+                openChars.RemoveAt(openChars.Count - 1);
+                p++;
+                continue;
+            }
+            if (openChars.Count > 0 && ch == ':') break;
+            p++;
+        }
+        if (openPositions.Count > 0)
+        {
+            truncated = true;
+            return openPositions[0];
+        }
+        return p;
+    }
+
+    private static bool StartsEmbeddedPathInsideGroup(string text, int nextPos)
+    {
+        if (nextPos >= text.Length) return true;
+        var ch = text[nextPos];
+        if (ch is '/' or '\\' or ':') return true;
+        if (ch == '~' && nextPos + 1 < text.Length && text[nextPos + 1] == '/') return true;
+        return IsFileSchemeAt(text, nextPos) || IsWindowsDriveAt(text, nextPos);
+    }
+
+    private static bool IsWindowsDriveAt(string text, int pos) =>
+        pos + 2 < text.Length && char.IsAsciiLetter(text[pos]) && text[pos + 1] == ':' && text[pos + 2] is '/' or '\\';
+
+    private static bool IsUrlEndBoundary(string text, int pos)
+    {
+        var ch = text[pos];
+        if (char.IsWhiteSpace(ch) || ch is '"' or '\'' or '<' or '>' or '\\' or '{' or '}' or ',' or ';' or '(' or ')' or '[' or ']')
+        {
+            return true;
+        }
+        return IsFileSchemeAt(text, pos) || IsWindowsDriveAt(text, pos);
+    }
+
+    private static string RedactQuotedFilenames(string text)
+    {
+        if (!text.Contains('.')) return text;
+        var result = text.Contains('"') ? RedactDoubleQuotedFilenames(text) : text;
+        return result.Contains('\'') ? RedactSingleQuotedFilenames(result) : result;
+    }
+
+    private static string RedactDoubleQuotedFilenames(string text)
+    {
+        StringBuilder? sb = null;
+        var copied = 0;
+        var i = 0;
+        while (i < text.Length)
+        {
+            if (text[i] != '"') { i++; continue; }
+            var j = i + 1;
+            while (j < text.Length && text[j] is not ('"' or '\r' or '\n' or '/' or '\\' or '\u001E' or '\u001F')) j++;
+            if (j < text.Length && text[j] == '"' && EndsWithFilenameExt(text, i + 1, j))
+            {
+                sb ??= new StringBuilder(text.Length);
+                sb.Append(text, copied, i - copied).Append("[redacted-path]");
+                copied = j + 1;
+                i = j + 1;
+            }
+            else
+            {
+                i = j < text.Length && text[j] == '"' ? j + 1 : j;
+            }
+        }
+        if (sb == null) return text;
+        return sb.Append(text, copied, text.Length - copied).ToString();
+    }
+
+    private static string RedactSingleQuotedFilenames(string text)
+    {
+        StringBuilder? sb = null;
+        var copied = 0;
+        var segStart = 0;
+        while (segStart < text.Length)
+        {
+            var segEnd = segStart;
+            while (segEnd < text.Length && text[segEnd] is not ('\r' or '\n' or '/' or '\\' or '\u001E' or '\u001F')) segEnd++;
+            var minOpen = Math.Max(segStart, copied);
+            for (var close = segStart + 1; close < segEnd; close++)
+            {
+                if (text[close] != '\'' || !EndsWithFilenameExt(text, minOpen, close)) continue;
+                var open = close - 1;
+                while (open >= minOpen)
+                {
+                    if (text[open] == '\'' && (open == segStart || !char.IsLetterOrDigit(text[open - 1]))) break;
+                    open--;
+                }
+                if (open >= minOpen && EndsWithFilenameExt(text, open + 1, close))
+                {
+                    sb ??= new StringBuilder(text.Length);
+                    sb.Append(text, copied, open - copied).Append("[redacted-path]");
+                    copied = close + 1;
+                    minOpen = copied;
+                }
+            }
+            segStart = segEnd + 1;
+        }
+        if (sb == null) return text;
+        return sb.Append(text, copied, text.Length - copied).ToString();
+    }
+
+    private static bool EndsWithFilenameExt(string text, int start, int end)
+    {
+        var extStart = end;
+        while (extStart > start && end - extStart < 17 && IsAsciiAlphaNum(text[extStart - 1])) extStart--;
+        var extLen = end - extStart;
+        return extLen >= 1 && extLen <= 16 && extStart > start && text[extStart - 1] == '.';
     }
 
     private static string RedactKeywordUnquotedFilenames(string text)
@@ -709,13 +943,11 @@ public sealed class CoreTelemetryService : ITelemetryService
                 var rawEnd = schemeEnd;
                 var stoppedAtVault = false;
                 var escapedBackslash = false;
+                var lastQuotePos = -1;
                 while (rawEnd < text.Length)
                 {
                     var ch = text[rawEnd];
-                    var isInnerApostrophe =
-                        ch == '\'' && rawEnd > schemeEnd && rawEnd + 1 < text.Length &&
-                        char.IsLetterOrDigit(text[rawEnd - 1]) && char.IsLetter(text[rawEnd + 1]);
-                    if (ch is '\r' or '\n' || (quote != '\0' && ch == quote && !escapedBackslash && !isInnerApostrophe)) break;
+                    if (ch is '\r' or '\n') break;
                     if (ch == '\u001E' &&
                         rawEnd + vaultPrefix.Length <= text.Length &&
                         text.AsSpan(rawEnd, vaultPrefix.Length).Equals(vaultPrefix, StringComparison.Ordinal))
@@ -723,8 +955,17 @@ public sealed class CoreTelemetryService : ITelemetryService
                         stoppedAtVault = true;
                         break;
                     }
+                    if (quote != '\0' && ch == quote && !escapedBackslash)
+                    {
+                        lastQuotePos = rawEnd;
+                    }
                     escapedBackslash = ch == '\\' ? !escapedBackslash : false;
                     rawEnd++;
+                }
+                if (lastQuotePos >= 0)
+                {
+                    rawEnd = lastQuotePos;
+                    stoppedAtVault = false;
                 }
                 var trimmedEnd = rawEnd;
                 if (stoppedAtVault)
