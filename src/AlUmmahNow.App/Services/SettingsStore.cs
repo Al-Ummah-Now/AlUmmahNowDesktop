@@ -202,12 +202,70 @@ namespace AlUmmahNow.App.Services
         {
             var directory = Path.GetDirectoryName(_telemetryConsentPath);
             if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
+            CleanupOrphanConsentTempFilesUnlocked();
             var content = pendingClaims != null && pendingClaims.Count > 0
                 ? token + "\npending:" + string.Join(",", pendingClaims)
                 : token;
             var temp = _telemetryConsentPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
-            File.WriteAllText(temp, content);
-            ReplaceFile(temp, _telemetryConsentPath);
+            try
+            {
+                File.WriteAllText(temp, content);
+                ReplaceFile(temp, _telemetryConsentPath);
+            }
+            catch
+            {
+                try { File.Delete(temp); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+                throw;
+            }
+        }
+
+        private void CleanupOrphanConsentTempFilesUnlocked()
+        {
+            var directory = Path.GetDirectoryName(_telemetryConsentPath);
+            var fileName = Path.GetFileName(_telemetryConsentPath);
+            if (string.IsNullOrEmpty(directory) || string.IsNullOrEmpty(fileName)) return;
+            try
+            {
+                foreach (var tmp in Directory.EnumerateFiles(directory, fileName + ".*.tmp"))
+                {
+                    try { File.Delete(tmp); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+                }
+            }
+            catch (Exception ex) when (ex is DirectoryNotFoundException || ex is IOException || ex is UnauthorizedAccessException)
+            {
+            }
+        }
+
+        /// <summary>
+        /// Clears the shared telemetry consent sidecar ONLY if it still represents
+        /// <paramref name="expectedConfirmedToken"/> (or is already absent), so a failed startup
+        /// cannot erase a concurrent opt-in or an in-progress pending claim from another instance.
+        /// </summary>
+        public bool ClearTelemetryConsentIfTokenMatches(string? expectedConfirmedToken)
+        {
+            using var crossProcessLock = TryAcquireConsentLock(
+                createDirectory: false,
+                out var directoryMissing,
+                timeoutMs: 10000,
+                serializeMutation: true);
+            if (directoryMissing) return true;
+            if (crossProcessLock == null) return false;
+            ReadConsentSidecarUnlocked(out var current, out var pendingClaims);
+            if (current is not { Length: > 0 })
+            {
+                CleanupOrphanConsentTempFilesUnlocked();
+                return true;
+            }
+            if (pendingClaims != null) return false;
+            if (expectedConfirmedToken is not { Length: > 0 }) return false;
+            if (!string.Equals(
+                    ExtractBaseGenerationToken(current),
+                    ExtractBaseGenerationToken(expectedConfirmedToken),
+                    StringComparison.Ordinal))
+            {
+                return false;
+            }
+            return ClearConsentSidecarUnlocked();
         }
 
         /// <summary>
@@ -431,11 +489,12 @@ namespace AlUmmahNow.App.Services
                     return false;
                 }
             }
+            CleanupOrphanConsentTempFilesUnlocked();
             if (cleared)
             {
-                WaitForActiveFlushRevocationsUnlocked(timeoutMs: 1500);
+                return WaitForActiveFlushRevocationsUnlocked(timeoutMs: 1500);
             }
-            return cleared;
+            return false;
         }
 
         /// <summary>
@@ -459,10 +518,10 @@ namespace AlUmmahNow.App.Services
             }
         }
 
-        private void WaitForActiveFlushRevocationsUnlocked(int timeoutMs)
+        private bool WaitForActiveFlushRevocationsUnlocked(int timeoutMs)
         {
             var directory = Path.GetDirectoryName(_telemetryConsentPath);
-            if (string.IsNullOrEmpty(directory)) return;
+            if (string.IsNullOrEmpty(directory)) return true;
             var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
             while (true)
             {
@@ -471,11 +530,15 @@ namespace AlUmmahNow.App.Services
                 {
                     guards = Directory.GetFiles(directory, "telemetry-flush-active.*.lock");
                 }
+                catch (DirectoryNotFoundException)
+                {
+                    return true;
+                }
                 catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
                 {
-                    return;
+                    return false;
                 }
-                if (guards.Length == 0) return;
+                if (guards.Length == 0) return true;
                 var anyLive = false;
                 foreach (var guardPath in guards)
                 {
@@ -491,7 +554,7 @@ namespace AlUmmahNow.App.Services
                     }
                     catch (DirectoryNotFoundException)
                     {
-                        return;
+                        return true;
                     }
                     catch (IOException)
                     {
@@ -502,7 +565,8 @@ namespace AlUmmahNow.App.Services
                         anyLive = true;
                     }
                 }
-                if (!anyLive || DateTime.UtcNow >= deadline) return;
+                if (!anyLive) return true;
+                if (DateTime.UtcNow >= deadline) return false;
                 Thread.Sleep(5);
             }
         }

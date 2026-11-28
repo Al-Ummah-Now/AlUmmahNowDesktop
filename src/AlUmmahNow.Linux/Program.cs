@@ -72,6 +72,7 @@ var updateScene = UpdateScene.FromEnvironment(localizer, UpdateInstall.Flatpak, 
 var version = UpdateText.VersionOf(typeof(MainWindow).Assembly);
 var stateHome = Environment.GetEnvironmentVariable("XDG_STATE_HOME");
 if (string.IsNullOrEmpty(stateHome)) stateHome = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "state");
+var initialConsentToken = isDemo ? null : store.LoadTelemetryConsentToken();
 var telemetry = CoreTelemetryService.CreateOrNull(
     platform: "linux",
     appVersion: version,
@@ -85,7 +86,11 @@ var telemetry = CoreTelemetryService.CreateOrNull(
     acquireExternalConsentLock: () => store.TryAcquireTelemetryConsentLock(),
     externalConsentTokenForClaim: claim => store.LoadTelemetryConsentTokenForClaim(claim),
     acquireActiveFlushGuard: () => store.TryAcquireActiveFlushGuard());
-if (settings.TelemetryEnabled && telemetry.Consent == AlUmmahNow.CoreBridge.TelemetryConsent.Off && store.SaveTelemetryEnabled(false))
+if (!isDemo &&
+    settings.TelemetryEnabled &&
+    telemetry.Consent == AlUmmahNow.CoreBridge.TelemetryConsent.Off &&
+    CoreTelemetryService.ShouldClearStaleStartupConsent(telemetry) &&
+    store.ClearTelemetryConsentIfTokenMatches(initialConsentToken))
 {
     settings.TelemetryEnabled = false;
     telemetry.SetConsent(AlUmmahNow.CoreBridge.TelemetryConsent.Off);

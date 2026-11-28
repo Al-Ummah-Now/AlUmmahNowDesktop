@@ -71,6 +71,7 @@ public sealed class SettingsPage
         var telemetryBody = Gtk.Box.New(Gtk.Orientation.Vertical, 8);
         telemetryBody.Append(Ui.CardTitle(l["settings.telemetry.title"]));
         telemetryBody.Append(Ui.Label(l["settings.telemetry.body"], dim: true));
+        settings.TelemetryEnabled = store.LoadTelemetryEnabled();
         var telemetryCheck = Gtk.CheckButton.NewWithLabel(l["settings.telemetry.toggle"]);
         telemetryCheck.SetActive(settings.TelemetryEnabled);
         var purgeWarningText = l["settings.telemetry.purgeWarning"];
@@ -99,10 +100,16 @@ public sealed class SettingsPage
                     telemetryNotice.SetVisible(true);
                     return;
                 }
-                if (telemetry.Consent == TelemetryConsent.Off && settings.TelemetryEnabled && !store.LoadTelemetryEnabled())
+                var persistedEnabled = store.LoadTelemetryEnabled();
+                if (!persistedEnabled && telemetry.Consent == TelemetryConsent.Off && settings.TelemetryEnabled)
                 {
                     settings.TelemetryEnabled = false;
                     telemetryCheck.SetActive(false);
+                }
+                else if (persistedEnabled && !settings.TelemetryEnabled)
+                {
+                    settings.TelemetryEnabled = true;
+                    telemetryCheck.SetActive(true);
                 }
                 if (failed && telemetry.Consent == TelemetryConsent.Off)
                 {

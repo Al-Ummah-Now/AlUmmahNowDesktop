@@ -3071,28 +3071,55 @@ public class CoreTelemetryServiceTests
                 await guardFailClosed.FlushAsync();
                 Assert.False(flushDispatchedWithNullGuard);
 
-                // Arabic-Indic phone, JWT, IPv4 keys, 9+ digit numeric values, share-link tokens, and identifiers are scrubbed.
+                // Arabic-Indic phone, JWT, IPv4, compressed IPv6, 9+ digit numeric values, share-link tokens, and identifiers are scrubbed.
                 var scrubbed = CoreTelemetryService.SerializeProperties(new Dictionary<string, object>
                 {
                     ["+٩٧١٥٠١٢٣٤٥٦"] = true,
                     ["eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.sig_part-1"] = "failed",
                     ["192.0.2.10"] = true,
+                    ["fe80::1"] = true,
+                    ["2001:db8::beef:cafe"] = true,
                     ["recipient"] = 12025550148L,
+                    ["detail"] = "Peer 192.168.42.17 called +٩٧١٥٠١٢٣٤٥٦٧ from fe80::1",
                     ["share"] = "https://share.example.com/s/V8r2Qp6Lm4",
+                    ["dropbox"] = "https://www.dropbox.com/scl/fi/a1b2c3d4e5f6g7h8i9j0/PrivateAcquisition.pdf",
                 });
                 Assert.NotNull(scrubbed);
                 Assert.DoesNotContain("٩٧١٥٠١٢٣٤٥٦", scrubbed);
                 Assert.DoesNotContain("eyJhbGciOiJIUzI1NiJ9", scrubbed);
                 Assert.DoesNotContain("192.0.2.10", scrubbed);
+                Assert.DoesNotContain("192.168.42.17", scrubbed);
+                Assert.DoesNotContain("fe80", scrubbed);
+                Assert.DoesNotContain("beef:cafe", scrubbed);
                 Assert.DoesNotContain("12025550148", scrubbed);
                 Assert.DoesNotContain("V8r2Qp6Lm4", scrubbed);
+                Assert.DoesNotContain("PrivateAcquisition", scrubbed);
                 Assert.Contains("https://share.example.com/s/[redacted]", scrubbed);
+                Assert.Contains("https://www.dropbox.com/scl/[redacted]", scrubbed);
 
                 guardFailClosed.Track("4155550123");
-                guardFailClosed.AddBreadcrumb("4155550123", "opened");
-                guardFailClosed.ReportCrash("4155550123", "boom");
+                guardFailClosed.AddBreadcrumb("fe80::1", "Peer 192.168.42.17 called +٩٧١٥٠١٢٣٤٥٦٧");
+                guardFailClosed.ReportCrash("4155550123", "Peer 192.168.42.17 called +٩٧١٥٠١٢٣٤٥٦٧");
                 var persisted = File.ReadAllText(guardFailClosed.ActiveBufferPathForTesting!);
                 Assert.DoesNotContain("4155550123", persisted);
+                Assert.DoesNotContain("192.168.42.17", persisted);
+                Assert.DoesNotContain("٩٧١٥٠١٢٣٤٥٦٧", persisted);
+                Assert.DoesNotContain("fe80", persisted);
+            }
+            Assert.False(CoreTelemetryService.ShouldClearStaleStartupConsent(NullTelemetryService.Instance));
+            using (var contendedStart = new CoreTelemetryService(
+                platform: "linux",
+                appVersion: "1.0.0",
+                locale: "en",
+                videosApiBaseUrl: null,
+                userAgent: "AlUmmahNowLinux/1.0.0",
+                bufferPath: bufferPath,
+                initialEnabled: true,
+                externalConsentToken: () => Volatile.Read(ref sharedToken),
+                acquireExternalConsentLock: () => null))
+            {
+                Assert.Equal(TelemetryConsent.Off, contendedStart.Consent);
+                Assert.False(CoreTelemetryService.ShouldClearStaleStartupConsent(contendedStart));
             }
 
             // Active flush guard stays held until external opt-out triggers native revocation, even while HTTP stalls.

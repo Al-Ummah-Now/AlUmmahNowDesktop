@@ -314,6 +314,7 @@ public sealed partial class Shell
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetHeadingLevel(telemetryHeading, Microsoft.UI.Xaml.Automation.Peers.AutomationHeadingLevel.Level2);
         telemetryBody.Children.Add(telemetryHeading);
         telemetryBody.Children.Add(new TextBlock { Text = _localizer["settings.telemetry.body"], TextWrapping = TextWrapping.Wrap }.Dim(0.75));
+        _settings.TelemetryEnabled = _store.LoadTelemetryEnabled();
         var telemetryToggle = new ToggleSwitch { Header = _localizer["settings.telemetry.toggle"], IsOn = _settings.TelemetryEnabled };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(telemetryToggle, "SettingsTelemetryToggle");
         var purgeWarningText = _localizer["settings.telemetry.purgeWarning"];
@@ -342,10 +343,16 @@ public sealed partial class Shell
                 telemetryNotice.Visibility = Visibility.Visible;
                 return;
             }
-            if (_telemetry.Consent == TelemetryConsent.Off && _settings.TelemetryEnabled && !_store.LoadTelemetryEnabled())
+            var persistedEnabled = _store.LoadTelemetryEnabled();
+            if (!persistedEnabled && _telemetry.Consent == TelemetryConsent.Off && _settings.TelemetryEnabled)
             {
                 _settings.TelemetryEnabled = false;
                 telemetryToggle.IsOn = false;
+            }
+            else if (persistedEnabled && !_settings.TelemetryEnabled)
+            {
+                _settings.TelemetryEnabled = true;
+                telemetryToggle.IsOn = true;
             }
             if (failed && _telemetry.Consent == TelemetryConsent.Off)
             {

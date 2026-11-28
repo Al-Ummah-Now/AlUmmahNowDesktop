@@ -325,6 +325,7 @@ public sealed partial class MainWindow
         telemetryBody.SetWrap(true);
         telemetryBody.AddCssClass("dim-label");
         telemetryCard.Append(telemetryBody);
+        _settings.TelemetryEnabled = _store.LoadTelemetryEnabled();
         var telemetryCheck = Gtk.CheckButton.NewWithLabel(_localizer["settings.telemetry.toggle"]);
         telemetryCheck.SetActive(_settings.TelemetryEnabled);
         var purgeWarningText = _localizer["settings.telemetry.purgeWarning"];
@@ -351,10 +352,16 @@ public sealed partial class MainWindow
                 telemetryNotice.SetVisible(true);
                 return;
             }
-            if (_telemetry.Consent == TelemetryConsent.Off && _settings.TelemetryEnabled && !_store.LoadTelemetryEnabled())
+            var persistedEnabled = _store.LoadTelemetryEnabled();
+            if (!persistedEnabled && _telemetry.Consent == TelemetryConsent.Off && _settings.TelemetryEnabled)
             {
                 _settings.TelemetryEnabled = false;
                 telemetryCheck.SetActive(false);
+            }
+            else if (persistedEnabled && !_settings.TelemetryEnabled)
+            {
+                _settings.TelemetryEnabled = true;
+                telemetryCheck.SetActive(true);
             }
             if (failed && _telemetry.Consent == TelemetryConsent.Off)
             {

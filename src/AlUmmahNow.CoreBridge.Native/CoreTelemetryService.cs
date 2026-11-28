@@ -879,7 +879,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     }
 
     private static readonly Regex WebhookPathTokenRegex = new(
-        @"((?:^|/|%2[fF])(?:webhooks?|reset|reset-password|password-reset|forgot-password|verify|verify-email|confirm|confirm-email|activate|magic|magic-link|invite|invitations?|tokens?|auth|oauth2?|callback|sessions?|unsubscribe|secrets?|keys?|api-?keys?|credentials?|sign-?in|login|sso|redeem|claim|recovery?|passwords?|share|shared|sh|s|dl|link|private|join|otp|passkey|code)(?:/|%2[fF]))[^\s?#]+",
+        @"((?:^|/|%2[fF])(?:webhooks?|reset|reset-password|password-reset|forgot-password|verify|verify-email|confirm|confirm-email|activate|magic|magic-link|invite|invitations?|tokens?|auth|oauth2?|callback|sessions?|unsubscribe|secrets?|keys?|api-?keys?|credentials?|sign-?in|login|sso|redeem|claim|recovery?|passwords?|share|shared|sh|s|scl|dl|link|private|join|otp|passkey|code|folders|file/d|document/d|spreadsheets/d|presentation/d)(?:/|%2[fF]))[^\s?#]+",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex SlackWebhookHostRegex = new(
@@ -6447,7 +6447,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             _ => TelemetryBreadcrumbLevel.Info,
         };
         var safeCategory = SanitizePropertyKey(category);
-        var safeMessage = SanitizeLocalPaths(message ?? "");
+        var safeMessage = SanitizeDiagnosticText(message ?? "");
         CancellationTokenSource? toCancel = null;
         lock (_gate)
         {
@@ -6469,8 +6469,8 @@ public sealed class CoreTelemetryService : ITelemetryService
             if (_disposeRequested || _clientDisposed || _consent == TelemetryConsent.Off) return;
             captureEpoch = _consentEpoch;
         }
-        var safeMessage = string.IsNullOrWhiteSpace(message) ? "Unhandled exception" : SanitizeLocalPaths(message);
-        var safeStack = stack == null ? null : SanitizeLocalPaths(stack);
+        var safeMessage = string.IsNullOrWhiteSpace(message) ? "Unhandled exception" : SanitizeDiagnosticText(message);
+        var safeStack = stack == null ? null : SanitizeDiagnosticText(stack);
         var safeKind = string.IsNullOrWhiteSpace(kind) ? "UnhandledException" : SanitizePropertyKey(kind);
         var report = new TelemetryCrashReport(
             safeKind,
@@ -8146,17 +8146,26 @@ public sealed class CoreTelemetryService : ITelemetryService
         }
     }
 
+    /// <summary>
+    /// Returns true only when a startup with saved consent ended with telemetry <c>Off</c> due to a
+    /// non-transient initialization failure (never for demo mode or transient lock contention).
+    /// </summary>
+    public static bool ShouldClearStaleStartupConsent(ITelemetryService telemetry) =>
+        telemetry is not NullTelemetryService &&
+        !(telemetry is CoreTelemetryService svc && svc.IsPendingInitialEnable);
+
+    internal bool IsPendingInitialEnable { get { lock (_gate) return _pendingInitialEnable; } }
+
     private static readonly Regex JwtInKeyRegex = new(@"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+(?![A-Za-z0-9_-])", RegexOptions.Compiled);
     private static readonly Regex Ipv4InKeyRegex = new(@"(?<![A-Za-z0-9_.])(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?![A-Za-z0-9_.])", RegexOptions.Compiled);
-    private static readonly Regex Ipv6InKeyRegex = new(@"(?<![A-Za-z0-9_:])(?:[0-9a-fA-F]{1,4}:){2,7}[0-9a-fA-F]{0,4}|(?<![A-Za-z0-9_:])::(?:[0-9a-fA-F]{1,4}:){0,6}[0-9a-fA-F]{1,4}(?![A-Za-z0-9_:])", RegexOptions.Compiled);
+    private static readonly Regex Ipv6InKeyRegex = new(@"(?<![A-Za-z0-9_:])(?:(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:){1,7}:(?:[0-9a-fA-F]{1,4}(?::[0-9a-fA-F]{1,4}){0,5})?|::(?:[0-9a-fA-F]{1,4}(?::[0-9a-fA-F]{1,4}){0,6}))(?:%[A-Za-z0-9_.-]+)?(?![A-Za-z0-9_:])", RegexOptions.Compiled);
     private static readonly Regex PhoneInKeyRegex = new(@"(?<![A-Za-z0-9_])\+?\d[\d\s().-]{7,}\d(?![A-Za-z0-9_])", RegexOptions.Compiled);
     private static readonly Regex OpaqueSecretInKeyRegex = new(@"(?<![A-Za-z0-9_])[A-Za-z0-9+/=_-]{32,}(?![A-Za-z0-9_])", RegexOptions.Compiled);
     private static readonly Regex UuidExactRegex = new(@"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", RegexOptions.Compiled);
 
-    private static string SanitizePropertyKey(string key)
+    private static string SanitizeDiagnosticText(string text)
     {
-        var safe = SanitizeLocalPaths(key);
-        safe = JwtInKeyRegex.Replace(safe, "[redacted-token]");
+        var safe = SanitizeLocalPaths(text);
         safe = Ipv4InKeyRegex.Replace(safe, "[redacted-ip]");
         safe = Ipv6InKeyRegex.Replace(safe, "[redacted-ip]");
         safe = PhoneInKeyRegex.Replace(safe, static m =>
@@ -8165,6 +8174,13 @@ public sealed class CoreTelemetryService : ITelemetryService
             foreach (var c in m.Value) if (char.IsDigit(c)) digits++;
             return digits >= 9 ? "[redacted-phone]" : m.Value;
         });
+        return safe;
+    }
+
+    private static string SanitizePropertyKey(string key)
+    {
+        var safe = SanitizeDiagnosticText(key);
+        safe = JwtInKeyRegex.Replace(safe, "[redacted-token]");
         safe = OpaqueSecretInKeyRegex.Replace(safe, static m =>
         {
             var v = m.Value;
@@ -8202,7 +8218,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             switch (kv.Value)
             {
                 case string s:
-                    flat[uniqueKey] = SanitizeLocalPaths(s);
+                    flat[uniqueKey] = SanitizeDiagnosticText(s);
                     break;
                 case bool b:
                     flat[uniqueKey] = b;

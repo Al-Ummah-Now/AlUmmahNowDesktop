@@ -124,6 +124,7 @@ public sealed partial class App : Application
         var updateScene = UpdateScene.FromEnvironment(localizer, UpdateInstall.Msix, IsBusy);
         var dataRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AlUmmahNow");
         var isDemo = Environment.GetEnvironmentVariable("AUN_DEMO") == "1";
+        var initialConsentToken = isDemo ? null : store.LoadTelemetryConsentToken();
         _telemetry = CoreTelemetryService.CreateOrNull(
             platform: "windows",
             appVersion: version,
@@ -137,7 +138,11 @@ public sealed partial class App : Application
             acquireExternalConsentLock: () => store.TryAcquireTelemetryConsentLock(),
             externalConsentTokenForClaim: claim => store.LoadTelemetryConsentTokenForClaim(claim),
             acquireActiveFlushGuard: () => store.TryAcquireActiveFlushGuard());
-        if (settings.TelemetryEnabled && _telemetry.Consent == AlUmmahNow.CoreBridge.TelemetryConsent.Off && store.SaveTelemetryEnabled(false))
+        if (!isDemo &&
+            settings.TelemetryEnabled &&
+            _telemetry.Consent == AlUmmahNow.CoreBridge.TelemetryConsent.Off &&
+            CoreTelemetryService.ShouldClearStaleStartupConsent(_telemetry) &&
+            store.ClearTelemetryConsentIfTokenMatches(initialConsentToken))
         {
             settings.TelemetryEnabled = false;
             _telemetry.SetConsent(AlUmmahNow.CoreBridge.TelemetryConsent.Off);

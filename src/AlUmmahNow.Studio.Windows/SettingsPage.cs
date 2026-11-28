@@ -78,6 +78,7 @@ internal sealed class SettingsPage
         var telemetryBody = new StackPanel { Spacing = 8 };
         telemetryBody.Children.Add(Heading(l["settings.telemetry.title"]));
         telemetryBody.Children.Add(new TextBlock { Text = l["settings.telemetry.body"], TextWrapping = TextWrapping.Wrap, Foreground = LanternGlass.Res("StudioMutedBrush") });
+        settings.TelemetryEnabled = store.LoadTelemetryEnabled();
         var telemetryToggle = new ToggleSwitch { Header = l["settings.telemetry.toggle"], IsOn = settings.TelemetryEnabled };
         AutomationProperties.SetAutomationId(telemetryToggle, "SettingsTelemetryToggle");
         var initialPurgeFailed = telemetry?.LastPurgeFailed ?? false;
@@ -109,10 +110,16 @@ internal sealed class SettingsPage
                     telemetryNotice.Visibility = Visibility.Visible;
                     return;
                 }
-                if (telemetry.Consent == TelemetryConsent.Off && settings.TelemetryEnabled && !store.LoadTelemetryEnabled())
+                var persistedEnabled = store.LoadTelemetryEnabled();
+                if (!persistedEnabled && telemetry.Consent == TelemetryConsent.Off && settings.TelemetryEnabled)
                 {
                     settings.TelemetryEnabled = false;
                     telemetryToggle.IsOn = false;
+                }
+                else if (persistedEnabled && !settings.TelemetryEnabled)
+                {
+                    settings.TelemetryEnabled = true;
+                    telemetryToggle.IsOn = true;
                 }
                 if (failed && telemetry.Consent == TelemetryConsent.Off)
                 {
