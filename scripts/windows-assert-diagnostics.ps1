@@ -1,8 +1,11 @@
 # Assert the card in the same window that was captured, using the native UI Automation tree.
-param([IntPtr]$Handle, [string]$Lang, [switch]$Studio)
+param([IntPtr]$Handle, [string]$Lang, [switch]$Studio, [int]$ExpectedProcessId = 0)
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
 $window = [System.Windows.Automation.AutomationElement]::FromHandle($Handle)
+if ($ExpectedProcessId -ne 0 -and $window.Current.ProcessId -ne $ExpectedProcessId) {
+  throw "Captured window is not owned by process $ExpectedProcessId"
+}
 $elements = $window.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
 $names = foreach ($element in $elements) {
   $current = $element.Current
