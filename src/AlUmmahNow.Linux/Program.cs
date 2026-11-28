@@ -78,13 +78,14 @@ if (string.IsNullOrEmpty(stateHome)) stateHome = Path.Combine(Environment.GetFol
 var initialConsentToken = isDemo ? null : store.LoadTelemetryConsentToken();
 var initialTelemetryEnabled = initialConsentToken != null;
 settings.TelemetryEnabled = initialTelemetryEnabled;
+var telemetryBufferPath = Path.Combine(stateHome, "alummahnow", "telemetry", "telemetry-buffer.json");
 var telemetry = CoreTelemetryService.CreateOrNull(
     platform: "linux",
     appVersion: version,
     locale: settings.Language,
     videosApiBaseUrl: environment.VideosApi.AbsoluteUri,
     userAgent: "AlUmmahNowLinux/" + version,
-    bufferPath: Path.Combine(stateHome, "alummahnow", "telemetry-buffer.json"),
+    bufferPath: telemetryBufferPath,
     initialEnabled: initialTelemetryEnabled,
     demo: isDemo,
     externalConsentToken: () => store.LoadTelemetryConsentToken(),

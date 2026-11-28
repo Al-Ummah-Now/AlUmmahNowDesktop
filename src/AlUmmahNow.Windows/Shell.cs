@@ -353,15 +353,16 @@ public sealed partial class Shell
         {
             if (telemetrySyncInFlight) return;
             telemetrySyncInFlight = true;
-            _ = Task.Run(() => _telemetry.SetConsent(target)).ContinueWith(_ =>
+            _ = Task.Run(() => _telemetry.SetConsent(target)).ContinueWith(t =>
             {
+                var ok = t.IsCompletedSuccessfully && t.Result;
                 var dq = telemetryNotice.DispatcherQueue;
                 if (dq != null)
                 {
                     dq.TryEnqueue(() =>
                     {
                         telemetrySyncInFlight = false;
-                        SyncPurgeNotice();
+                        SyncPurgeNotice(allowBackgroundSync: ok);
                     });
                 }
                 else
@@ -370,7 +371,7 @@ public sealed partial class Shell
                 }
             });
         }
-        void SyncPurgeNotice()
+        void SyncPurgeNotice(bool allowBackgroundSync = true)
         {
             if (telemetryToggleBusy) return;
             if (telemetryUnavailable)
@@ -400,7 +401,7 @@ public sealed partial class Shell
             var pendingOtherRevocation = _store.IsTelemetryPendingOtherRevocation();
             if (!persistedEnabled)
             {
-                if (_telemetry.Consent != TelemetryConsent.Off)
+                if (_telemetry.Consent != TelemetryConsent.Off && allowBackgroundSync)
                 {
                     ScheduleBackgroundConsentSync(TelemetryConsent.Off);
                 }
@@ -414,7 +415,7 @@ public sealed partial class Shell
             {
                 if (_telemetry.Consent == TelemetryConsent.Off)
                 {
-                    ScheduleBackgroundConsentSync(TelemetryConsent.Full);
+                    if (allowBackgroundSync) ScheduleBackgroundConsentSync(TelemetryConsent.Full);
                     return;
                 }
                 if (_telemetry.Consent == TelemetryConsent.Full)

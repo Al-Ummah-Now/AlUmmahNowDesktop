@@ -57,13 +57,14 @@ var userAgent = "AlUmmahNowStudioLinux/" + version;
 var initialConsentToken = demo ? null : settingsStore.LoadTelemetryConsentToken();
 var initialTelemetryEnabled = initialConsentToken != null;
 settings.TelemetryEnabled = initialTelemetryEnabled;
+var telemetryBufferPath = Path.Combine(stateDir, "telemetry", "telemetry-buffer.json");
 var telemetry = CoreTelemetryService.CreateOrNull(
     platform: "linux",
     appVersion: version,
     locale: localizer.Language,
     videosApiBaseUrl: environment.VideosApi.AbsoluteUri,
     userAgent: userAgent,
-    bufferPath: Path.Combine(stateDir, "telemetry-buffer.json"),
+    bufferPath: telemetryBufferPath,
     initialEnabled: initialTelemetryEnabled,
     demo: demo,
     externalConsentToken: () => settingsStore.LoadTelemetryConsentToken(),

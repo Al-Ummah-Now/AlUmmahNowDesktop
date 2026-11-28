@@ -199,6 +199,7 @@ public sealed class CoreTelemetryService : ITelemetryService
 
     private TelemetryClient CreateClient(string? bufferPath)
     {
+        EnsurePrivateBufferDirectory(bufferPath);
         var config = new TelemetryClientConfig(
             _app,
             _ingestUrl,
@@ -208,6 +209,78 @@ public sealed class CoreTelemetryService : ITelemetryService
             null,
             null);
         return new TelemetryClient(config);
+    }
+
+    private static bool IsSharedTempDirectory(string dir)
+    {
+        try
+        {
+            var full = Path.GetFullPath(dir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var temp = Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            return string.Equals(full, temp, StringComparison.Ordinal) ||
+                string.Equals(full, "/tmp", StringComparison.Ordinal) ||
+                string.Equals(full, "/private/tmp", StringComparison.Ordinal) ||
+                string.Equals(full, "/var/tmp", StringComparison.Ordinal);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            return true;
+        }
+    }
+
+    private static void EnsurePrivateBufferDirectory(string? bufferPath)
+    {
+        if (string.IsNullOrWhiteSpace(bufferPath)) return;
+        var dir = Path.GetDirectoryName(bufferPath);
+        if (string.IsNullOrEmpty(dir)) return;
+        try
+        {
+            if (OperatingSystem.IsWindows())
+            {
+                if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
+                return;
+            }
+            const UnixFileMode ownerDirMode =
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
+            const UnixFileMode nonOwnerMask =
+                UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.GroupExecute |
+                UnixFileMode.OtherRead | UnixFileMode.OtherWrite | UnixFileMode.OtherExecute;
+            if (!Directory.Exists(dir))
+            {
+                Directory.CreateDirectory(dir, ownerDirMode);
+            }
+            if (!IsSharedTempDirectory(dir))
+            {
+                var current = File.GetUnixFileMode(dir);
+                if ((current & nonOwnerMask) != 0)
+                {
+                    File.SetUnixFileMode(dir, current & ~nonOwnerMask);
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+        }
+    }
+
+    private static void RestrictUnixFilePermissions(string? path)
+    {
+        if (OperatingSystem.IsWindows() || string.IsNullOrWhiteSpace(path)) return;
+        try
+        {
+            if (!File.Exists(path)) return;
+            const UnixFileMode nonOwnerMask =
+                UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.GroupExecute |
+                UnixFileMode.OtherRead | UnixFileMode.OtherWrite | UnixFileMode.OtherExecute;
+            var current = File.GetUnixFileMode(path);
+            if ((current & nonOwnerMask) != 0)
+            {
+                File.SetUnixFileMode(path, current & ~nonOwnerMask);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+        }
     }
 
     /// <summary>
@@ -608,7 +681,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         var inSingleQuote = (quoteState & 1) != 0;
         var inDoubleQuote = (quoteState & 2) != 0;
         var probeInput = rawUrl + "x";
-        var probe = RedactUrlPathSecrets(probeInput);
+        var probe = RedactUrlPathSecrets(probeInput, includeUserRoutes: false);
         var webhookProbe = (probe != probeInput && probe.EndsWith("[redacted]", StringComparison.Ordinal)) ? probe : null;
         if (webhookProbe == null && totalEnd < failedContMax) return false;
         var outerQuote = (inDoubleQuote || (urlStart > 0 && text[urlStart - 1] == '"'))
@@ -706,7 +779,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         var nestedStart = FindFirstNestedUrlStart(text, totalEnd, sliceEnd);
         if (nestedStart < 0) return RedactUrlPathSecrets(text.Substring(urlStart, sliceEnd - urlStart));
         var prefix = text.Substring(urlStart, nestedStart - urlStart);
-        var probe = RedactUrlPathSecrets(prefix + "x");
+        var probe = RedactUrlPathSecrets(prefix + "x", includeUserRoutes: false);
         if (probe != prefix + "x" && probe.EndsWith("[redacted]", StringComparison.Ordinal))
         {
             return RedactUrlPathSecrets(text.Substring(urlStart, sliceEnd - urlStart));
@@ -917,7 +990,61 @@ public sealed class CoreTelemetryService : ITelemetryService
         @"(?<![A-Za-z0-9_])([A-Za-z0-9_.-]{2,64})([=:])([^/?#&\s;]+)",
         RegexOptions.Compiled);
 
-    private static string RedactUrlPathSecrets(string url)
+    private static readonly Regex RawPathEmailRegex = new(
+        @"(?:@|%40)[^\s/?#]*\.[A-Za-z0-9\u0080-\uFFFF]",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex UserIdentityPathRegex = new(
+        @"((?:^|/|%2[fF])(?:users?|profiles?|accounts?|members?|people|person|authors?|creators?|handles?|customers?|contacts?|subscribers?|followers?|owners?|(?<!file/)(?<!document/)(?<!spreadsheets/)(?<!presentation/)u)(?:/|%2[fF]))([^/?#\s]+)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static string RedactUserIdentityPathSegments(string url)
+    {
+        var schemeIdx = url.IndexOf("://", StringComparison.Ordinal);
+        if (schemeIdx < 0) return url;
+        var pathSlash = url.IndexOf('/', schemeIdx + 3);
+        if (pathSlash < 0 || RawPathEmailRegex.IsMatch(url.AsSpan(pathSlash))) return url;
+        string decoded;
+        int[]? origOffsets = null;
+        if (url.IndexOf('%') >= 0)
+        {
+            (decoded, origOffsets) = DecodeUrlForPathSecretMatch(url);
+        }
+        else
+        {
+            decoded = url;
+        }
+        var decSchemeIdx = decoded.IndexOf("://", StringComparison.Ordinal);
+        var decPathSlash = decSchemeIdx >= 0 ? decoded.IndexOf('/', decSchemeIdx + 3) : -1;
+        if (decPathSlash < 0) return url;
+        var matches = UserIdentityPathRegex.Matches(decoded, decPathSlash);
+        if (matches.Count == 0) return url;
+        StringBuilder? sb = null;
+        var copied = 0;
+        foreach (Match match in matches)
+        {
+            var segGroup = match.Groups[2];
+            var segVal = segGroup.ValueSpan;
+            if (segVal.Length == 0 ||
+                segVal[0] == '{' ||
+                segVal.StartsWith("[redacted", StringComparison.Ordinal) ||
+                segVal.StartsWith("s!", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            var start = origOffsets != null ? origOffsets[segGroup.Index] : segGroup.Index;
+            if (start < copied) continue;
+            var end = origOffsets != null ? origOffsets[segGroup.Index + segGroup.Length] : segGroup.Index + segGroup.Length;
+            sb ??= new StringBuilder(url.Length);
+            sb.Append(url, copied, start - copied).Append("[redacted]");
+            copied = end;
+        }
+        if (sb == null) return url;
+        sb.Append(url, copied, url.Length - copied);
+        return sb.ToString();
+    }
+
+    private static string RedactUrlPathSecrets(string url, bool includeUserRoutes = true)
     {
         var result = UrlUserinfoRegex.Replace(url, "$1[redacted]@");
         result = ReplaceUrlPathSecret(result, WebhookPathTokenRegex);
@@ -927,6 +1054,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         result = ReplaceUrlPathSecret(result, UrlMatrixParamRegex);
         result = RedactEncodedKeyValuesInUrl(result);
         result = RedactEncodedJoseTokensInUrl(result);
+        if (includeUserRoutes) result = RedactUserIdentityPathSegments(result);
         result = RedactEncodedOpaqueSegmentsInUrl(result);
         return result;
     }
@@ -1030,12 +1158,38 @@ public sealed class CoreTelemetryService : ITelemetryService
         return hasLetter && hasDigit;
     }
 
+    private static string DecodeUtf8PercentOnce(string raw)
+    {
+        if (raw.IndexOf('%') < 0) return raw;
+        var bytes = new List<byte>(raw.Length);
+        var sb = new StringBuilder(raw.Length);
+        var i = 0;
+        while (i < raw.Length)
+        {
+            if (raw[i] == '%' && i + 2 < raw.Length && TryParseHexByte(raw[i + 1], raw[i + 2], out var b))
+            {
+                bytes.Add(b);
+                i += 3;
+                continue;
+            }
+            if (bytes.Count > 0)
+            {
+                sb.Append(Encoding.UTF8.GetString(bytes.ToArray()));
+                bytes.Clear();
+            }
+            sb.Append(raw[i]);
+            i++;
+        }
+        if (bytes.Count > 0) sb.Append(Encoding.UTF8.GetString(bytes.ToArray()));
+        return sb.ToString();
+    }
+
     private static string DecodeRepeatedForCheck(string seg)
     {
         var cur = seg;
         for (var round = 0; round < 4 && cur.IndexOf('%') >= 0; round++)
         {
-            var next = DecodeUrlSegmentFull(cur).Decoded;
+            var next = DecodeUtf8PercentOnce(cur);
             if (string.Equals(next, cur, StringComparison.Ordinal)) break;
             cur = next;
         }
@@ -1056,6 +1210,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         var span = expanded.AsSpan();
         return IsOpaqueUrlSecretSegment(span) ||
             IsDecodedPhoneUrlSegment(span) ||
+            !string.Equals(ScrubUnicodePhoneNumbers(expanded), expanded, StringComparison.Ordinal) ||
             Ipv4InKeyRegex.IsMatch(span) ||
             Ipv6InKeyRegex.IsMatch(span) ||
             (checkEmail && IsDecodedEmailUrlSegment(span));
@@ -1376,7 +1531,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     {
         if (redactedUrl != rawUrl && redactedUrl.EndsWith("[redacted]", StringComparison.Ordinal)) return redactedUrl;
         var probeInput = rawUrl + "x";
-        var probe = RedactUrlPathSecrets(probeInput);
+        var probe = RedactUrlPathSecrets(probeInput, includeUserRoutes: false);
         return probe != probeInput && probe.EndsWith("[redacted]", StringComparison.Ordinal) ? probe : null;
     }
 
@@ -6738,6 +6893,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                             return;
                         }
                         nativeAction();
+                        RestrictUnixFilePermissions(_activeBufferPath);
                         EnsureExternalConsentLocked(out toCancel);
                     }
                 }
@@ -6759,6 +6915,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                     return;
                 }
                 nativeAction();
+                RestrictUnixFilePermissions(_activeBufferPath);
             }
         }
         finally
@@ -7403,10 +7560,12 @@ public sealed class CoreTelemetryService : ITelemetryService
         if (string.IsNullOrEmpty(lockPath)) return;
         try
         {
+            EnsurePrivateBufferDirectory(lockPath);
             var dir = Path.GetDirectoryName(lockPath);
             if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir) && !File.Exists(lockPath))
             {
                 using var _ = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite);
+                RestrictUnixFilePermissions(lockPath);
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -7422,17 +7581,15 @@ public sealed class CoreTelemetryService : ITelemetryService
         if (string.IsNullOrEmpty(lockPath)) return null;
         try
         {
-            var dir = Path.GetDirectoryName(lockPath);
-            if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
-            {
-                Directory.CreateDirectory(dir);
-            }
+            EnsurePrivateBufferDirectory(lockPath);
             var deadline = DateTime.UtcNow.AddSeconds(2);
             while (true)
             {
                 try
                 {
-                    return new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+                    var stream = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+                    RestrictUnixFilePermissions(lockPath);
+                    return stream;
                 }
                 catch (IOException) when (DateTime.UtcNow < deadline)
                 {
@@ -7609,12 +7766,9 @@ public sealed class CoreTelemetryService : ITelemetryService
         }
         try
         {
-            var dir = Path.GetDirectoryName(ownerPath);
-            if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
-            {
-                Directory.CreateDirectory(dir);
-            }
+            EnsurePrivateBufferDirectory(ownerPath);
             var nextLock = new FileStream(ownerPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            RestrictUnixFilePermissions(ownerPath);
             ReleaseInstanceOwnerLockLocked();
             _instanceOwnerLock = nextLock;
             _instanceOwnerLockPath = ownerPath;

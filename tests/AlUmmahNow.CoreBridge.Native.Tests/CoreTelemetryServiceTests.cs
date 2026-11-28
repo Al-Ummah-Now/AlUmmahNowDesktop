@@ -3242,6 +3242,12 @@ public class CoreTelemetryServiceTests
             CoreTelemetryService.SanitizeLocalPaths("https://example.test/%72eset-password/AbCdEf123456"));
         Assert.Equal("https://example.test/%2572eset-password/[redacted]",
             CoreTelemetryService.SanitizeLocalPaths("https://example.test/%2572eset-password/AbCdEf123456"));
+        Assert.Equal("https://example.test/lookup/[redacted]",
+            CoreTelemetryService.SanitizeLocalPaths("https://example.test/lookup/202%C2%A0555%C2%A00123"));
+        Assert.Equal("GET https://example.com/users/[redacted] failed",
+            CoreTelemetryService.SanitizeLocalPaths("GET https://example.com/users/AliceSmith failed"));
+        Assert.Equal("https://example.com/%75sers/[redacted]",
+            CoreTelemetryService.SanitizeLocalPaths("https://example.com/%75sers/BobJones"));
         Assert.Equal("en", CoreTelemetryService.SanitizeLocaleTag("/Users/Ada/Private.mov"));
         Assert.Equal("ar-SA", CoreTelemetryService.SanitizeLocaleTag("ar-SA"));
         var multiEnc = CoreTelemetryService.SerializeProperties(new Dictionary<string, object>
@@ -3317,6 +3323,14 @@ public class CoreTelemetryServiceTests
             Assert.Contains("TestException", persisted);
             Assert.DoesNotContain("Abcdefghijklmno1", persisted);
             Assert.DoesNotContain("Pqrstuvwxyzabcd2", persisted);
+            if (!OperatingSystem.IsWindows())
+            {
+                const UnixFileMode nonOwnerMask =
+                    UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.GroupExecute |
+                    UnixFileMode.OtherRead | UnixFileMode.OtherWrite | UnixFileMode.OtherExecute;
+                Assert.Equal(UnixFileMode.None, File.GetUnixFileMode(dir) & nonOwnerMask);
+                Assert.Equal(UnixFileMode.None, File.GetUnixFileMode(service.ActiveBufferPathForTesting!) & nonOwnerMask);
+            }
 
             // Local failed opt-out suppresses automatic crash-time re-enable for the stale token.
             Volatile.Write(ref suppressed, true);
