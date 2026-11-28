@@ -80,9 +80,6 @@ public sealed partial class Shell
     /// <summary>The update bar, screen and section of the page that is there.</summary>
     internal UpdateViews Updates { get; private set; } = null!;
 
-    /// <summary>A stream that is on air is being watched: nothing takes it away.</summary>
-    public bool IsLivePlaying => LiveWatch is { Mode: LiveMode.Live, Watch.IsPlaying: true };
-
     public Panel Root => _root;
     public HomeViewModel Home { get; }
     public WatchViewModel? Watch => _watch ?? LiveWatch?.Watch;

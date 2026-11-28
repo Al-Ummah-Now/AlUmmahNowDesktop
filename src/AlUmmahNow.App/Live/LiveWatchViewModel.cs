@@ -94,6 +94,10 @@ namespace AlUmmahNow.App.Live
         /// <summary>The player's page, once there is something to play.</summary>
         public WatchViewModel? Watch { get; private set; }
 
+        /// <summary>A live page is opening or playing. A forced update waits for the current session to finish.</summary>
+        public bool DefersUpdate => !_isGone && (State == LoadState.Loading ||
+            (State == LoadState.Content && Mode == LiveMode.Live && Watch != null && _player.State is PlayerState.Loading or PlayerState.Playing));
+
         /// <summary>
         /// The window is hidden: nothing is asked for, and the viewer is counted out, also while the sound plays on. A
         /// premiere is still kept at its moment.

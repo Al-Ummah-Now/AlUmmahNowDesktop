@@ -70,7 +70,7 @@ var isDemo = Environment.GetEnvironmentVariable("AUN_DEMO") == "1";
 if (isDemo && automation == "diagnostics") settings.TelemetryEnabled = Environment.GetEnvironmentVariable("AUN_DEMO_DIAGNOSTICS") == "on";
 var updateInstall = isDemo ? UpdateInstall.Development : UpdateInstalls.OnLinux(UpdateInstalls.IsReleaseBuild, File.Exists("/.flatpak-info"), AppContext.BaseDirectory, UpdateApp.Viewer);
 MainWindow? viewer = null;
-bool IsBusy() => viewer?.IsLivePlaying == true;
+bool IsBusy() => viewer?.LiveWatch?.DefersUpdate == true;
 var updateScene = UpdateScene.FromEnvironment(localizer, UpdateInstall.Flatpak, IsBusy);
 var version = UpdateText.VersionOf(typeof(MainWindow).Assembly);
 // Opt-in crash reports and diagnostics (Settings → Diagnostics); demo mode never reports.

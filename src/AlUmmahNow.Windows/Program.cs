@@ -113,7 +113,7 @@ public sealed partial class App : Application
         // The check for a new version: none in a demo, or in a build that is no release.
         var version = UpdateText.VersionOf(typeof(App).Assembly);
         Shell? shown = null;
-        bool IsBusy() => shown?.IsLivePlaying == true;
+        bool IsBusy() => shown?.LiveWatch?.DefersUpdate == true;
         var updateScene = UpdateScene.FromEnvironment(localizer, UpdateInstall.Msix, IsBusy);
         var updateStore = new UpdateStore(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AlUmmahNow", "updates.json"));
         var updates = updateScene?.Service ?? WindowsInstall.Service("viewer", environment.VideosApi, version, "AlUmmahNowWindows/" + version,
