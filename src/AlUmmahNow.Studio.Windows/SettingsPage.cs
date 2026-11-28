@@ -28,6 +28,7 @@ internal sealed class SettingsPage
     private readonly FrameworkElement _updatesCard;
     private readonly FrameworkElement? _passkeyCard;
     private readonly Func<StudioAccount, Task> _signOut;
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _telemetrySyncTimer;
 
     public SettingsPage(Localizer l, AppSettings settings, SettingsStore store, StudioShellViewModel shell, UploadsViewModel uploads,
         Func<Task<string?>> chooseFolder, Func<StudioAccount, Task> signOut, Func<Task> addPasskey, string version, UpdateViews updates, Action restart,
@@ -84,6 +85,7 @@ internal sealed class SettingsPage
         var initialPurgeFailed = telemetry?.LastPurgeFailed ?? false;
         var purgeWarningText = l["settings.telemetry.purgeWarning"];
         var disableErrorText = l["settings.telemetry.disableError"];
+        var revokingOtherText = l["settings.telemetry.revokingOtherWindow"];
         var telemetryNotice = new TextBlock
         {
             TextWrapping = TextWrapping.Wrap,
@@ -150,10 +152,19 @@ internal sealed class SettingsPage
                     telemetry.ConsentChanged += onConsentChanged;
                     purgeSubscribed = true;
                 }
+                if (_telemetrySyncTimer == null && telemetryNotice.DispatcherQueue != null)
+                {
+                    _telemetrySyncTimer = telemetryNotice.DispatcherQueue.CreateTimer();
+                    _telemetrySyncTimer.Interval = TimeSpan.FromSeconds(1);
+                    _telemetrySyncTimer.Tick += (_, _) => SyncPurgeNotice();
+                }
+                _telemetrySyncTimer?.Start();
                 SyncPurgeNotice();
             };
             telemetryNotice.Unloaded += (_, _) =>
             {
+                _telemetrySyncTimer?.Stop();
+                _telemetrySyncTimer = null;
                 if (purgeSubscribed)
                 {
                     telemetry.PurgeFailureChanged -= onPurgeChanged;
@@ -213,10 +224,10 @@ internal sealed class SettingsPage
             }
             else
             {
-                var saved = store.SaveTelemetryEnabled(false);
+                var optOut = store.SaveTelemetryOptOut();
                 var purged = telemetry?.SetConsent(TelemetryConsent.Off) ?? true;
-                disableSaveFailed = !saved;
-                if (!saved)
+                disableSaveFailed = optOut == SettingsStore.TelemetryOptOutResult.SaveFailed;
+                if (disableSaveFailed)
                 {
                     settings.TelemetryEnabled = true;
                     telemetryToggle.IsOn = true;
@@ -227,6 +238,14 @@ internal sealed class SettingsPage
                     return;
                 }
                 settings.TelemetryEnabled = false;
+                if (optOut == SettingsStore.TelemetryOptOutResult.PendingOtherProcessRevocation)
+                {
+                    telemetryNotice.Text = purged
+                        ? revokingOtherText
+                        : revokingOtherText + "\n" + purgeWarningText;
+                    telemetryNotice.Visibility = Visibility.Visible;
+                    return;
+                }
                 telemetryNotice.Text = purged ? string.Empty : purgeWarningText;
                 telemetryNotice.Visibility = purged ? Visibility.Collapsed : Visibility.Visible;
             }

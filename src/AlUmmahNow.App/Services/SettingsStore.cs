@@ -290,6 +290,37 @@ namespace AlUmmahNow.App.Services
             }
         }
 
+        /// <summary>Outcome of saving a telemetry opt-out across processes.</summary>
+        public enum TelemetryOptOutResult
+        {
+            Saved,
+            PendingOtherProcessRevocation,
+            SaveFailed,
+        }
+
+        /// <summary>
+        /// Clears the shared telemetry consent sidecar and waits briefly for any sibling process's
+        /// active flush monitor to observe revocation. Distinguishes a true save failure from a saved
+        /// opt-out whose sibling flush revocation wait timed out.
+        /// </summary>
+        public TelemetryOptOutResult SaveTelemetryOptOut()
+        {
+            using var crossProcessLock = TryAcquireConsentLock(
+                createDirectory: false,
+                out var directoryMissing,
+                timeoutMs: 10000,
+                serializeMutation: true);
+            if (directoryMissing)
+            {
+                return TelemetryOptOutResult.Saved;
+            }
+            if (crossProcessLock == null)
+            {
+                return TelemetryOptOutResult.SaveFailed;
+            }
+            return ClearConsentSidecarUnlockedResult();
+        }
+
         /// <summary>
         /// Atomically updates the standalone telemetry consent state without touching <c>settings.json</c>.
         /// Returns <c>true</c> only when the on-disk state was confirmed updated to <paramref name="enabled"/>.
@@ -298,7 +329,9 @@ namespace AlUmmahNow.App.Services
         /// returns <c>false</c> rather than treating an unreadable file as opted out.
         /// </summary>
         public bool SaveTelemetryEnabled(bool enabled) =>
-            TrySaveTelemetryEnabledInternal(enabled, confirmImmediately: true, out _);
+            enabled
+                ? TrySaveTelemetryEnabledInternal(true, confirmImmediately: true, out _)
+                : SaveTelemetryOptOut() == TelemetryOptOutResult.Saved;
 
         /// <summary>
         /// Atomically updates the standalone telemetry consent state under a cross-process lock without
@@ -452,7 +485,10 @@ namespace AlUmmahNow.App.Services
             token.StartsWith("enabled:", StringComparison.Ordinal) &&
             token.IndexOf(':', "enabled:".Length) >= 0;
 
-        private bool ClearConsentSidecarUnlocked()
+        private bool ClearConsentSidecarUnlocked() =>
+            ClearConsentSidecarUnlockedResult() == TelemetryOptOutResult.Saved;
+
+        private TelemetryOptOutResult ClearConsentSidecarUnlockedResult()
         {
             bool cleared;
             try
@@ -464,7 +500,7 @@ namespace AlUmmahNow.App.Services
             }
             catch (DirectoryNotFoundException)
             {
-                return true;
+                return TelemetryOptOutResult.Saved;
             }
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
             {
@@ -483,15 +519,17 @@ namespace AlUmmahNow.App.Services
                 }
                 catch (Exception overwriteEx) when (overwriteEx is IOException || overwriteEx is UnauthorizedAccessException)
                 {
-                    return false;
+                    return TelemetryOptOutResult.SaveFailed;
                 }
             }
             CleanupOrphanConsentTempFilesUnlocked();
             if (cleared)
             {
-                return WaitForActiveFlushRevocationsUnlocked(timeoutMs: 1500);
+                return WaitForActiveFlushRevocationsUnlocked(timeoutMs: 1500)
+                    ? TelemetryOptOutResult.Saved
+                    : TelemetryOptOutResult.PendingOtherProcessRevocation;
             }
-            return false;
+            return TelemetryOptOutResult.SaveFailed;
         }
 
         /// <summary>

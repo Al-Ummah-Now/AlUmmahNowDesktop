@@ -43,6 +43,7 @@
   "settings.telemetry.purgeWarning": "Diagnostics turned off, but cached diagnostic files could not be removed from disk.",
   "settings.telemetry.enableError": "Couldn't enable diagnostics on this device.",
   "settings.telemetry.disableError": "Couldn't save your opt-out preference on this device. Diagnostics are paused now, but may re-enable on restart.",
+  "settings.telemetry.revokingOtherWindow": "Diagnostics turned off. Another open window is still finishing stopping its active diagnostic upload.",
   "updates.title": "Updates",
   "updates.settings": "Settings",
   "updates.available": "A new version, {0}, is available.",

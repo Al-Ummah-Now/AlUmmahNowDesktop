@@ -3080,8 +3080,13 @@ public class CoreTelemetryServiceTests
                     ["fe80::1"] = true,
                     ["2001:db8::beef:cafe"] = true,
                     ["recipient"] = 12025550148L,
-                    ["detail"] = "Peer 192.168.42.17 called +٩٧١٥٠١٢٣٤٥٦٧ from fe80::1",
+                    ["detail"] = "Peer 192.168.42.17 called +٩٧١٥٠١٢٣٤٥٦٧ from fe80::1 source:2001:db8::1 2001:db8:1234:5678:9abc:def0:192.0.2.128 call +𝟙𝟚𝟛\u2011𝟜𝟝𝟞\u2011𝟟𝟠𝟡𝟘",
                     ["peer"] = System.Net.IPAddress.Parse("2001:db8::1"),
+                    ["challenge.verificationCode"] = 123456,
+                    ["roundedDecimal"] = 123456789.000000001m,
+                    ["throwingObj"] = new ThrowingToStringForTesting(),
+                    ["wsJwe"] = "IHsiYWxnIjoiZGlyIiwiZW5jIjoiQTI1NkdDTSJ9..iv1234.cipher5678.tag9012",
+                    ["encodedJweUrl"] = "https://example.com/download/eyJhbGciOiJkaXIifQ%2E%2Eiv1234%2Ecipher9999%2Etag8888",
                     ["share"] = "https://share.example.com/s/V8r2Qp6Lm4",
                     ["box"] = "https://app.box.com/s/a1b2c3d4e5f6g7h8i9j0k1l2",
                     ["matrix"] = "https://example.com/a;jsessionid=abc123",
@@ -3089,13 +3094,20 @@ public class CoreTelemetryServiceTests
                 });
                 Assert.NotNull(scrubbed);
                 Assert.DoesNotContain("٩٧١٥٠١٢٣٤٥٦", scrubbed);
+                Assert.DoesNotContain("𝟙𝟚𝟛", scrubbed);
                 Assert.DoesNotContain("eyJhbGciOiJIUzI1NiJ9", scrubbed);
                 Assert.DoesNotContain("192.0.2.10", scrubbed);
                 Assert.DoesNotContain("192.168.42.17", scrubbed);
+                Assert.DoesNotContain("192.0.2.128", scrubbed);
+                Assert.DoesNotContain("9abc:def0", scrubbed);
                 Assert.DoesNotContain("fe80", scrubbed);
                 Assert.DoesNotContain("2001:db8", scrubbed);
                 Assert.DoesNotContain("beef:cafe", scrubbed);
                 Assert.DoesNotContain("12025550148", scrubbed);
+                Assert.DoesNotContain("123456", scrubbed);
+                Assert.DoesNotContain("123456789", scrubbed);
+                Assert.DoesNotContain("cipher5678", scrubbed);
+                Assert.DoesNotContain("cipher9999", scrubbed);
                 Assert.DoesNotContain("V8r2Qp6Lm4", scrubbed);
                 Assert.DoesNotContain("a1b2c3d4e5f6g7h8i9j0k1l2", scrubbed);
                 Assert.DoesNotContain("abc123", scrubbed);
@@ -3183,6 +3195,11 @@ public class CoreTelemetryServiceTests
         private Action? _onDispose;
         public CallbackDisposable(Action onDispose) => _onDispose = onDispose;
         public void Dispose() => Interlocked.Exchange(ref _onDispose, null)?.Invoke();
+    }
+
+    private sealed class ThrowingToStringForTesting
+    {
+        public override string ToString() => throw new InvalidOperationException("boom");
     }
 
     private sealed class NoOpDisposable : IDisposable

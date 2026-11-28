@@ -330,6 +330,7 @@ public sealed partial class MainWindow
         telemetryCheck.SetActive(_settings.TelemetryEnabled);
         var purgeWarningText = _localizer["settings.telemetry.purgeWarning"];
         var disableErrorText = _localizer["settings.telemetry.disableError"];
+        var revokingOtherText = _localizer["settings.telemetry.revokingOtherWindow"];
         var telemetryNotice = Gtk.Label.New(string.Empty);
         telemetryNotice.SetHalign(Gtk.Align.Start);
         telemetryNotice.SetWrap(true);
@@ -391,11 +392,19 @@ public sealed partial class MainWindow
         };
         Action<bool> onPurgeChanged = _ => scheduleSync();
         Action<TelemetryConsent> onConsentChanged = _ => scheduleSync();
+        var telemetryDestroyed = false;
         _telemetry.PurgeFailureChanged += onPurgeChanged;
         _telemetry.ConsentChanged += onConsentChanged;
         telemetryCheck.OnMap += (_, _) => SyncPurgeNotice();
+        GLib.Functions.TimeoutAdd(0, 1000, () =>
+        {
+            if (telemetryDestroyed) return false;
+            SyncPurgeNotice();
+            return true;
+        });
         telemetryNotice.OnDestroy += (_, _) =>
         {
+            telemetryDestroyed = true;
             _telemetry.PurgeFailureChanged -= onPurgeChanged;
             _telemetry.ConsentChanged -= onConsentChanged;
         };
@@ -448,10 +457,10 @@ public sealed partial class MainWindow
             }
             else
             {
-                var saved = _store.SaveTelemetryEnabled(false);
+                var optOut = _store.SaveTelemetryOptOut();
                 var purged = _telemetry.SetConsent(TelemetryConsent.Off);
-                disableSaveFailed = !saved;
-                if (!saved)
+                disableSaveFailed = optOut == SettingsStore.TelemetryOptOutResult.SaveFailed;
+                if (disableSaveFailed)
                 {
                     _settings.TelemetryEnabled = true;
                     telemetryCheck.SetActive(true);
@@ -462,6 +471,14 @@ public sealed partial class MainWindow
                     return;
                 }
                 _settings.TelemetryEnabled = false;
+                if (optOut == SettingsStore.TelemetryOptOutResult.PendingOtherProcessRevocation)
+                {
+                    telemetryNotice.SetText(purged
+                        ? revokingOtherText
+                        : revokingOtherText + "\n" + purgeWarningText);
+                    telemetryNotice.SetVisible(true);
+                    return;
+                }
                 telemetryNotice.SetText(purged ? string.Empty : purgeWarningText);
                 telemetryNotice.SetVisible(!purged);
             }

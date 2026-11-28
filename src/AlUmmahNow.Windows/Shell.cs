@@ -43,6 +43,7 @@ public sealed partial class Shell
     private readonly UpdateService _updates;
     private readonly Action _quit;
     private readonly ITelemetryService _telemetry;
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _telemetrySyncTimer;
     private bool _hasSettings = true;
 
     public Shell(ICatalogClient catalog, Localizer localizer, Navigator navigator, WindowsMediaPlayer player, SmtcSession session, AppSettings settings, SettingsStore store, AuthViewModel auth, ILiveClient live, string shortLinkHost, UpdateService updates, Action quit, ITelemetryService? telemetry = null)
@@ -319,6 +320,7 @@ public sealed partial class Shell
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(telemetryToggle, "SettingsTelemetryToggle");
         var purgeWarningText = _localizer["settings.telemetry.purgeWarning"];
         var disableErrorText = _localizer["settings.telemetry.disableError"];
+        var revokingOtherText = _localizer["settings.telemetry.revokingOtherWindow"];
         var telemetryNotice = new TextBlock
         {
             TextWrapping = TextWrapping.Wrap,
@@ -383,10 +385,19 @@ public sealed partial class Shell
                 _telemetry.ConsentChanged += onConsentChanged;
                 purgeSubscribed = true;
             }
+            if (_telemetrySyncTimer == null && telemetryNotice.DispatcherQueue != null)
+            {
+                _telemetrySyncTimer = telemetryNotice.DispatcherQueue.CreateTimer();
+                _telemetrySyncTimer.Interval = TimeSpan.FromSeconds(1);
+                _telemetrySyncTimer.Tick += (_, _) => SyncPurgeNotice();
+            }
+            _telemetrySyncTimer?.Start();
             SyncPurgeNotice();
         };
         telemetryNotice.Unloaded += (_, _) =>
         {
+            _telemetrySyncTimer?.Stop();
+            _telemetrySyncTimer = null;
             if (purgeSubscribed)
             {
                 _telemetry.PurgeFailureChanged -= onPurgeChanged;
@@ -442,10 +453,10 @@ public sealed partial class Shell
             }
             else
             {
-                var saved = _store.SaveTelemetryEnabled(false);
+                var optOut = _store.SaveTelemetryOptOut();
                 var purged = _telemetry.SetConsent(TelemetryConsent.Off);
-                disableSaveFailed = !saved;
-                if (!saved)
+                disableSaveFailed = optOut == SettingsStore.TelemetryOptOutResult.SaveFailed;
+                if (disableSaveFailed)
                 {
                     _settings.TelemetryEnabled = true;
                     telemetryToggle.IsOn = true;
@@ -456,6 +467,14 @@ public sealed partial class Shell
                     return;
                 }
                 _settings.TelemetryEnabled = false;
+                if (optOut == SettingsStore.TelemetryOptOutResult.PendingOtherProcessRevocation)
+                {
+                    telemetryNotice.Text = purged
+                        ? revokingOtherText
+                        : revokingOtherText + "\n" + purgeWarningText;
+                    telemetryNotice.Visibility = Visibility.Visible;
+                    return;
+                }
                 telemetryNotice.Text = purged ? string.Empty : purgeWarningText;
                 telemetryNotice.Visibility = purged ? Visibility.Collapsed : Visibility.Visible;
             }

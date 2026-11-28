@@ -43,6 +43,7 @@
   "settings.telemetry.purgeWarning": "تم إيقاف التشخيص، لكن تعذّر حذف ملفات التشخيص المؤقتة من القرص.",
   "settings.telemetry.enableError": "تعذّر تفعيل التشخيص على هذا الجهاز.",
   "settings.telemetry.disableError": "تعذّر حفظ تفضيل إيقاف التشخيص على هذا الجهاز. تم إيقاف التشخيص مؤقتًا الآن، لكن قد يُعاد تفعيله عند إعادة التشغيل.",
+  "settings.telemetry.revokingOtherWindow": "تم إيقاف التشخيص. لا تزال نافذة مفتوحة أخرى تُنهي إيقاف عملية رفع تشخيص نشطة.",
   "updates.title": "التحديثات",
   "updates.settings": "الإعدادات",
   "updates.available": "يتوفّر إصدار جديد، {0}.",

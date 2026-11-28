@@ -904,7 +904,40 @@ public sealed class CoreTelemetryService : ITelemetryService
         result = RedactSlackWebhookUrl(result);
         result = ReplaceUrlPathSecret(result, TelegramBotTokenUrlRegex);
         result = ReplaceUrlPathSecret(result, UrlMatrixParamRegex);
+        result = RedactEncodedJoseTokensInUrl(result);
         return result;
+    }
+
+    private static string RedactEncodedJoseTokensInUrl(string url)
+    {
+        string decoded;
+        int[]? origOffsets = null;
+        if (url.IndexOf('%') >= 0)
+        {
+            (decoded, origOffsets) = DecodeUrlForPathSecretMatch(url);
+        }
+        else
+        {
+            decoded = url;
+        }
+        if (decoded.IndexOf('.') < 0) return url;
+        var matches = JwtTokenRegex.Matches(decoded);
+        if (matches.Count == 0) return url;
+        StringBuilder? sb = null;
+        var copied = 0;
+        foreach (Match match in matches)
+        {
+            if (!IsCompactJoseToken(match.Value)) continue;
+            var start = origOffsets != null ? origOffsets[match.Index] : match.Index;
+            if (start < copied) continue;
+            var end = origOffsets != null ? origOffsets[match.Index + match.Length] : match.Index + match.Length;
+            sb ??= new StringBuilder(url.Length);
+            sb.Append(url, copied, start - copied).Append("[redacted]");
+            copied = end;
+        }
+        if (sb == null) return url;
+        sb.Append(url, copied, url.Length - copied);
+        return sb.ToString();
     }
 
     private static string RedactSlackWebhookUrl(string url)
@@ -2642,8 +2675,40 @@ public sealed class CoreTelemetryService : ITelemetryService
     }
 
     private static readonly Regex JwtTokenRegex = new(
-        @"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]+){1,3}(?![A-Za-z0-9_-])",
+        @"(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]+){1,3}(?![A-Za-z0-9_-])",
         RegexOptions.Compiled);
+
+    private static bool IsCompactJoseToken(string token)
+    {
+        var dot = token.IndexOf('.');
+        if (dot < 8) return false;
+        var header = token.Substring(0, dot);
+        if (header.StartsWith("eyJ", StringComparison.Ordinal)) return true;
+        if (header.Length > 512) return false;
+        try
+        {
+            var std = header.Replace('-', '+').Replace('_', '/');
+            var pad = (4 - (std.Length % 4)) % 4;
+            if (pad > 0) std += new string('=', pad);
+            var bytes = Convert.FromBase64String(std);
+            var decoded = System.Text.Encoding.UTF8.GetString(bytes).TrimStart();
+            return decoded.StartsWith("{", StringComparison.Ordinal) &&
+                (decoded.Contains("\"alg\"", StringComparison.Ordinal) ||
+                 decoded.Contains("\"enc\"", StringComparison.Ordinal) ||
+                 decoded.Contains("\"typ\"", StringComparison.Ordinal) ||
+                 decoded.Contains("\"kid\"", StringComparison.Ordinal));
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+    }
+
+    private static string RedactJwtTokens(string text)
+    {
+        if (text.IndexOf('.') < 0) return text;
+        return JwtTokenRegex.Replace(text, static m => IsCompactJoseToken(m.Value) ? "[redacted]" : m.Value);
+    }
 
     private static string RedactAuthCredentials(string text)
     {
@@ -2652,9 +2717,9 @@ public sealed class CoreTelemetryService : ITelemetryService
         result = RedactBasicTokens(result);
         result = RedactBearerTokens(result);
         result = RedactEscapedBearerInBalancedQuotes(result);
-        if (result.IndexOf("eyJ", StringComparison.Ordinal) >= 0)
+        if (result.IndexOf('.') >= 0)
         {
-            result = JwtTokenRegex.Replace(result, "[redacted]");
+            result = RedactJwtTokens(result);
         }
         return result;
     }
@@ -8232,7 +8297,60 @@ public sealed class CoreTelemetryService : ITelemetryService
         _ = task.ContinueWith(static t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
     }
 
-    private static bool IsAuthHeaderPropertyKey(string key) => IsKnownAuthHeaderName(key.AsSpan().Trim());
+    private static readonly HashSet<string> SensitiveKeySegments = new(StringComparer.Ordinal)
+    {
+        "token", "secret", "jwt", "bearer", "password", "passwd", "passphrase",
+        "credential", "credentials", "otp", "pin", "passcode", "cookie",
+        "authorization", "signature", "apikey", "accesskey", "privatekey",
+        "secretkey", "sessionid", "sessionkey", "codeverifier",
+        "verificationcode", "authcode", "recoverycode", "clientsecret",
+        "accesstoken", "refreshtoken", "idtoken", "sessiontoken", "securitytoken",
+    };
+
+    private static bool IsAuthHeaderPropertyKey(string key)
+    {
+        var trimmed = key.AsSpan().Trim();
+        if (IsKnownAuthHeaderName(trimmed)) return true;
+        var segments = SplitKeySegments(trimmed);
+        for (var i = 0; i < segments.Count; i++)
+        {
+            if (SensitiveKeySegments.Contains(segments[i])) return true;
+            if (i + 1 < segments.Count && SensitiveKeySegments.Contains(segments[i] + segments[i + 1])) return true;
+        }
+        return false;
+    }
+
+    private static List<string> SplitKeySegments(ReadOnlySpan<char> key)
+    {
+        var result = new List<string>();
+        var cur = new StringBuilder();
+        for (var i = 0; i < key.Length; i++)
+        {
+            var c = key[i];
+            if (!char.IsLetterOrDigit(c))
+            {
+                if (cur.Length > 0)
+                {
+                    result.Add(cur.ToString().ToLowerInvariant());
+                    cur.Clear();
+                }
+                continue;
+            }
+            if (cur.Length > 0 && i > 0 && char.IsUpper(c))
+            {
+                var prev = key[i - 1];
+                var nextLower = i + 1 < key.Length && char.IsLower(key[i + 1]);
+                if (char.IsLower(prev) || char.IsDigit(prev) || (char.IsUpper(prev) && nextLower))
+                {
+                    result.Add(cur.ToString().ToLowerInvariant());
+                    cur.Clear();
+                }
+            }
+            cur.Append(c);
+        }
+        if (cur.Length > 0) result.Add(cur.ToString().ToLowerInvariant());
+        return result;
+    }
 
     private static string ResolveUniquePropertyKey(
         Dictionary<string, object> flat, string safeKey, Dictionary<string, int> nextSuffixByBase)
@@ -8261,12 +8379,88 @@ public sealed class CoreTelemetryService : ITelemetryService
 
     internal bool IsPendingInitialEnable { get { lock (_gate) return _pendingInitialEnable; } }
 
-    private static readonly Regex JwtInKeyRegex = new(@"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]+){1,3}(?![A-Za-z0-9_-])", RegexOptions.Compiled);
-    private static readonly Regex Ipv4InKeyRegex = new(@"(?<![A-Za-z0-9_.])(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?![A-Za-z0-9_]|\.\d)", RegexOptions.Compiled);
-    private static readonly Regex Ipv6InKeyRegex = new(@"(?<![0-9a-fA-F]:)(?<![A-Za-z0-9_])(?:(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:){1,7}:(?:[0-9a-fA-F]{1,4}(?::[0-9a-fA-F]{1,4}){0,5})?|::(?:[0-9a-fA-F]{1,4}(?::[0-9a-fA-F]{1,4}){0,6}))(?:%[A-Za-z0-9_.-]+)?(?![A-Za-z0-9_]|:[0-9a-fA-F])", RegexOptions.Compiled);
-    private static readonly Regex PhoneInKeyRegex = new(@"(?<![A-Za-z0-9_])\+?\p{Nd}[\p{Nd}\s().\p{Pd}]{7,}\p{Nd}(?![A-Za-z0-9_])", RegexOptions.Compiled);
+    private const string Ipv4OctetPattern = @"(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)";
+    private const string Ipv4CorePattern = @"(?:" + Ipv4OctetPattern + @"\.){3}" + Ipv4OctetPattern;
+    private static readonly Regex Ipv4InKeyRegex = new(@"(?<![A-Za-z0-9_.])" + Ipv4CorePattern + @"(?![A-Za-z0-9_]|\.\d)", RegexOptions.Compiled);
+    private static readonly Regex Ipv6InKeyRegex = new(
+        @"(?<![A-Za-z0-9_])(?:(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:){6}" + Ipv4CorePattern +
+        @"|(?:[0-9a-fA-F]{1,4}:){1,7}:(?:(?:[0-9a-fA-F]{1,4}:){0,4}" + Ipv4CorePattern +
+        @"|[0-9a-fA-F]{1,4}(?::[0-9a-fA-F]{1,4}){0,5})?|::(?:(?:[0-9a-fA-F]{1,4}:){0,5}" + Ipv4CorePattern +
+        @"|[0-9a-fA-F]{1,4}(?::[0-9a-fA-F]{1,4}){0,6}))(?:%[A-Za-z0-9_.-]+)?(?![A-Za-z0-9_]|:[0-9a-fA-F])",
+        RegexOptions.Compiled);
     private static readonly Regex OpaqueSecretInKeyRegex = new(@"(?<![A-Za-z0-9_])[A-Za-z0-9+/=_-]{32,}(?![A-Za-z0-9_])", RegexOptions.Compiled);
     private static readonly Regex UuidExactRegex = new(@"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", RegexOptions.Compiled);
+
+    private static bool IsPhoneBoundaryWordRune(System.Text.Rune r) =>
+        System.Text.Rune.IsLetterOrDigit(r) || r.Value == '_';
+
+    private static bool IsPhoneSeparatorRune(System.Text.Rune r) =>
+        r.Value is ' ' or '\t' or '(' or ')' or '.' ||
+        System.Text.Rune.GetUnicodeCategory(r) == System.Globalization.UnicodeCategory.DashPunctuation;
+
+    private static string ScrubUnicodePhoneNumbers(string text)
+    {
+        if (text.Length < 9) return text;
+        var runes = new List<(System.Text.Rune Rune, int Offset, int Length)>();
+        var idx = 0;
+        while (idx < text.Length)
+        {
+            if (System.Text.Rune.DecodeFromUtf16(text.AsSpan(idx), out var rune, out var consumed) != System.Buffers.OperationStatus.Done)
+            {
+                rune = System.Text.Rune.ReplacementChar;
+                consumed = 1;
+            }
+            runes.Add((rune, idx, consumed));
+            idx += consumed;
+        }
+        StringBuilder? sb = null;
+        var copied = 0;
+        var i = 0;
+        while (i < runes.Count)
+        {
+            var r = runes[i].Rune;
+            var startsWithPlus = r.Value == '+' && i + 1 < runes.Count && System.Text.Rune.IsDigit(runes[i + 1].Rune);
+            if ((startsWithPlus || System.Text.Rune.IsDigit(r)) && (i == 0 || !IsPhoneBoundaryWordRune(runes[i - 1].Rune)))
+            {
+                var j = startsWithPlus ? i + 1 : i;
+                var digits = 0;
+                var lastDigitIdx = -1;
+                while (j < runes.Count)
+                {
+                    var cur = runes[j].Rune;
+                    if (System.Text.Rune.IsDigit(cur))
+                    {
+                        digits++;
+                        lastDigitIdx = j;
+                        j++;
+                    }
+                    else if (IsPhoneSeparatorRune(cur))
+                    {
+                        j++;
+                    }
+                    else
+                    {
+                        break;
+                    }
+                }
+                var afterOk = lastDigitIdx >= 0 && (lastDigitIdx + 1 >= runes.Count || !IsPhoneBoundaryWordRune(runes[lastDigitIdx + 1].Rune));
+                if (digits >= 9 && afterOk)
+                {
+                    var startOff = runes[i].Offset;
+                    var endOff = runes[lastDigitIdx].Offset + runes[lastDigitIdx].Length;
+                    sb ??= new StringBuilder(text.Length);
+                    sb.Append(text, copied, startOff - copied).Append("[redacted-phone]");
+                    copied = endOff;
+                    i = lastDigitIdx + 1;
+                    continue;
+                }
+            }
+            i++;
+        }
+        if (sb == null) return text;
+        sb.Append(text, copied, text.Length - copied);
+        return sb.ToString();
+    }
 
     private static readonly Regex KeyValueCredentialRegex = new(
         @"(?<![A-Za-z0-9_])(token|secret|jwt|passphrase|credential|credentials|verification[_-]?code|auth[_-]?code|recovery[_-]?code|passcode|otp|pin|client[_-]?secret|access[_-]?token|refresh[_-]?token|id[_-]?token|api[_-]?key|api[_-]?token|auth[_-]?token|session[_-]?token|security[_-]?token|private[_-]?key|secret[_-]?key|access[_-]?key|code[_-]?verifier|session[_-]?id|session[_-]?key|password|passwd)(\s*[=:]\s*)(?:""(?:\\.|[^""\\])*""|'(?:\\.|[^'\\])*'|[^\s,;}\]]+)",
@@ -8276,21 +8470,16 @@ public sealed class CoreTelemetryService : ITelemetryService
     {
         var safe = SanitizeLocalPaths(text);
         safe = KeyValueCredentialRegex.Replace(safe, "$1$2[redacted]");
-        safe = Ipv4InKeyRegex.Replace(safe, "[redacted-ip]");
         safe = Ipv6InKeyRegex.Replace(safe, "[redacted-ip]");
-        safe = PhoneInKeyRegex.Replace(safe, static m =>
-        {
-            var digits = 0;
-            foreach (var r in m.Value.EnumerateRunes()) if (System.Text.Rune.IsDigit(r)) digits++;
-            return digits >= 9 ? "[redacted-phone]" : m.Value;
-        });
+        safe = Ipv4InKeyRegex.Replace(safe, "[redacted-ip]");
+        safe = ScrubUnicodePhoneNumbers(safe);
         return safe;
     }
 
     private static string SanitizePropertyKey(string key)
     {
         var safe = SanitizeDiagnosticText(key);
-        safe = JwtInKeyRegex.Replace(safe, "[redacted-token]");
+        safe = RedactJwtTokens(safe);
         safe = OpaqueSecretInKeyRegex.Replace(safe, static m =>
         {
             var v = m.Value;
@@ -8346,18 +8535,33 @@ public sealed class CoreTelemetryService : ITelemetryService
                     flat[uniqueKey] = Math.Abs(f) >= MinSensitiveIntegerMagnitude && Math.Truncate(f) == f ? "[redacted-number]" : (double)f;
                     break;
                 case decimal dec:
-                    flat[uniqueKey] = Math.Abs(dec) >= MinSensitiveIntegerMagnitude && decimal.Truncate(dec) == dec
-                        ? "[redacted-number]"
-                        : (double)dec;
+                {
+                    var d = (double)dec;
+                    if (!double.IsFinite(d)) break;
+                    var isSensitive = (Math.Abs(dec) >= MinSensitiveIntegerMagnitude && decimal.Truncate(dec) == dec) ||
+                        (Math.Abs(d) >= MinSensitiveIntegerMagnitude && Math.Truncate(d) == d);
+                    flat[uniqueKey] = isSensitive ? "[redacted-number]" : d;
                     break;
+                }
                 case System.Numerics.BigInteger bi:
                     flat[uniqueKey] = System.Numerics.BigInteger.Abs(bi) >= MinSensitiveIntegerMagnitude
                         ? "[redacted-number]"
-                        : SanitizeDiagnosticText(bi.ToString());
+                        : (long)bi;
                     break;
                 default:
-                    flat[uniqueKey] = SanitizeDiagnosticText(kv.Value.ToString() ?? "");
+                {
+                    string? raw;
+                    try
+                    {
+                        raw = kv.Value.ToString();
+                    }
+                    catch
+                    {
+                        break;
+                    }
+                    flat[uniqueKey] = SanitizeDiagnosticText(raw ?? "");
                     break;
+                }
             }
         }
         return flat.Count == 0 ? null : JsonSerializer.Serialize(flat);

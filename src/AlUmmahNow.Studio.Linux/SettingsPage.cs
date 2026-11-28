@@ -76,6 +76,7 @@ public sealed class SettingsPage
         telemetryCheck.SetActive(settings.TelemetryEnabled);
         var purgeWarningText = l["settings.telemetry.purgeWarning"];
         var disableErrorText = l["settings.telemetry.disableError"];
+        var revokingOtherText = l["settings.telemetry.revokingOtherWindow"];
         var telemetryNotice = Gtk.Label.New(string.Empty);
         telemetryNotice.SetHalign(Gtk.Align.Start);
         telemetryNotice.SetWrap(true);
@@ -139,11 +140,19 @@ public sealed class SettingsPage
             };
             Action<bool> onPurgeChanged = _ => scheduleSync();
             Action<TelemetryConsent> onConsentChanged = _ => scheduleSync();
+            var telemetryDestroyed = false;
             telemetry.PurgeFailureChanged += onPurgeChanged;
             telemetry.ConsentChanged += onConsentChanged;
             telemetryCheck.OnMap += (_, _) => SyncPurgeNotice();
+            GLib.Functions.TimeoutAdd(0, 1000, () =>
+            {
+                if (telemetryDestroyed) return false;
+                SyncPurgeNotice();
+                return true;
+            });
             telemetryNotice.OnDestroy += (_, _) =>
             {
+                telemetryDestroyed = true;
                 telemetry.PurgeFailureChanged -= onPurgeChanged;
                 telemetry.ConsentChanged -= onConsentChanged;
             };
@@ -200,10 +209,10 @@ public sealed class SettingsPage
             }
             else
             {
-                var saved = store.SaveTelemetryEnabled(false);
+                var optOut = store.SaveTelemetryOptOut();
                 var purged = telemetry?.SetConsent(TelemetryConsent.Off) ?? true;
-                disableSaveFailed = !saved;
-                if (!saved)
+                disableSaveFailed = optOut == SettingsStore.TelemetryOptOutResult.SaveFailed;
+                if (disableSaveFailed)
                 {
                     settings.TelemetryEnabled = true;
                     telemetryCheck.SetActive(true);
@@ -214,6 +223,14 @@ public sealed class SettingsPage
                     return;
                 }
                 settings.TelemetryEnabled = false;
+                if (optOut == SettingsStore.TelemetryOptOutResult.PendingOtherProcessRevocation)
+                {
+                    telemetryNotice.SetText(purged
+                        ? revokingOtherText
+                        : revokingOtherText + "\n" + purgeWarningText);
+                    telemetryNotice.SetVisible(true);
+                    return;
+                }
                 telemetryNotice.SetText(purged ? string.Empty : purgeWarningText);
                 telemetryNotice.SetVisible(!purged);
             }
