@@ -1,3 +1,4 @@
+using AlUmmahNow.CoreBridge;
 using AlUmmahNow.CoreBridge.Logging;
 using AlUmmahNow.App.Media;
 using Microsoft.UI.Dispatching;
@@ -15,15 +16,23 @@ public sealed class WindowsMediaPlayer : IMediaPlayer
     private bool _autoPlay;
     private PlayerState _state = PlayerState.Idle;
 
-    public WindowsMediaPlayer(DispatcherQueue ui)
+    public ITelemetryService? Telemetry { get; set; }
+
+    public WindowsMediaPlayer(DispatcherQueue ui, ITelemetryService? telemetry = null)
     {
         _ui = ui;
+        Telemetry = telemetry;
         Player = new MediaPlayer { AutoPlay = false };
         Player.CommandManager.IsEnabled = false;
         Player.MediaOpened += (_, _) => _ui.TryEnqueue(OnOpened);
         Player.MediaFailed += (_, e) => _ui.TryEnqueue(() =>
         {
             Log.For("player").Error("playback error: " + e.Error + " " + e.ErrorMessage);
+            Telemetry?.TrackError("playback_failed", new Dictionary<string, object>
+            {
+                ["backend"] = "winui",
+                ["error"] = e.Error.ToString(),
+            });
             SetState(PlayerState.Failed);
         });
         Player.MediaEnded += (_, _) => _ui.TryEnqueue(() => SetState(PlayerState.Ended));

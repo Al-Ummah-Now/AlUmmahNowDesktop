@@ -80,6 +80,7 @@ if (!demo &&
     settings.TelemetryEnabled = false;
     telemetry.SetConsent(AlUmmahNow.CoreBridge.TelemetryConsent.Off);
 }
+telemetry.Track("app_open");
 AppDomain.CurrentDomain.UnhandledException += (_, e) =>
 {
     if (e.ExceptionObject is Exception ex) telemetry.ReportCrash(ex.GetType().FullName ?? ex.GetType().Name, ex.GetType().Name, ex.StackTrace);

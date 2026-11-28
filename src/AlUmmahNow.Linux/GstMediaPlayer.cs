@@ -1,3 +1,4 @@
+using AlUmmahNow.CoreBridge;
 using AlUmmahNow.CoreBridge.Logging;
 using System.Runtime.InteropServices;
 using AlUmmahNow.App.Media;
@@ -10,14 +11,16 @@ public sealed class GstMediaPlayer : IMediaPlayer
     private const long NanosPerSecond = 1_000_000_000L;
 
     private readonly Gst.Element _playbin;
+    private readonly ITelemetryService? _telemetry;
     private double _rate = 1;
     private double _pendingStart = -1;
     private bool _wantPlaying;
     private bool _open;
     private PlayerState _state = PlayerState.Idle;
 
-    public GstMediaPlayer()
+    public GstMediaPlayer(ITelemetryService? telemetry = null)
     {
+        _telemetry = telemetry;
         var sink = Gst.ElementFactory.Make("gtk4paintablesink", "sink")
             ?? throw new InvalidOperationException("gtk4paintablesink is not installed");
         using (var value = new GObject.Value(GObject.Type.Object))
@@ -114,6 +117,7 @@ public sealed class GstMediaPlayer : IMediaPlayer
                 break;
             case Gst.MessageType.Error:
                 Log.For("player").Error("playback error: " + ReadError(message));
+                _telemetry?.TrackError("playback_failed", new Dictionary<string, object> { ["backend"] = "gstreamer" });
                 _open = false;
                 SetState(PlayerState.Failed);
                 break;

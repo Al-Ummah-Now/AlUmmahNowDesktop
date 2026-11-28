@@ -885,7 +885,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     }
 
     private static readonly Regex WebhookPathTokenRegex = new(
-        @"((?:^|/|%2[fF])(?:webhooks?|reset|reset-password|password-reset|forgot-password|verify|verify-email|confirm|confirm-email|activate|magic|magic-link|invite|invitations?|tokens?|auth|oauth2?|callback|sessions?|unsubscribe|secrets?|keys?|api-?keys?|credentials?|sign-?in|login|sso|redeem|claim|recovery?|passwords?|share|shared|sh|s|scl|dl|link|private|join|otp|passkey|code|folders|(?:file|document|spreadsheets|presentation)/(?:u/\d+/)?d)(?:/|%2[fF]))[^\s?#]+",
+        @"((?:^|/|%2[fF])(?:webhooks?|reset|reset-password|password-reset|forgot-password|verify|verify-email|confirm|confirm-email|activate|magic|magic-link|invite|invitations?|tokens?|auth|oauth2?|callback|sessions?|unsubscribe|secrets?|keys?|api-?keys?|credentials?|sign-?in|login|sso|redeem|claim|recovery?|passwords?|share|shared|sh|s|scl|dl|link|private|join|otp|passkey|code|folders|watch|v|videos?|live|channels?|playlists?|streams?|clips?|episodes?|uploads?|downloads?|files?|assets?|media|objects?|blobs?|presigned|signed|exports?|imports?|artifacts?|backups?|recordings?|drafts?|(?:file|document|spreadsheets|presentation)/(?:u/\d+/)?d)(?:/|%2[fF]))[^\s?#]+",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex SlackWebhookHostRegex = new(

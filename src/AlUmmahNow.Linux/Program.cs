@@ -126,7 +126,8 @@ app.OnActivate += async (_, _) =>
     IMediaSession session = mpris;
     _ = mpris.StartAsync();
 
-    var player = new GstMediaPlayer();
+    var player = new GstMediaPlayer(telemetry);
+    telemetry.Track("app_open");
     MainWindow? window = null;
     app.OnShutdown += (_, _) => window?.Close();
     var updates = updateScene?.Service ?? new UpdateService(

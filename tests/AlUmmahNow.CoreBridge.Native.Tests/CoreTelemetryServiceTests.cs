@@ -3228,6 +3228,10 @@ public class CoreTelemetryServiceTests
         Assert.DoesNotContain("alice%40example.com", json);
         Assert.Equal("https://example.org/r/[redacted]",
             CoreTelemetryService.SanitizeLocalPaths("https://example.org/r/Abcdefghijklmno1%41Pqrstuvwxyzabcd2"));
+        Assert.Equal("https://uploads.example.test/upload/[redacted]",
+            CoreTelemetryService.SanitizeLocalPaths("https://uploads.example.test/upload/853876e8-cc19-465d-bafa-7459aba00936"));
+        Assert.Equal("alummahnow://watch/[redacted]",
+            CoreTelemetryService.SanitizeLocalPaths("alummahnow://watch/v1"));
         Assert.DoesNotContain("12 Cedar Rd", json);
         Assert.DoesNotContain("orchid", json);
         Assert.DoesNotContain("velvet", json);

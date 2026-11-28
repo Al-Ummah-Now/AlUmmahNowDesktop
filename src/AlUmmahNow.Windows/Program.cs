@@ -150,6 +150,8 @@ public sealed partial class App : Application
             settings.TelemetryEnabled = false;
             _telemetry.SetConsent(AlUmmahNow.CoreBridge.TelemetryConsent.Off);
         }
+        player.Telemetry = _telemetry;
+        _telemetry.Track("app_open");
         var updateStore = new UpdateStore(Path.Combine(dataRoot, "updates.json"));
         var updates = updateScene?.Service ?? WindowsInstall.Service("viewer", environment.VideosApi, version, "AlUmmahNowWindows/" + version,
             dataRoot, updateStore, isDemo, IsBusy, WindowsEnd.Close);
