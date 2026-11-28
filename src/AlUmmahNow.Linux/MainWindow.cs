@@ -351,7 +351,7 @@ public sealed partial class MainWindow
                 telemetryNotice.SetVisible(true);
                 return;
             }
-            if (_telemetry.Consent == TelemetryConsent.Off && _settings.TelemetryEnabled)
+            if (_telemetry.Consent == TelemetryConsent.Off && _settings.TelemetryEnabled && !_store.LoadTelemetryEnabled())
             {
                 _settings.TelemetryEnabled = false;
                 telemetryCheck.SetActive(false);

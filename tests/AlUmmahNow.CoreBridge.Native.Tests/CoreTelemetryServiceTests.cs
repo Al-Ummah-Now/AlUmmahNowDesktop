@@ -2776,6 +2776,9 @@ public class CoreTelemetryServiceTests
             "[redacted-path]",
             CoreTelemetryService.SanitizeLocalPaths("Acquisition.blend"));
         Assert.Equal(
+            "[redacted-path]",
+            CoreTelemetryService.SanitizeLocalPaths("smb://server/Confidential/Acquisition.mov"));
+        Assert.Equal(
             "https://example.com/reset/[redacted]",
             CoreTelemetryService.SanitizeLocalPaths("https://example.com/reset/super-secret-token"));
         Assert.Equal(
@@ -2784,6 +2787,9 @@ public class CoreTelemetryServiceTests
         Assert.Equal(
             "{\"X-Amz-Security-Token\":\"[redacted]\"}",
             CoreTelemetryService.SerializeProperties(new Dictionary<string, object> { ["X-Amz-Security-Token"] = "secretcredential" }));
+        Assert.Equal(
+            "{\"contact [redacted-phone]\":true}",
+            CoreTelemetryService.SerializeProperties(new Dictionary<string, object> { ["contact +1 2025550142"] = true }));
         Assert.Equal(
             "https://[redacted-email]",
             CoreTelemetryService.SanitizeLocalPaths("https://example.com/users/alice%40%65xample.com"));
@@ -3007,17 +3013,32 @@ public class CoreTelemetryServiceTests
                 Assert.Equal(1, qaReload.PendingCount);
             }
 
-            // Fallback service when native library is unavailable purges buffered files on opt-out instead of silently succeeding.
+            // Fallback service when native library is unavailable purges buffered files (including legacy .adopt.tmp)
+            // on opt-out, and fails closed without sweeping when consent lock is contended.
+            var legacyAdoptTmp = Path.Combine(dir, ".telemetry-buffer.envgen1.123456.json.9999.adopt.tmp");
+            File.WriteAllText(legacyAdoptTmp, "{\"events\":[]}");
             Volatile.Write(ref sharedToken, null);
+            using (var contendedFallback = CoreTelemetryService.CreateUnavailableFallbackForTesting(
+                bufferPath: bufferPath,
+                initialEnabled: true,
+                externalConsentToken: () => Volatile.Read(ref sharedToken),
+                acquireExternalConsentLock: () => null))
+            {
+                Assert.False(contendedFallback.SetConsent(TelemetryConsent.Off));
+                Assert.True(contendedFallback.LastPurgeFailed);
+                Assert.True(File.Exists(legacyAdoptTmp));
+            }
             using (var unavailable = CoreTelemetryService.CreateUnavailableFallbackForTesting(
                 bufferPath: bufferPath,
                 initialEnabled: true,
-                externalConsentToken: () => Volatile.Read(ref sharedToken)))
+                externalConsentToken: () => Volatile.Read(ref sharedToken),
+                acquireExternalConsentLock: () => new NoOpDisposable()))
             {
                 Assert.Equal(TelemetryConsent.Off, unavailable.Consent);
                 Assert.False(unavailable.SetConsent(TelemetryConsent.Full));
                 Assert.True(unavailable.SetConsent(TelemetryConsent.Off));
                 Assert.False(unavailable.LastPurgeFailed);
+                Assert.False(File.Exists(legacyAdoptTmp));
                 Assert.Empty(Directory.GetFiles(dir, "telemetry-buffer*.json"));
             }
             Volatile.Write(ref sharedToken, "enabled:envgen1");

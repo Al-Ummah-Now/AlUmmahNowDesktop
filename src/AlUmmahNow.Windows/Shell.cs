@@ -342,7 +342,7 @@ public sealed partial class Shell
                 telemetryNotice.Visibility = Visibility.Visible;
                 return;
             }
-            if (_telemetry.Consent == TelemetryConsent.Off && _settings.TelemetryEnabled)
+            if (_telemetry.Consent == TelemetryConsent.Off && _settings.TelemetryEnabled && !_store.LoadTelemetryEnabled())
             {
                 _settings.TelemetryEnabled = false;
                 telemetryToggle.IsOn = false;

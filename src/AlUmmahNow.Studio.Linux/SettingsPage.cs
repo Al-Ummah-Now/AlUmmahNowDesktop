@@ -99,7 +99,7 @@ public sealed class SettingsPage
                     telemetryNotice.SetVisible(true);
                     return;
                 }
-                if (telemetry.Consent == TelemetryConsent.Off && settings.TelemetryEnabled)
+                if (telemetry.Consent == TelemetryConsent.Off && settings.TelemetryEnabled && !store.LoadTelemetryEnabled())
                 {
                     settings.TelemetryEnabled = false;
                     telemetryCheck.SetActive(false);

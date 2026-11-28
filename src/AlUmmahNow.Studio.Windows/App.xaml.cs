@@ -121,6 +121,11 @@ public sealed partial class App : Application
             acquireExternalConsentLock: () => settingsStore.TryAcquireTelemetryConsentLock(),
             externalConsentTokenForClaim: claim => settingsStore.LoadTelemetryConsentTokenForClaim(claim),
             acquireActiveFlushGuard: () => settingsStore.TryAcquireActiveFlushGuard());
+        if (settings.TelemetryEnabled && _telemetry.Consent == AlUmmahNow.CoreBridge.TelemetryConsent.Off && settingsStore.SaveTelemetryEnabled(false))
+        {
+            settings.TelemetryEnabled = false;
+            _telemetry.SetConsent(AlUmmahNow.CoreBridge.TelemetryConsent.Off);
+        }
 
         // The passkey sheet is modal to the Studio window; its handle is filled in once it exists.
         var hwnd = IntPtr.Zero;

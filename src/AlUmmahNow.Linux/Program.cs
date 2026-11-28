@@ -85,6 +85,11 @@ var telemetry = CoreTelemetryService.CreateOrNull(
     acquireExternalConsentLock: () => store.TryAcquireTelemetryConsentLock(),
     externalConsentTokenForClaim: claim => store.LoadTelemetryConsentTokenForClaim(claim),
     acquireActiveFlushGuard: () => store.TryAcquireActiveFlushGuard());
+if (settings.TelemetryEnabled && telemetry.Consent == AlUmmahNow.CoreBridge.TelemetryConsent.Off && store.SaveTelemetryEnabled(false))
+{
+    settings.TelemetryEnabled = false;
+    telemetry.SetConsent(AlUmmahNow.CoreBridge.TelemetryConsent.Off);
+}
 AppDomain.CurrentDomain.UnhandledException += (_, e) =>
 {
     if (e.ExceptionObject is Exception ex) telemetry.ReportCrash(ex.GetType().FullName ?? ex.GetType().Name, ex.GetType().Name, ex.StackTrace);

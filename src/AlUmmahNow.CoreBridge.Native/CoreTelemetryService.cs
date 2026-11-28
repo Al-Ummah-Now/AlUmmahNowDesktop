@@ -233,15 +233,16 @@ public sealed class CoreTelemetryService : ITelemetryService
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException or AunException)
         {
             Log.For("telemetry").Warn("telemetry unavailable, continuing with purge-capable fallback service: " + ex.Message);
-            return new UnavailableNativeTelemetryService(bufferPath, initialEnabled, externalConsentToken);
+            return new UnavailableNativeTelemetryService(bufferPath, initialEnabled, externalConsentToken, acquireExternalConsentLock);
         }
     }
 
     internal static ITelemetryService CreateUnavailableFallbackForTesting(
         string? bufferPath,
         bool initialEnabled = false,
-        Func<string?>? externalConsentToken = null) =>
-        new UnavailableNativeTelemetryService(bufferPath, initialEnabled, externalConsentToken);
+        Func<string?>? externalConsentToken = null,
+        Func<IDisposable?>? acquireExternalConsentLock = null) =>
+        new UnavailableNativeTelemetryService(bufferPath, initialEnabled, externalConsentToken, acquireExternalConsentLock);
 
     /// <summary>
     /// Constructs <c>https://&lt;host&gt;[:port]/api/v1/telemetry/batches</c> from a parsed HTTPS URI,
@@ -1028,9 +1029,23 @@ public sealed class CoreTelemetryService : ITelemetryService
         if (sep - start < 2 || !char.IsAsciiLetter(text[start])) return false;
         if (!steppedJsonEscape && start > 0 && (IsUrlSchemeChar(text[start - 1]) || text[start - 1] is '/' or '\\')) return false;
         var scheme = text.AsSpan(start, sep - start);
-        return !scheme.Equals("file", StringComparison.OrdinalIgnoreCase) &&
-            !scheme.Equals("content", StringComparison.OrdinalIgnoreCase);
+        return !IsLocalOrShareScheme(scheme);
     }
+
+    private static bool IsLocalOrShareScheme(ReadOnlySpan<char> scheme) =>
+        scheme.Equals("file", StringComparison.OrdinalIgnoreCase) ||
+        scheme.Equals("content", StringComparison.OrdinalIgnoreCase) ||
+        scheme.Equals("smb", StringComparison.OrdinalIgnoreCase) ||
+        scheme.Equals("cifs", StringComparison.OrdinalIgnoreCase) ||
+        scheme.Equals("afp", StringComparison.OrdinalIgnoreCase) ||
+        scheme.Equals("nfs", StringComparison.OrdinalIgnoreCase) ||
+        scheme.Equals("sftp", StringComparison.OrdinalIgnoreCase) ||
+        scheme.Equals("ftp", StringComparison.OrdinalIgnoreCase) ||
+        scheme.Equals("ftps", StringComparison.OrdinalIgnoreCase) ||
+        scheme.Equals("dav", StringComparison.OrdinalIgnoreCase) ||
+        scheme.Equals("davs", StringComparison.OrdinalIgnoreCase) ||
+        scheme.Equals("webdav", StringComparison.OrdinalIgnoreCase) ||
+        scheme.Equals("webdavs", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsAngleWrappedBefore(string text, int urlStart)
     {
@@ -2210,8 +2225,20 @@ public sealed class CoreTelemetryService : ITelemetryService
         return -1;
     }
 
-    private static bool MatchDecodedFileScheme(string text, int pos, int end) =>
-        MatchDecodedSchemePrefix(text, pos, end, "file:/") || MatchDecodedSchemePrefix(text, pos, end, "content://");
+    private static readonly string[] LocalOrShareUriPrefixes =
+    {
+        "file://", "file:/", "content://", "smb://", "cifs://", "afp://", "nfs://",
+        "sftp://", "ftps://", "ftp://", "davs://", "dav://", "webdavs://", "webdav://"
+    };
+
+    private static bool MatchDecodedFileScheme(string text, int pos, int end)
+    {
+        foreach (var prefix in LocalOrShareUriPrefixes)
+        {
+            if (MatchDecodedSchemePrefix(text, pos, end, prefix)) return true;
+        }
+        return false;
+    }
 
     private static bool MatchDecodedSchemePrefix(string text, int pos, int end, string target)
     {
@@ -5792,17 +5819,13 @@ public sealed class CoreTelemetryService : ITelemetryService
     private static int LocalUriSchemeLengthAt(string text, int pos)
     {
         if (pos > 0 && IsUrlSchemeChar(text[pos - 1])) return 0;
-        if (pos + 7 <= text.Length && text.AsSpan(pos, 7).Equals("file://", StringComparison.OrdinalIgnoreCase))
+        foreach (var prefix in LocalOrShareUriPrefixes)
         {
-            return 7;
-        }
-        if (pos + 6 <= text.Length && text.AsSpan(pos, 6).Equals("file:/", StringComparison.OrdinalIgnoreCase))
-        {
-            return 6;
-        }
-        if (pos + 10 <= text.Length && text.AsSpan(pos, 10).Equals("content://", StringComparison.OrdinalIgnoreCase))
-        {
-            return 10;
+            if (pos + prefix.Length <= text.Length &&
+                text.AsSpan(pos, prefix.Length).Equals(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return prefix.Length;
+            }
         }
         return 0;
     }
@@ -6526,25 +6549,37 @@ public sealed class CoreTelemetryService : ITelemetryService
         }
         using (externalConsentLock)
         {
+            // Register the active-flush guard BEFORE checking external consent (Dekker ordering):
+            // either a concurrent opt-out sees this guard and waits for our monitor to revoke, or
+            // opt-out cleared the sidecar before guard registration and our check below sees it.
+            if (_externalConsentToken != null)
+            {
+                flushGuard = new FlushGuardHolder(_acquireActiveFlushGuard?.Invoke());
+            }
             lock (_gate)
             {
                 if (!EnsureExternalConsentLocked(out toCancel))
                 {
+                    flushGuard?.Release();
                     if (toCancel != null) goto CancelAndReturn;
                     return true;
                 }
                 if (cancellationToken.IsCancellationRequested || _disposeRequested || _clientDisposed || _consent == TelemetryConsent.Off)
                 {
+                    flushGuard?.Release();
                     return true;
                 }
                 revokeToken = _flushCts.Token;
-                if (revokeToken.IsCancellationRequested) return true;
+                if (revokeToken.IsCancellationRequested)
+                {
+                    flushGuard?.Release();
+                    return true;
+                }
                 flushEpoch = _consentEpoch;
                 flushBufferPath = _activeBufferPath;
                 _inFlightFlushes++;
                 if (_externalConsentToken != null)
                 {
-                    flushGuard = new FlushGuardHolder(_acquireActiveFlushGuard?.Invoke());
                     monitorCts = new CancellationTokenSource();
                     _ = MonitorExternalConsentWhileFlushingAsync(monitorCts.Token, flushGuard);
                 }
@@ -6913,11 +6948,13 @@ public sealed class CoreTelemetryService : ITelemetryService
         }
     }
 
-    private string? GetBufferLockPath()
+    private string? GetBufferLockPath() => GetBufferLockPathForPath(_bufferPath);
+
+    private static string? GetBufferLockPathForPath(string? bufferPath)
     {
-        if (string.IsNullOrWhiteSpace(_bufferPath)) return null;
-        var dir = Path.GetDirectoryName(_bufferPath);
-        var stem = Path.GetFileNameWithoutExtension(_bufferPath);
+        if (string.IsNullOrWhiteSpace(bufferPath)) return null;
+        var dir = Path.GetDirectoryName(bufferPath);
+        var stem = Path.GetFileNameWithoutExtension(bufferPath);
         if (string.IsNullOrEmpty(stem)) return null;
         // Keep the lock file in the same shared state directory as the buffer files so processes
         // with different TMPDIR values coordinate on the exact same lock file.
@@ -6941,9 +6978,11 @@ public sealed class CoreTelemetryService : ITelemetryService
         }
     }
 
-    private IDisposable? AcquireCrossProcessBufferLock()
+    private IDisposable? AcquireCrossProcessBufferLock() => AcquireCrossProcessBufferLockForPath(_bufferPath);
+
+    private static IDisposable? AcquireCrossProcessBufferLockForPath(string? bufferPath)
     {
-        var lockPath = GetBufferLockPath();
+        var lockPath = GetBufferLockPathForPath(bufferPath);
         if (string.IsNullOrEmpty(lockPath)) return null;
         try
         {
@@ -7225,7 +7264,7 @@ public sealed class CoreTelemetryService : ITelemetryService
 
             if (mergedEvents.Count > 0 || latestBreadcrumbs.Count > 0)
             {
-                var tmpPath = Path.Combine(dir, $".{Path.GetFileName(targetBufferPath)}.{Environment.ProcessId}.adopt.tmp");
+                var tmpPath = Path.Combine(dir, $".{Path.GetFileName(targetBufferPath)}.{Environment.ProcessId}_adopt.tmp");
                 using (var fs = new FileStream(tmpPath, FileMode.Create, FileAccess.Write, FileShare.None))
                 using (var writer = new Utf8JsonWriter(fs))
                 {
@@ -7691,6 +7730,15 @@ public sealed class CoreTelemetryService : ITelemetryService
         return IsValidBufferSegment(gen) && IsValidBufferSegment(inst);
     }
 
+    private static string ExtractTempFileBufferName(string innerWithoutLeadingDotAndTmp)
+    {
+        var candidate = innerWithoutLeadingDotAndTmp.EndsWith(".adopt", StringComparison.Ordinal)
+            ? innerWithoutLeadingDotAndTmp.Substring(0, innerWithoutLeadingDotAndTmp.Length - ".adopt".Length)
+            : innerWithoutLeadingDotAndTmp;
+        var lastDot = candidate.LastIndexOf('.');
+        return lastDot > 0 ? candidate.Substring(0, lastDot) : string.Empty;
+    }
+
     private static bool IsManagedTelemetrySidecarFileName(string name, string stem, string ext, string suffix)
     {
         if (!name.StartsWith(".", StringComparison.Ordinal) || !name.EndsWith(suffix, StringComparison.Ordinal))
@@ -7702,11 +7750,9 @@ public sealed class CoreTelemetryService : ITelemetryService
         {
             return IsManagedTelemetryBufferFileName(inner, stem, ext);
         }
-        // Temp files are named `.<bufferFileName>.<nonce>.tmp`.
-        var lastDot = inner.LastIndexOf('.');
-        if (lastDot <= 0) return false;
-        var bufferName = inner.Substring(0, lastDot);
-        return IsManagedTelemetryBufferFileName(bufferName, stem, ext);
+        // Temp files are named `.<bufferFileName>.<nonce>.tmp` (and legacy `.<bufferFileName>.<pid>.adopt.tmp`).
+        var bufferName = ExtractTempFileBufferName(inner);
+        return bufferName.Length > 0 && IsManagedTelemetryBufferFileName(bufferName, stem, ext);
     }
 
     private static bool HasIngestScopePrefix(ReadOnlySpan<char> genSegment)
@@ -7744,9 +7790,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         if (IsTempFileInGeneration(fileName, keepGenerationPrefix, ext)) return true;
         if (!fileName.StartsWith(".", StringComparison.Ordinal) || !fileName.EndsWith(suffix, StringComparison.Ordinal)) return false;
         var inner = fileName.Substring(1, fileName.Length - 1 - suffix.Length);
-        var bufferName = suffix == ".owner"
-            ? inner
-            : (inner.LastIndexOf('.') is var dot && dot > 0 ? inner.Substring(0, dot) : string.Empty);
+        var bufferName = suffix == ".owner" ? inner : ExtractTempFileBufferName(inner);
         return bufferName.Length > 0 && IsBufferFileInSameConsentGeneration(bufferName, keepGenerationPrefix, stem, ext);
     }
 
@@ -7817,16 +7861,19 @@ public sealed class CoreTelemetryService : ITelemetryService
     {
         private readonly string? _bufferPath;
         private readonly Func<string?>? _externalConsentToken;
+        private readonly Func<IDisposable?>? _acquireExternalConsentLock;
         private readonly object _gate = new();
         private bool _lastPurgeFailed;
 
         public UnavailableNativeTelemetryService(
             string? bufferPath,
             bool initialEnabled,
-            Func<string?>? externalConsentToken)
+            Func<string?>? externalConsentToken,
+            Func<IDisposable?>? acquireExternalConsentLock = null)
         {
             _bufferPath = bufferPath;
             _externalConsentToken = externalConsentToken;
+            _acquireExternalConsentLock = acquireExternalConsentLock;
             if (!initialEnabled)
             {
                 PurgeBuffers();
@@ -7849,35 +7896,59 @@ public sealed class CoreTelemetryService : ITelemetryService
 
         private bool PurgeBuffers()
         {
-            string? keepGenPrefix = null;
-            if (_externalConsentToken != null && !string.IsNullOrWhiteSpace(_bufferPath))
+            IDisposable? externalConsentLock = null;
+            if (_acquireExternalConsentLock != null)
             {
-                try
+                externalConsentLock = _acquireExternalConsentLock();
+                if (externalConsentLock == null)
                 {
-                    var token = _externalConsentToken();
-                    if (!string.IsNullOrWhiteSpace(token))
-                    {
-                        var stem = Path.GetFileNameWithoutExtension(_bufferPath);
-                        var normalized = NormalizeConsentGenerationToken(token) ?? string.Empty;
-                        var rawGen = normalized.StartsWith("enabled:", StringComparison.Ordinal)
-                            ? normalized["enabled:".Length..]
-                            : "legacy";
-                        var safeGen = new string(rawGen.Where(static ch => char.IsAsciiLetterOrDigit(ch) || ch is '-' or '_').ToArray());
-                        if (string.IsNullOrEmpty(safeGen)) safeGen = "legacy";
-                        if (!string.IsNullOrEmpty(stem)) keepGenPrefix = $"{stem}.{safeGen}";
-                    }
-                }
-                catch
-                {
-                    keepGenPrefix = null;
+                    SetPurgeFailed(true);
+                    return false;
                 }
             }
-            var purged = TryDeleteForeignGenerationBuffersForPath(_bufferPath, keepGenPrefix);
+            using (externalConsentLock)
+            {
+                var needsBufferLock = !string.IsNullOrWhiteSpace(_bufferPath);
+                using var bufferLock = needsBufferLock ? AcquireCrossProcessBufferLockForPath(_bufferPath) : null;
+                if (needsBufferLock && bufferLock == null)
+                {
+                    SetPurgeFailed(true);
+                    return false;
+                }
+                string? keepGenPrefix = null;
+                if (_externalConsentToken != null && !string.IsNullOrWhiteSpace(_bufferPath))
+                {
+                    try
+                    {
+                        var token = _externalConsentToken();
+                        if (!string.IsNullOrWhiteSpace(token))
+                        {
+                            var stem = Path.GetFileNameWithoutExtension(_bufferPath);
+                            var normalized = NormalizeConsentGenerationToken(token) ?? string.Empty;
+                            var rawGen = normalized.StartsWith("enabled:", StringComparison.Ordinal)
+                                ? normalized["enabled:".Length..]
+                                : "legacy";
+                            var safeGen = new string(rawGen.Where(static ch => char.IsAsciiLetterOrDigit(ch) || ch is '-' or '_').ToArray());
+                            if (string.IsNullOrEmpty(safeGen)) safeGen = "legacy";
+                            if (!string.IsNullOrEmpty(stem)) keepGenPrefix = $"{stem}.{safeGen}";
+                        }
+                    }
+                    catch
+                    {
+                        keepGenPrefix = null;
+                    }
+                }
+                var purged = TryDeleteForeignGenerationBuffersForPath(_bufferPath, keepGenPrefix);
+                SetPurgeFailed(!purged);
+                return purged;
+            }
+        }
+
+        private void SetPurgeFailed(bool failed)
+        {
             Action<bool>? notify = null;
-            bool failed;
             lock (_gate)
             {
-                failed = !purged;
                 if (_lastPurgeFailed != failed)
                 {
                     _lastPurgeFailed = failed;
@@ -7885,7 +7956,6 @@ public sealed class CoreTelemetryService : ITelemetryService
                 }
             }
             NotifyPurgeFailureQuietly(notify, failed);
-            return purged;
         }
 
         public void Track(string name, IReadOnlyDictionary<string, object>? properties = null) { }
@@ -8055,6 +8125,34 @@ public sealed class CoreTelemetryService : ITelemetryService
         }
     }
 
+    private static readonly Regex PhoneInKeyRegex = new(@"(?<![A-Za-z0-9_])\+?\d[\d\s().-]{7,}\d(?![A-Za-z0-9_])", RegexOptions.Compiled);
+    private static readonly Regex OpaqueSecretInKeyRegex = new(@"(?<![A-Za-z0-9_])[A-Za-z0-9+/=_-]{32,}(?![A-Za-z0-9_])", RegexOptions.Compiled);
+    private static readonly Regex UuidExactRegex = new(@"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", RegexOptions.Compiled);
+
+    private static string SanitizePropertyKey(string key)
+    {
+        var safe = SanitizeLocalPaths(key);
+        safe = PhoneInKeyRegex.Replace(safe, static m =>
+        {
+            var digits = 0;
+            foreach (var c in m.Value) if (c >= '0' && c <= '9') digits++;
+            return digits >= 9 ? "[redacted-phone]" : m.Value;
+        });
+        safe = OpaqueSecretInKeyRegex.Replace(safe, static m =>
+        {
+            var v = m.Value;
+            var hasLetter = false;
+            var hasDigit = false;
+            foreach (var c in v)
+            {
+                if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) hasLetter = true;
+                else if (c >= '0' && c <= '9') hasDigit = true;
+            }
+            return hasLetter && hasDigit && !UuidExactRegex.IsMatch(v) ? "[redacted]" : v;
+        });
+        return safe;
+    }
+
     internal static string? SerializeProperties(IReadOnlyDictionary<string, object>? properties)
     {
         if (properties == null || properties.Count == 0) return null;
@@ -8064,7 +8162,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         {
             if (string.IsNullOrWhiteSpace(kv.Key) || kv.Value == null) continue;
             var isAuthKey = IsAuthHeaderPropertyKey(kv.Key);
-            var safeKey = isAuthKey ? kv.Key : SanitizeLocalPaths(kv.Key);
+            var safeKey = SanitizePropertyKey(kv.Key);
             if (string.IsNullOrWhiteSpace(safeKey)) continue;
             var uniqueKey = ResolveUniquePropertyKey(flat, safeKey, nextSuffixByBase);
             if (isAuthKey)

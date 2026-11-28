@@ -137,6 +137,11 @@ public sealed partial class App : Application
             acquireExternalConsentLock: () => store.TryAcquireTelemetryConsentLock(),
             externalConsentTokenForClaim: claim => store.LoadTelemetryConsentTokenForClaim(claim),
             acquireActiveFlushGuard: () => store.TryAcquireActiveFlushGuard());
+        if (settings.TelemetryEnabled && _telemetry.Consent == AlUmmahNow.CoreBridge.TelemetryConsent.Off && store.SaveTelemetryEnabled(false))
+        {
+            settings.TelemetryEnabled = false;
+            _telemetry.SetConsent(AlUmmahNow.CoreBridge.TelemetryConsent.Off);
+        }
         var updateStore = new UpdateStore(Path.Combine(dataRoot, "updates.json"));
         var updates = updateScene?.Service ?? WindowsInstall.Service("viewer", environment.VideosApi, version, "AlUmmahNowWindows/" + version,
             dataRoot, updateStore, isDemo, IsBusy, WindowsEnd.Close);
