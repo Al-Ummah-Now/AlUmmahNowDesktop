@@ -39,7 +39,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         "Bearer", "Basic", "Digest", "Token", "Api-Key", "ApiKey",
         "OAuth", "Negotiate", "Mutual", "HOBA", "Vapid", "SCRAM-SHA-256", "AWS4-HMAC-SHA256"
     };
-    private static readonly Regex BasicTokenRegex = new(@"\b(Basic)\s+(?:(""|'|\\""|\\u0022)([A-Za-z0-9+/_-]{2,}={0,2})(?![A-Za-z0-9+/_=-])(\2|$)|([A-Za-z0-9+/_-]{2,}={0,2})(?![A-Za-z0-9+/_=-]))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex BasicTokenRegex = new(@"\b(Basic)\s+(?:(""|'|\\""|\\u0022)([A-Za-z0-9+/_-]{2,}={0,2})(?![A-Za-z0-9+/_=-])(\2|\\""|\\u0022|$)|([A-Za-z0-9+/_-]{2,}={0,2})(?![A-Za-z0-9+/_=-]))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly System.Text.UTF8Encoding StrictUtf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
 
     private readonly TelemetryAppInfo _app;
@@ -2555,11 +2555,14 @@ public sealed class CoreTelemetryService : ITelemetryService
     private static string RedactAuthCredentials(string text)
     {
         var result = RedactAuthHeaders(text);
-        result = RedactBearerTokens(result);
-        result = RedactEscapedBearerInBalancedQuotes(result);
         result = RedactEscapedBasicInBalancedQuotes(result);
-        return RedactBasicTokens(result);
+        result = RedactBasicTokens(result);
+        result = RedactBearerTokens(result);
+        return RedactEscapedBearerInBalancedQuotes(result);
     }
+
+    private static bool AreBasicQuotesCompatible(string openQ, string closeQ) =>
+        closeQ.Length == 0 || openQ == closeQ || (openQ[0] == '\\' && closeQ[0] == '\\');
 
     private static string RedactBasicTokens(string text)
     {
@@ -2573,7 +2576,8 @@ public sealed class CoreTelemetryService : ITelemetryService
             if (!match.Success) break;
             var isQuoted = match.Groups[3].Success;
             var token = isQuoted ? match.Groups[3].Value : match.Groups[5].Value;
-            if (!IsBasicCredentialToken(token))
+            if ((isQuoted && !AreBasicQuotesCompatible(match.Groups[2].Value, match.Groups[4].Value)) ||
+                !IsBasicCredentialToken(token))
             {
                 pos = match.Index + 5;
                 continue;
@@ -2697,7 +2701,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                     }
                 }
                 if (afterWs < text.Length &&
-                    (HasValidBasicCredentialAt(text, afterWs) ||
+                    (HasRedactedBasicAt(text, afterWs) ||
                      HasBearerTokenAt(text, afterWs, inEscapedQuote, inLiteralDoubleQuote, allowLiteralQuoted, requireClosingLiteralQuote)))
                 {
                     i = lastBearer;
@@ -2709,7 +2713,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                 }
                 continue;
             }
-            if (HasValidBasicCredentialAt(text, wsEnd))
+            if (HasRedactedBasicAt(text, wsEnd))
             {
                 i = wsEnd;
                 continue;
@@ -2799,11 +2803,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                ScanBearerTokenEnd(text, pos, inEscapedQuote) > pos;
     }
 
-    private static bool IsBasicBase64Char(char ch) =>
-        (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') ||
-        ch is '+' or '/' or '_' or '-';
-
-    private static bool HasValidBasicCredentialAt(string text, int pos)
+    private static bool HasRedactedBasicAt(string text, int pos)
     {
         if (pos + 5 >= text.Length || !MatchesAsciiIgnoreCase(text, pos, "basic") || !char.IsWhiteSpace(text[pos + 5]))
         {
@@ -2812,27 +2812,8 @@ public sealed class CoreTelemetryService : ITelemetryService
         var p = pos + 5;
         while (p < text.Length && char.IsWhiteSpace(text[p])) p++;
         if (p >= text.Length) return false;
-        var openCh = text[p];
-        var openLen = openCh is '"' or '\'' ? 1 : EscapedDoubleQuoteLen(text, p);
-        var tokStart = p + openLen;
-        var tokEnd = tokStart;
-        while (tokEnd < text.Length && IsBasicBase64Char(text[tokEnd])) tokEnd++;
-        var eqCount = 0;
-        while (tokEnd < text.Length && eqCount < 2 && text[tokEnd] == '=')
-        {
-            tokEnd++;
-            eqCount++;
-        }
-        if (tokEnd - tokStart - eqCount < 2) return false;
-        if (tokEnd < text.Length && (IsBasicBase64Char(text[tokEnd]) || text[tokEnd] == '=')) return false;
-        if (openLen > 0 && tokEnd < text.Length)
-        {
-            var closeOk = openLen == 1
-                ? text[tokEnd] == openCh
-                : EscapedDoubleQuoteLen(text, tokEnd) == openLen;
-            if (!closeOk) return false;
-        }
-        return IsBasicCredentialToken(text.Substring(tokStart, tokEnd - tokStart));
+        var openLen = text[p] is '"' or '\'' ? 1 : EscapedDoubleQuoteLen(text, p);
+        return IsRedactedBearerPlaceholderAt(text, p + openLen, stopAtEscapedQuote: openLen > 1);
     }
 
     private static bool IsBearerStopPunct(char ch) =>
@@ -2939,7 +2920,8 @@ public sealed class CoreTelemetryService : ITelemetryService
                 if (!match.Success) break;
                 var isQuoted = match.Groups[3].Success;
                 var tokenGroup = isQuoted ? match.Groups[3] : match.Groups[5];
-                if (!IsBasicCredentialToken(tokenGroup.Value))
+                if ((isQuoted && !AreBasicQuotesCompatible(match.Groups[2].Value, match.Groups[4].Value)) ||
+                    !IsBasicCredentialToken(tokenGroup.Value))
                 {
                     pos = match.Index + 5;
                     continue;

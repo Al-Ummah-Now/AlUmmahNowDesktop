@@ -2498,6 +2498,12 @@ public class CoreTelemetryServiceTests
             "{\"m\":\"Basic Basic \\\"[redacted]\\\"\"}",
             CoreTelemetryService.SanitizeLocalPaths("{\"m\":\"Basic Basic \\\"dXNlcjpwYXNz\\\"\"}"));
         Assert.Equal(
+            "{\"msg\":\"Bearer Basic \\u0022[redacted]\\\"\"}",
+            CoreTelemetryService.SanitizeLocalPaths("{\"msg\":\"Bearer Basic \\u0022dTpw\\\"\"}"));
+        Assert.Equal(
+            "Basic \\u0022[redacted]\\\"",
+            CoreTelemetryService.SanitizeLocalPaths("Basic \\u0022dTpw\\\""));
+        Assert.Equal(
             "https://[redacted-email]",
             CoreTelemetryService.SanitizeLocalPaths("https://example.org/users/alice/@example.com"));
         Assert.Equal(
