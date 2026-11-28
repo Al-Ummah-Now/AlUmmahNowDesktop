@@ -2187,6 +2187,41 @@ public class CoreTelemetryServiceTests
         }
     }
 
+    [Fact]
+    public void SanitizeLocalPaths_NormalizesSlackDotSegments_PreservesPathColons_AndRedactsContentUris()
+    {
+        Assert.Equal(
+            "https://hooks.slack.com/./services/[redacted]",
+            CoreTelemetryService.SanitizeLocalPaths("https://hooks.slack.com/./services/T000/B000/fakeWebhookSecret"));
+        Assert.Equal(
+            "https://hooks.slack.com/a/../services/[redacted]",
+            CoreTelemetryService.SanitizeLocalPaths("https://hooks.slack.com/a/../services/T000/B000/fakeWebhookSecret"));
+        Assert.Equal(
+            "https://hooks.slack.com/%2e/services/[redacted]",
+            CoreTelemetryService.SanitizeLocalPaths("https://hooks.slack.com/%2e/services/T000/B000/fakeWebhookSecret"));
+        Assert.Equal(
+            "https://hooks.slack.com//services/[redacted]",
+            CoreTelemetryService.SanitizeLocalPaths("https://hooks.slack.com//services/T000/B000/fakeWebhookSecret"));
+        Assert.Equal(
+            "https://example.com/projectc:/foo",
+            CoreTelemetryService.SanitizeLocalPaths("https://example.com/projectc:/foo"));
+        Assert.Equal(
+            "https://example.com/my-c:/foo",
+            CoreTelemetryService.SanitizeLocalPaths("https://example.com/my-c:/foo"));
+        Assert.Equal(
+            "[redacted-path]",
+            CoreTelemetryService.SanitizeLocalPaths(
+                "content://com.android.externalstorage.documents/document/primary%3ADownload%2FPrivateAcquisition.mov"));
+        Assert.Equal(
+            "{\"uri\":\"[redacted-path]\",\"ok\":true}",
+            CoreTelemetryService.SanitizeLocalPaths(
+                "{\"uri\":\"content://com.android.externalstorage.documents/document/primary%3ADownload%2FPrivateAcquisition.mov\",\"ok\":true}"));
+        Assert.Equal(
+            "{\"uri\":\"[redacted-path]\",\"ok\":true}",
+            CoreTelemetryService.SanitizeLocalPaths(
+                "{\"uri\":\"content:\\/\\/com.android.externalstorage.documents\\/document\\/primary%3ADownload%2FPrivateAcquisition.mov\",\"ok\":true}"));
+    }
+
     private sealed class CallbackDisposable : IDisposable
     {
         private Action? _onDispose;

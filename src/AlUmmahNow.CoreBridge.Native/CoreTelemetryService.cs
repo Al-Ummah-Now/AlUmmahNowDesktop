@@ -704,7 +704,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                 p++;
                 continue;
             }
-            if (IsFileSchemeAt(text, p) || ((p == 0 || !IsAsciiAlphaNum(text[p - 1])) && IsWindowsDriveAt(text, p))) break;
+            if (IsFileSchemeAt(text, p) || IsUrlWindowsDriveStopAt(text, p)) break;
             if (stopAtSchemes && p > start &&
                 !IsUrlSchemeChar(text[p - 1]) && text[p - 1] is not ('/' or '\\') && IsUrlSchemeAt(text, p))
             {
@@ -841,7 +841,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex SlackWebhookUrlRegex = new(
-        @"(https?://hooks\.slack(?:-gov)?\.com\.?(?::\d+)?(?:/|%2[fF])(?:services|workflows|triggers)(?:/|%2[fF]))[^\s?#]+",
+        @"(https?://hooks\.slack(?:-gov)?\.com\.?(?::\d+)?(?:(?:/|%2[fF])[^\s?#]*?)?(?:/|%2[fF])(?:services|workflows|triggers)(?:/|%2[fF]))[^\s?#]+",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex TelegramBotTokenUrlRegex = new(
@@ -952,7 +952,9 @@ public sealed class CoreTelemetryService : ITelemetryService
         }
         if (sep - start < 2 || !char.IsAsciiLetter(text[start])) return false;
         if (!steppedJsonEscape && start > 0 && (IsUrlSchemeChar(text[start - 1]) || text[start - 1] is '/' or '\\')) return false;
-        return !text.AsSpan(start, sep - start).Equals("file", StringComparison.OrdinalIgnoreCase);
+        var scheme = text.AsSpan(start, sep - start);
+        return !scheme.Equals("file", StringComparison.OrdinalIgnoreCase) &&
+            !scheme.Equals("content", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsAngleWrappedBefore(string text, int urlStart)
@@ -1055,7 +1057,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             if (ch is '\r' or '\n') break;
             if (inDoubleQuote && ch == '"') break;
             if (wrappedInAngle && (ch == '>' || IsEscapedGreaterAt(text, p))) break;
-            if (IsFileSchemeAt(text, p) || ((p == 0 || !IsAsciiAlphaNum(text[p - 1])) && IsWindowsDriveAt(text, p))) break;
+            if (IsFileSchemeAt(text, p) || IsUrlWindowsDriveStopAt(text, p)) break;
             if (p > totalEnd &&
                 !IsUrlSchemeChar(text[p - 1]) && text[p - 1] is not ('/' or '\\') && IsUrlSchemeAt(text, p))
             {
@@ -1289,7 +1291,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         var openBraceCount = 0;
         while (p < text.Length)
         {
-            if (IsFileSchemeAt(text, p) || ((p == 0 || !IsAsciiAlphaNum(text[p - 1])) && IsWindowsDriveAt(text, p))) break;
+            if (IsFileSchemeAt(text, p) || IsUrlWindowsDriveStopAt(text, p)) break;
             var ch = text[p];
             if (char.IsWhiteSpace(ch) || ch is '"' or '<' or '>' or '\\' or '?' or '#' or '\r' or '\n')
             {
@@ -1346,6 +1348,14 @@ public sealed class CoreTelemetryService : ITelemetryService
     private static bool IsWindowsDriveAt(string text, int pos) =>
         pos + 2 < text.Length && char.IsAsciiLetter(text[pos]) && text[pos + 1] == ':' && text[pos + 2] is '/' or '\\';
 
+    private static bool IsUrlWindowsDriveStopAt(string text, int pos)
+    {
+        if (!IsWindowsDriveAt(text, pos)) return false;
+        if (pos == 0 || text[pos + 2] == '\\') return true;
+        var prev = text[pos - 1];
+        return !(IsAsciiAlphaNum(prev) || prev is '-' or '_' or '.' or '~');
+    }
+
     private static bool IsUrlEndBoundary(string text, int pos)
     {
         var ch = text[pos];
@@ -1353,7 +1363,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         {
             return true;
         }
-        return IsFileSchemeAt(text, pos) || IsWindowsDriveAt(text, pos);
+        return IsFileSchemeAt(text, pos) || IsUrlWindowsDriveStopAt(text, pos);
     }
 
     private static string RedactDoubleQuotedLocalPaths(string text)
@@ -1994,7 +2004,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                         continue;
                     }
                 }
-                if ((c0 == 'f' || c0 == 'F') && MatchDecodedFileScheme(text, p, end)) return p;
+                if (c0 is 'f' or 'F' or 'c' or 'C' && MatchDecodedFileScheme(text, p, end)) return p;
             }
             if (c0 == '/' || (c0 == '\\' && (tokenStart >= 0 || len0 > 1)))
             {
@@ -2087,9 +2097,11 @@ public sealed class CoreTelemetryService : ITelemetryService
         return -1;
     }
 
-    private static bool MatchDecodedFileScheme(string text, int pos, int end)
+    private static bool MatchDecodedFileScheme(string text, int pos, int end) =>
+        MatchDecodedSchemePrefix(text, pos, end, "file://") || MatchDecodedSchemePrefix(text, pos, end, "content://");
+
+    private static bool MatchDecodedSchemePrefix(string text, int pos, int end, string target)
     {
-        const string target = "file://";
         var p = pos;
         for (var i = 0; i < target.Length; i++)
         {
@@ -5203,10 +5215,21 @@ public sealed class CoreTelemetryService : ITelemetryService
 
     private static bool IsOpeningWrapper(char ch) => ch is '(' or '[' or '{' or '"' or '\'';
 
-    private static bool IsFileSchemeAt(string text, int pos) =>
-        pos + 7 <= text.Length &&
-        (pos == 0 || !IsUrlSchemeChar(text[pos - 1])) &&
-        text.AsSpan(pos, 7).Equals("file://", StringComparison.OrdinalIgnoreCase);
+    private static bool IsFileSchemeAt(string text, int pos) => LocalUriSchemeLengthAt(text, pos) > 0;
+
+    private static int LocalUriSchemeLengthAt(string text, int pos)
+    {
+        if (pos > 0 && IsUrlSchemeChar(text[pos - 1])) return 0;
+        if (pos + 7 <= text.Length && text.AsSpan(pos, 7).Equals("file://", StringComparison.OrdinalIgnoreCase))
+        {
+            return 7;
+        }
+        if (pos + 10 <= text.Length && text.AsSpan(pos, 10).Equals("content://", StringComparison.OrdinalIgnoreCase))
+        {
+            return 10;
+        }
+        return 0;
+    }
 
     private static string RedactFileUris(string text, string vaultPrefix)
     {
@@ -5219,10 +5242,11 @@ public sealed class CoreTelemetryService : ITelemetryService
         var pos = 0;
         while (pos < text.Length)
         {
-            if (IsFileSchemeAt(text, pos))
+            var schemeLen = LocalUriSchemeLengthAt(text, pos);
+            if (schemeLen > 0)
             {
-                // Double-quoted file:// URIs terminate at the next unescaped '"'. Unquoted and
-                // single-quoted file:// URIs fail closed to the next vaulted URL or line break so
+                // Double-quoted file:// or content:// URIs terminate at the next unescaped '"'. Unquoted and
+                // single-quoted URIs fail closed to the next vaulted URL or line break so
                 // unescaped apostrophes inside filenames (e.g. "O' Connor") can never leak suffixes.
                 if (!checkedQuotes)
                 {
@@ -5243,7 +5267,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                 {
                     scanLimit = escClosePos;
                 }
-                var schemeEnd = pos + 7;
+                var schemeEnd = pos + schemeLen;
                 var rawEnd = schemeEnd;
                 var stoppedAtVault = false;
                 var escapedBackslash = false;
