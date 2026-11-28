@@ -2628,6 +2628,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     {
         var ranges = new List<(int Start, int End, bool RedactedOnly)>();
         var inEscapedQuote = false;
+        var inLiteralDoubleQuote = false;
         var i = 0;
         while (i < text.Length)
         {
@@ -2650,9 +2651,17 @@ public sealed class CoreTelemetryService : ITelemetryService
                 i += 2;
                 continue;
             }
-            if (ch is '"' or '\r' or '\n')
+            if (ch == '"')
             {
                 inEscapedQuote = false;
+                inLiteralDoubleQuote = !inLiteralDoubleQuote;
+                i++;
+                continue;
+            }
+            if (ch is '\r' or '\n')
+            {
+                inEscapedQuote = false;
+                inLiteralDoubleQuote = false;
                 i++;
                 continue;
             }
@@ -2689,7 +2698,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                 }
                 if (afterWs < text.Length &&
                     (HasValidBasicCredentialAt(text, afterWs) ||
-                     HasBearerTokenAt(text, afterWs, inEscapedQuote, allowLiteralQuoted, requireClosingLiteralQuote)))
+                     HasBearerTokenAt(text, afterWs, inEscapedQuote, inLiteralDoubleQuote, allowLiteralQuoted, requireClosingLiteralQuote)))
                 {
                     i = lastBearer;
                 }
@@ -2722,7 +2731,8 @@ public sealed class CoreTelemetryService : ITelemetryService
                 var closeQuoteLen = openQuoteLen == 1
                     ? (innerEnd < text.Length && text[innerEnd] == wsCh ? 1 : 0)
                     : EscapedDoubleQuoteLen(text, innerEnd);
-                if (innerEnd > innerStart && (closeQuoteLen > 0 || (openQuoteLen == 1 && !requireClosingLiteralQuote)))
+                if (innerEnd > innerStart &&
+                    IsValidQuotedBearerEnd(text, innerEnd, openQuoteLen, wsCh, closeQuoteLen, inLiteralDoubleQuote, requireClosingLiteralQuote))
                 {
                     ranges.Add((innerStart, innerEnd, true));
                     i = innerEnd + closeQuoteLen;
@@ -2756,8 +2766,17 @@ public sealed class CoreTelemetryService : ITelemetryService
     private static bool MatchesBearerPrefixAt(string text, int pos) =>
         pos + 6 < text.Length && MatchesAsciiIgnoreCase(text, pos, "bearer") && char.IsWhiteSpace(text[pos + 6]);
 
+    private static bool IsValidQuotedBearerEnd(
+        string text, int innerEnd, int openLen, char openCh, int closeLen, bool inLiteralDoubleQuote, bool requireClosingLiteralQuote)
+    {
+        if (closeLen > 0) return true;
+        if (openLen == 1 && !requireClosingLiteralQuote) return true;
+        if (openLen == 1 && openCh == '"' && inLiteralDoubleQuote) return false;
+        return innerEnd >= text.Length || text[innerEnd] is '\r' or '\n' or ',' or ';' or ')' or ']' or '}';
+    }
+
     private static bool HasBearerTokenAt(
-        string text, int pos, bool inEscapedQuote, bool allowLiteralQuoted, bool requireClosingLiteralQuote)
+        string text, int pos, bool inEscapedQuote, bool inLiteralDoubleQuote, bool allowLiteralQuoted, bool requireClosingLiteralQuote)
     {
         if (pos >= text.Length) return false;
         var wsCh = text[pos];
@@ -2773,8 +2792,8 @@ public sealed class CoreTelemetryService : ITelemetryService
             var closeLen = openLen == 1
                 ? (innerEnd < text.Length && text[innerEnd] == wsCh ? 1 : 0)
                 : EscapedDoubleQuoteLen(text, innerEnd);
-            if (innerEnd > innerStart && (closeLen > 0 || (openLen == 1 && !requireClosingLiteralQuote))) return true;
-            return false;
+            return innerEnd > innerStart &&
+                IsValidQuotedBearerEnd(text, innerEnd, openLen, wsCh, closeLen, inLiteralDoubleQuote, requireClosingLiteralQuote);
         }
         return IsRedactedBearerPlaceholderAt(text, pos, inEscapedQuote) ||
                ScanBearerTokenEnd(text, pos, inEscapedQuote) > pos;

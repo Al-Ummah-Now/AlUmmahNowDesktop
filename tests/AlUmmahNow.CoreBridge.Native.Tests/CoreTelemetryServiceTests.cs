@@ -2465,6 +2465,15 @@ public class CoreTelemetryServiceTests
             "Bearer Bearer \"[redacted]\"",
             CoreTelemetryService.SanitizeLocalPaths("Bearer Bearer \"opaqueSecret123\""));
         Assert.Equal(
+            "received Bearer \"[redacted]",
+            CoreTelemetryService.SanitizeLocalPaths("received Bearer \"opaqueSecret123"));
+        Assert.Equal(
+            "Bearer Bearer \"[redacted]",
+            CoreTelemetryService.SanitizeLocalPaths("Bearer Bearer \"opaqueSecret123"));
+        Assert.Equal(
+            "received Bearer '[redacted]",
+            CoreTelemetryService.SanitizeLocalPaths("received Bearer 'opaqueSecret123"));
+        Assert.Equal(
             "Bearer Bearer [redacted]",
             CoreTelemetryService.SanitizeLocalPaths("Bearer Bearer opaqueSecret123"));
         Assert.Equal(
