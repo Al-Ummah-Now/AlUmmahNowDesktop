@@ -207,12 +207,15 @@ app.OnActivate += async (_, _) =>
 };
 
 var rc = app.RunWithSynchronizationContext(null);
-telemetry.Persist();
 using (var exitFlushCts = new CancellationTokenSource(TimeSpan.FromSeconds(2)))
 {
     try
     {
-        Task.Run(() => telemetry.FlushAsync(exitFlushCts.Token)).Wait(TimeSpan.FromSeconds(2));
+        Task.Run(async () =>
+        {
+            telemetry.Persist();
+            await telemetry.FlushAsync(exitFlushCts.Token).ConfigureAwait(false);
+        }).Wait(TimeSpan.FromSeconds(2));
     }
     catch
     {

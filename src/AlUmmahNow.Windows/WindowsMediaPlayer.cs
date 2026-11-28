@@ -25,21 +25,21 @@ public sealed class WindowsMediaPlayer : IMediaPlayer
         Player = new MediaPlayer { AutoPlay = false };
         Player.CommandManager.IsEnabled = false;
         Player.MediaOpened += (_, _) => _ui.TryEnqueue(OnOpened);
-        Player.MediaFailed += (_, e) => _ui.TryEnqueue(() =>
+        Player.MediaFailed += (_, e) =>
         {
-            Log.For("player").Error("playback error: " + e.Error + " " + e.ErrorMessage);
-            SetState(PlayerState.Failed);
-            var telemetry = Telemetry;
-            if (telemetry != null)
+            var error = e.Error;
+            var errorMessage = e.ErrorMessage;
+            Telemetry?.EnqueueTrackError("playback_failed", new Dictionary<string, object>
             {
-                var errorName = e.Error.ToString();
-                telemetry.EnqueueTrackError("playback_failed", new Dictionary<string, object>
-                {
-                    ["backend"] = "winui",
-                    ["error"] = errorName,
-                });
-            }
-        });
+                ["backend"] = "winui",
+                ["error"] = error.ToString(),
+            });
+            _ui.TryEnqueue(() =>
+            {
+                Log.For("player").Error("playback error: " + error + " " + errorMessage);
+                SetState(PlayerState.Failed);
+            });
+        };
         Player.MediaEnded += (_, _) => _ui.TryEnqueue(() => SetState(PlayerState.Ended));
         Player.PlaybackSession.PlaybackStateChanged += (_, _) => _ui.TryEnqueue(SyncState);
         _timer = ui.CreateTimer();

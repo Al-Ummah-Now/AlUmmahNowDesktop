@@ -166,7 +166,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             _consent = TelemetryConsent.Off;
             _observedExternalToken = null;
             _suppressedExternalToken = NormalizeConsentGenerationToken(ReadExternalTokenSafe());
-            using var crossProcessLock = AcquireCrossProcessBufferLock();
+            using var crossProcessLock = AcquireCrossProcessBufferLock(timeoutMs: 0);
             try
             {
                 _client.SetConsent(TelemetryConsentState.Denied);
@@ -251,18 +251,25 @@ public sealed class CoreTelemetryService : ITelemetryService
             const UnixFileMode nonOwnerWriteMask =
                 UnixFileMode.GroupWrite | UnixFileMode.OtherWrite;
 
-            var parent = Path.GetDirectoryName(dir);
-            if (!string.IsNullOrEmpty(parent) && Directory.Exists(parent) && !IsSharedTempDirectory(parent))
+            var fullDir = Path.GetFullPath(dir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var immediateParent = Path.GetDirectoryName(fullDir);
+            for (var ancestor = immediateParent; !string.IsNullOrEmpty(ancestor); ancestor = Path.GetDirectoryName(ancestor))
             {
-                var parentInfo = new DirectoryInfo(parent);
-                if (parentInfo.LinkTarget != null) return false;
-                var parentMode = File.GetUnixFileMode(parent);
-                if ((parentMode & nonOwnerWriteMask) != 0 && (parentMode & UnixFileMode.StickyBit) == 0)
+                if (!Directory.Exists(ancestor)) continue;
+                var isImmediateParent = string.Equals(ancestor, immediateParent, StringComparison.Ordinal);
+                var isSharedTemp = IsSharedTempDirectory(ancestor);
+                if (isImmediateParent && !isSharedTemp && new DirectoryInfo(ancestor).LinkTarget != null)
                 {
-                    File.SetUnixFileMode(parent, parentMode & ~nonOwnerWriteMask);
-                    parentMode = File.GetUnixFileMode(parent);
+                    return false;
                 }
-                if ((parentMode & nonOwnerWriteMask) != 0 && (parentMode & UnixFileMode.StickyBit) == 0)
+                var ancestorMode = File.GetUnixFileMode(ancestor);
+                if (isImmediateParent && !isSharedTemp &&
+                    (ancestorMode & nonOwnerWriteMask) != 0 && (ancestorMode & UnixFileMode.StickyBit) == 0)
+                {
+                    File.SetUnixFileMode(ancestor, ancestorMode & ~nonOwnerWriteMask);
+                    ancestorMode = File.GetUnixFileMode(ancestor);
+                }
+                if ((ancestorMode & nonOwnerWriteMask) != 0 && (ancestorMode & UnixFileMode.StickyBit) == 0)
                 {
                     return false;
                 }
@@ -7669,16 +7676,17 @@ public sealed class CoreTelemetryService : ITelemetryService
         }
     }
 
-    private IDisposable? AcquireCrossProcessBufferLock() => AcquireCrossProcessBufferLockForPath(_bufferPath);
+    private IDisposable? AcquireCrossProcessBufferLock(int timeoutMs = 2000) =>
+        AcquireCrossProcessBufferLockForPath(_bufferPath, timeoutMs);
 
-    private static IDisposable? AcquireCrossProcessBufferLockForPath(string? bufferPath)
+    private static IDisposable? AcquireCrossProcessBufferLockForPath(string? bufferPath, int timeoutMs = 2000)
     {
         var lockPath = GetBufferLockPathForPath(bufferPath);
         if (string.IsNullOrEmpty(lockPath)) return null;
         try
         {
             EnsurePrivateBufferDirectory(lockPath);
-            var deadline = DateTime.UtcNow.AddSeconds(2);
+            var deadline = timeoutMs > 0 ? DateTime.UtcNow.AddMilliseconds(timeoutMs) : DateTime.MinValue;
             while (true)
             {
                 try
