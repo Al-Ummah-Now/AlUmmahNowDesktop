@@ -2945,6 +2945,96 @@ public class CoreTelemetryServiceTests
         }
     }
 
+    [Fact]
+    public async Task Different_ingest_environments_do_not_adopt_each_others_buffers_and_opt_out_waits_for_flush_revocation()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "aun-tel-env-flush-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var bufferPath = Path.Combine(dir, "telemetry-buffer.json");
+        var guardPath = Path.Combine(dir, "telemetry-flush-active.test.lock");
+        try
+        {
+            string? sharedToken = "enabled:envgen1";
+            // QA instance persists a crash and exits.
+            using (var qa = new CoreTelemetryService(
+                platform: "linux",
+                appVersion: "1.0.0",
+                locale: "en",
+                videosApiBaseUrl: "https://qa.videos.api.alummahnow.net",
+                userAgent: "AlUmmahNowLinux/1.0.0",
+                bufferPath: bufferPath,
+                initialEnabled: true,
+                externalConsentToken: () => Volatile.Read(ref sharedToken),
+                acquireExternalConsentLock: () => new NoOpDisposable()))
+            {
+                qa.ReportCrash("InvalidOperationException", "qa crash", "at Qa.Main()");
+                Assert.Equal(1, qa.PendingCount);
+            }
+
+            // Prod instance with the same consent token and bufferPath MUST NOT adopt the QA crash.
+            using (var prod = new CoreTelemetryService(
+                platform: "linux",
+                appVersion: "1.0.0",
+                locale: "en",
+                videosApiBaseUrl: "https://videos.api.alummahnow.net",
+                userAgent: "AlUmmahNowLinux/1.0.0",
+                bufferPath: bufferPath,
+                initialEnabled: true,
+                externalConsentToken: () => Volatile.Read(ref sharedToken),
+                acquireExternalConsentLock: () => new NoOpDisposable()))
+            {
+                Assert.Equal(TelemetryConsent.Full, prod.Consent);
+                Assert.Equal(0, prod.PendingCount);
+            }
+
+            // Active flush guard stays held until external opt-out triggers native revocation, even while HTTP stalls.
+            var flushStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseHttp = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var guardReleased = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            using var flusher = new CoreTelemetryService(
+                platform: "linux",
+                appVersion: "1.0.0",
+                locale: "en",
+                videosApiBaseUrl: "https://videos.api.alummahnow.net",
+                userAgent: "AlUmmahNowLinux/1.0.0",
+                bufferPath: bufferPath,
+                initialEnabled: true,
+                externalConsentToken: () => Volatile.Read(ref sharedToken),
+                acquireExternalConsentLock: () => new NoOpDisposable(),
+                acquireActiveFlushGuard: () =>
+                {
+                    var fs = new FileStream(guardPath, FileMode.Create, FileAccess.ReadWrite, FileShare.None);
+                    return new CallbackDisposable(() =>
+                    {
+                        fs.Dispose();
+                        try { File.Delete(guardPath); } catch (IOException) { }
+                        guardReleased.TrySetResult();
+                    });
+                });
+            flusher.ExternalPollIntervalMsForTesting = 5;
+            flusher.FlushOverrideForTesting = async () =>
+            {
+                flushStarted.TrySetResult();
+                await releaseHttp.Task;
+            };
+            var flushTask = flusher.FlushAsync();
+            await flushStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.False(guardReleased.Task.IsCompleted);
+
+            // Simulate cross-process opt-out while batch 1 HTTP is still stalled.
+            Volatile.Write(ref sharedToken, null);
+            await guardReleased.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(AlUmmahNow.Core.TelemetryConsentState.Denied, flusher.NativeConsentForTesting);
+
+            releaseHttp.TrySetResult();
+            await flushTask.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+    }
+
     private sealed class CallbackDisposable : IDisposable
     {
         private Action? _onDispose;

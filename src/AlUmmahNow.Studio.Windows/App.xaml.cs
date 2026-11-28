@@ -34,6 +34,7 @@ public sealed partial class App : Application
     private DispatcherQueueTimer? _updateTimer;
     private StudioWindow? _window;
     private ITelemetryService _telemetry = NullTelemetryService.Instance;
+    private Exception? _lastReportedFatalException;
 
     public App()
     {
@@ -51,10 +52,19 @@ public sealed partial class App : Application
         UnhandledException += (_, e) =>
         {
             Log.For("app").Error("unhandled exception", e.Exception);
-            _telemetry.ReportCrash(e.Exception.GetType().FullName ?? e.Exception.GetType().Name, e.Exception.GetType().Name, e.Exception.StackTrace);
+            ReportFatalTelemetry(e.Exception);
             File.AppendAllText(ResultPath + ".crash.txt", LogScrubber.Scrub(e.Exception.ToString()) + "\n");
         };
+        AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+        {
+            if (e.ExceptionObject is Exception ex) ReportFatalTelemetry(ex);
+        };
+    }
 
+    private void ReportFatalTelemetry(Exception ex)
+    {
+        if (ReferenceEquals(System.Threading.Interlocked.Exchange(ref _lastReportedFatalException, ex), ex)) return;
+        _telemetry.ReportCrash(ex.GetType().FullName ?? ex.GetType().Name, ex.GetType().Name, ex.StackTrace);
     }
 
     private static string ResultPath => Environment.GetEnvironmentVariable("AUN_RESULT") ?? "aun-studio-result.txt";
@@ -109,7 +119,8 @@ public sealed partial class App : Application
             demo: demo,
             externalConsentToken: () => settingsStore.LoadTelemetryConsentToken(),
             acquireExternalConsentLock: () => settingsStore.TryAcquireTelemetryConsentLock(),
-            externalConsentTokenForClaim: claim => settingsStore.LoadTelemetryConsentTokenForClaim(claim));
+            externalConsentTokenForClaim: claim => settingsStore.LoadTelemetryConsentTokenForClaim(claim),
+            acquireActiveFlushGuard: () => settingsStore.TryAcquireActiveFlushGuard());
 
         // The passkey sheet is modal to the Studio window; its handle is filled in once it exists.
         var hwnd = IntPtr.Zero;

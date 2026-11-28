@@ -24,15 +24,26 @@ public sealed partial class App : Application
     private DispatcherQueueTimer? _endTimer;
     private DispatcherQueueTimer? _updateTimer;
     private ITelemetryService _telemetry = NullTelemetryService.Instance;
+    private Exception? _lastReportedFatalException;
 
     public App()
     {
         InitializeComponent();
         UnhandledException += (_, e) =>
         {
-            _telemetry.ReportCrash(e.Exception.GetType().FullName ?? e.Exception.GetType().Name, e.Exception.GetType().Name, e.Exception.StackTrace);
+            ReportFatalTelemetry(e.Exception);
             ReportCrash("unhandled: " + e.Message + "\n" + e.Exception);
         };
+        AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+        {
+            if (e.ExceptionObject is Exception ex) ReportFatalTelemetry(ex);
+        };
+    }
+
+    private void ReportFatalTelemetry(Exception ex)
+    {
+        if (ReferenceEquals(System.Threading.Interlocked.Exchange(ref _lastReportedFatalException, ex), ex)) return;
+        _telemetry.ReportCrash(ex.GetType().FullName ?? ex.GetType().Name, ex.GetType().Name, ex.StackTrace);
     }
 
     private static void ReportCrash(string text)
@@ -124,7 +135,8 @@ public sealed partial class App : Application
             demo: isDemo,
             externalConsentToken: () => store.LoadTelemetryConsentToken(),
             acquireExternalConsentLock: () => store.TryAcquireTelemetryConsentLock(),
-            externalConsentTokenForClaim: claim => store.LoadTelemetryConsentTokenForClaim(claim));
+            externalConsentTokenForClaim: claim => store.LoadTelemetryConsentTokenForClaim(claim),
+            acquireActiveFlushGuard: () => store.TryAcquireActiveFlushGuard());
         var updateStore = new UpdateStore(Path.Combine(dataRoot, "updates.json"));
         var updates = updateScene?.Service ?? WindowsInstall.Service("viewer", environment.VideosApi, version, "AlUmmahNowWindows/" + version,
             dataRoot, updateStore, isDemo, IsBusy, WindowsEnd.Close);

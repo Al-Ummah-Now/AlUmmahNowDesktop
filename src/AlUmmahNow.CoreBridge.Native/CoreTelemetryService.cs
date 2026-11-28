@@ -44,12 +44,14 @@ public sealed class CoreTelemetryService : ITelemetryService
 
     private readonly TelemetryAppInfo _app;
     private readonly string? _ingestUrl;
+    private readonly string _ingestScope;
     private readonly string _userAgent;
     private readonly string _clientHeader;
     private readonly string? _bufferPath;
     private readonly Func<string?>? _externalConsentToken;
     private readonly Func<string?, string?>? _externalConsentTokenForClaim;
     private readonly Func<IDisposable?>? _acquireExternalConsentLock;
+    private readonly Func<IDisposable?>? _acquireActiveFlushGuard;
     private readonly object _externalLockGate = new();
     private IDisposable? _heldExternalLock;
     private int _externalLockRefs;
@@ -76,7 +78,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     private bool _contendedFlushRetryReschedule;
     private CancellationToken _contendedFlushRetryToken;
     internal Func<Task>? FlushOverrideForTesting { get; set; }
-    internal int ExternalPollIntervalMsForTesting { get; set; } = 50;
+    internal int ExternalPollIntervalMsForTesting { get; set; } = 10;
     internal int ExternalLockRetryDelayMsForTesting { get; set; } = 250;
     internal string? ActiveBufferPathForTesting
     {
@@ -110,12 +112,14 @@ public sealed class CoreTelemetryService : ITelemetryService
         bool initialEnabled = false,
         Func<string?>? externalConsentToken = null,
         Func<IDisposable?>? acquireExternalConsentLock = null,
-        Func<string?, string?>? externalConsentTokenForClaim = null)
+        Func<string?, string?>? externalConsentTokenForClaim = null,
+        Func<IDisposable?>? acquireActiveFlushGuard = null)
     {
         _bufferPath = bufferPath;
         _externalConsentToken = externalConsentToken;
         _externalConsentTokenForClaim = externalConsentTokenForClaim;
         _acquireExternalConsentLock = acquireExternalConsentLock;
+        _acquireActiveFlushGuard = acquireActiveFlushGuard;
         var os = AunClient.CurrentOs();
         _app = new TelemetryAppInfo(
             platform,
@@ -125,6 +129,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             locale);
 
         _ingestUrl = ResolveIngestUrl(videosApiBaseUrl);
+        _ingestScope = ComputeIngestScope(_ingestUrl);
         _userAgent = userAgent;
         _clientHeader = AunClient.FromUserAgent(userAgent, os);
         var initialToken = initialEnabled && _externalConsentToken != null ? ReadExternalTokenSafe() : null;
@@ -215,14 +220,15 @@ public sealed class CoreTelemetryService : ITelemetryService
         bool demo = false,
         Func<string?>? externalConsentToken = null,
         Func<IDisposable?>? acquireExternalConsentLock = null,
-        Func<string?, string?>? externalConsentTokenForClaim = null)
+        Func<string?, string?>? externalConsentTokenForClaim = null,
+        Func<IDisposable?>? acquireActiveFlushGuard = null)
     {
         if (demo) return NullTelemetryService.Instance;
         try
         {
             return new CoreTelemetryService(
                 platform, appVersion, locale, videosApiBaseUrl, userAgent, bufferPath,
-                initialEnabled, externalConsentToken, acquireExternalConsentLock, externalConsentTokenForClaim);
+                initialEnabled, externalConsentToken, acquireExternalConsentLock, externalConsentTokenForClaim, acquireActiveFlushGuard);
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException or AunException)
         {
@@ -6487,6 +6493,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         CancellationTokenSource? toCancel = null;
         Task? nativeFlush = null;
         CancellationTokenSource? monitorCts = null;
+        FlushGuardHolder? flushGuard = null;
         var flushOverride = FlushOverrideForTesting;
         IDisposable? externalConsentLock = null;
         if (_acquireExternalConsentLock != null)
@@ -6531,15 +6538,17 @@ public sealed class CoreTelemetryService : ITelemetryService
                 _inFlightFlushes++;
                 if (_externalConsentToken != null)
                 {
+                    flushGuard = new FlushGuardHolder(_acquireActiveFlushGuard?.Invoke());
                     monitorCts = new CancellationTokenSource();
-                    _ = MonitorExternalConsentWhileFlushingAsync(monitorCts.Token);
+                    _ = MonitorExternalConsentWhileFlushingAsync(monitorCts.Token, flushGuard);
                 }
                 try
                 {
                     // Dispatch under the cross-process consent lease, then release the lease
                     // immediately so cross-process opt-out is never blocked by slow network I/O.
-                    // MonitorExternalConsentWhileFlushingAsync watches for mid-flush opt-out and
-                    // revokes native consent promptly.
+                    // MonitorExternalConsentWhileFlushingAsync watches for mid-flush opt-out,
+                    // revokes native consent immediately, and releases `flushGuard` so opt-out
+                    // callers observe revocation before returning.
                     nativeFlush = flushOverride != null ? flushOverride() : _client.Flush();
                 }
                 catch (Exception ex) when (ex is AunException or ObjectDisposedException or OperationCanceledException)
@@ -6553,6 +6562,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             if (nativeFlush != null)
             {
                 var monitorToStop = monitorCts;
+                var guardToRelease = flushGuard;
                 // Defer decrementing `_inFlightFlushes` and any pending native `_client.Dispose()`
                 // until `nativeFlush` actually finishes, even if `WaitWithCancellationAsync` returns
                 // early on cancel/revoke.
@@ -6560,12 +6570,13 @@ public sealed class CoreTelemetryService : ITelemetryService
                     static (t, state) =>
                     {
                         _ = t.Exception;
-                        var (svc, cts, epoch, bufPath) =
-                            ((CoreTelemetryService, CancellationTokenSource?, long, string?))state!;
+                        var (svc, cts, guard, epoch, bufPath) =
+                            ((CoreTelemetryService, CancellationTokenSource?, FlushGuardHolder?, long, string?))state!;
                         if (cts != null) CancelQuietly(cts);
+                        guard?.Release();
                         svc.ReleaseInFlightFlush(epoch, bufPath);
                     },
-                    (this, monitorToStop, flushEpoch, flushBufferPath),
+                    (this, monitorToStop, guardToRelease, flushEpoch, flushBufferPath),
                     CancellationToken.None,
                     TaskContinuationOptions.ExecuteSynchronously,
                     TaskScheduler.Default);
@@ -6575,6 +6586,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         if (nativeFlush == null)
         {
             if (monitorCts != null) CancelQuietly(monitorCts);
+            flushGuard?.Release();
             ReleaseInFlightFlush(flushEpoch, flushBufferPath);
             return true;
         }
@@ -6713,9 +6725,22 @@ public sealed class CoreTelemetryService : ITelemetryService
         }
     }
 
-    private async Task MonitorExternalConsentWhileFlushingAsync(CancellationToken stopToken)
+    private sealed class FlushGuardHolder
     {
-        var intervalMs = Math.Max(10, ExternalPollIntervalMsForTesting);
+        private IDisposable? _guard;
+
+        public FlushGuardHolder(IDisposable? guard) => _guard = guard;
+
+        public void Release()
+        {
+            var g = Interlocked.Exchange(ref _guard, null);
+            g?.Dispose();
+        }
+    }
+
+    private async Task MonitorExternalConsentWhileFlushingAsync(CancellationToken stopToken, FlushGuardHolder? flushGuard)
+    {
+        var intervalMs = Math.Max(5, ExternalPollIntervalMsForTesting);
         while (!stopToken.IsCancellationRequested)
         {
             try
@@ -6734,7 +6759,11 @@ public sealed class CoreTelemetryService : ITelemetryService
                 revokedNow = !EnsureExternalConsentLocked(out toCancel, allowDuringDisposeFlush: true);
             }
             if (toCancel != null) CancelQuietly(toCancel);
-            if (revokedNow) return;
+            if (revokedNow)
+            {
+                flushGuard?.Release();
+                return;
+            }
         }
     }
 
@@ -7038,6 +7067,14 @@ public sealed class CoreTelemetryService : ITelemetryService
         return secondColon >= 0 ? externalToken.Substring(0, secondColon) : externalToken;
     }
 
+    private static string ComputeIngestScope(string? ingestUrl)
+    {
+        if (string.IsNullOrWhiteSpace(ingestUrl)) return string.Empty;
+        var hash = System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(ingestUrl.Trim().ToLowerInvariant()));
+        return Convert.ToHexString(hash)[..8].ToLowerInvariant();
+    }
+
     private string? ResolveGenerationPrefix(string? externalToken)
     {
         if (string.IsNullOrWhiteSpace(_bufferPath) || _externalConsentToken == null || string.IsNullOrWhiteSpace(externalToken))
@@ -7052,7 +7089,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             : "legacy";
         var safeGen = new string(rawGen.Where(static ch => char.IsAsciiLetterOrDigit(ch) || ch is '-' or '_').ToArray());
         if (string.IsNullOrEmpty(safeGen)) safeGen = "legacy";
-        return $"{stem}.{safeGen}";
+        return string.IsNullOrEmpty(_ingestScope) ? $"{stem}.{safeGen}" : $"{stem}.{_ingestScope}_{safeGen}";
     }
 
     private string? ResolveBufferPathForToken(string? externalToken)

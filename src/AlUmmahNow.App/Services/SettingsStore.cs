@@ -399,12 +399,13 @@ namespace AlUmmahNow.App.Services
 
         private bool ClearConsentSidecarUnlocked()
         {
+            bool cleared;
             try
             {
                 // Do NOT pre-check with File.Exists: it returns false when directory search permission is denied,
                 // which would falsely report opt-out success while the "enabled" marker still exists on disk.
                 File.Delete(_telemetryConsentPath);
-                return true;
+                cleared = true;
             }
             catch (DirectoryNotFoundException)
             {
@@ -423,12 +424,106 @@ namespace AlUmmahNow.App.Services
                     {
                         writer.Write("disabled");
                     }
-                    return true;
+                    cleared = true;
                 }
                 catch (Exception overwriteEx) when (overwriteEx is IOException || overwriteEx is UnauthorizedAccessException)
                 {
                     return false;
                 }
+            }
+            if (cleared)
+            {
+                WaitForActiveFlushRevocationsUnlocked(timeoutMs: 1500);
+            }
+            return cleared;
+        }
+
+        /// <summary>
+        /// Acquires a per-flush guard file in the shared config directory so a concurrent opt-out in
+        /// another process can wait briefly for this process's flush monitor to revoke native consent
+        /// before opt-out returns (without waiting for slow HTTP I/O to finish).
+        /// </summary>
+        public IDisposable? TryAcquireActiveFlushGuard()
+        {
+            try
+            {
+                var directory = Path.GetDirectoryName(_telemetryConsentPath);
+                if (string.IsNullOrEmpty(directory) || !Directory.Exists(directory)) return null;
+                var guardPath = Path.Combine(directory, "telemetry-flush-active." + Guid.NewGuid().ToString("N") + ".lock");
+                var stream = new FileStream(guardPath, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None);
+                return new ActiveFlushGuardLease(stream, guardPath);
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+            {
+                return null;
+            }
+        }
+
+        private void WaitForActiveFlushRevocationsUnlocked(int timeoutMs)
+        {
+            var directory = Path.GetDirectoryName(_telemetryConsentPath);
+            if (string.IsNullOrEmpty(directory)) return;
+            var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+            while (true)
+            {
+                string[] guards;
+                try
+                {
+                    guards = Directory.GetFiles(directory, "telemetry-flush-active.*.lock");
+                }
+                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+                {
+                    return;
+                }
+                if (guards.Length == 0) return;
+                var anyLive = false;
+                foreach (var guardPath in guards)
+                {
+                    try
+                    {
+                        using (new FileStream(guardPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+                        {
+                        }
+                        try { File.Delete(guardPath); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+                    }
+                    catch (FileNotFoundException)
+                    {
+                    }
+                    catch (DirectoryNotFoundException)
+                    {
+                        return;
+                    }
+                    catch (IOException)
+                    {
+                        anyLive = true;
+                    }
+                    catch (UnauthorizedAccessException)
+                    {
+                        anyLive = true;
+                    }
+                }
+                if (!anyLive || DateTime.UtcNow >= deadline) return;
+                Thread.Sleep(5);
+            }
+        }
+
+        private sealed class ActiveFlushGuardLease : IDisposable
+        {
+            private FileStream? _stream;
+            private readonly string _path;
+
+            public ActiveFlushGuardLease(FileStream stream, string path)
+            {
+                _stream = stream;
+                _path = path;
+            }
+
+            public void Dispose()
+            {
+                var stream = Interlocked.Exchange(ref _stream, null);
+                if (stream == null) return;
+                try { stream.Dispose(); } catch (IOException) { }
+                try { File.Delete(_path); } catch (IOException) { } catch (UnauthorizedAccessException) { }
             }
         }
 
