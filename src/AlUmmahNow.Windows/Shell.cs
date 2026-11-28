@@ -460,8 +460,8 @@ public sealed partial class Shell
                 }
             }
         }
-        Action<bool> onPurgeChanged = _ => telemetryNotice.DispatcherQueue?.TryEnqueue(SyncPurgeNotice);
-        Action<TelemetryConsent> onConsentChanged = _ => telemetryNotice.DispatcherQueue?.TryEnqueue(SyncPurgeNotice);
+        Action<bool> onPurgeChanged = _ => telemetryNotice.DispatcherQueue?.TryEnqueue(() => SyncPurgeNotice());
+        Action<TelemetryConsent> onConsentChanged = _ => telemetryNotice.DispatcherQueue?.TryEnqueue(() => SyncPurgeNotice());
         var purgeSubscribed = false;
         telemetryNotice.Loaded += (_, _) =>
         {
