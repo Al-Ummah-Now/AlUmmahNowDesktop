@@ -258,10 +258,7 @@ namespace AlUmmahNow.App.Services
             }
             if (pendingClaims != null) return false;
             if (expectedConfirmedToken is not { Length: > 0 }) return false;
-            if (!string.Equals(
-                    ExtractBaseGenerationToken(current),
-                    ExtractBaseGenerationToken(expectedConfirmedToken),
-                    StringComparison.Ordinal))
+            if (!string.Equals(current, expectedConfirmedToken, StringComparison.Ordinal))
             {
                 return false;
             }

@@ -116,10 +116,17 @@ internal sealed class SettingsPage
                     settings.TelemetryEnabled = false;
                     telemetryToggle.IsOn = false;
                 }
-                else if (persistedEnabled && !settings.TelemetryEnabled)
+                else if (persistedEnabled)
                 {
-                    settings.TelemetryEnabled = true;
-                    telemetryToggle.IsOn = true;
+                    if (telemetry.Consent == TelemetryConsent.Off)
+                    {
+                        telemetry.SetConsent(TelemetryConsent.Full);
+                    }
+                    if (!settings.TelemetryEnabled)
+                    {
+                        settings.TelemetryEnabled = true;
+                        telemetryToggle.IsOn = true;
+                    }
                 }
                 if (failed && telemetry.Consent == TelemetryConsent.Off)
                 {

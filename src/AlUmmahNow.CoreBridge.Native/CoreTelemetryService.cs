@@ -879,7 +879,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     }
 
     private static readonly Regex WebhookPathTokenRegex = new(
-        @"((?:^|/|%2[fF])(?:webhooks?|reset|reset-password|password-reset|forgot-password|verify|verify-email|confirm|confirm-email|activate|magic|magic-link|invite|invitations?|tokens?|auth|oauth2?|callback|sessions?|unsubscribe|secrets?|keys?|api-?keys?|credentials?|sign-?in|login|sso|redeem|claim|recovery?|passwords?|share|shared|sh|s|scl|dl|link|private|join|otp|passkey|code|folders|file/d|document/d|spreadsheets/d|presentation/d)(?:/|%2[fF]))[^\s?#]+",
+        @"((?:^|/|%2[fF])(?:webhooks?|reset|reset-password|password-reset|forgot-password|verify|verify-email|confirm|confirm-email|activate|magic|magic-link|invite|invitations?|tokens?|auth|oauth2?|callback|sessions?|unsubscribe|secrets?|keys?|api-?keys?|credentials?|sign-?in|login|sso|redeem|claim|recovery?|passwords?|share|shared|sh|s|scl|dl|link|private|join|otp|passkey|code|folders|(?:file|document|spreadsheets|presentation)/(?:u/\d+/)?d)(?:/|%2[fF]))[^\s?#]+",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex SlackWebhookHostRegex = new(
@@ -894,11 +894,16 @@ public sealed class CoreTelemetryService : ITelemetryService
         @"((?:/|%2[fF])bot\d+:)[^/\s?#]+",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+    private static readonly Regex UrlMatrixParamRegex = new(
+        @"(;[a-z0-9_-]*(?:session|jsessionid|phpsessid|sid|token|secret|auth|key|pass|pwd|cred|jwt|sig|code|otp|ticket|cookie)[a-z0-9_-]*=)[^/?#;\s]+",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
     private static string RedactUrlPathSecrets(string url)
     {
         var result = ReplaceUrlPathSecret(url, WebhookPathTokenRegex);
         result = RedactSlackWebhookUrl(result);
         result = ReplaceUrlPathSecret(result, TelegramBotTokenUrlRegex);
+        result = ReplaceUrlPathSecret(result, UrlMatrixParamRegex);
         return result;
     }
 
@@ -2637,7 +2642,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     }
 
     private static readonly Regex JwtTokenRegex = new(
-        @"\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}(?:\.[A-Za-z0-9_-]*)?",
+        @"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]+){1,3}(?![A-Za-z0-9_-])",
         RegexOptions.Compiled);
 
     private static string RedactAuthCredentials(string text)
@@ -3739,6 +3744,39 @@ public sealed class CoreTelemetryService : ITelemetryService
         trimmed.Equals("code-verifier".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
         trimmed.Equals("client_secret".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
         trimmed.Equals("client-secret".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("clientsecret".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("accesstoken".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("refreshtoken".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("idtoken".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("apikey".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("apitoken".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("authtoken".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("sessiontoken".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("securitytoken".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("sessionid".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("sessionkey".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("privatekey".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("secretkey".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("accesskey".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("codeverifier".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("verification_code".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("verification-code".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("verificationcode".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("auth_code".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("auth-code".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("authcode".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("recovery_code".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("recovery-code".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("recoverycode".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("passcode".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("otp".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("pin".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("passphrase".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("credential".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("credentials".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("token".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("secret".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("jwt".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
         trimmed.Equals("authorizationsignature".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
         trimmed.Equals("authorization-signature".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
         trimmed.Equals("password".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
@@ -3849,6 +3887,36 @@ public sealed class CoreTelemetryService : ITelemetryService
             MatchesUnquotedAuthKey(text, pos, "code-verifier", out keyEnd) ||
             MatchesUnquotedAuthKey(text, pos, "client_secret", out keyEnd) ||
             MatchesUnquotedAuthKey(text, pos, "client-secret", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "clientsecret", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "accesstoken", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "refreshtoken", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "idtoken", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "apikey", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "apitoken", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "authtoken", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "sessiontoken", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "securitytoken", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "sessionid", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "sessionkey", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "privatekey", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "secretkey", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "accesskey", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "codeverifier", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "verification_code", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "verification-code", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "verificationcode", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "auth_code", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "auth-code", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "authcode", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "recovery_code", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "recovery-code", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "recoverycode", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "passcode", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "otp", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "pin", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "passphrase", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "credential", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "credentials", out keyEnd) ||
             MatchesUnquotedAuthKey(text, pos, "password", out keyEnd) ||
             MatchesUnquotedAuthKey(text, pos, "passwd", out keyEnd) ||
             MatchesUnquotedCustomXHeader(text, pos, out keyEnd))
@@ -6144,6 +6212,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             IDisposable? crossProcessLock = needsBufferLock ? AcquireCrossProcessBufferLock() : null;
             if (consent != TelemetryConsent.Off && needsBufferLock && crossProcessLock == null)
             {
+                lock (_gate) _lastEnableBlockedByExternalLock = true;
                 return false;
             }
             using (crossProcessLock)
@@ -6335,20 +6404,43 @@ public sealed class CoreTelemetryService : ITelemetryService
             externalConsentLock = TryAcquireExternalConsentLease();
             if (externalConsentLock == null)
             {
-                lock (_gate)
+                if (!allowUnlockedDoubleCheckedFallback)
                 {
-                    if (!EnsureExternalConsentLocked(out toCancel)) goto CancelAndReturn;
-                    if (!allowUnlockedDoubleCheckedFallback) return;
-                    var activeEpoch = requiresFull ? _analyticsEpoch : _consentEpoch;
-                    if (_disposeRequested || _clientDisposed || _consent == TelemetryConsent.Off ||
-                        (requiresFull && _consent != TelemetryConsent.Full) ||
-                        (expectedEpoch.HasValue && activeEpoch != expectedEpoch.Value))
+                    lock (_gate) EnsureExternalConsentLocked(out toCancel);
+                    if (toCancel != null) CancelQuietly(toCancel);
+                    return;
+                }
+                // Dekker ordering: register an active-flush guard BEFORE the first consent check so a
+                // concurrent cross-process opt-out waits for this crash write + post-write check to
+                // finish (or revoke/purge) before opt-out returns success.
+                IDisposable? fallbackGuard = null;
+                if (_externalConsentToken != null && _acquireActiveFlushGuard != null)
+                {
+                    fallbackGuard = _acquireActiveFlushGuard();
+                    if (fallbackGuard == null)
                     {
+                        lock (_gate) EnsureExternalConsentLocked(out toCancel);
+                        if (toCancel != null) CancelQuietly(toCancel);
                         return;
                     }
-                    nativeAction();
-                    EnsureExternalConsentLocked(out toCancel);
                 }
+                using (fallbackGuard)
+                {
+                    lock (_gate)
+                    {
+                        if (!EnsureExternalConsentLocked(out toCancel)) goto CancelFallback;
+                        var activeEpoch = requiresFull ? _analyticsEpoch : _consentEpoch;
+                        if (_disposeRequested || _clientDisposed || _consent == TelemetryConsent.Off ||
+                            (requiresFull && _consent != TelemetryConsent.Full) ||
+                            (expectedEpoch.HasValue && activeEpoch != expectedEpoch.Value))
+                        {
+                            return;
+                        }
+                        nativeAction();
+                        EnsureExternalConsentLocked(out toCancel);
+                    }
+                }
+            CancelFallback:
                 if (toCancel != null) CancelQuietly(toCancel);
                 return;
             }
@@ -7343,10 +7435,9 @@ public sealed class CoreTelemetryService : ITelemetryService
                 try
                 {
                     ownerLock = new FileStream(ownerLockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
-                    if (!File.Exists(ownerBufferPath))
-                    {
-                        TryDeleteSingleFile(tmp);
-                    }
+                    // Holding the exclusive .owner lock proves the writing instance has exited, so any
+                    // leftover .tmp file for this buffer is an abandoned partial write and safe to remove.
+                    TryDeleteSingleFile(tmp);
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
@@ -7463,8 +7554,17 @@ public sealed class CoreTelemetryService : ITelemetryService
     }
 
     private static bool ReadPersistedBufferInto(
-        string path, List<AdoptedEvent> mergedEvents, HashSet<string> seenIds, List<AdoptedBreadcrumb> latestBreadcrumbs)
+        string path, List<AdoptedEvent> mergedEvents, HashSet<string> seenIds, List<AdoptedBreadcrumb> latestBreadcrumbs) =>
+        ReadPersistedBufferInto(path, mergedEvents, seenIds, latestBreadcrumbs, out _);
+
+    private static bool ReadPersistedBufferInto(
+        string path,
+        List<AdoptedEvent> mergedEvents,
+        HashSet<string> seenIds,
+        List<AdoptedBreadcrumb> latestBreadcrumbs,
+        out bool permanentlyUnreadable)
     {
+        permanentlyUnreadable = false;
         try
         {
             var bytes = File.ReadAllBytes(path);
@@ -7531,7 +7631,12 @@ public sealed class CoreTelemetryService : ITelemetryService
         {
             return true;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (UnauthorizedAccessException)
+        {
+            permanentlyUnreadable = true;
+            return false;
+        }
+        catch (IOException)
         {
             return false;
         }
@@ -8156,22 +8261,27 @@ public sealed class CoreTelemetryService : ITelemetryService
 
     internal bool IsPendingInitialEnable { get { lock (_gate) return _pendingInitialEnable; } }
 
-    private static readonly Regex JwtInKeyRegex = new(@"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+(?![A-Za-z0-9_-])", RegexOptions.Compiled);
-    private static readonly Regex Ipv4InKeyRegex = new(@"(?<![A-Za-z0-9_.])(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?![A-Za-z0-9_.])", RegexOptions.Compiled);
-    private static readonly Regex Ipv6InKeyRegex = new(@"(?<![A-Za-z0-9_:])(?:(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:){1,7}:(?:[0-9a-fA-F]{1,4}(?::[0-9a-fA-F]{1,4}){0,5})?|::(?:[0-9a-fA-F]{1,4}(?::[0-9a-fA-F]{1,4}){0,6}))(?:%[A-Za-z0-9_.-]+)?(?![A-Za-z0-9_:])", RegexOptions.Compiled);
-    private static readonly Regex PhoneInKeyRegex = new(@"(?<![A-Za-z0-9_])\+?\d[\d\s().-]{7,}\d(?![A-Za-z0-9_])", RegexOptions.Compiled);
+    private static readonly Regex JwtInKeyRegex = new(@"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]+){1,3}(?![A-Za-z0-9_-])", RegexOptions.Compiled);
+    private static readonly Regex Ipv4InKeyRegex = new(@"(?<![A-Za-z0-9_.])(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?![A-Za-z0-9_]|\.\d)", RegexOptions.Compiled);
+    private static readonly Regex Ipv6InKeyRegex = new(@"(?<![0-9a-fA-F]:)(?<![A-Za-z0-9_])(?:(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:){1,7}:(?:[0-9a-fA-F]{1,4}(?::[0-9a-fA-F]{1,4}){0,5})?|::(?:[0-9a-fA-F]{1,4}(?::[0-9a-fA-F]{1,4}){0,6}))(?:%[A-Za-z0-9_.-]+)?(?![A-Za-z0-9_]|:[0-9a-fA-F])", RegexOptions.Compiled);
+    private static readonly Regex PhoneInKeyRegex = new(@"(?<![A-Za-z0-9_])\+?\p{Nd}[\p{Nd}\s().\p{Pd}]{7,}\p{Nd}(?![A-Za-z0-9_])", RegexOptions.Compiled);
     private static readonly Regex OpaqueSecretInKeyRegex = new(@"(?<![A-Za-z0-9_])[A-Za-z0-9+/=_-]{32,}(?![A-Za-z0-9_])", RegexOptions.Compiled);
     private static readonly Regex UuidExactRegex = new(@"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", RegexOptions.Compiled);
+
+    private static readonly Regex KeyValueCredentialRegex = new(
+        @"(?<![A-Za-z0-9_])(token|secret|jwt|passphrase|credential|credentials|verification[_-]?code|auth[_-]?code|recovery[_-]?code|passcode|otp|pin|client[_-]?secret|access[_-]?token|refresh[_-]?token|id[_-]?token|api[_-]?key|api[_-]?token|auth[_-]?token|session[_-]?token|security[_-]?token|private[_-]?key|secret[_-]?key|access[_-]?key|code[_-]?verifier|session[_-]?id|session[_-]?key|password|passwd)(\s*[=:]\s*)(?:""(?:\\.|[^""\\])*""|'(?:\\.|[^'\\])*'|[^\s,;}\]]+)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static string SanitizeDiagnosticText(string text)
     {
         var safe = SanitizeLocalPaths(text);
+        safe = KeyValueCredentialRegex.Replace(safe, "$1$2[redacted]");
         safe = Ipv4InKeyRegex.Replace(safe, "[redacted-ip]");
         safe = Ipv6InKeyRegex.Replace(safe, "[redacted-ip]");
         safe = PhoneInKeyRegex.Replace(safe, static m =>
         {
             var digits = 0;
-            foreach (var c in m.Value) if (char.IsDigit(c)) digits++;
+            foreach (var r in m.Value.EnumerateRunes()) if (System.Text.Rune.IsDigit(r)) digits++;
             return digits >= 9 ? "[redacted-phone]" : m.Value;
         });
         return safe;
@@ -8235,8 +8345,18 @@ public sealed class CoreTelemetryService : ITelemetryService
                 case float f when float.IsFinite(f):
                     flat[uniqueKey] = Math.Abs(f) >= MinSensitiveIntegerMagnitude && Math.Truncate(f) == f ? "[redacted-number]" : (double)f;
                     break;
+                case decimal dec:
+                    flat[uniqueKey] = Math.Abs(dec) >= MinSensitiveIntegerMagnitude && decimal.Truncate(dec) == dec
+                        ? "[redacted-number]"
+                        : (double)dec;
+                    break;
+                case System.Numerics.BigInteger bi:
+                    flat[uniqueKey] = System.Numerics.BigInteger.Abs(bi) >= MinSensitiveIntegerMagnitude
+                        ? "[redacted-number]"
+                        : SanitizeDiagnosticText(bi.ToString());
+                    break;
                 default:
-                    flat[uniqueKey] = SanitizeLocalPaths(kv.Value.ToString() ?? "");
+                    flat[uniqueKey] = SanitizeDiagnosticText(kv.Value.ToString() ?? "");
                     break;
             }
         }

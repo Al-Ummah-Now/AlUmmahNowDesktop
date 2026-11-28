@@ -3081,7 +3081,10 @@ public class CoreTelemetryServiceTests
                     ["2001:db8::beef:cafe"] = true,
                     ["recipient"] = 12025550148L,
                     ["detail"] = "Peer 192.168.42.17 called +٩٧١٥٠١٢٣٤٥٦٧ from fe80::1",
+                    ["peer"] = System.Net.IPAddress.Parse("2001:db8::1"),
                     ["share"] = "https://share.example.com/s/V8r2Qp6Lm4",
+                    ["box"] = "https://app.box.com/s/a1b2c3d4e5f6g7h8i9j0k1l2",
+                    ["matrix"] = "https://example.com/a;jsessionid=abc123",
                     ["dropbox"] = "https://www.dropbox.com/scl/fi/a1b2c3d4e5f6g7h8i9j0/PrivateAcquisition.pdf",
                 });
                 Assert.NotNull(scrubbed);
@@ -3090,11 +3093,16 @@ public class CoreTelemetryServiceTests
                 Assert.DoesNotContain("192.0.2.10", scrubbed);
                 Assert.DoesNotContain("192.168.42.17", scrubbed);
                 Assert.DoesNotContain("fe80", scrubbed);
+                Assert.DoesNotContain("2001:db8", scrubbed);
                 Assert.DoesNotContain("beef:cafe", scrubbed);
                 Assert.DoesNotContain("12025550148", scrubbed);
                 Assert.DoesNotContain("V8r2Qp6Lm4", scrubbed);
+                Assert.DoesNotContain("a1b2c3d4e5f6g7h8i9j0k1l2", scrubbed);
+                Assert.DoesNotContain("abc123", scrubbed);
                 Assert.DoesNotContain("PrivateAcquisition", scrubbed);
                 Assert.Contains("https://share.example.com/s/[redacted]", scrubbed);
+                Assert.Contains("https://app.box.com/s/[redacted]", scrubbed);
+                Assert.Contains("https://example.com/a;jsessionid=[redacted]", scrubbed);
                 Assert.Contains("https://www.dropbox.com/scl/[redacted]", scrubbed);
 
                 guardFailClosed.Track("4155550123");

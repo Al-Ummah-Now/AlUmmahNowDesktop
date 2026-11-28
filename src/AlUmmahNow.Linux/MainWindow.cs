@@ -358,10 +358,17 @@ public sealed partial class MainWindow
                 _settings.TelemetryEnabled = false;
                 telemetryCheck.SetActive(false);
             }
-            else if (persistedEnabled && !_settings.TelemetryEnabled)
+            else if (persistedEnabled)
             {
-                _settings.TelemetryEnabled = true;
-                telemetryCheck.SetActive(true);
+                if (_telemetry.Consent == TelemetryConsent.Off)
+                {
+                    _telemetry.SetConsent(TelemetryConsent.Full);
+                }
+                if (!_settings.TelemetryEnabled)
+                {
+                    _settings.TelemetryEnabled = true;
+                    telemetryCheck.SetActive(true);
+                }
             }
             if (failed && _telemetry.Consent == TelemetryConsent.Off)
             {

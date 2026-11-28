@@ -349,10 +349,17 @@ public sealed partial class Shell
                 _settings.TelemetryEnabled = false;
                 telemetryToggle.IsOn = false;
             }
-            else if (persistedEnabled && !_settings.TelemetryEnabled)
+            else if (persistedEnabled)
             {
-                _settings.TelemetryEnabled = true;
-                telemetryToggle.IsOn = true;
+                if (_telemetry.Consent == TelemetryConsent.Off)
+                {
+                    _telemetry.SetConsent(TelemetryConsent.Full);
+                }
+                if (!_settings.TelemetryEnabled)
+                {
+                    _settings.TelemetryEnabled = true;
+                    telemetryToggle.IsOn = true;
+                }
             }
             if (failed && _telemetry.Consent == TelemetryConsent.Off)
             {

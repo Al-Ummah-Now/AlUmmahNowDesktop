@@ -106,10 +106,17 @@ public sealed class SettingsPage
                     settings.TelemetryEnabled = false;
                     telemetryCheck.SetActive(false);
                 }
-                else if (persistedEnabled && !settings.TelemetryEnabled)
+                else if (persistedEnabled)
                 {
-                    settings.TelemetryEnabled = true;
-                    telemetryCheck.SetActive(true);
+                    if (telemetry.Consent == TelemetryConsent.Off)
+                    {
+                        telemetry.SetConsent(TelemetryConsent.Full);
+                    }
+                    if (!settings.TelemetryEnabled)
+                    {
+                        settings.TelemetryEnabled = true;
+                        telemetryCheck.SetActive(true);
+                    }
                 }
                 if (failed && telemetry.Consent == TelemetryConsent.Off)
                 {
