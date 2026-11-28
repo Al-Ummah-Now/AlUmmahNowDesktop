@@ -172,7 +172,12 @@ public sealed class CoreTelemetryService : ITelemetryService
             // currently recorded in external consent, without creating directories or modifying parent modes.
             _consent = TelemetryConsent.Off;
             _observedExternalToken = null;
-            _suppressedExternalToken = NormalizeConsentGenerationToken(ReadExternalTokenSafe());
+            var localOptOutSuppressed = false;
+            if (_isLocalOptOutSuppressed != null)
+            {
+                try { localOptOutSuppressed = _isLocalOptOutSuppressed(); } catch { }
+            }
+            _suppressedExternalToken = localOptOutSuppressed ? NormalizeConsentGenerationToken(ReadExternalTokenSafe()) : null;
             if (!bufferDirExists)
             {
                 try { _client.SetConsent(TelemetryConsentState.Denied); } catch (AunException) { }
@@ -6783,6 +6788,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                         }
                     }
                     string? externalToken = null;
+                    var switchedClient = false;
                     if (_externalConsentToken != null)
                     {
                         externalToken = !string.IsNullOrEmpty(pendingConsentToken) && _externalConsentTokenForClaim != null
@@ -6803,7 +6809,6 @@ public sealed class CoreTelemetryService : ITelemetryService
                         {
                             return false;
                         }
-                        var switchedClient = false;
                         if (!string.Equals(_activeBufferPath, targetBufferPath, StringComparison.Ordinal))
                         {
                             if (_inFlightFlushes > 0) return false;
@@ -6854,12 +6859,21 @@ public sealed class CoreTelemetryService : ITelemetryService
                         }
                         else
                         {
-                            if (_consent == TelemetryConsent.Full && consent != TelemetryConsent.Full)
+                            var nextExternalToken = NormalizeConsentGenerationToken(externalToken);
+                            var switchedGeneration = switchedClient ||
+                                (!string.IsNullOrEmpty(_observedExternalToken) &&
+                                 !string.Equals(_observedExternalToken, nextExternalToken, StringComparison.Ordinal));
+                            if (switchedGeneration)
+                            {
+                                _consentEpoch++;
+                                _analyticsEpoch++;
+                            }
+                            else if (_consent == TelemetryConsent.Full && consent != TelemetryConsent.Full)
                             {
                                 _analyticsEpoch++;
                             }
                             _consent = consent;
-                            _observedExternalToken = NormalizeConsentGenerationToken(externalToken);
+                            _observedExternalToken = nextExternalToken;
                             _suppressedExternalToken = null;
                             _pendingInitialEnable = false;
                             UpdatePurgeFailedLocked(false, ref purgeNotify, ref purgeNotifyValue);
@@ -8755,7 +8769,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             _ = acquireExternalConsentLock;
             if (!initialEnabled)
             {
-                PurgeBuffers();
+                PurgeBuffers(isStartup: true);
             }
         }
 
@@ -8770,10 +8784,10 @@ public sealed class CoreTelemetryService : ITelemetryService
         public bool SetConsent(TelemetryConsent consent, string? pendingConsentToken, Func<bool>? confirmPendingConsent)
         {
             if (consent != TelemetryConsent.Off) return false;
-            return PurgeBuffers();
+            return PurgeBuffers(isStartup: false);
         }
 
-        private bool PurgeBuffers()
+        private bool PurgeBuffers(bool isStartup = false)
         {
             // Match CoreTelemetryService.SetConsent(Off): synchronize on the cross-process buffer lock
             // rather than failing when the config directory does not yet exist (e.g. fresh XDG_CONFIG_HOME
@@ -8781,7 +8795,15 @@ public sealed class CoreTelemetryService : ITelemetryService
             // external token while holding the buffer lock, reading _externalConsentToken under this lock
             // always preserves any active sibling generation while purging stale buffers on opt-out.
             var needsBufferLock = !string.IsNullOrWhiteSpace(_bufferPath);
-            using var bufferLock = needsBufferLock ? AcquireCrossProcessBufferLockForPath(_bufferPath) : null;
+            var bufferDir = needsBufferLock ? Path.GetDirectoryName(_bufferPath) : null;
+            if (needsBufferLock && (string.IsNullOrEmpty(bufferDir) || !Directory.Exists(bufferDir)))
+            {
+                SetPurgeFailed(false);
+                return true;
+            }
+            using var bufferLock = needsBufferLock
+                ? AcquireCrossProcessBufferLockForPath(_bufferPath, timeoutMs: isStartup ? 0 : 2000, createDirectory: false)
+                : null;
             if (needsBufferLock && bufferLock == null)
             {
                 SetPurgeFailed(true);
