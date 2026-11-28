@@ -2120,17 +2120,17 @@ public class CoreTelemetryServiceTests
     }
 
     [Fact]
-    public async Task FlushAsync_holds_external_consent_lock_until_native_flush_completes()
+    public async Task FlushAsync_releases_external_consent_lock_after_dispatch_so_cross_process_opt_out_succeeds()
     {
         var dir = Path.Combine(Path.GetTempPath(), "aun-tel-flush-lease-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
+        var lockPath = Path.Combine(dir, "telemetry-consent.lock");
         var bufferPath = Path.Combine(dir, "telemetry-buffer.json");
         try
         {
-            var activeLocks = 0;
+            string? sharedToken = "enabled:gen1";
             var nativeStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             var nativeRelease = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-            var lockReleased = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             using var service = new CoreTelemetryService(
                 platform: "linux",
                 appVersion: "1.0.0",
@@ -2139,23 +2139,20 @@ public class CoreTelemetryServiceTests
                 userAgent: "AlUmmahNowLinux/1.0.0",
                 bufferPath: bufferPath,
                 initialEnabled: true,
-                externalConsentToken: () => "gen-1",
+                externalConsentToken: () => Volatile.Read(ref sharedToken),
                 acquireExternalConsentLock: () =>
                 {
-                    if (Interlocked.Increment(ref activeLocks) != 1)
+                    try
                     {
-                        Interlocked.Decrement(ref activeLocks);
+                        return new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+                    }
+                    catch (IOException)
+                    {
                         return null;
                     }
-                    return new CallbackDisposable(() =>
-                    {
-                        if (Interlocked.Decrement(ref activeLocks) == 0)
-                        {
-                            lockReleased.TrySetResult(true);
-                        }
-                    });
                 })
             {
+                ExternalPollIntervalMsForTesting = 15,
                 FlushOverrideForTesting = () =>
                 {
                     nativeStarted.TrySetResult(true);
@@ -2163,23 +2160,122 @@ public class CoreTelemetryServiceTests
                 }
             };
 
-            lockReleased = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             var flushTask = service.FlushAsync();
-            await nativeStarted.Task;
-            Assert.Equal(1, Volatile.Read(ref activeLocks));
+            await nativeStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
 
-            // Same-process writes reuse the held lease without deadlocking on the non-reentrant OS lock.
-            service.Track("screen_view");
-            Assert.Equal(1, Volatile.Read(ref activeLocks));
+            // Cross-process opt-out must acquire the exclusive OS lock immediately even while nativeFlush stays open.
+            using (var processBLock = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
+            {
+                Volatile.Write(ref sharedToken, null);
+            }
 
-            // Same-process opt-out does not block on the lease, and the OS lock stays held until nativeFlush ends.
-            Assert.True(service.SetConsent(TelemetryConsent.Off));
-            await flushTask;
-            Assert.Equal(1, Volatile.Read(ref activeLocks));
+            // Process A's in-flight monitor detects the cross-process opt-out and revokes native consent promptly.
+            await flushTask.WaitAsync(TimeSpan.FromSeconds(2));
+            Assert.Equal(TelemetryConsent.Off, service.Consent);
+            Assert.Equal(AlUmmahNow.Core.TelemetryConsentState.Denied, service.NativeConsentForTesting);
 
             nativeRelease.TrySetResult(true);
-            await lockReleased.Task.WaitAsync(TimeSpan.FromSeconds(2));
-            Assert.Equal(0, Volatile.Read(ref activeLocks));
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task FlushAsync_retries_in_same_session_when_external_consent_lock_is_released()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "aun-tel-flush-retry-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var bufferPath = Path.Combine(dir, "telemetry-buffer.json");
+        try
+        {
+            var lockBusy = 1;
+            var flushed = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            using var service = new CoreTelemetryService(
+                platform: "linux",
+                appVersion: "1.0.0",
+                locale: "en",
+                videosApiBaseUrl: null,
+                userAgent: "AlUmmahNowLinux/1.0.0",
+                bufferPath: bufferPath,
+                initialEnabled: true,
+                externalConsentToken: () => "enabled:gen-retry",
+                acquireExternalConsentLock: () => Volatile.Read(ref lockBusy) == 1 ? null : new NoOpDisposable())
+            {
+                ExternalLockRetryDelayMsForTesting = 20,
+                FlushOverrideForTesting = () =>
+                {
+                    flushed.TrySetResult(true);
+                    return Task.CompletedTask;
+                }
+            };
+
+            // Startup flush misses the lock while another instance holds it.
+            await service.FlushAsync();
+            Assert.False(flushed.Task.IsCompleted);
+
+            // Releasing the lock lets the scheduled retry activate and flush in the same session.
+            Volatile.Write(ref lockBusy, 0);
+            Assert.True(await flushed.Task.WaitAsync(TimeSpan.FromSeconds(2)));
+            Assert.Equal(TelemetryConsent.Full, service.Consent);
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    private sealed class BlockingToStringValue
+    {
+        private readonly ManualResetEventSlim _entered;
+        private readonly ManualResetEventSlim _release;
+
+        public BlockingToStringValue(ManualResetEventSlim entered, ManualResetEventSlim release)
+        {
+            _entered = entered;
+            _release = release;
+        }
+
+        public override string ToString()
+        {
+            _entered.Set();
+            _release.Wait(TimeSpan.FromSeconds(5));
+            return "pre-revoke-value";
+        }
+    }
+
+    [Fact]
+    public async Task Track_drops_event_when_consent_is_revoked_and_reenabled_during_serialization()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "aun-tel-epoch-track-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var bufferPath = Path.Combine(dir, "telemetry-buffer.json");
+        try
+        {
+            using var service = new CoreTelemetryService(
+                platform: "linux",
+                appVersion: "1.0.0",
+                locale: "en",
+                videosApiBaseUrl: null,
+                userAgent: "AlUmmahNowLinux/1.0.0",
+                bufferPath: bufferPath,
+                initialEnabled: true);
+
+            using var entered = new ManualResetEventSlim(false);
+            using var release = new ManualResetEventSlim(false);
+            var blocker = new BlockingToStringValue(entered, release);
+
+            var worker = Task.Run(() =>
+                service.Track("screen_view", new Dictionary<string, object> { ["detail"] = blocker }));
+            Assert.True(entered.Wait(TimeSpan.FromSeconds(2)));
+
+            Assert.True(service.SetConsent(TelemetryConsent.Off));
+            Assert.True(service.SetConsent(TelemetryConsent.Full));
+            release.Set();
+            await worker.WaitAsync(TimeSpan.FromSeconds(2));
+
+            Assert.Equal(0, service.PendingCount);
         }
         finally
         {
@@ -2551,6 +2647,11 @@ public class CoreTelemetryServiceTests
         Assert.Equal(
             "https://registry.npmjs.org/%40angular/core",
             CoreTelemetryService.SanitizeLocalPaths("https://registry.npmjs.org/%40angular/core"));
+        Assert.Equal(
+            "https://hooks.slack.com:/services/[redacted]",
+            CoreTelemetryService.SanitizeLocalPaths("https://hooks.slack.com:/services/T000/B000/Canary"));
+        var longProto = "(HTTP/1" + string.Concat(Enumerable.Repeat(".1", 50_000)) + "x)";
+        Assert.Equal("([redacted-path])", CoreTelemetryService.SanitizeLocalPaths(longProto));
         var repeatedOpen = string.Concat(Enumerable.Repeat("x@[", 10_000));
         Assert.Equal(repeatedOpen, CoreTelemetryService.SanitizeLocalPaths(repeatedOpen));
     }

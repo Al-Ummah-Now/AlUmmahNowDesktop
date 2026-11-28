@@ -20,12 +20,12 @@ namespace AlUmmahNow.CoreBridge.Native;
 public sealed class CoreTelemetryService : ITelemetryService
 {
     private static readonly Regex ParenPathRegex = new(@"(\()(?:/|~/|[A-Za-z]:[\\/]|\\\\)[^()\r\n\u001E]+(\))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex ParenRelativeSlashPathRegex = new(@"(\()(?![ \t]*(?:HTTP|TLS|SSL)/\d+(?:\.\d+)*[.,;:!?\s]*\))(?![ \t]*\d+/\d+[.,;:!?\s]*\))[^\s/\\""'<>()\[\]{}:,;=\u001E\u001F]+/[^()\r\n\u001E]+(\))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex ParenRelativeSlashPathRegex = new(@"(\()(?![ \t]*(?:HTTP|TLS|SSL)/\d+(?:\.\d+){0,8}[.,;:!?\s]*\))(?![ \t]*\d+/\d+[.,;:!?\s]*\))[^\s/\\""'<>()\[\]{}:,;=\u001E\u001F]+/[^()\r\n\u001E]+(\))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex WindowsPathRegex = new(@"(?:[A-Za-z]:[\\/]|\\\\)[^\S\r\n]*[^\r\n\u001E\s""](?:[^\r\n\u001E]*[^\r\n\u001E\s])?", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex RelativeBackslashPathRegex = new(@"(^|[\s(\[{""'=,:;<>)\u001F])[^\s\\/""'<>()\[{:,;=\u001E\u001F]+\\[^\r\n\u001E\u001F\s""](?:[^\r\n\u001E\u001F]*[^\r\n\u001E\u001F\s])?", RegexOptions.Compiled);
     private static readonly Regex QuotedSpacedRootPathRegex = new(@"[""']/[ \t]+[^\r\n\u001E\s""][^\r\n\u001E]*", RegexOptions.Compiled);
     private static readonly Regex UnixPathRegex = new(@"(?<![\p{L}\p{M}\p{N}._/-])(?:~/(?=[^\S\r\n]*[^\s""])|//+(?=[^\S\r\n]*[^\s/""])|/(?=[^\S\r\n]*[^\s/""]))[^\S\r\n]*[^\r\n\u001E\s](?:[^\r\n\u001E]*[^\r\n\u001E\s])?", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex RelativeSlashPathRegex = new(@"(^|[\s(\[{)\]}<>""'=,:;\u001F])(?!(?<!['""])(?:HTTP|TLS|SSL)/\d+(?:\.\d+)*(?:$|[\s(\[{)\]},;:!?]|\.(?![A-Za-z0-9])))(?!(?<!['""])\d+/\d+(?:$|[\s)\]},;:!?]|\.(?![A-Za-z0-9])))[^\s/\\""'<>()\[\]{}:,;=\u001E\u001F]+/[^\r\n\u001E\u001F\s""](?:[^\r\n\u001E\u001F]*[^\r\n\u001E\u001F\s])?", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex RelativeSlashPathRegex = new(@"(^|[\s(\[{)\]}<>""'=,:;\u001F])(?!(?<!['""])(?:HTTP|TLS|SSL)/\d+(?:\.\d+){0,8}(?:$|[\s(\[{)\]},;:!?]|\.(?![A-Za-z0-9])))(?!(?<!['""])\d+/\d+(?:$|[\s)\]},;:!?]|\.(?![A-Za-z0-9])))[^\s/\\""'<>()\[\]{}:,;=\u001E\u001F]+/[^\r\n\u001E\u001F\s""](?:[^\r\n\u001E\u001F]*[^\r\n\u001E\u001F\s])?", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex KeywordQuotedPathRegex = new(@"\b(?:file|path|directory|folder|document)[^\S\r\n]+(?=[""'])", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex KeywordFilenamePrefixRegex = new(@"\b(?:open|opening|read|reading|write|writing|delete|deleting|remove|removing|rename|stat|create|creating|load|loading|save|saving|access|accessing|unlink|file|path|directory|folder|document|filename|filepath)\b(?:[^\S\r\n]*[:=][^\S\r\n]*|[^\S\r\n]+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly HashSet<string> SourceLineExtensions = new(StringComparer.OrdinalIgnoreCase)
@@ -70,8 +70,12 @@ public sealed class CoreTelemetryService : ITelemetryService
     private bool _disposeRequested;
     private bool _clientDisposed;
     private bool _lastPurgeFailed;
+    private bool _contendedFlushRetryActive;
+    private bool _contendedFlushRetryReschedule;
+    private CancellationToken _contendedFlushRetryToken;
     internal Func<Task>? FlushOverrideForTesting { get; set; }
     internal int ExternalPollIntervalMsForTesting { get; set; } = 50;
+    internal int ExternalLockRetryDelayMsForTesting { get; set; } = 250;
     internal string? ActiveBufferPathForTesting
     {
         get
@@ -857,7 +861,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex SlackWebhookHostRegex = new(
-        @"https?://hooks\.slack(?:-gov)?\.com\.?(?::\d+)?(?=(?:/|%2[fF]))",
+        @"https?://hooks\.slack(?:-gov)?\.com\.?(?::\d*)?(?=(?:/|%2[fF]))",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex SlackWebhookRouteRegex = new(
@@ -5974,13 +5978,14 @@ public sealed class CoreTelemetryService : ITelemetryService
         return result;
     }
 
-    private void WithPersistingConsent(bool requiresFull, Action nativeAction)
+    private void WithPersistingConsent(bool requiresFull, Action nativeAction, long? expectedEpoch = null)
     {
         TryCompletePendingInitialEnable();
         lock (_gate)
         {
             if (_disposeRequested || _clientDisposed || _consent == TelemetryConsent.Off ||
-                (requiresFull && _consent != TelemetryConsent.Full))
+                (requiresFull && _consent != TelemetryConsent.Full) ||
+                (expectedEpoch.HasValue && _consentEpoch != expectedEpoch.Value))
             {
                 return;
             }
@@ -6006,7 +6011,8 @@ public sealed class CoreTelemetryService : ITelemetryService
             {
                 if (!EnsureExternalConsentLocked(out toCancel)) goto CancelAndReturn;
                 if (_disposeRequested || _clientDisposed || _consent == TelemetryConsent.Off ||
-                    (requiresFull && _consent != TelemetryConsent.Full))
+                    (requiresFull && _consent != TelemetryConsent.Full) ||
+                    (expectedEpoch.HasValue && _consentEpoch != expectedEpoch.Value))
                 {
                     return;
                 }
@@ -6026,9 +6032,11 @@ public sealed class CoreTelemetryService : ITelemetryService
     {
         if (string.IsNullOrWhiteSpace(name)) return;
         TryCompletePendingInitialEnable();
+        long captureEpoch;
         lock (_gate)
         {
             if (_disposeRequested || _clientDisposed || _consent != TelemetryConsent.Full) return;
+            captureEpoch = _consentEpoch;
         }
         var safeName = SanitizeLocalPaths(name);
         if (string.IsNullOrWhiteSpace(safeName)) return;
@@ -6043,16 +6051,18 @@ public sealed class CoreTelemetryService : ITelemetryService
             {
                 Log.For("telemetry").Warn("telemetry track skipped: " + ex.Message);
             }
-        });
+        }, captureEpoch);
     }
 
     public void TrackError(string code, IReadOnlyDictionary<string, object>? properties = null)
     {
         if (string.IsNullOrWhiteSpace(code)) return;
         TryCompletePendingInitialEnable();
+        long captureEpoch;
         lock (_gate)
         {
             if (_disposeRequested || _clientDisposed || _consent != TelemetryConsent.Full) return;
+            captureEpoch = _consentEpoch;
         }
         var safeCode = SanitizeLocalPaths(code);
         if (string.IsNullOrWhiteSpace(safeCode)) return;
@@ -6067,16 +6077,18 @@ public sealed class CoreTelemetryService : ITelemetryService
             {
                 Log.For("telemetry").Warn("telemetry error skipped: " + ex.Message);
             }
-        });
+        }, captureEpoch);
     }
 
     public void AddBreadcrumb(string category, string message, TelemetryBreadcrumbSeverity level = TelemetryBreadcrumbSeverity.Info)
     {
         if (string.IsNullOrWhiteSpace(category)) return;
         TryCompletePendingInitialEnable();
+        long captureEpoch;
         lock (_gate)
         {
             if (_disposeRequested || _clientDisposed || _consent == TelemetryConsent.Off) return;
+            captureEpoch = _consentEpoch;
         }
         var mapped = level switch
         {
@@ -6091,7 +6103,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         lock (_gate)
         {
             if (!EnsureExternalConsentLocked(out toCancel)) goto CancelAndReturn;
-            if (_disposeRequested || _clientDisposed || _consent == TelemetryConsent.Off) return;
+            if (_disposeRequested || _clientDisposed || _consent == TelemetryConsent.Off || _consentEpoch != captureEpoch) return;
             _client.AddBreadcrumb(safeCategory, safeMessage, mapped);
         }
         return;
@@ -6102,9 +6114,11 @@ public sealed class CoreTelemetryService : ITelemetryService
     public void ReportCrash(string kind, string message, string? stack = null, bool fromPreviousSession = false)
     {
         TryCompletePendingInitialEnable();
+        long captureEpoch;
         lock (_gate)
         {
             if (_disposeRequested || _clientDisposed || _consent == TelemetryConsent.Off) return;
+            captureEpoch = _consentEpoch;
         }
         var safeMessage = string.IsNullOrWhiteSpace(message) ? "Unhandled exception" : SanitizeLocalPaths(message);
         var safeStack = stack == null ? null : SanitizeLocalPaths(stack);
@@ -6127,7 +6141,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             {
                 Log.For("telemetry").Warn("telemetry crash record skipped: " + ex.Message);
             }
-        });
+        }, captureEpoch);
     }
 
     public void Persist()
@@ -6145,9 +6159,12 @@ public sealed class CoreTelemetryService : ITelemetryService
         });
     }
 
-    public async Task FlushAsync(CancellationToken cancellationToken = default)
+    public Task FlushAsync(CancellationToken cancellationToken = default) =>
+        FlushInternalAsync(cancellationToken, scheduleRetryOnLockContention: true);
+
+    private async Task<bool> FlushInternalAsync(CancellationToken cancellationToken, bool scheduleRetryOnLockContention)
     {
-        if (cancellationToken.IsCancellationRequested) return;
+        if (cancellationToken.IsCancellationRequested) return true;
         TryCompletePendingInitialEnable();
 
         CancellationToken revokeToken;
@@ -6163,30 +6180,38 @@ public sealed class CoreTelemetryService : ITelemetryService
             externalConsentLock = TryAcquireExternalConsentLease();
             if (externalConsentLock == null)
             {
+                bool shouldRetry;
                 lock (_gate)
                 {
                     EnsureExternalConsentLocked(out toCancel);
+                    shouldRetry = !cancellationToken.IsCancellationRequested &&
+                                  !_disposeRequested &&
+                                  !_clientDisposed &&
+                                  (_consent != TelemetryConsent.Off || _pendingInitialEnable);
+                    if (shouldRetry && scheduleRetryOnLockContention)
+                    {
+                        ScheduleContendedFlushRetryLocked(cancellationToken);
+                    }
                 }
                 if (toCancel != null) CancelQuietly(toCancel);
-                return;
+                return !shouldRetry;
             }
         }
-        var lockTransferred = false;
-        try
+        using (externalConsentLock)
         {
             lock (_gate)
             {
                 if (!EnsureExternalConsentLocked(out toCancel))
                 {
                     if (toCancel != null) goto CancelAndReturn;
-                    return;
+                    return true;
                 }
                 if (cancellationToken.IsCancellationRequested || _disposeRequested || _clientDisposed || _consent == TelemetryConsent.Off)
                 {
-                    return;
+                    return true;
                 }
                 revokeToken = _flushCts.Token;
-                if (revokeToken.IsCancellationRequested) return;
+                if (revokeToken.IsCancellationRequested) return true;
                 flushEpoch = _consentEpoch;
                 flushBufferPath = _activeBufferPath;
                 _inFlightFlushes++;
@@ -6197,9 +6222,10 @@ public sealed class CoreTelemetryService : ITelemetryService
                 }
                 try
                 {
-                    // Dispatch under the cross-process consent lease and hold the lease until the
-                    // entire native flush completes so another process's opt-out serializes cleanly
-                    // with multi-batch flushing and no batch can start after opt-out finishes.
+                    // Dispatch under the cross-process consent lease, then release the lease
+                    // immediately so cross-process opt-out is never blocked by slow network I/O.
+                    // MonitorExternalConsentWhileFlushingAsync watches for mid-flush opt-out and
+                    // revokes native consent promptly.
                     nativeFlush = flushOverride != null ? flushOverride() : _client.Flush();
                 }
                 catch (Exception ex) when (ex is AunException or ObjectDisposedException or OperationCanceledException)
@@ -6213,38 +6239,22 @@ public sealed class CoreTelemetryService : ITelemetryService
             if (nativeFlush != null)
             {
                 var monitorToStop = monitorCts;
-                var heldLease = externalConsentLock;
-                lockTransferred = true;
-                // Defer decrementing `_inFlightFlushes`, any pending native `_client.Dispose()`, and
-                // releasing the cross-process consent lease until `nativeFlush` actually finishes,
-                // even if `WaitWithCancellationAsync` returns early on cancel/revoke.
+                // Defer decrementing `_inFlightFlushes` and any pending native `_client.Dispose()`
+                // until `nativeFlush` actually finishes, even if `WaitWithCancellationAsync` returns
+                // early on cancel/revoke.
                 _ = nativeFlush.ContinueWith(
                     static (t, state) =>
                     {
                         _ = t.Exception;
-                        var (svc, cts, lease, epoch, bufPath) =
-                            ((CoreTelemetryService, CancellationTokenSource?, IDisposable?, long, string?))state!;
-                        try
-                        {
-                            if (cts != null) CancelQuietly(cts);
-                            svc.ReleaseInFlightFlush(epoch, bufPath);
-                        }
-                        finally
-                        {
-                            lease?.Dispose();
-                        }
+                        var (svc, cts, epoch, bufPath) =
+                            ((CoreTelemetryService, CancellationTokenSource?, long, string?))state!;
+                        if (cts != null) CancelQuietly(cts);
+                        svc.ReleaseInFlightFlush(epoch, bufPath);
                     },
-                    (this, monitorToStop, heldLease, flushEpoch, flushBufferPath),
+                    (this, monitorToStop, flushEpoch, flushBufferPath),
                     CancellationToken.None,
                     TaskContinuationOptions.ExecuteSynchronously,
                     TaskScheduler.Default);
-            }
-        }
-        finally
-        {
-            if (!lockTransferred)
-            {
-                externalConsentLock?.Dispose();
             }
         }
 
@@ -6252,7 +6262,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         {
             if (monitorCts != null) CancelQuietly(monitorCts);
             ReleaseInFlightFlush(flushEpoch, flushBufferPath);
-            return;
+            return true;
         }
 
         try
@@ -6267,9 +6277,81 @@ public sealed class CoreTelemetryService : ITelemetryService
                 Log.For("telemetry").Warn("telemetry flush skipped: " + ex.Message);
             }
         }
-        return;
+        return true;
     CancelAndReturn:
         CancelQuietly(toCancel);
+        return true;
+    }
+
+    private void ScheduleContendedFlushRetryLocked(CancellationToken callerToken)
+    {
+        if (_disposeRequested || _clientDisposed) return;
+        _contendedFlushRetryToken = callerToken;
+        if (_contendedFlushRetryActive)
+        {
+            _contendedFlushRetryReschedule = true;
+            return;
+        }
+        _contendedFlushRetryActive = true;
+        _contendedFlushRetryReschedule = false;
+        var stopToken = _flushCts.Token;
+        _ = Task.Run(() => RunContendedFlushRetryLoopAsync(stopToken, callerToken));
+    }
+
+    private async Task RunContendedFlushRetryLoopAsync(CancellationToken stopToken, CancellationToken callerToken)
+    {
+        var currentStop = stopToken;
+        var currentCaller = callerToken;
+        while (true)
+        {
+            var succeededOrDone = false;
+            try
+            {
+                var delayMs = Math.Max(10, ExternalLockRetryDelayMsForTesting);
+                using var linked = CancellationTokenSource.CreateLinkedTokenSource(currentStop, currentCaller);
+                while (!linked.Token.IsCancellationRequested)
+                {
+                    await Task.Delay(delayMs, linked.Token).ConfigureAwait(false);
+                    lock (_gate)
+                    {
+                        if (_disposeRequested || _clientDisposed ||
+                            (_consent == TelemetryConsent.Off && !_pendingInitialEnable))
+                        {
+                            succeededOrDone = true;
+                            break;
+                        }
+                    }
+                    if (await FlushInternalAsync(linked.Token, scheduleRetryOnLockContention: false).ConfigureAwait(false))
+                    {
+                        succeededOrDone = true;
+                        break;
+                    }
+                    delayMs = Math.Min(delayMs * 2, 5000);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+            }
+
+            lock (_gate)
+            {
+                if (!succeededOrDone &&
+                    _contendedFlushRetryReschedule &&
+                    !_disposeRequested &&
+                    !_clientDisposed &&
+                    (_consent != TelemetryConsent.Off || _pendingInitialEnable) &&
+                    !_contendedFlushRetryToken.IsCancellationRequested)
+                {
+                    _contendedFlushRetryReschedule = false;
+                    currentStop = _flushCts.Token;
+                    currentCaller = _contendedFlushRetryToken;
+                    continue;
+                }
+                _contendedFlushRetryActive = false;
+                _contendedFlushRetryReschedule = false;
+                return;
+            }
+        }
     }
 
     private IDisposable? TryAcquireExternalConsentLease()
