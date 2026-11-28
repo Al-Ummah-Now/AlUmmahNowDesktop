@@ -346,4 +346,48 @@ public class SettingsStoreTests
             if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
         }
     }
+
+    [Fact]
+    public void IsTelemetryDisableSaveFailed_persists_across_settings_rebuilds_until_opt_out_or_new_generation()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "aun-settings-failed-optout-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var settingsPath = Path.Combine(dir, "settings.json");
+            var consentPath = Path.Combine(dir, "telemetry-consent");
+            var store = new SettingsStore(settingsPath);
+            var otherStore = new SettingsStore(settingsPath);
+            Assert.True(store.SaveTelemetryEnabled(true));
+            Assert.False(store.IsTelemetryDisableSaveFailed());
+
+            if (!OperatingSystem.IsWindows())
+            {
+                File.SetUnixFileMode(consentPath, UnixFileMode.UserRead);
+                File.SetUnixFileMode(dir, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+                try
+                {
+                    Assert.Equal(SettingsStore.TelemetryOptOutResult.SaveFailed, store.SaveTelemetryOptOut());
+                    Assert.True(store.IsTelemetryDisableSaveFailed());
+                }
+                finally
+                {
+                    File.SetUnixFileMode(dir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+                    File.SetUnixFileMode(consentPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+                }
+
+                // Even after permissions are restored and a rebuilt Settings view queries the store,
+                // the failed opt-out remains tracked for the stale generation until resolved.
+                Assert.True(store.IsTelemetryDisableSaveFailed());
+
+                // Once another window opts out, the failure clears.
+                Assert.Equal(SettingsStore.TelemetryOptOutResult.Saved, otherStore.SaveTelemetryOptOut());
+                Assert.False(store.IsTelemetryDisableSaveFailed());
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+    }
 }

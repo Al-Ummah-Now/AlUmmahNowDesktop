@@ -8323,15 +8323,15 @@ public sealed class CoreTelemetryService : ITelemetryService
 
     private static readonly HashSet<string> SensitiveKeySegments = new(StringComparer.Ordinal)
     {
-        "token", "secret", "jwt", "bearer", "password", "passwd", "pwd", "passphrase",
+        "token", "secret", "jwt", "bearer", "password", "passwd", "pwd", "pass", "passphrase",
         "credential", "credentials", "otp", "pin", "passcode", "cookie",
-        "authorization", "signature", "apikey", "accesskey", "privatekey",
+        "authorization", "auth", "signature", "sig", "apikey", "accesskey", "key", "privatekey",
         "secretkey", "sessionid", "sessionkey", "codeverifier",
         "verificationcode", "authcode", "recoverycode", "clientsecret",
         "accesstoken", "refreshtoken", "idtoken", "sessiontoken", "securitytoken",
         "apitoken", "authtoken",
         "email", "mail", "phone", "phonenumber", "msisdn", "mobile", "tel", "telephone",
-        "ssn", "ipaddress", "address", "street", "streetaddress", "homeaddress",
+        "ssn", "ip", "ipaddress", "address", "street", "streetaddress", "homeaddress",
         "card", "creditcard", "cvv", "cvc", "iban", "pan",
         "dob", "birthdate", "dateofbirth",
         "firstname", "lastname", "fullname", "displayname", "givenname", "familyname",
@@ -8447,7 +8447,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         RegexOptions.Compiled);
 
     private static bool IsPhoneBoundaryWordRune(System.Text.Rune r) =>
-        System.Text.Rune.IsLetterOrDigit(r) || r.Value == '_';
+        System.Text.Rune.IsLetterOrDigit(r);
 
     private static bool IsPhoneSeparatorRune(System.Text.Rune r) =>
         (System.Text.Rune.IsWhiteSpace(r) && r.Value is not ('\r' or '\n')) ||

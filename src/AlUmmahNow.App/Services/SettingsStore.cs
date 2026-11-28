@@ -298,6 +298,97 @@ namespace AlUmmahNow.App.Services
             SaveFailed,
         }
 
+        private readonly object _optOutStateGate = new();
+        private string? _failedOptOutToken;
+        private bool _pendingOtherProcessRevocation;
+
+        /// <summary>
+        /// Returns true when an earlier opt-out or rollback in this process failed to update the shared
+        /// consent sidecar and the same stale opt-in generation is still present on disk. Automatically
+        /// clears once another window opts out or starts a newer opt-in generation.
+        /// </summary>
+        public bool IsTelemetryDisableSaveFailed()
+        {
+            string? failedToken;
+            lock (_optOutStateGate) failedToken = _failedOptOutToken;
+            if (failedToken == null) return false;
+            var current = LoadTelemetryConsentToken();
+            if (current == null)
+            {
+                if (!LoadTelemetryEnabled())
+                {
+                    lock (_optOutStateGate)
+                    {
+                        if (_failedOptOutToken == failedToken) _failedOptOutToken = null;
+                    }
+                    return false;
+                }
+                return true;
+            }
+            var currentBase = ExtractBaseGenerationToken(current);
+            if (failedToken != "__failed__" && !string.Equals(currentBase, failedToken, StringComparison.Ordinal))
+            {
+                lock (_optOutStateGate)
+                {
+                    if (_failedOptOutToken == failedToken) _failedOptOutToken = null;
+                }
+                return false;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Returns true when an earlier opt-out in this process succeeded on disk while a sibling process
+        /// still held an active flush guard, and that guard is still active with telemetry still opted out.
+        /// </summary>
+        public bool IsTelemetryPendingOtherRevocation()
+        {
+            lock (_optOutStateGate)
+            {
+                if (!_pendingOtherProcessRevocation) return false;
+            }
+            if (LoadTelemetryEnabled() || !HasActiveFlushGuards())
+            {
+                lock (_optOutStateGate) _pendingOtherProcessRevocation = false;
+                return false;
+            }
+            return true;
+        }
+
+        private void RecordDisableSaveFailed()
+        {
+            var current = LoadTelemetryConsentToken();
+            var token = current is { Length: > 0 } ? ExtractBaseGenerationToken(current) : "__failed__";
+            lock (_optOutStateGate)
+            {
+                _failedOptOutToken = token;
+                _pendingOtherProcessRevocation = false;
+            }
+        }
+
+        private void RecordOptOutResult(TelemetryOptOutResult result)
+        {
+            if (result == TelemetryOptOutResult.SaveFailed)
+            {
+                RecordDisableSaveFailed();
+                return;
+            }
+            lock (_optOutStateGate)
+            {
+                _failedOptOutToken = null;
+                _pendingOtherProcessRevocation = result == TelemetryOptOutResult.PendingOtherProcessRevocation;
+            }
+        }
+
+        private void ClearOptOutTracking()
+        {
+            lock (_optOutStateGate)
+            {
+                _failedOptOutToken = null;
+                _pendingOtherProcessRevocation = false;
+            }
+        }
+
         /// <summary>
         /// Clears the shared telemetry consent sidecar and waits briefly for any sibling process's
         /// active flush monitor to observe revocation. Distinguishes a true save failure from a saved
@@ -310,15 +401,21 @@ namespace AlUmmahNow.App.Services
                 out var directoryMissing,
                 timeoutMs: 10000,
                 serializeMutation: true);
+            TelemetryOptOutResult result;
             if (directoryMissing)
             {
-                return TelemetryOptOutResult.Saved;
+                result = TelemetryOptOutResult.Saved;
             }
-            if (crossProcessLock == null)
+            else if (crossProcessLock == null)
             {
-                return TelemetryOptOutResult.SaveFailed;
+                result = TelemetryOptOutResult.SaveFailed;
             }
-            return ClearConsentSidecarUnlockedResult();
+            else
+            {
+                result = ClearConsentSidecarUnlockedResult();
+            }
+            RecordOptOutResult(result);
+            return result;
         }
 
         /// <summary>
@@ -389,6 +486,7 @@ namespace AlUmmahNow.App.Services
                 }
                 WriteConsentSidecarUnlocked(token, nextPending);
                 writtenToken = token;
+                if (confirmImmediately) ClearOptOutTracking();
                 return true;
             }
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
@@ -415,10 +513,15 @@ namespace AlUmmahNow.App.Services
             {
                 return false;
             }
-            if (pendingClaims == null) return true;
+            if (pendingClaims == null)
+            {
+                ClearOptOutTracking();
+                return true;
+            }
             try
             {
                 WriteConsentSidecarUnlocked(current, pendingClaims: null);
+                ClearOptOutTracking();
                 return true;
             }
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
@@ -435,13 +538,21 @@ namespace AlUmmahNow.App.Services
         /// </summary>
         public bool RollbackTelemetryEnabled(string? expectedToken)
         {
-            if (expectedToken is not { Length: > 0 }) return false;
+            if (expectedToken is not { Length: > 0 })
+            {
+                RecordDisableSaveFailed();
+                return false;
+            }
             using var crossProcessLock = TryAcquireConsentLock(
                 createDirectory: false,
                 out var directoryMissing,
                 serializeMutation: true);
             if (directoryMissing) return true;
-            if (crossProcessLock == null) return false;
+            if (crossProcessLock == null)
+            {
+                RecordDisableSaveFailed();
+                return false;
+            }
             ReadConsentSidecarUnlocked(out var current, out var pendingClaims);
             if (current is not { Length: > 0 }) return true;
             if (pendingClaims != null)
@@ -452,7 +563,9 @@ namespace AlUmmahNow.App.Services
                 }
                 if (pendingClaims.Count == 0)
                 {
-                    return ClearConsentSidecarUnlocked();
+                    var optOutResult = ClearConsentSidecarUnlockedResult();
+                    RecordOptOutResult(optOutResult);
+                    return optOutResult != TelemetryOptOutResult.SaveFailed;
                 }
                 try
                 {
@@ -464,6 +577,7 @@ namespace AlUmmahNow.App.Services
                 }
                 catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
                 {
+                    RecordDisableSaveFailed();
                     return false;
                 }
             }

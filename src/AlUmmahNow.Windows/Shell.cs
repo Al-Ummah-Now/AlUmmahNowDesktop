@@ -316,7 +316,7 @@ public sealed partial class Shell
         telemetryBody.Children.Add(telemetryHeading);
         telemetryBody.Children.Add(new TextBlock { Text = _localizer["settings.telemetry.body"], TextWrapping = TextWrapping.Wrap }.Dim(0.75));
         var telemetryUnavailable = _telemetry is NullTelemetryService;
-        _settings.TelemetryEnabled = !telemetryUnavailable && _store.LoadTelemetryEnabled() && _telemetry.Consent == TelemetryConsent.Full;
+        _settings.TelemetryEnabled = !telemetryUnavailable && (_store.IsTelemetryDisableSaveFailed() || (_store.LoadTelemetryEnabled() && _telemetry.Consent == TelemetryConsent.Full));
         var telemetryToggle = new ToggleSwitch { Header = _localizer["settings.telemetry.toggle"], IsOn = _settings.TelemetryEnabled, IsEnabled = !telemetryUnavailable };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(telemetryToggle, "SettingsTelemetryToggle");
         var purgeWarningText = _localizer["settings.telemetry.purgeWarning"];
@@ -347,8 +347,6 @@ public sealed partial class Shell
                     "telemetry-notice");
             }
         }
-        var disableSaveFailed = false;
-        var pendingOtherRevocation = false;
         void SyncPurgeNotice()
         {
             if (telemetryUnavailable)
@@ -362,30 +360,20 @@ public sealed partial class Shell
                 return;
             }
             var failed = _telemetry.LastPurgeFailed;
+            if (_store.IsTelemetryDisableSaveFailed())
+            {
+                if (!_settings.TelemetryEnabled)
+                {
+                    _settings.TelemetryEnabled = true;
+                    telemetryToggle.IsOn = true;
+                }
+                SetTelemetryNotice(failed
+                    ? disableErrorText + "\n" + purgeWarningText
+                    : disableErrorText);
+                return;
+            }
             var persistedEnabled = _store.LoadTelemetryEnabled();
-            if (disableSaveFailed)
-            {
-                if (!persistedEnabled)
-                {
-                    disableSaveFailed = false;
-                }
-                else
-                {
-                    if (!_settings.TelemetryEnabled)
-                    {
-                        _settings.TelemetryEnabled = true;
-                        telemetryToggle.IsOn = true;
-                    }
-                    SetTelemetryNotice(failed
-                        ? disableErrorText + "\n" + purgeWarningText
-                        : disableErrorText);
-                    return;
-                }
-            }
-            if (pendingOtherRevocation && (persistedEnabled || !_store.HasActiveFlushGuards()))
-            {
-                pendingOtherRevocation = false;
-            }
+            var pendingOtherRevocation = _store.IsTelemetryPendingOtherRevocation();
             if (!persistedEnabled)
             {
                 if (_telemetry.Consent != TelemetryConsent.Off)
@@ -506,7 +494,6 @@ public sealed partial class Shell
                 {
                     var rolledBack = _store.RollbackTelemetryEnabled(writtenToken);
                     var purged = _telemetry.SetConsent(TelemetryConsent.Off);
-                    disableSaveFailed = !rolledBack;
                     if (!rolledBack)
                     {
                         _settings.TelemetryEnabled = true;
@@ -521,8 +508,6 @@ public sealed partial class Shell
                     SetTelemetryNotice(confirmationFailed ? string.Empty : _localizer["settings.telemetry.enableError"]);
                     return;
                 }
-                disableSaveFailed = false;
-                pendingOtherRevocation = false;
                 _settings.TelemetryEnabled = true;
                 SetTelemetryNotice(string.Empty);
             }
@@ -530,9 +515,7 @@ public sealed partial class Shell
             {
                 var optOut = _store.SaveTelemetryOptOut();
                 var purged = _telemetry.SetConsent(TelemetryConsent.Off);
-                disableSaveFailed = optOut == SettingsStore.TelemetryOptOutResult.SaveFailed;
-                pendingOtherRevocation = optOut == SettingsStore.TelemetryOptOutResult.PendingOtherProcessRevocation;
-                if (disableSaveFailed)
+                if (optOut == SettingsStore.TelemetryOptOutResult.SaveFailed)
                 {
                     _settings.TelemetryEnabled = true;
                     telemetryToggle.IsOn = true;
@@ -542,7 +525,7 @@ public sealed partial class Shell
                     return;
                 }
                 _settings.TelemetryEnabled = false;
-                if (pendingOtherRevocation)
+                if (optOut == SettingsStore.TelemetryOptOutResult.PendingOtherProcessRevocation)
                 {
                     SetTelemetryNotice(purged
                         ? revokingOtherText

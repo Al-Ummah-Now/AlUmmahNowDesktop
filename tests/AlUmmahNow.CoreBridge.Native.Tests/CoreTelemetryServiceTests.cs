@@ -3200,8 +3200,8 @@ public class CoreTelemetryServiceTests
 
         var json = CoreTelemetryService.SerializeProperties(new Dictionary<string, object>
         {
-            ["quotedCred"] = "{\"challenge.verificationCode\":\"482731\"} pwd=shortsecret token=cobalt-orchard",
-            ["personalText"] = "fullName=\"Alice Wonderland\" displayName='Bob Smith' address=\"123 Main St, Apt 4\"",
+            ["quotedCred"] = "{\"challenge.verificationCode\":\"482731\"} pass=\"correct horse battery staple\" {\"pass\":\"multi word phrase\"} pwd=shortsecret token=cobalt-orchard",
+            ["personalText"] = "fullName=\"Alice Wonderland\" displayName='Bob Smith' address=\"123 Main St, Apt 4\" phone_2025550123",
             ["http://u:p@localhost/x"] = "https://1drv.ms/u/s!Aq82F1ZLPx0K",
             ["algNone"] = "IHsiYWxnIjoibm9uZSJ9.eyJzdWIiOiJhbGljZSJ9.",
             ["longJwt"] = longSignedJwt,
@@ -3213,6 +3213,9 @@ public class CoreTelemetryServiceTests
 
         Assert.NotNull(json);
         Assert.DoesNotContain("482731", json);
+        Assert.DoesNotContain("horse battery staple", json);
+        Assert.DoesNotContain("word phrase", json);
+        Assert.DoesNotContain("2025550123", json);
         Assert.DoesNotContain("shortsecret", json);
         Assert.DoesNotContain("cobalt-orchard", json);
         Assert.DoesNotContain("[redacted]]", json);
