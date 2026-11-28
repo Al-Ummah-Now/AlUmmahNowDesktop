@@ -421,6 +421,7 @@ public sealed partial class MainWindow
                     telemetryNotice.SetVisible(true);
                     return;
                 }
+                _store.ConfirmTelemetryEnabled(writtenToken);
                 disableSaveFailed = false;
                 _settings.TelemetryEnabled = true;
                 telemetryNotice.SetText(string.Empty);

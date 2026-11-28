@@ -415,6 +415,7 @@ public sealed partial class Shell
                     telemetryNotice.Visibility = Visibility.Visible;
                     return;
                 }
+                _store.ConfirmTelemetryEnabled(writtenToken);
                 disableSaveFailed = false;
                 _settings.TelemetryEnabled = true;
                 telemetryNotice.Text = string.Empty;

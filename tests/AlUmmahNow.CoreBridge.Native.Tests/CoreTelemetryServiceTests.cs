@@ -2183,6 +2183,62 @@ public class CoreTelemetryServiceTests
     }
 
     [Fact]
+    public async Task Dispose_during_flush_still_detects_cross_process_opt_out_and_revokes_native_consent()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "aun-tel-dispose-monitor-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var bufferPath = Path.Combine(dir, "telemetry-buffer.json");
+        try
+        {
+            string? sharedToken = "enabled:gen-dispose";
+            var nativeStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var nativeRelease = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            using var service = new CoreTelemetryService(
+                platform: "linux",
+                appVersion: "1.0.0",
+                locale: "en",
+                videosApiBaseUrl: null,
+                userAgent: "AlUmmahNowLinux/1.0.0",
+                bufferPath: bufferPath,
+                initialEnabled: true,
+                externalConsentToken: () => Volatile.Read(ref sharedToken),
+                acquireExternalConsentLock: () => new NoOpDisposable())
+            {
+                ExternalPollIntervalMsForTesting = 15,
+                FlushOverrideForTesting = () =>
+                {
+                    nativeStarted.TrySetResult(true);
+                    return nativeRelease.Task;
+                }
+            };
+
+            var flushTask = service.FlushAsync();
+            await nativeStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+            // Dispose instance A while its native flush is still running, keeping the native client alive.
+            service.Dispose();
+            await flushTask.WaitAsync(TimeSpan.FromSeconds(2));
+            Assert.False(service.IsClientDisposedForTesting);
+
+            // Instance B opts out while A's flush is still open; A's monitor must still revoke native consent.
+            Volatile.Write(ref sharedToken, null);
+            var deadline = DateTime.UtcNow.AddSeconds(2);
+            while (service.NativeConsentForTesting != AlUmmahNow.Core.TelemetryConsentState.Denied &&
+                   DateTime.UtcNow < deadline)
+            {
+                await Task.Delay(15);
+            }
+            Assert.Equal(AlUmmahNow.Core.TelemetryConsentState.Denied, service.NativeConsentForTesting);
+
+            nativeRelease.TrySetResult(true);
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task FlushAsync_retries_in_same_session_when_external_consent_lock_is_released()
     {
         var dir = Path.Combine(Path.GetTempPath(), "aun-tel-flush-retry-" + Guid.NewGuid().ToString("N"));
@@ -2669,6 +2725,12 @@ public class CoreTelemetryServiceTests
         Assert.Equal(
             "jwt=[redacted]",
             CoreTelemetryService.SanitizeLocalPaths("jwt=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTYifQ.sigSecret"));
+        Assert.Equal(
+            "https://[redacted-email]",
+            CoreTelemetryService.SanitizeLocalPaths("https://example.com/users/alice%40%65xample.com"));
+        Assert.Equal(
+            "https://[redacted-email]",
+            CoreTelemetryService.SanitizeLocalPaths("https://example.com/users/alice%40b%C3%BCcher.example"));
         Assert.Equal(
             "https://hooks.slack.com:/services/[redacted]",
             CoreTelemetryService.SanitizeLocalPaths("https://hooks.slack.com:/services/T000/B000/Canary"));

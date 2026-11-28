@@ -5148,6 +5148,72 @@ public sealed class CoreTelemetryService : ITelemetryService
         _ => DomainCharKind.Other
     };
 
+    private static int HexNibble(char c) =>
+        c is >= '0' and <= '9' ? c - '0' :
+        c is >= 'a' and <= 'f' ? c - 'a' + 10 :
+        c is >= 'A' and <= 'F' ? c - 'A' + 10 : -1;
+
+    private static bool TryParsePercentByte(string text, int pos, out byte value)
+    {
+        value = 0;
+        if (pos + 2 >= text.Length || text[pos] != '%') return false;
+        var hi = HexNibble(text[pos + 1]);
+        var lo = HexNibble(text[pos + 2]);
+        if (hi < 0 || lo < 0) return false;
+        value = (byte)((hi << 4) | lo);
+        return true;
+    }
+
+    private static bool TryClassifyPercentDomainChar(string text, int pos, out DomainCharKind kind, out int step)
+    {
+        kind = DomainCharKind.Other;
+        step = 1;
+        if (!TryParsePercentByte(text, pos, out var b0)) return false;
+        if (b0 < 0x80)
+        {
+            step = 3;
+            var ch = (char)b0;
+            if (char.IsAsciiLetter(ch)) kind = DomainCharKind.Letter;
+            else if (char.IsAsciiDigit(ch)) kind = DomainCharKind.Digit;
+            else if (ch == '.') kind = DomainCharKind.Dot;
+            else if (ch == '-') kind = DomainCharKind.Hyphen;
+            return true;
+        }
+        var count = b0 is >= 0xC2 and <= 0xDF ? 2 : b0 is >= 0xE0 and <= 0xEF ? 3 : b0 is >= 0xF0 and <= 0xF4 ? 4 : 0;
+        if (count == 0 || pos + count * 3 > text.Length) return false;
+        Span<byte> bytes = stackalloc byte[count];
+        bytes[0] = b0;
+        for (var i = 1; i < count; i++)
+        {
+            if (!TryParsePercentByte(text, pos + i * 3, out var next) || next is < 0x80 or > 0xBF) return false;
+            bytes[i] = next;
+        }
+        string decoded;
+        try
+        {
+            decoded = StrictUtf8.GetString(bytes);
+        }
+        catch (System.Text.DecoderFallbackException)
+        {
+            return false;
+        }
+        if (decoded.Length == 0) return false;
+        step = count * 3;
+        if (decoded.Length == 1)
+        {
+            var ch = decoded[0];
+            kind = IsEmailDomainDot(ch) ? DomainCharKind.Dot : ClassifyUnicodeCategory(char.GetUnicodeCategory(ch));
+            return true;
+        }
+        if (decoded.Length == 2 && char.IsSurrogatePair(decoded[0], decoded[1]))
+        {
+            kind = ClassifyUnicodeCategory(
+                System.Globalization.CharUnicodeInfo.GetUnicodeCategory(char.ConvertToUtf32(decoded[0], decoded[1])));
+            return true;
+        }
+        return false;
+    }
+
     private static DomainCharKind ClassifyDomainCharAt(string text, int pos, out int step)
     {
         step = 1;
@@ -5176,6 +5242,11 @@ public sealed class CoreTelemetryService : ITelemetryService
                 return DomainCharKind.Other;
             }
             return char.IsLowSurrogate(ch) ? DomainCharKind.Other : ClassifyUnicodeCategory(char.GetUnicodeCategory(ch));
+        }
+        if (ch == '%' && pos + 2 < text.Length && TryClassifyPercentDomainChar(text, pos, out var pctKind, out var pctStep))
+        {
+            step = pctStep;
+            return pctKind;
         }
         if (ch < 0x80)
         {
@@ -6465,7 +6536,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             bool revokedNow;
             lock (_gate)
             {
-                revokedNow = !EnsureExternalConsentLocked(out toCancel);
+                revokedNow = !EnsureExternalConsentLocked(out toCancel, allowDuringDisposeFlush: true);
             }
             if (toCancel != null) CancelQuietly(toCancel);
             if (revokedNow) return;
@@ -6477,10 +6548,16 @@ public sealed class CoreTelemetryService : ITelemetryService
     /// If another instance revoked consent, revokes this instance immediately before any write or network send.
     /// Must be called while holding <see cref="_gate"/>.
     /// </summary>
-    private bool EnsureExternalConsentLocked(out CancellationTokenSource? toCancel)
+    private bool EnsureExternalConsentLocked(out CancellationTokenSource? toCancel, bool allowDuringDisposeFlush = false)
     {
         toCancel = null;
-        if (_disposeRequested || _clientDisposed || _consent == TelemetryConsent.Off || _externalConsentToken == null)
+        if (_clientDisposed || _externalConsentToken == null)
+        {
+            return true;
+        }
+        var monitorDisposingFlush =
+            allowDuringDisposeFlush && _disposeRequested && _inFlightFlushes > 0 && _observedExternalToken != null;
+        if (!monitorDisposingFlush && (_disposeRequested || _consent == TelemetryConsent.Off))
         {
             return true;
         }

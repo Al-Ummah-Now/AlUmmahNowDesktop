@@ -182,6 +182,26 @@ public class SettingsStoreTests
             Assert.StartsWith(gen2 + ":", joinedGen2);
             Assert.True(storeB.RollbackTelemetryEnabled(joinedGen2));
             Assert.True(storeA.LoadTelemetryEnabled());
+
+            // Rolling back the remaining unconfirmed opt-in clears the sidecar so two failed opt-ins never leave telemetry enabled.
+            Assert.True(storeA.RollbackTelemetryEnabled(gen2));
+            Assert.False(storeA.LoadTelemetryEnabled());
+            Assert.Null(storeB.LoadTelemetryConsentToken());
+
+            // Same behavior when the first caller rolls back before the second caller.
+            Assert.True(storeA.TrySaveTelemetryEnabled(true, out var gen3A));
+            Assert.True(storeB.TrySaveTelemetryEnabled(true, out var gen3B));
+            Assert.True(storeA.RollbackTelemetryEnabled(gen3A));
+            Assert.True(storeB.LoadTelemetryEnabled());
+            Assert.True(storeB.RollbackTelemetryEnabled(gen3B));
+            Assert.False(storeA.LoadTelemetryEnabled());
+
+            // Once one caller confirms activation, rolling back a concurrent caller keeps telemetry enabled.
+            Assert.True(storeA.TrySaveTelemetryEnabled(true, out var gen4A));
+            Assert.True(storeB.TrySaveTelemetryEnabled(true, out var gen4B));
+            Assert.True(storeA.ConfirmTelemetryEnabled(gen4A));
+            Assert.True(storeB.RollbackTelemetryEnabled(gen4B));
+            Assert.True(storeA.LoadTelemetryEnabled());
         }
         finally
         {

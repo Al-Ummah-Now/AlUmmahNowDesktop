@@ -86,21 +86,63 @@ namespace AlUmmahNow.App.Services
         /// </summary>
         public string? LoadTelemetryConsentToken()
         {
+            ReadConsentSidecarUnlocked(out var token, out _);
+            return token;
+        }
+
+        private static bool IsValidEnabledToken(string? raw) =>
+            string.Equals(raw, "enabled", StringComparison.Ordinal) ||
+            (raw != null && raw.StartsWith("enabled:", StringComparison.Ordinal) && raw.Length > "enabled:".Length);
+
+        private void ReadConsentSidecarUnlocked(out string? token, out List<string>? pendingClaims)
+        {
+            token = null;
+            pendingClaims = null;
             try
             {
-                if (!File.Exists(_telemetryConsentPath)) return null;
-                var raw = File.ReadAllText(_telemetryConsentPath).Trim();
-                if (string.Equals(raw, "enabled", StringComparison.Ordinal) ||
-                    (raw.StartsWith("enabled:", StringComparison.Ordinal) && raw.Length > "enabled:".Length))
+                if (!File.Exists(_telemetryConsentPath)) return;
+                var lines = File.ReadAllText(_telemetryConsentPath)
+                    .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                if (lines.Length == 0) return;
+                var first = lines[0].Trim();
+                if (!IsValidEnabledToken(first)) return;
+                token = first;
+                if (lines.Length > 1)
                 {
-                    return raw;
+                    var second = lines[1].Trim();
+                    if (second.StartsWith("pending:", StringComparison.Ordinal))
+                    {
+                        pendingClaims = new List<string>();
+                        var parts = second.Substring("pending:".Length)
+                            .Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
+                        foreach (var part in parts)
+                        {
+                            var claim = part.Trim();
+                            if (claim.Length > 0 && !pendingClaims.Contains(claim))
+                            {
+                                pendingClaims.Add(claim);
+                            }
+                        }
+                    }
                 }
-                return null;
             }
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
             {
-                return null;
+                token = null;
+                pendingClaims = null;
             }
+        }
+
+        private void WriteConsentSidecarUnlocked(string token, List<string>? pendingClaims)
+        {
+            var directory = Path.GetDirectoryName(_telemetryConsentPath);
+            if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
+            var content = pendingClaims != null && pendingClaims.Count > 0
+                ? token + "\npending:" + string.Join(",", pendingClaims)
+                : token;
+            var temp = _telemetryConsentPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            File.WriteAllText(temp, content);
+            ReplaceFile(temp, _telemetryConsentPath);
         }
 
         /// <summary>
@@ -115,15 +157,21 @@ namespace AlUmmahNow.App.Services
         /// if both delete and overwrite fail (for example due to an exclusive handle or read-only volume),
         /// returns <c>false</c> rather than treating an unreadable file as opted out.
         /// </summary>
-        public bool SaveTelemetryEnabled(bool enabled) => TrySaveTelemetryEnabled(enabled, out _);
+        public bool SaveTelemetryEnabled(bool enabled) =>
+            TrySaveTelemetryEnabledInternal(enabled, confirmImmediately: true, out _);
 
         /// <summary>
         /// Atomically updates the standalone telemetry consent state under a cross-process lock without
         /// touching <c>settings.json</c>. When enabling, <paramref name="writtenToken"/> receives the
-        /// unique generation token written so a failed enable can roll back via <see cref="RollbackTelemetryEnabled"/>
-        /// without clobbering a newer opt-in from another process.
+        /// unique claim token written so a failed enable can roll back via <see cref="RollbackTelemetryEnabled"/>
+        /// without clobbering a confirmed or concurrent opt-in, while clearing the sidecar if all concurrent
+        /// unconfirmed opt-in attempts roll back. Call <see cref="ConfirmTelemetryEnabled"/> once native
+        /// consent activation succeeds.
         /// </summary>
-        public bool TrySaveTelemetryEnabled(bool enabled, out string? writtenToken)
+        public bool TrySaveTelemetryEnabled(bool enabled, out string? writtenToken) =>
+            TrySaveTelemetryEnabledInternal(enabled, confirmImmediately: false, out writtenToken);
+
+        private bool TrySaveTelemetryEnabledInternal(bool enabled, bool confirmImmediately, out string? writtenToken)
         {
             writtenToken = null;
             using var crossProcessLock = TryAcquireConsentLock(
@@ -146,22 +194,27 @@ namespace AlUmmahNow.App.Services
 
             try
             {
-                var directory = Path.GetDirectoryName(_telemetryConsentPath);
-                if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
-                var existing = LoadTelemetryConsentToken();
+                ReadConsentSidecarUnlocked(out var existing, out var pendingClaims);
                 string token;
+                List<string>? nextPending = null;
                 if (existing is { Length: > 0 })
                 {
                     var baseGen = ExtractBaseGenerationToken(existing);
                     token = baseGen + ":" + Guid.NewGuid().ToString("N");
+                    if (!confirmImmediately && pendingClaims != null)
+                    {
+                        nextPending = new List<string>(pendingClaims) { token };
+                    }
                 }
                 else
                 {
                     token = "enabled:" + Guid.NewGuid().ToString("N");
+                    if (!confirmImmediately)
+                    {
+                        nextPending = new List<string> { token };
+                    }
                 }
-                var temp = _telemetryConsentPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
-                File.WriteAllText(temp, token);
-                ReplaceFile(temp, _telemetryConsentPath);
+                WriteConsentSidecarUnlocked(token, nextPending);
                 writtenToken = token;
                 return true;
             }
@@ -172,9 +225,39 @@ namespace AlUmmahNow.App.Services
         }
 
         /// <summary>
-        /// Rolls back a failed opt-in only if the on-disk consent token still matches <paramref name="expectedToken"/>.
-        /// If another process already wrote a newer generation token, leaves the newer opt-in untouched and returns <c>true</c>.
-        /// If this opt-in only joined an already-enabled generation, leaves consent enabled for existing instances.
+        /// Marks a pending opt-in claim as confirmed after native consent activation succeeds.
+        /// Never resurrects consent if another process already opted out or started a different generation.
+        /// </summary>
+        public bool ConfirmTelemetryEnabled(string? expectedToken)
+        {
+            if (expectedToken is not { Length: > 0 }) return false;
+            using var crossProcessLock = TryAcquireConsentLock(
+                createDirectory: false,
+                out var directoryMissing,
+                serializeMutation: true);
+            if (directoryMissing || crossProcessLock == null) return false;
+            ReadConsentSidecarUnlocked(out var current, out var pendingClaims);
+            if (current is not { Length: > 0 }) return false;
+            if (!string.Equals(ExtractBaseGenerationToken(current), ExtractBaseGenerationToken(expectedToken), StringComparison.Ordinal))
+            {
+                return false;
+            }
+            if (pendingClaims == null) return true;
+            try
+            {
+                WriteConsentSidecarUnlocked(current, pendingClaims: null);
+                return true;
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Rolls back a failed opt-in claim. If the generation is still unconfirmed, removes this claim from
+        /// the pending set and deletes the sidecar once no unconfirmed opt-in claims remain. If the generation
+        /// is already confirmed (or another process started a newer generation), leaves it untouched.
         /// Returns <c>false</c> when <paramref name="expectedToken"/> is missing or the cross-process lock cannot be acquired.
         /// </summary>
         public bool RollbackTelemetryEnabled(string? expectedToken)
@@ -186,7 +269,31 @@ namespace AlUmmahNow.App.Services
                 serializeMutation: true);
             if (directoryMissing) return true;
             if (crossProcessLock == null) return false;
-            var current = LoadTelemetryConsentToken();
+            ReadConsentSidecarUnlocked(out var current, out var pendingClaims);
+            if (current is not { Length: > 0 }) return true;
+            if (pendingClaims != null)
+            {
+                if (!pendingClaims.Remove(expectedToken))
+                {
+                    return true;
+                }
+                if (pendingClaims.Count == 0)
+                {
+                    return ClearConsentSidecarUnlocked();
+                }
+                try
+                {
+                    var nextLine1 = string.Equals(current, expectedToken, StringComparison.Ordinal)
+                        ? pendingClaims[pendingClaims.Count - 1]
+                        : current;
+                    WriteConsentSidecarUnlocked(nextLine1, pendingClaims);
+                    return true;
+                }
+                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+                {
+                    return false;
+                }
+            }
             if (!string.Equals(current, expectedToken, StringComparison.Ordinal))
             {
                 return true;

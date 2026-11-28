@@ -183,6 +183,7 @@ internal sealed class SettingsPage
                     telemetryNotice.Visibility = Visibility.Visible;
                     return;
                 }
+                store.ConfirmTelemetryEnabled(writtenToken);
                 disableSaveFailed = false;
                 settings.TelemetryEnabled = true;
                 telemetryNotice.Text = string.Empty;

@@ -170,6 +170,7 @@ public sealed class SettingsPage
                     telemetryNotice.SetVisible(true);
                     return;
                 }
+                store.ConfirmTelemetryEnabled(writtenToken);
                 disableSaveFailed = false;
                 settings.TelemetryEnabled = true;
                 telemetryNotice.SetText(string.Empty);
