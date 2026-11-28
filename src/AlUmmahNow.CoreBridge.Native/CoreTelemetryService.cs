@@ -248,10 +248,32 @@ public sealed class CoreTelemetryService : ITelemetryService
             const UnixFileMode nonOwnerMask =
                 UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.GroupExecute |
                 UnixFileMode.OtherRead | UnixFileMode.OtherWrite | UnixFileMode.OtherExecute;
+            const UnixFileMode nonOwnerWriteMask =
+                UnixFileMode.GroupWrite | UnixFileMode.OtherWrite;
+
+            var parent = Path.GetDirectoryName(dir);
+            if (!string.IsNullOrEmpty(parent) && Directory.Exists(parent) && !IsSharedTempDirectory(parent))
+            {
+                var parentInfo = new DirectoryInfo(parent);
+                if (parentInfo.LinkTarget != null) return false;
+                var parentMode = File.GetUnixFileMode(parent);
+                if ((parentMode & nonOwnerWriteMask) != 0 && (parentMode & UnixFileMode.StickyBit) == 0)
+                {
+                    File.SetUnixFileMode(parent, parentMode & ~nonOwnerWriteMask);
+                    parentMode = File.GetUnixFileMode(parent);
+                }
+                if ((parentMode & nonOwnerWriteMask) != 0 && (parentMode & UnixFileMode.StickyBit) == 0)
+                {
+                    return false;
+                }
+            }
+
             if (!Directory.Exists(dir))
             {
                 Directory.CreateDirectory(dir, ownerDirMode);
             }
+            var dirInfo = new DirectoryInfo(dir);
+            if (dirInfo.LinkTarget != null) return false;
             var current = File.GetUnixFileMode(dir);
             if ((current & nonOwnerMask) != 0)
             {
@@ -6900,6 +6922,10 @@ public sealed class CoreTelemetryService : ITelemetryService
                         {
                             return;
                         }
+                        if (!string.IsNullOrWhiteSpace(_activeBufferPath) && !EnsurePrivateBufferDirectory(_activeBufferPath))
+                        {
+                            return;
+                        }
                         nativeAction();
                         RestrictUnixFilePermissions(_activeBufferPath);
                         EnsureExternalConsentLocked(out toCancel);
@@ -6919,6 +6945,10 @@ public sealed class CoreTelemetryService : ITelemetryService
                 if (_disposeRequested || _clientDisposed || _consent == TelemetryConsent.Off ||
                     (requiresFull && _consent != TelemetryConsent.Full) ||
                     (expectedEpoch.HasValue && activeEpoch != expectedEpoch.Value))
+                {
+                    return;
+                }
+                if (!string.IsNullOrWhiteSpace(_activeBufferPath) && !EnsurePrivateBufferDirectory(_activeBufferPath))
                 {
                     return;
                 }

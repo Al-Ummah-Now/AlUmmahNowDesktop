@@ -251,9 +251,17 @@ public sealed partial class App : Application
         var closing = new CancellationTokenSource();
         _ = updates.RunAsync(closing.Token);
         _ = _telemetry.FlushAsync(closing.Token);
-        WindowsEnd.Attach(window.Window, updates, new Action[] { closing.Cancel, _telemetry.Persist },
+        WindowsEnd.Attach(window.Window, updates, new Action[] { closing.Cancel },
             // Uploads (and the details of finished ones) and encodes, at once and within the end's limit
-            stop => Task.WhenAll(uploadsVm.StopAsync(stop), encode.StopAsync(stop), _telemetry.FlushAsync(stop)), allowRestart: updateScene == null);
+            stop => Task.WhenAll(
+                uploadsVm.StopAsync(stop),
+                encode.StopAsync(stop),
+                Task.Run(async () =>
+                {
+                    _telemetry.Persist();
+                    await _telemetry.FlushAsync(stop).ConfigureAwait(false);
+                }, stop)),
+            allowRestart: updateScene == null);
 
         _refresh = ui.CreateTimer();
         _refresh.Interval = TimeSpan.FromMilliseconds(300);

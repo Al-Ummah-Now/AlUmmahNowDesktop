@@ -176,8 +176,17 @@ public sealed partial class App : Application
         _window.AppWindow.Resize(new global::Windows.Graphics.SizeInt32(1280, 800));
         if (_window.AppWindow.Presenter is OverlappedPresenter presenter) presenter.Maximize();
         var leaving = Task.CompletedTask;
-        WindowsEnd.Attach(_window, updates, new Action[] { closing.Cancel, player.Stop, _telemetry.Persist, () => leaving = shell.LeaveLive() },
-            stop => Task.WhenAny(Task.WhenAll(leaving, _telemetry.FlushAsync(stop)), Task.Delay(TimeSpan.FromSeconds(2), stop)), allowRestart: updateScene == null);
+        WindowsEnd.Attach(_window, updates, new Action[] { closing.Cancel, player.Stop, () => leaving = shell.LeaveLive() },
+            stop => Task.WhenAny(
+                Task.WhenAll(
+                    leaving,
+                    Task.Run(async () =>
+                    {
+                        _telemetry.Persist();
+                        await _telemetry.FlushAsync(stop).ConfigureAwait(false);
+                    }, stop)),
+                Task.Delay(TimeSpan.FromSeconds(2), stop)),
+            allowRestart: updateScene == null);
         _window.VisibilityChanged += (_, e) => shell.SetHidden(!e.Visible);
         _window.Activate();
 
