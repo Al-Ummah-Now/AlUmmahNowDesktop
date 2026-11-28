@@ -23,10 +23,37 @@ jobs:
         uses: ./.github/actions/apt-install
         with:
           packages: >-
-            libgtk-4-1 libadwaita-1-0 xvfb imagemagick openbox dbus-x11 libglib2.0-bin
+            libgtk-4-1 libadwaita-1-0 xvfb imagemagick openbox dbus-x11 libglib2.0-bin python3-pyatspi at-spi2-core
             gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad
             gstreamer1.0-libav gstreamer1.0-gtk4 fonts-noto-core libgl1-mesa-dri adwaita-icon-theme libsecret-1-0
       - run: dotnet build src/AlUmmahNow.Linux -c Release
+      - name: Diagnostics Settings frames
+        env:
+          AUN_DEMO: "1"
+          AUN_DEMO_LIVE: "off"
+          AUN_SHOT_AFTER: "9"
+          AUN_EXIT_AFTER: "15"
+          GDK_BACKEND: x11
+          GSK_RENDERER: cairo
+          LIBGL_ALWAYS_SOFTWARE: "1"
+        run: |
+          mkdir -p artifacts/diagnostics
+          for lang in en ar; do for variant in light dark dark-on; do
+            theme=${variant%-on}
+            export AUN_DEMO_DIAGNOSTICS=off
+            if [[ $variant == dark-on ]]; then export AUN_DEMO_DIAGNOSTICS=on; fi
+            name="linux-viewer-diagnostics-$lang-$variant"
+            frame="artifacts/diagnostics/$name"
+            dbus-run-session -- xvfb-run -a -s "-screen 0 1280x800x24" \
+              scripts/linux-scenario.sh "$lang" "$theme" diagnostics "$name" artifacts/diagnostics > "$frame.log" 2>&1
+            grep 'RESULT PASS' "$frame.log"
+            bash scripts/linux-assert-diagnostics.sh "$lang" "$frame"
+          done; done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-viewer-diagnostics
+          path: artifacts/diagnostics
       - name: Run viewer scenarios (ar and en, home and watch)
         env:
           AUN_DEMO_TODAY: "2026-11-21"  # one demo "today" for every frame (DemoClock)

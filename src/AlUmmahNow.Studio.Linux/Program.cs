@@ -48,18 +48,22 @@ log.Info($"Al Ummah Now Studio {version} for Linux, environment {environment.Nam
 
 var settingsStore = new SettingsStore(Path.Combine(configDir, "settings.json"));
 var settings = settingsStore.Load();
+if (demo && scene == "diagnostics") settings.TelemetryEnabled = Environment.GetEnvironmentVariable("AUN_DEMO_DIAGNOSTICS") == "on";
 // A forced theme is the one Settings shows as chosen.
 if (Environment.GetEnvironmentVariable("AUN_THEME") is "dark" or "light") settings.Theme = Environment.GetEnvironmentVariable("AUN_THEME") == "light" ? ThemePreference.Light : ThemePreference.Dark;
 // The saved language (Settings), Arabic by default; CI and screenshots force one with AUN_LANG.
 var localizer = new Localizer(Environment.GetEnvironmentVariable("AUN_LANG") is { Length: > 0 } lang ? lang : settings.Language);
 
 var userAgent = "AlUmmahNowStudioLinux/" + version;
+// Opt-in crash reports and diagnostics (Settings → Diagnostics); demo mode never reports.
+var telemetry = demo ? NullTelemetryService.Instance
+    : CoreTelemetryService.Start(environment.VideosApi, userAgent, version, localizer.Language, Path.Combine(stateDir, "telemetry.json"), settings.TelemetryEnabled);
 IStudioAccounts accounts;
 IApiTransport transport;
 Func<string, IUploadService> uploadServiceFor;
 if (demo)
 {
-    accounts = new DemoAccounts();
+    accounts = new DemoAccounts(localizer.Language);
     transport = new DemoTransport(DemoTransport.FeaturesOff(Environment.GetEnvironmentVariable("AUN_DEMO_FEATURES_OFF")), Environment.GetEnvironmentVariable("AUN_DEMO_THUMBS"), localizer.Language, withDeleted: scene.StartsWith("deleted", StringComparison.Ordinal));
     uploadServiceFor = account => new SimulatedUploadService(account, TimeSpan.FromMilliseconds(250));
 }
@@ -156,7 +160,7 @@ app.OnActivate += (_, _) =>
         updateStore, updateInstall, version, IsBusy, new DownloadPageDelivery(new ShellBrowserLauncher()));
     var updateViews = new UpdateViews(updates, new UpdateText(localizer, UpdateApp.Studio, updates), window.Window, UpdateText.Icon(UpdateApp.Studio), app.Quit);
     window.UseUpdates(updateViews);
-    var settingsPage = new SettingsPage(localizer, settings, settingsStore, shell, uploadsVm, ChooseFolderAsync, window.SignOut, updates.InstalledVersion, updateViews);
+    var settingsPage = new SettingsPage(localizer, settings, settingsStore, shell, uploadsVm, ChooseFolderAsync, window.SignOut, updates.InstalledVersion, updateViews, telemetry);
     window.AddPage(StudioPages.Settings, localizer["studio.tab.settings"], "emblem-system-symbolic", settingsPage.Root);
     window.UsePages(pages);
     window.SearchRequested += (_, q) => videos.SearchFor(q);

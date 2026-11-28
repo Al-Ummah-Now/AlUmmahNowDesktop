@@ -72,9 +72,16 @@ $g = [System.Drawing.Graphics]::FromImage($bmp)
 $g.CopyFromScreen($r.Left, $r.Top, 0, 0, (New-Object System.Drawing.Size $w, $hgt))
 $bmp.Save((Join-Path $Out "$Name.png"), [System.Drawing.Imaging.ImageFormat]::Png)
 $g.Dispose(); $bmp.Dispose()
+$diagnosticsError = $null
+if ($Scene -eq "diagnostics") {
+  try {
+    & "$PSScriptRoot/windows-assert-diagnostics.ps1" $h $Lang -Studio
+  } catch { $diagnosticsError = $_ }
+}
 if ($Scene -eq "highcontrastswitch") { Set-Content $end "" }
 if (-not $p.WaitForExit(40000)) { $p.Kill(); "EXIT HANG" | Add-Content "$env:AUN_RESULT.hang.txt" }
 if ($Scene -eq "highcontrastswitch") { Remove-Item $end; $env:AUN_END_FILE = "" }
 & "$PSScriptRoot/windows-result.ps1" $env:AUN_RESULT
 # The pointer stays until Studio has said whether it is over the search.
 if ($Scene -in "searchhover", "cardhover") { [AunShot.Win]::MoveTo($r.Right + 200, $r.Bottom - 60) | Out-Null }
+if ($diagnosticsError) { throw $diagnosticsError }

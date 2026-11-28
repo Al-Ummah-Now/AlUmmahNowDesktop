@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using AlUmmahNow.App.I18n;
 using AlUmmahNow.App.Services;
+using AlUmmahNow.CoreBridge;
 using AlUmmahNow.CoreBridge.Studio;
 using AlUmmahNow.Studio.Shell;
 using AlUmmahNow.Studio.Upload;
@@ -24,7 +25,7 @@ public sealed class SettingsPage
     private readonly Adw.Banner _restart;
 
     public SettingsPage(Localizer l, AppSettings settings, SettingsStore store, StudioShellViewModel shell, UploadsViewModel uploads,
-        Func<Task<string?>> chooseFolder, Func<StudioAccount, Task> signOut, string version, UpdateViews updates)
+        Func<Task<string?>> chooseFolder, Func<StudioAccount, Task> signOut, string version, UpdateViews updates, ITelemetryService telemetry)
     {
         _l = l;
         _shell = shell;
@@ -65,6 +66,19 @@ public sealed class SettingsPage
             _restart.SetRevealed(settings.Language != l.Language);
         }));
 
+        // Only while the server's switch is on
+        var updatesCard = Ui.Card(updates.SectionBody, updates.SectionActions);
+        left.Append(updatesCard);
+        updates.UseSection(updatesCard);
+
+        // Diagnostics: off until turned on; turning it off deletes what was kept.
+        left.Append(Choice(l["settings.telemetry"], new[] { (l["settings.telemetry.off"], !settings.TelemetryEnabled), (l["settings.telemetry.on"], settings.TelemetryEnabled) }, i =>
+        {
+            settings.TelemetryEnabled = i == 1;
+            store.Save(settings);
+            telemetry.SetEnabled(settings.TelemetryEnabled);
+        }, l["settings.telemetry.note"]));
+
         var about = Gtk.Box.New(Gtk.Orientation.Vertical, 6);
         about.Append(Ui.CardTitle(l["studio.settings.about"]));
         about.Append(Ui.Label(l["studio.name"]));
@@ -99,11 +113,6 @@ public sealed class SettingsPage
         }));
         right.Append(Ui.Card(watchBody, watchActions));
 
-        // Only while the server's switch is on
-        var updatesCard = Ui.Card(updates.SectionBody, updates.SectionActions);
-        right.Append(updatesCard);
-        updates.UseSection(updatesCard);
-
         Root = Gtk.ScrolledWindow.New();
         Root.SetPolicy(Gtk.PolicyType.Never, Gtk.PolicyType.Automatic);
         Root.SetChild(page);
@@ -120,7 +129,7 @@ public sealed class SettingsPage
     public Gtk.ScrolledWindow Root { get; }
 
     /// <summary>A card with a heading and one choice among options (radio buttons).</summary>
-    private static Gtk.Widget Choice(string title, (string Label, bool On)[] options, Action<int> picked)
+    private static Gtk.Widget Choice(string title, (string Label, bool On)[] options, Action<int> picked, string? note = null)
     {
         var body = Gtk.Box.New(Gtk.Orientation.Vertical, 8);
         body.Append(Ui.CardTitle(title));
@@ -138,6 +147,7 @@ public sealed class SettingsPage
             };
             body.Append(option);
         }
+        if (note != null) body.Append(Ui.Label(note, dim: true));
 
         return Ui.Card(body);
     }

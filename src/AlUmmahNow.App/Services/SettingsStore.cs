@@ -22,6 +22,9 @@ namespace AlUmmahNow.App.Services
 
         /// <summary>Studio: each signed-in account's resolved name (user id → name), so the account menu shows names, not emails.</summary>
         public Dictionary<string, string>? AccountNames { get; set; }
+
+        /// <summary>Send diagnostics and crash reports. Off until the person turns it on.</summary>
+        public bool TelemetryEnabled { get; set; }
     }
 
     /// <summary>Stores settings as JSON. A corrupt or missing file yields defaults.</summary>

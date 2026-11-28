@@ -10,6 +10,9 @@ dotnet src/AlUmmahNow.Linux/bin/Release/net9.0/alummahnow.dll &
 app=$!
 sleep "${AUN_SHOT_AFTER:-18}"
 import -window root "$out/$name.png"
+if [[ $automation == diagnostics ]]; then
+  /usr/bin/python3 scripts/atspi-dump.py alummahnow "$out/$name.atspi.txt"
+fi
 if [[ $automation == watch:* ]]; then
   # Exercise MPRIS as a desktop shell would.
   dest="--session --dest org.mpris.MediaPlayer2.alummahnow --object-path /org/mpris/MediaPlayer2"

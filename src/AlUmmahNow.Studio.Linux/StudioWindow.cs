@@ -569,7 +569,7 @@ public sealed class StudioWindow
         box.Append(image);
         // Wraps to the menu's width instead of cutting the account name short («تسجيل الخروج من Ami…»); a small natural
         // width keeps a long name from widening the menu past the sidebar. The sign-out item joins the name's words with
-        // no-break spaces, so the name moves to the next line whole ("Sign out of" / "Amina Studio").
+        // no-break spaces, so the name moves to the next line whole ("Sign out of" / "Noor Channel").
         var label = Gtk.Label.New(text);
         label.SetXalign(0);
         label.SetWrap(true);

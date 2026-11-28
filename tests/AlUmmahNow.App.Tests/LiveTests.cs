@@ -311,6 +311,25 @@ public class LiveTests
     }
 
     [Fact]
+    public async Task An_update_waits_while_a_live_stream_opens_and_plays()
+    {
+        _live.Current = OnAir();
+        using var vm = Model();
+        Assert.True(vm.DefersUpdate);
+        await vm.LoadAsync();
+        _player.Set(PlayerState.Loading);
+        Assert.True(vm.DefersUpdate);
+        _player.Set(PlayerState.Playing);
+        Assert.True(vm.DefersUpdate);
+        _player.Set(PlayerState.Paused);
+        Assert.False(vm.DefersUpdate);
+        _player.Set(PlayerState.Failed);
+        Assert.False(vm.DefersUpdate);
+        _player.Set(PlayerState.Ended);
+        Assert.False(vm.DefersUpdate);
+    }
+
+    [Fact]
     public async Task A_paused_stream_is_behind_and_returning_opens_its_newest_moment()
     {
         _live.Current = OnAir();

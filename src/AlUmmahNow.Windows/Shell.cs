@@ -42,12 +42,13 @@ public sealed partial class Shell
     private Action? _unbind;
     private readonly UpdateService _updates;
     private readonly Action _quit;
-    private bool _hasSettings;
+    private readonly ITelemetryService _telemetry;
 
-    public Shell(ICatalogClient catalog, Localizer localizer, Navigator navigator, WindowsMediaPlayer player, SmtcSession session, AppSettings settings, SettingsStore store, AuthViewModel auth, ILiveClient live, string shortLinkHost, UpdateService updates, Action quit)
+    public Shell(ICatalogClient catalog, Localizer localizer, Navigator navigator, WindowsMediaPlayer player, SmtcSession session, AppSettings settings, SettingsStore store, AuthViewModel auth, ILiveClient live, string shortLinkHost, UpdateService updates, Action quit, ITelemetryService telemetry)
     {
         _updates = updates;
         _quit = quit;
+        _telemetry = telemetry;
         _live = live;
         _shortLinkHost = shortLinkHost;
         LiveList = new LiveListViewModel(live, localizer, navigator);
@@ -69,13 +70,6 @@ public sealed partial class Shell
             if (navigator.Current is not Route.Watch && navigator.Current is not Route.Live) _ = RefreshLiveAsync();
         };
         localizer.LanguageChanged += (_, _) => Render();
-        updates.PropertyChanged += (_, e) =>
-        {
-            if (e.PropertyName != nameof(UpdateService.IsSectionVisible) || updates.IsSectionVisible == _hasSettings) return;
-            // The page is gone with the section: the settings have nothing else
-            if (!updates.IsSectionVisible && navigator.Current is Route.Settings) navigator.Back();
-            else Render();
-        };
         // Every brush follows high contrast itself: no box behind a text on a highlight
         _root.HighContrastAdjustment = ElementHighContrastAdjustment.None;
         AddKey(VirtualKey.Space, () => Watch?.TogglePlay());
@@ -85,9 +79,6 @@ public sealed partial class Shell
 
     /// <summary>The update bar, screen and section of the page that is there.</summary>
     internal UpdateViews Updates { get; private set; } = null!;
-
-    /// <summary>A stream that is on air is being watched: nothing takes it away.</summary>
-    public bool IsLivePlaying => LiveWatch is { Mode: LiveMode.Live, Watch.IsPlaying: true };
 
     public Panel Root => _root;
     public HomeViewModel Home { get; }
@@ -137,7 +128,6 @@ public sealed partial class Shell
         Updates?.Dispose();
         Updates = new UpdateViews(_updates, new UpdateText(_localizer, UpdateApp.Viewer, _updates), UpdateText.Icon(UpdateApp.Viewer), _quit);
         Updates.ForcedChanged += Render;
-        _hasSettings = _updates.IsSectionVisible;
         var header = new StackPanel();
         header.Children.Add(BuildHeader());
         header.Children.Add(Updates.Bar);
@@ -227,7 +217,7 @@ public sealed partial class Shell
 
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         if (!Updates.IsForced) actions.Children.Add(BuildAccount());
-        if (_hasSettings && !Updates.IsForced && _navigator.Current is not Route.Settings)
+        if (!Updates.IsForced && _navigator.Current is not Route.Settings)
         {
             var settings = new Button { Content = new FontIcon { Glyph = "\uE713", FontSize = 16 } };
             ToolTipService.SetToolTip(settings, _localizer["updates.settings"]);
@@ -298,20 +288,48 @@ public sealed partial class Shell
         return panel;
     }
 
-    /// <summary>Settings: the updates. Theme and language are in the header.</summary>
+    /// <summary>Settings: Diagnostics, and the updates while the server's switch is on. Theme and language are in the header.</summary>
     private FrameworkElement BuildSettings()
     {
         var title = new TextBlock { Text = _localizer["updates.settings"], FontSize = 26, FontWeight = Microsoft.UI.Text.FontWeights.Bold };
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetHeadingLevel(title, Microsoft.UI.Xaml.Automation.Peers.AutomationHeadingLevel.Level1);
+        var column = new StackPanel { Spacing = 18, Padding = new Thickness(24, 18, 24, 24) };
+        column.Children.Add(title);
+        column.Children.Add(BuildDiagnostics());
         var body = new StackPanel { Spacing = 14 };
         body.Children.Add(Updates.SectionBody);
         body.Children.Add(Updates.SectionActions);
         var card = Updates.Card(body);
         Updates.UseSection(card);
-        var column = new StackPanel { Spacing = 18, Padding = new Thickness(24, 18, 24, 24) };
-        column.Children.Add(title);
         column.Children.Add(card);
         return new ScrollViewer { Content = column };
+    }
+
+    /// <summary>Diagnostics: off until turned on; turning it off deletes what was kept.</summary>
+    private FrameworkElement BuildDiagnostics()
+    {
+        var body = new StackPanel { Spacing = 10 };
+        var heading = new TextBlock { Text = _localizer["settings.telemetry"], FontSize = 18, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetHeadingLevel(heading, Microsoft.UI.Xaml.Automation.Peers.AutomationHeadingLevel.Level2);
+        body.Children.Add(heading);
+        var choice = new RadioButtons { ItemsSource = new[] { _localizer["settings.telemetry.off"], _localizer["settings.telemetry.on"] }, SelectedIndex = _settings.TelemetryEnabled ? 1 : 0 };
+        AutomationName(choice, _localizer["settings.telemetry"]);
+        choice.SelectionChanged += (_, _) =>
+        {
+            if (choice.SelectedIndex < 0) return;
+            _settings.TelemetryEnabled = choice.SelectedIndex == 1;
+            _store.Save(_settings);
+            _telemetry.SetEnabled(_settings.TelemetryEnabled);
+        };
+        body.Children.Add(choice);
+        body.Children.Add(new TextBlock
+        {
+            Text = _localizer["settings.telemetry.note"],
+            TextWrapping = TextWrapping.Wrap,
+            TextReadingOrder = TextReadingOrder.UseFlowDirection,
+            Foreground = ViewerTheme.Brush("TextMuted", IsDark, HighContrastRole.Text),
+        });
+        return Updates.Card(body);
     }
 
     private FrameworkElement BuildHome()

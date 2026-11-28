@@ -9,6 +9,7 @@ using AlUmmahNow.CoreBridge;
 using AlUmmahNow.CoreBridge.Native;
 using AlUmmahNow.CoreBridge.Temporary;
 using AlUmmahNow.Updates.Views;
+using AlUmmahNow.Windowing;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
@@ -27,8 +28,15 @@ public sealed partial class App : Application
     public App()
     {
         InitializeComponent();
-        UnhandledException += (_, e) => ReportCrash("unhandled: " + e.Message + "\n" + e.Exception);
+        UnhandledException += (_, e) =>
+        {
+            ReportCrash("unhandled: " + e.Message + "\n" + e.Exception);
+            _telemetry.ReportCrash(e.Exception);
+        };
     }
+
+    /// <summary>Opt-in crash reports (Settings → Diagnostics); nothing until OnLaunched starts it.</summary>
+    private static ITelemetryService _telemetry = NullTelemetryService.Instance;
 
     private static void ReportCrash(string text)
     {
@@ -70,6 +78,8 @@ public sealed partial class App : Application
         if (Environment.GetEnvironmentVariable("AUN_LANG") is { Length: > 0 } lang) settings.Language = lang;
         if (Enum.TryParse<ThemePreference>(Environment.GetEnvironmentVariable("AUN_THEME"), true, out var theme)) settings.Theme = theme;
         var automation = Environment.GetEnvironmentVariable("AUN_AUTOMATION") ?? "";
+        if (Environment.GetEnvironmentVariable("AUN_DEMO") == "1" && automation == "diagnostics")
+            settings.TelemetryEnabled = Environment.GetEnvironmentVariable("AUN_DEMO_DIAGNOSTICS") == "on";
         var exitAfter = int.TryParse(Environment.GetEnvironmentVariable("AUN_EXIT_AFTER"), out var s) ? s : 0;
 
         var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
@@ -104,15 +114,28 @@ public sealed partial class App : Application
         // The check for a new version: none in a demo, or in a build that is no release.
         var version = UpdateText.VersionOf(typeof(App).Assembly);
         Shell? shown = null;
-        bool IsBusy() => shown?.IsLivePlaying == true;
+        bool IsBusy() => shown?.LiveWatch?.DefersUpdate == true;
         var updateScene = UpdateScene.FromEnvironment(localizer, UpdateInstall.Msix, IsBusy);
         var updateStore = new UpdateStore(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AlUmmahNow", "updates.json"));
         var updates = updateScene?.Service ?? WindowsInstall.Service("viewer", environment.VideosApi, version, "AlUmmahNowWindows/" + version,
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AlUmmahNow"), updateStore, Environment.GetEnvironmentVariable("AUN_DEMO") == "1", IsBusy, WindowsEnd.Close);
-        var shell = shown = new Shell(catalog, localizer, navigator, player, session, settings, store, auth, live, environment.ShortLinkHost, updates, WindowsEnd.Close);
+        // Demo mode and CI scenarios never report.
+        if (Environment.GetEnvironmentVariable("AUN_DEMO") != "1")
+            _telemetry = CoreTelemetryService.Start(environment.VideosApi, "AlUmmahNowWindows/" + version, version, localizer.Language,
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AlUmmahNow", "telemetry.json"), settings.TelemetryEnabled);
+        var shell = shown = new Shell(catalog, localizer, navigator, player, session, settings, store, auth, live, environment.ShortLinkHost, updates, WindowsEnd.Close, _telemetry);
         var closing = new CancellationTokenSource();
 
-        _window = new Window { Title = localizer["app.name"], Content = shell.Root };
+        var window = _window = new Window();
+        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
+        void ApplyCaptionLanguage()
+        {
+            WindowLayout.Apply(hwnd, localizer.IsRtl);
+            window.Title = localizer["app.name"];
+        }
+        ApplyCaptionLanguage();
+        localizer.LanguageChanged += (_, _) => ApplyCaptionLanguage();
+        window.Content = shell.Root;
         // The title bar follows the viewer's theme, not Windows'
         var titleBar = _window.AppWindow.TitleBar;
         TitleBarTheme TitleTheme() => SystemBrushes.IsHighContrast ? TitleBarTheme.UseDefaultAppMode : shell.IsDark ? TitleBarTheme.Dark : TitleBarTheme.Light;
@@ -198,7 +221,8 @@ public sealed partial class App : Application
             act.Start();
         }
 
-        if (automation.StartsWith("watch:", StringComparison.Ordinal)) navigator.Push(new Route.Watch(automation.Substring(6)));
+        if (Environment.GetEnvironmentVariable("AUN_DEMO") == "1" && automation == "diagnostics") navigator.Push(new Route.Settings());
+        else if (automation.StartsWith("watch:", StringComparison.Ordinal)) navigator.Push(new Route.Watch(automation.Substring(6)));
         if (LiveAutomation.RouteOf(automation) is { } route)
         {
             navigator.Push(route);
