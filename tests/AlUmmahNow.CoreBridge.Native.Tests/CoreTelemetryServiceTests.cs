@@ -3234,6 +3234,8 @@ public class CoreTelemetryServiceTests
             CoreTelemetryService.SanitizeLocalPaths("alummahnow://watch/v1"));
         Assert.Equal("https://example.test/lookup/[redacted]",
             CoreTelemetryService.SanitizeLocalPaths("https://example.test/lookup/%2B%31%32%30%32%35%35%35%30%31%32%33"));
+        Assert.Equal("https://example.test/lookup/[redacted]",
+            CoreTelemetryService.SanitizeLocalPaths("https://example.test/lookup/alice%2540example.test"));
         var multiEnc = CoreTelemetryService.SerializeProperties(new Dictionary<string, object>
         {
             ["u"] = "https%25253A%25252F%25252Fexample.test%25252Flogin%25253Ftoken%25253Ds3cr3t",

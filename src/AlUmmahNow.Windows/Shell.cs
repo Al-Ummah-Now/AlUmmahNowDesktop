@@ -348,6 +348,28 @@ public sealed partial class Shell
             }
         }
         var telemetryToggleBusy = false;
+        var telemetrySyncInFlight = false;
+        void ScheduleBackgroundConsentSync(TelemetryConsent target)
+        {
+            if (telemetrySyncInFlight) return;
+            telemetrySyncInFlight = true;
+            _ = Task.Run(() => _telemetry.SetConsent(target)).ContinueWith(_ =>
+            {
+                var dq = telemetryNotice.DispatcherQueue;
+                if (dq != null)
+                {
+                    dq.TryEnqueue(() =>
+                    {
+                        telemetrySyncInFlight = false;
+                        SyncPurgeNotice();
+                    });
+                }
+                else
+                {
+                    telemetrySyncInFlight = false;
+                }
+            });
+        }
         void SyncPurgeNotice()
         {
             if (telemetryToggleBusy) return;
@@ -380,8 +402,7 @@ public sealed partial class Shell
             {
                 if (_telemetry.Consent != TelemetryConsent.Off)
                 {
-                    _telemetry.SetConsent(TelemetryConsent.Off);
-                    failed = _telemetry.LastPurgeFailed;
+                    ScheduleBackgroundConsentSync(TelemetryConsent.Off);
                 }
                 if (_settings.TelemetryEnabled)
                 {
@@ -393,7 +414,8 @@ public sealed partial class Shell
             {
                 if (_telemetry.Consent == TelemetryConsent.Off)
                 {
-                    _telemetry.SetConsent(TelemetryConsent.Full);
+                    ScheduleBackgroundConsentSync(TelemetryConsent.Full);
+                    return;
                 }
                 if (_telemetry.Consent == TelemetryConsent.Full)
                 {

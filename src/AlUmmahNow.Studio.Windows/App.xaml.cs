@@ -108,7 +108,8 @@ public sealed partial class App : Application
         // The saved language (Settings), Arabic by default; CI and screenshots force one with AUN_LANG.
         var localizer = new Localizer(Environment.GetEnvironmentVariable("AUN_LANG") is { Length: > 0 } l ? l : settings.Language);
         var userAgent = "AlUmmahNowStudioWindows/" + version;
-        var initialConsentToken = demo ? null : settingsStore.LoadTelemetryConsentToken();
+        var telemetryDemo = demo || Environment.GetEnvironmentVariable("AUN_SIMULATE_UPLOADS") == "1";
+        var initialConsentToken = telemetryDemo ? null : settingsStore.LoadTelemetryConsentToken();
         var initialTelemetryEnabled = initialConsentToken != null;
         settings.TelemetryEnabled = initialTelemetryEnabled;
         _telemetry = CoreTelemetryService.CreateOrNull(
@@ -119,13 +120,13 @@ public sealed partial class App : Application
             userAgent: userAgent,
             bufferPath: Path.Combine(dataRoot, "telemetry-buffer.json"),
             initialEnabled: initialTelemetryEnabled,
-            demo: demo,
+            demo: telemetryDemo,
             externalConsentToken: () => settingsStore.LoadTelemetryConsentToken(),
             acquireExternalConsentLock: () => settingsStore.TryAcquireTelemetryConsentLock(),
             externalConsentTokenForClaim: claim => settingsStore.LoadTelemetryConsentTokenForClaim(claim),
             acquireActiveFlushGuard: () => settingsStore.TryAcquireActiveFlushGuard(),
             isLocalOptOutSuppressed: () => settingsStore.IsTelemetryDisableSaveFailed());
-        if (!demo &&
+        if (!telemetryDemo &&
             initialTelemetryEnabled &&
             _telemetry.Consent == AlUmmahNow.CoreBridge.TelemetryConsent.Off &&
             CoreTelemetryService.ShouldClearStaleStartupConsent(_telemetry) &&

@@ -952,9 +952,10 @@ public sealed class CoreTelemetryService : ITelemetryService
             if (coreEnd > segStart && url.IndexOf('%', segStart, coreEnd - segStart) >= 0)
             {
                 var rawSeg = url.Substring(segStart, coreEnd - segStart);
+                var doubleEncoded = rawSeg.IndexOf("%25", StringComparison.OrdinalIgnoreCase) >= 0;
                 var (decodedSeg, offsets) = DecodeUrlSegmentFull(rawSeg);
                 var redactedWhole = !decodedSeg.StartsWith("[redacted", StringComparison.Ordinal) &&
-                    IsDecodedSensitiveUrlSegment(decodedSeg.AsSpan());
+                    IsDecodedSensitiveUrlSegment(decodedSeg, checkEmail: doubleEncoded);
                 if (redactedWhole)
                 {
                     sb ??= new StringBuilder(url.Length);
@@ -968,9 +969,9 @@ public sealed class CoreTelemetryService : ITelemetryService
                     {
                         var subSlash = decodedSeg.IndexOf('/', subStart);
                         var subEnd = subSlash < 0 ? decodedSeg.Length : subSlash;
-                        var sub = decodedSeg.AsSpan(subStart, subEnd - subStart);
+                        var sub = decodedSeg.Substring(subStart, subEnd - subStart);
                         if (sub.Length > 0 && !sub.StartsWith("[redacted", StringComparison.Ordinal) &&
-                            IsDecodedSensitiveUrlSegment(sub))
+                            IsDecodedSensitiveUrlSegment(sub, checkEmail: doubleEncoded))
                         {
                             var origStart = segStart + offsets[subStart];
                             var origEnd = segStart + offsets[subEnd];
@@ -1029,11 +1030,36 @@ public sealed class CoreTelemetryService : ITelemetryService
         return hasLetter && hasDigit;
     }
 
-    private static bool IsDecodedSensitiveUrlSegment(ReadOnlySpan<char> segment) =>
-        IsOpaqueUrlSecretSegment(segment) ||
-        IsDecodedPhoneUrlSegment(segment) ||
-        Ipv4InKeyRegex.IsMatch(segment) ||
-        Ipv6InKeyRegex.IsMatch(segment);
+    private static string DecodeRepeatedForCheck(string seg)
+    {
+        var cur = seg;
+        for (var round = 0; round < 4 && cur.IndexOf('%') >= 0; round++)
+        {
+            var next = DecodeUrlSegmentFull(cur).Decoded;
+            if (string.Equals(next, cur, StringComparison.Ordinal)) break;
+            cur = next;
+        }
+        return cur;
+    }
+
+    private static bool IsDecodedEmailUrlSegment(ReadOnlySpan<char> segment)
+    {
+        var at = segment.IndexOf('@');
+        if (at <= 0 || at + 1 >= segment.Length) return false;
+        var domain = segment[(at + 1)..];
+        return domain.IndexOf('.') > 0 && domain.IndexOf('@') < 0;
+    }
+
+    private static bool IsDecodedSensitiveUrlSegment(string seg, bool checkEmail)
+    {
+        var expanded = seg.IndexOf('%') >= 0 ? DecodeRepeatedForCheck(seg) : seg;
+        var span = expanded.AsSpan();
+        return IsOpaqueUrlSecretSegment(span) ||
+            IsDecodedPhoneUrlSegment(span) ||
+            Ipv4InKeyRegex.IsMatch(span) ||
+            Ipv6InKeyRegex.IsMatch(span) ||
+            (checkEmail && IsDecodedEmailUrlSegment(span));
+    }
 
     private static bool IsDecodedPhoneUrlSegment(ReadOnlySpan<char> segment)
     {

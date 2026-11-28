@@ -361,6 +361,22 @@ public sealed partial class MainWindow
             }
         }
         var telemetryToggleBusy = false;
+        var telemetrySyncInFlight = false;
+        var telemetryDestroyed = false;
+        void ScheduleBackgroundConsentSync(TelemetryConsent target)
+        {
+            if (telemetrySyncInFlight) return;
+            telemetrySyncInFlight = true;
+            _ = Task.Run(() => _telemetry.SetConsent(target)).ContinueWith(_ =>
+            {
+                GLib.Functions.IdleAdd(GLib.Constants.PRIORITY_DEFAULT_IDLE, () =>
+                {
+                    telemetrySyncInFlight = false;
+                    if (!telemetryDestroyed) SyncPurgeNotice();
+                    return false;
+                });
+            });
+        }
         void SyncPurgeNotice()
         {
             if (telemetryToggleBusy) return;
@@ -393,8 +409,7 @@ public sealed partial class MainWindow
             {
                 if (_telemetry.Consent != TelemetryConsent.Off)
                 {
-                    _telemetry.SetConsent(TelemetryConsent.Off);
-                    failed = _telemetry.LastPurgeFailed;
+                    ScheduleBackgroundConsentSync(TelemetryConsent.Off);
                 }
                 if (_settings.TelemetryEnabled)
                 {
@@ -406,7 +421,8 @@ public sealed partial class MainWindow
             {
                 if (_telemetry.Consent == TelemetryConsent.Off)
                 {
-                    _telemetry.SetConsent(TelemetryConsent.Full);
+                    ScheduleBackgroundConsentSync(TelemetryConsent.Full);
+                    return;
                 }
                 if (_telemetry.Consent == TelemetryConsent.Full)
                 {
@@ -460,7 +476,6 @@ public sealed partial class MainWindow
         };
         Action<bool> onPurgeChanged = _ => scheduleSync();
         Action<TelemetryConsent> onConsentChanged = _ => scheduleSync();
-        var telemetryDestroyed = false;
         _telemetry.PurgeFailureChanged += onPurgeChanged;
         _telemetry.ConsentChanged += onConsentChanged;
         telemetryCheck.OnMap += (_, _) => SyncPurgeNotice();

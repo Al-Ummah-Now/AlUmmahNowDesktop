@@ -113,8 +113,30 @@ internal sealed class SettingsPage
             }
         }
         var telemetryToggleBusy = false;
+        var telemetrySyncInFlight = false;
         if (telemetry != null && !telemetryUnavailable)
         {
+            void ScheduleBackgroundConsentSync(TelemetryConsent target)
+            {
+                if (telemetrySyncInFlight) return;
+                telemetrySyncInFlight = true;
+                _ = Task.Run(() => telemetry.SetConsent(target)).ContinueWith(_ =>
+                {
+                    var dq = telemetryNotice.DispatcherQueue;
+                    if (dq != null)
+                    {
+                        dq.TryEnqueue(() =>
+                        {
+                            telemetrySyncInFlight = false;
+                            SyncPurgeNotice();
+                        });
+                    }
+                    else
+                    {
+                        telemetrySyncInFlight = false;
+                    }
+                });
+            }
             void SyncPurgeNotice()
             {
                 if (telemetryToggleBusy) return;
@@ -137,8 +159,7 @@ internal sealed class SettingsPage
                 {
                     if (telemetry.Consent != TelemetryConsent.Off)
                     {
-                        telemetry.SetConsent(TelemetryConsent.Off);
-                        failed = telemetry.LastPurgeFailed;
+                        ScheduleBackgroundConsentSync(TelemetryConsent.Off);
                     }
                     if (settings.TelemetryEnabled)
                     {
@@ -150,7 +171,8 @@ internal sealed class SettingsPage
                 {
                     if (telemetry.Consent == TelemetryConsent.Off)
                     {
-                        telemetry.SetConsent(TelemetryConsent.Full);
+                        ScheduleBackgroundConsentSync(TelemetryConsent.Full);
+                        return;
                     }
                     if (telemetry.Consent == TelemetryConsent.Full)
                     {

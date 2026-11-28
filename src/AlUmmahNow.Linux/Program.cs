@@ -64,7 +64,10 @@ AlUmmahNow.CoreBridge.ILiveClient live = Environment.GetEnvironmentVariable("AUN
     : new HttpLiveClient(http, environment.VideosApi, HttpLiveClient.TokenOf(authSession));
 var coreVersion = CoreRuntime.VersionOrNone();
 // The check for a new version: none in a demo, or in a build that is no release.
-var isDemo = Environment.GetEnvironmentVariable("AUN_DEMO") == "1";
+var isDemo = Environment.GetEnvironmentVariable("AUN_DEMO") == "1"
+    || Environment.GetEnvironmentVariable("AUN_DEMO_AUTH") is { Length: > 0 }
+    || Environment.GetEnvironmentVariable("AUN_DEMO_LIVE") is "1" or "off"
+    || Environment.GetEnvironmentVariable("AUN_FIXTURE_MEDIA") is { Length: > 0 };
 var updateInstall = isDemo ? UpdateInstall.Development : UpdateInstalls.OnLinux(UpdateInstalls.IsReleaseBuild, File.Exists("/.flatpak-info"), AppContext.BaseDirectory, UpdateApp.Viewer);
 MainWindow? viewer = null;
 bool IsBusy() => viewer?.IsLivePlaying == true;

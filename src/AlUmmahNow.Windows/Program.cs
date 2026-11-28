@@ -123,7 +123,10 @@ public sealed partial class App : Application
         bool IsBusy() => shown?.IsLivePlaying == true;
         var updateScene = UpdateScene.FromEnvironment(localizer, UpdateInstall.Msix, IsBusy);
         var dataRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AlUmmahNow");
-        var isDemo = Environment.GetEnvironmentVariable("AUN_DEMO") == "1";
+        var isDemo = Environment.GetEnvironmentVariable("AUN_DEMO") == "1"
+            || Environment.GetEnvironmentVariable("AUN_DEMO_AUTH") is { Length: > 0 }
+            || Environment.GetEnvironmentVariable("AUN_DEMO_LIVE") is "1" or "off"
+            || Environment.GetEnvironmentVariable("AUN_FIXTURE_MEDIA") is { Length: > 0 };
         var initialConsentToken = isDemo ? null : store.LoadTelemetryConsentToken();
         var initialTelemetryEnabled = initialConsentToken != null;
         settings.TelemetryEnabled = initialTelemetryEnabled;
