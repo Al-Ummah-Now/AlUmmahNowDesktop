@@ -40,7 +40,7 @@
   "settings.telemetry": "Diagnostics",
   "settings.telemetry.off": "Don't send",
   "settings.telemetry.on": "Send crash reports and diagnostics",
-  "settings.telemetry.note": "Off by default. Shares scrubbed crash reports and basic usage metrics to help fix bugs. Never includes personal data or viewing history.",
+  "settings.telemetry.note": "Off by default. Shares scrubbed crash reports and basic usage metrics to help fix bugs. Never includes personal data or viewing history. Turning it off also deletes any reports still stored on this device.",
   "updates.title": "Updates",
   "updates.settings": "Settings",
   "updates.available": "A new version, {0}, is available.",

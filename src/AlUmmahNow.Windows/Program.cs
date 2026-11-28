@@ -9,6 +9,7 @@ using AlUmmahNow.CoreBridge;
 using AlUmmahNow.CoreBridge.Native;
 using AlUmmahNow.CoreBridge.Temporary;
 using AlUmmahNow.Updates.Views;
+using AlUmmahNow.Windowing;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
@@ -125,7 +126,16 @@ public sealed partial class App : Application
         var shell = shown = new Shell(catalog, localizer, navigator, player, session, settings, store, auth, live, environment.ShortLinkHost, updates, WindowsEnd.Close, _telemetry);
         var closing = new CancellationTokenSource();
 
-        _window = new Window { Title = localizer["app.name"], Content = shell.Root };
+        var window = _window = new Window();
+        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
+        void ApplyCaptionLanguage()
+        {
+            WindowLayout.Apply(hwnd, localizer.IsRtl);
+            window.Title = localizer["app.name"];
+        }
+        ApplyCaptionLanguage();
+        localizer.LanguageChanged += (_, _) => ApplyCaptionLanguage();
+        window.Content = shell.Root;
         // The title bar follows the viewer's theme, not Windows'
         var titleBar = _window.AppWindow.TitleBar;
         TitleBarTheme TitleTheme() => SystemBrushes.IsHighContrast ? TitleBarTheme.UseDefaultAppMode : shell.IsDark ? TitleBarTheme.Dark : TitleBarTheme.Light;

@@ -7,6 +7,7 @@ using AlUmmahNow.CoreBridge.Passkeys;
 using AlUmmahNow.CoreBridge.Studio;
 using AlUmmahNow.Studio.Shell;
 using AlUmmahNow.Updates.Views;
+using AlUmmahNow.Windowing;
 using Microsoft.UI;
 using Microsoft.UI.Input;
 using Microsoft.UI.Windowing;
@@ -68,8 +69,7 @@ internal sealed class StudioWindow
 
         Window = new Window { Title = l["studio.name"], SystemBackdrop = new MicaBackdrop() };
         var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(Window);
-        // Arabic: a right-to-left window, so Windows puts the caption buttons on the left.
-        if (l.IsRtl) SetWindowLongPtr(hwnd, GwlExStyle, GetWindowLongPtr(hwnd, GwlExStyle) | WsExLayoutRtl);
+        WindowLayout.Apply(hwnd, l.IsRtl);
 
         _search = SearchPill(l["studio.videos.search"], text =>
         {
@@ -261,17 +261,8 @@ internal sealed class StudioWindow
     /// <summary>The title-bar search was submitted: the Videos page searches for the text.</summary>
     public event EventHandler<string>? SearchRequested;
 
-    private const int GwlExStyle = -20;
-    private const long WsExLayoutRtl = 0x00400000;
-
     [DllImport("user32.dll")]
     private static extern uint GetDpiForWindow(IntPtr hwnd);
-
-    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
-    private static extern long GetWindowLongPtr(IntPtr hwnd, int index);
-
-    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")]
-    private static extern long SetWindowLongPtr(IntPtr hwnd, int index, long value);
 
     private void BuildTitleBar()
     {
