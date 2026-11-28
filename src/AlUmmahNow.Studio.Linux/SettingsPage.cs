@@ -170,7 +170,27 @@ public sealed class SettingsPage
                     telemetryNotice.SetVisible(true);
                     return;
                 }
-                store.ConfirmTelemetryEnabled(writtenToken);
+                if (!store.ConfirmTelemetryEnabled(writtenToken))
+                {
+                    var rolledBack = store.RollbackTelemetryEnabled(writtenToken);
+                    var purged = telemetry?.SetConsent(TelemetryConsent.Off) ?? true;
+                    disableSaveFailed = !rolledBack;
+                    if (!rolledBack)
+                    {
+                        settings.TelemetryEnabled = true;
+                        telemetryCheck.SetActive(true);
+                        telemetryNotice.SetText(purged
+                            ? disableErrorText
+                            : disableErrorText + "\n" + purgeWarningText);
+                        telemetryNotice.SetVisible(true);
+                        return;
+                    }
+                    settings.TelemetryEnabled = false;
+                    telemetryCheck.SetActive(false);
+                    telemetryNotice.SetText(string.Empty);
+                    telemetryNotice.SetVisible(false);
+                    return;
+                }
                 disableSaveFailed = false;
                 settings.TelemetryEnabled = true;
                 telemetryNotice.SetText(string.Empty);

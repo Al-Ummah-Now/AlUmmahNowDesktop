@@ -2770,6 +2770,9 @@ public class CoreTelemetryServiceTests
             "[redacted-path]",
             CoreTelemetryService.SanitizeLocalPaths(".env"));
         Assert.Equal(
+            "[redacted-path]",
+            CoreTelemetryService.SanitizeLocalPaths("\\Confidential\\Payroll"));
+        Assert.Equal(
             "https://[redacted-email]",
             CoreTelemetryService.SanitizeLocalPaths("https://example.com/users/alice%40%65xample.com"));
         Assert.Equal(

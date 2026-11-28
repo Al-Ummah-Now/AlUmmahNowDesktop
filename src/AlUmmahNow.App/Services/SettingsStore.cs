@@ -89,7 +89,12 @@ namespace AlUmmahNow.App.Services
             try
             {
                 if (!File.Exists(_telemetryConsentPath)) return null;
-                using var reader = new StreamReader(_telemetryConsentPath);
+                using var stream = new FileStream(
+                    _telemetryConsentPath,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.ReadWrite | FileShare.Delete);
+                using var reader = new StreamReader(stream);
                 var first = reader.ReadLine()?.Trim();
                 return IsValidEnabledToken(first) ? first : null;
             }
@@ -103,6 +108,22 @@ namespace AlUmmahNow.App.Services
             string.Equals(raw, "enabled", StringComparison.Ordinal) ||
             (raw != null && raw.StartsWith("enabled:", StringComparison.Ordinal) && raw.Length > "enabled:".Length);
 
+        private static bool HasPendingPrefixOnNextLine(StreamReader reader)
+        {
+            int ch;
+            while ((ch = reader.Read()) >= 0 && (ch == '\r' || ch == '\n' || ch == ' ' || ch == '\t'))
+            {
+            }
+            if (ch < 0) return false;
+            const string prefix = "pending:";
+            if (ch != prefix[0]) return false;
+            for (var i = 1; i < prefix.Length; i++)
+            {
+                if (reader.Read() != prefix[i]) return false;
+            }
+            return true;
+        }
+
         private void ReadConsentSidecarUnlocked(out string? token, out List<string>? pendingClaims)
         {
             token = null;
@@ -110,7 +131,17 @@ namespace AlUmmahNow.App.Services
             try
             {
                 if (!File.Exists(_telemetryConsentPath)) return;
-                var lines = File.ReadAllText(_telemetryConsentPath)
+                string rawText;
+                using (var stream = new FileStream(
+                    _telemetryConsentPath,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.ReadWrite | FileShare.Delete))
+                using (var reader = new StreamReader(stream))
+                {
+                    rawText = reader.ReadToEnd();
+                }
+                var lines = rawText
                     .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
                 if (lines.Length == 0) return;
                 var first = lines[0].Trim();
@@ -156,9 +187,29 @@ namespace AlUmmahNow.App.Services
         }
 
         /// <summary>
-        /// Reads the standalone telemetry consent state. Missing, unreadable, or unrecognized files default to off.
+        /// Reads the confirmed standalone telemetry consent state. Missing, unreadable, unrecognized,
+        /// or unconfirmed pending-only files default to off so an interrupted opt-in never activates on restart.
         /// </summary>
-        public bool LoadTelemetryEnabled() => LoadTelemetryConsentToken() != null;
+        public bool LoadTelemetryEnabled()
+        {
+            try
+            {
+                if (!File.Exists(_telemetryConsentPath)) return false;
+                using var stream = new FileStream(
+                    _telemetryConsentPath,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.ReadWrite | FileShare.Delete);
+                using var reader = new StreamReader(stream);
+                var first = reader.ReadLine()?.Trim();
+                if (!IsValidEnabledToken(first)) return false;
+                return !HasPendingPrefixOnNextLine(reader);
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+            {
+                return false;
+            }
+        }
 
         /// <summary>
         /// Atomically updates the standalone telemetry consent state without touching <c>settings.json</c>.
@@ -339,7 +390,15 @@ namespace AlUmmahNow.App.Services
             {
                 try
                 {
-                    File.WriteAllText(_telemetryConsentPath, "disabled");
+                    using (var stream = new FileStream(
+                        _telemetryConsentPath,
+                        FileMode.Create,
+                        FileAccess.Write,
+                        FileShare.ReadWrite | FileShare.Delete))
+                    using (var writer = new StreamWriter(stream))
+                    {
+                        writer.Write("disabled");
+                    }
                     return true;
                 }
                 catch (Exception overwriteEx) when (overwriteEx is IOException || overwriteEx is UnauthorizedAccessException)

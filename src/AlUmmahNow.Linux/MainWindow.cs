@@ -421,7 +421,27 @@ public sealed partial class MainWindow
                     telemetryNotice.SetVisible(true);
                     return;
                 }
-                _store.ConfirmTelemetryEnabled(writtenToken);
+                if (!_store.ConfirmTelemetryEnabled(writtenToken))
+                {
+                    var rolledBack = _store.RollbackTelemetryEnabled(writtenToken);
+                    var purged = _telemetry.SetConsent(TelemetryConsent.Off);
+                    disableSaveFailed = !rolledBack;
+                    if (!rolledBack)
+                    {
+                        _settings.TelemetryEnabled = true;
+                        telemetryCheck.SetActive(true);
+                        telemetryNotice.SetText(purged
+                            ? disableErrorText
+                            : disableErrorText + "\n" + purgeWarningText);
+                        telemetryNotice.SetVisible(true);
+                        return;
+                    }
+                    _settings.TelemetryEnabled = false;
+                    telemetryCheck.SetActive(false);
+                    telemetryNotice.SetText(string.Empty);
+                    telemetryNotice.SetVisible(false);
+                    return;
+                }
                 disableSaveFailed = false;
                 _settings.TelemetryEnabled = true;
                 telemetryNotice.SetText(string.Empty);

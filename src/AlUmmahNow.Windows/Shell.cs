@@ -415,7 +415,27 @@ public sealed partial class Shell
                     telemetryNotice.Visibility = Visibility.Visible;
                     return;
                 }
-                _store.ConfirmTelemetryEnabled(writtenToken);
+                if (!_store.ConfirmTelemetryEnabled(writtenToken))
+                {
+                    var rolledBack = _store.RollbackTelemetryEnabled(writtenToken);
+                    var purged = _telemetry.SetConsent(TelemetryConsent.Off);
+                    disableSaveFailed = !rolledBack;
+                    if (!rolledBack)
+                    {
+                        _settings.TelemetryEnabled = true;
+                        telemetryToggle.IsOn = true;
+                        telemetryNotice.Text = purged
+                            ? disableErrorText
+                            : disableErrorText + "\n" + purgeWarningText;
+                        telemetryNotice.Visibility = Visibility.Visible;
+                        return;
+                    }
+                    _settings.TelemetryEnabled = false;
+                    telemetryToggle.IsOn = false;
+                    telemetryNotice.Text = string.Empty;
+                    telemetryNotice.Visibility = Visibility.Collapsed;
+                    return;
+                }
                 disableSaveFailed = false;
                 _settings.TelemetryEnabled = true;
                 telemetryNotice.Text = string.Empty;

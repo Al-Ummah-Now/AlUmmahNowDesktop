@@ -183,7 +183,27 @@ internal sealed class SettingsPage
                     telemetryNotice.Visibility = Visibility.Visible;
                     return;
                 }
-                store.ConfirmTelemetryEnabled(writtenToken);
+                if (!store.ConfirmTelemetryEnabled(writtenToken))
+                {
+                    var rolledBack = store.RollbackTelemetryEnabled(writtenToken);
+                    var purged = telemetry?.SetConsent(TelemetryConsent.Off) ?? true;
+                    disableSaveFailed = !rolledBack;
+                    if (!rolledBack)
+                    {
+                        settings.TelemetryEnabled = true;
+                        telemetryToggle.IsOn = true;
+                        telemetryNotice.Text = purged
+                            ? disableErrorText
+                            : disableErrorText + "\n" + purgeWarningText;
+                        telemetryNotice.Visibility = Visibility.Visible;
+                        return;
+                    }
+                    settings.TelemetryEnabled = false;
+                    telemetryToggle.IsOn = false;
+                    telemetryNotice.Text = string.Empty;
+                    telemetryNotice.Visibility = Visibility.Collapsed;
+                    return;
+                }
                 disableSaveFailed = false;
                 settings.TelemetryEnabled = true;
                 telemetryNotice.Text = string.Empty;

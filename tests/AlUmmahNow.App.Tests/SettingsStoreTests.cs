@@ -178,10 +178,15 @@ public class SettingsStoreTests
             Assert.True(storeA.TrySaveTelemetryEnabled(true, out var gen2));
             Assert.False(string.IsNullOrEmpty(gen2));
             Assert.NotEqual(gen1, gen2);
+            // An unconfirmed pending opt-in must NOT report enabled on restart before ConfirmTelemetryEnabled.
+            Assert.False(storeA.LoadTelemetryEnabled());
+            Assert.False(storeA.Load().TelemetryEnabled);
+            Assert.Equal(gen2, storeA.LoadTelemetryConsentToken());
+
             Assert.True(storeB.TrySaveTelemetryEnabled(true, out var joinedGen2));
             Assert.StartsWith(gen2 + ":", joinedGen2);
             Assert.True(storeB.RollbackTelemetryEnabled(joinedGen2));
-            Assert.True(storeA.LoadTelemetryEnabled());
+            Assert.Equal(gen2, storeA.LoadTelemetryConsentToken());
 
             // Rolling back the remaining unconfirmed opt-in clears the sidecar so two failed opt-ins never leave telemetry enabled.
             Assert.True(storeA.RollbackTelemetryEnabled(gen2));
@@ -192,17 +197,26 @@ public class SettingsStoreTests
             Assert.True(storeA.TrySaveTelemetryEnabled(true, out var gen3A));
             Assert.True(storeB.TrySaveTelemetryEnabled(true, out var gen3B));
             Assert.True(storeA.RollbackTelemetryEnabled(gen3A));
-            Assert.True(storeB.LoadTelemetryEnabled());
+            Assert.Equal(gen3B, storeB.LoadTelemetryConsentToken());
             Assert.True(storeB.RollbackTelemetryEnabled(gen3B));
             Assert.False(storeA.LoadTelemetryEnabled());
+            Assert.Null(storeA.LoadTelemetryConsentToken());
 
-            // Once one caller confirms activation, rolling back either caller keeps telemetry enabled.
+            // Once one caller confirms activation, LoadTelemetryEnabled is true and rolling back either caller keeps it enabled.
             Assert.True(storeA.TrySaveTelemetryEnabled(true, out var gen4A));
             Assert.True(storeB.TrySaveTelemetryEnabled(true, out var gen4B));
             Assert.True(storeA.ConfirmTelemetryEnabled(gen4A));
             Assert.True(storeB.RollbackTelemetryEnabled(gen4B));
             Assert.True(storeA.RollbackTelemetryEnabled(gen4A));
             Assert.True(storeA.LoadTelemetryEnabled());
+
+            // A concurrent opt-out before ConfirmTelemetryEnabled causes confirmation to fail without resurrecting consent.
+            Assert.True(storeA.SaveTelemetryEnabled(false));
+            Assert.True(storeA.TrySaveTelemetryEnabled(true, out var gen5));
+            Assert.True(storeB.SaveTelemetryEnabled(false));
+            Assert.False(storeA.ConfirmTelemetryEnabled(gen5));
+            Assert.False(storeA.LoadTelemetryEnabled());
+            Assert.Null(storeA.LoadTelemetryConsentToken());
         }
         finally
         {
