@@ -2440,6 +2440,116 @@ public class CoreTelemetryServiceTests
         }
     }
 
+    [Fact]
+    public void SanitizeLocalPaths_redacts_quoted_bearer_basic_slash_emails_and_linear_ip_literals()
+    {
+        Assert.Equal(
+            "received Bearer \"[redacted]\" during handshake",
+            CoreTelemetryService.SanitizeLocalPaths("received Bearer \"opaqueSecret123\" during handshake"));
+        Assert.Equal(
+            "received Bearer '[redacted]' during handshake",
+            CoreTelemetryService.SanitizeLocalPaths("received Bearer 'opaqueSecret123' during handshake"));
+        Assert.Equal(
+            "{\"m\":\"Basic \\\"[redacted]\\\"\"}",
+            CoreTelemetryService.SanitizeLocalPaths("{\"m\":\"Basic \\\"dXNlcjpwYXNz\\\"\"}"));
+        Assert.Equal(
+            "received Basic \"[redacted]\" during handshake",
+            CoreTelemetryService.SanitizeLocalPaths("received Basic \"dXNlcjpwYXNz\" during handshake"));
+        Assert.Equal(
+            "received Basic '[redacted]' during handshake",
+            CoreTelemetryService.SanitizeLocalPaths("received Basic 'dXNlcjpwYXNz' during handshake"));
+        Assert.Equal(
+            "Bearer \"hello world\"",
+            CoreTelemetryService.SanitizeLocalPaths("Bearer \"hello world\""));
+        Assert.Equal(
+            "https://[redacted-email]",
+            CoreTelemetryService.SanitizeLocalPaths("https://example.org/users/alice/@example.com"));
+        Assert.Equal(
+            "https://[redacted-email]",
+            CoreTelemetryService.SanitizeLocalPaths("https://example.org/users/alice/%40example.com"));
+        Assert.Equal(
+            "https://registry.npmjs.org/@angular/core",
+            CoreTelemetryService.SanitizeLocalPaths("https://registry.npmjs.org/@angular/core"));
+        Assert.Equal(
+            "https://registry.npmjs.org/%40angular/core",
+            CoreTelemetryService.SanitizeLocalPaths("https://registry.npmjs.org/%40angular/core"));
+        var repeatedOpen = string.Concat(Enumerable.Repeat("x@[", 10_000));
+        Assert.Equal(repeatedOpen, CoreTelemetryService.SanitizeLocalPaths(repeatedOpen));
+    }
+
+    [Fact]
+    public void OrphanAdoption_rejects_duplicate_json_keys_and_preserves_sibling_on_failed_opt_out()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "aun-tel-dupkey-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var bufferPath = Path.Combine(dir, "telemetry-buffer.json");
+        try
+        {
+            string? sharedToken = "enabled:gen1";
+            // Seed one valid orphan crash via instance 1, then exit.
+            using (var inst1 = new CoreTelemetryService(
+                platform: "linux",
+                appVersion: "1.0.0",
+                locale: "en",
+                videosApiBaseUrl: null,
+                userAgent: "AlUmmahNowLinux/1.0.0",
+                bufferPath: bufferPath,
+                initialEnabled: true,
+                externalConsentToken: () => Volatile.Read(ref sharedToken),
+                acquireExternalConsentLock: () => new NoOpDisposable()))
+            {
+                inst1.ReportCrash("InvalidOperationException", "valid crash", "at App.Main()");
+            }
+
+            // Seed a malformed sibling orphan with duplicate keys AND temp files.
+            var dupOrphan = Path.Combine(dir, "telemetry-buffer.gen1.dupkey01.json");
+            File.WriteAllText(
+                dupOrphan,
+                "{\"events\":[{\"id\":\"bad\",\"kind\":\"crash\",\"name\":\"first\",\"name\":\"second\",\"timestamp_ms\":1,\"session_id\":\"s\"}],\"breadcrumbs\":[]}");
+            var dupTmp = Path.Combine(dir, ".telemetry-buffer.gen1.dupkey01.json.999.tmp");
+            File.WriteAllText(dupTmp, "{}");
+
+            // Restarting must adopt the valid crash without letting the duplicate-key orphan poison it.
+            using var instA = new CoreTelemetryService(
+                platform: "linux",
+                appVersion: "1.0.0",
+                locale: "en",
+                videosApiBaseUrl: null,
+                userAgent: "AlUmmahNowLinux/1.0.0",
+                bufferPath: bufferPath,
+                initialEnabled: true,
+                externalConsentToken: () => Volatile.Read(ref sharedToken),
+                acquireExternalConsentLock: () => new NoOpDisposable());
+            Assert.Equal(1, instA.PendingCount);
+            Assert.False(File.Exists(dupOrphan));
+            Assert.False(File.Exists(dupTmp));
+
+            // Start a second active instance B in the same generation and persist a crash in B's buffer.
+            using var instB = new CoreTelemetryService(
+                platform: "linux",
+                appVersion: "1.0.0",
+                locale: "en",
+                videosApiBaseUrl: null,
+                userAgent: "AlUmmahNowLinux/1.0.0",
+                bufferPath: bufferPath,
+                initialEnabled: true,
+                externalConsentToken: () => Volatile.Read(ref sharedToken),
+                acquireExternalConsentLock: () => new NoOpDisposable());
+            instB.ReportCrash("InvalidOperationException", "sibling crash", "at B.Main()");
+            var bufferB = instB.ActiveBufferPathForTesting!;
+            Assert.True(File.Exists(bufferB));
+
+            // Simulate a failed opt-out on instance A: shared consent on disk remains enabled:gen1,
+            // and instance A calls SetConsent(Off). B's persisted buffer MUST remain intact.
+            Assert.True(instA.SetConsent(TelemetryConsent.Off));
+            Assert.True(File.Exists(bufferB));
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+    }
+
     private sealed class CallbackDisposable : IDisposable
     {
         private Action? _onDispose;

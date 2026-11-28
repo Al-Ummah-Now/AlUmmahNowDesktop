@@ -39,7 +39,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         "Bearer", "Basic", "Digest", "Token", "Api-Key", "ApiKey",
         "OAuth", "Negotiate", "Mutual", "HOBA", "Vapid", "SCRAM-SHA-256", "AWS4-HMAC-SHA256"
     };
-    private static readonly Regex BasicTokenRegex = new(@"\b(Basic)\s+([A-Za-z0-9+/_-]{2,}={0,2})(?![A-Za-z0-9+/_=-])", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex BasicTokenRegex = new(@"\b(Basic)\s+(?:(""|'|\\""|\\u0022)([A-Za-z0-9+/_-]{2,}={0,2})(?![A-Za-z0-9+/_=-])(\2|$)|([A-Za-z0-9+/_-]{2,}={0,2})(?![A-Za-z0-9+/_=-]))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly System.Text.UTF8Encoding StrictUtf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
 
     private readonly TelemetryAppInfo _app;
@@ -2559,15 +2559,20 @@ public sealed class CoreTelemetryService : ITelemetryService
         result = RedactEscapedBearerInBalancedQuotes(result);
         result = RedactEscapedBasicInBalancedQuotes(result);
         return BasicTokenRegex.Replace(result, match =>
-            IsBasicCredentialToken(match.Groups[2].Value)
-                ? $"{match.Groups[1].Value} [redacted]"
-                : match.Value);
+        {
+            var isQuoted = match.Groups[3].Success;
+            var token = isQuoted ? match.Groups[3].Value : match.Groups[5].Value;
+            if (!IsBasicCredentialToken(token)) return match.Value;
+            return isQuoted
+                ? $"{match.Groups[1].Value} {match.Groups[2].Value}[redacted]{match.Groups[4].Value}"
+                : $"{match.Groups[1].Value} [redacted]";
+        });
     }
 
     private static string RedactBearerTokens(string text)
     {
         if (text.IndexOf("bearer", StringComparison.OrdinalIgnoreCase) < 0) return text;
-        var ranges = FindBearerTokenRanges(text, allowLiteralQuoted: false);
+        var ranges = FindBearerTokenRanges(text, allowLiteralQuoted: true, requireClosingLiteralQuote: true);
         if (ranges.Count == 0) return text;
         var sb = new StringBuilder(text.Length);
         var copied = 0;
@@ -2592,7 +2597,8 @@ public sealed class CoreTelemetryService : ITelemetryService
         return 0;
     }
 
-    private static List<(int Start, int End, bool RedactedOnly)> FindBearerTokenRanges(string text, bool allowLiteralQuoted)
+    private static List<(int Start, int End, bool RedactedOnly)> FindBearerTokenRanges(
+        string text, bool allowLiteralQuoted, bool requireClosingLiteralQuote)
     {
         var ranges = new List<(int Start, int End, bool RedactedOnly)>();
         var inEscapedQuote = false;
@@ -2635,8 +2641,9 @@ public sealed class CoreTelemetryService : ITelemetryService
             var wsEnd = i + 6;
             while (wsEnd < text.Length && char.IsWhiteSpace(text[wsEnd])) wsEnd++;
             if (wsEnd >= text.Length) break;
+            var wsCh = text[wsEnd];
             var openQuoteLen = !inEscapedQuote
-                ? (allowLiteralQuoted && text[wsEnd] == '"' ? 1 : EscapedDoubleQuoteLen(text, wsEnd))
+                ? (allowLiteralQuoted && (wsCh is '"' or '\'') ? 1 : EscapedDoubleQuoteLen(text, wsEnd))
                 : 0;
             if (openQuoteLen > 0)
             {
@@ -2649,9 +2656,9 @@ public sealed class CoreTelemetryService : ITelemetryService
                 }
                 var innerEnd = ScanBearerTokenEnd(text, innerStart, stopEsc);
                 var closeQuoteLen = openQuoteLen == 1
-                    ? (innerEnd < text.Length && text[innerEnd] == '"' ? 1 : 0)
+                    ? (innerEnd < text.Length && text[innerEnd] == wsCh ? 1 : 0)
                     : EscapedDoubleQuoteLen(text, innerEnd);
-                if (innerEnd > innerStart && (closeQuoteLen > 0 || openQuoteLen == 1))
+                if (innerEnd > innerStart && (closeQuoteLen > 0 || (openQuoteLen == 1 && !requireClosingLiteralQuote)))
                 {
                     ranges.Add((innerStart, innerEnd, true));
                     i = innerEnd + closeQuoteLen;
@@ -2749,7 +2756,8 @@ public sealed class CoreTelemetryService : ITelemetryService
             if (innerStart >= close || text.IndexOf('\\', innerStart, close - innerStart) < 0) continue;
             var (decoded, rawOffsets) = DecodeQuotedSpanWithOffsets(text, innerStart, close);
             if (decoded.IndexOf("bearer", StringComparison.OrdinalIgnoreCase) < 0) continue;
-            foreach (var (mStart, mEnd, redactedOnly) in FindBearerTokenRanges(decoded, allowLiteralQuoted: true))
+            foreach (var (mStart, mEnd, redactedOnly) in FindBearerTokenRanges(
+                decoded, allowLiteralQuoted: true, requireClosingLiteralQuote: false))
             {
                 var rawStart = rawOffsets[mStart];
                 var rawEnd = rawOffsets[mEnd];
@@ -2781,16 +2789,20 @@ public sealed class CoreTelemetryService : ITelemetryService
             var match = BasicTokenRegex.Match(decoded);
             while (match.Success)
             {
-                if (IsBasicCredentialToken(match.Groups[2].Value))
+                var isQuoted = match.Groups[3].Success;
+                var tokenGroup = isQuoted ? match.Groups[3] : match.Groups[5];
+                if (IsBasicCredentialToken(tokenGroup.Value))
                 {
-                    var rawStart = rawOffsets[match.Index];
-                    var rawEnd = rawOffsets[match.Index + match.Length];
+                    var targetIndex = isQuoted ? tokenGroup.Index : match.Index;
+                    var targetLength = isQuoted ? tokenGroup.Length : match.Length;
+                    var rawStart = rawOffsets[targetIndex];
+                    var rawEnd = rawOffsets[targetIndex + targetLength];
                     if (rawStart >= copied)
                     {
                         sb ??= new StringBuilder(text.Length);
-                        sb.Append(text, copied, rawStart - copied)
-                            .Append(match.Groups[1].Value)
-                            .Append(" [redacted]");
+                        sb.Append(text, copied, rawStart - copied);
+                        if (isQuoted) sb.Append("[redacted]");
+                        else sb.Append(match.Groups[1].Value).Append(" [redacted]");
                         copied = rawEnd;
                     }
                 }
@@ -4562,7 +4574,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                 i++;
                 continue;
             }
-            var domEnd = FindEmailDomainEnd(text, i + atLen);
+            var domEnd = FindEmailDomainEnd(text, i + atLen, requireDot: i > copied && text[i - 1] == '/');
             var localStart = domEnd > 0 ? FindEmailLocalStart(text, i, copied) : i;
             if (domEnd > 0 && localStart < i)
             {
@@ -4630,7 +4642,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                 i++;
                 continue;
             }
-            var domEnd = FindEmailDomainEnd(text, i + atLen);
+            var domEnd = FindEmailDomainEnd(text, i + atLen, requireDot: i > copied && text[i - 1] == '/');
             var localStart = domEnd > 0 ? FindEmailLocalStart(text, i, copied) : i;
             if (domEnd > 0 && localStart < i)
             {
@@ -4779,10 +4791,6 @@ public sealed class CoreTelemetryService : ITelemetryService
             }
             return atPos;
         }
-        if (atPos > minPos && text[atPos - 1] == '/')
-        {
-            return atPos;
-        }
         var localStart = atPos;
         while (true)
         {
@@ -4835,17 +4843,18 @@ public sealed class CoreTelemetryService : ITelemetryService
     private static int FindIpLiteralDomainEnd(string text, int domStart)
     {
         var close = domStart + 1;
-        while (close < text.Length)
+        var maxClose = Math.Min(text.Length, domStart + 65);
+        while (close < maxClose)
         {
             var ch = text[close];
             if (ch == ']') break;
-            if (char.IsWhiteSpace(ch) || ch is '[' or '"' or '\'' or '<' or '>' or '\\' or '{' or '}' or '\r' or '\n')
+            if (char.IsWhiteSpace(ch) || ch is '[' or '@' or '"' or '\'' or '<' or '>' or '\\' or '{' or '}' or '\r' or '\n')
             {
                 return -1;
             }
             close++;
         }
-        if (close >= text.Length || text[close] != ']' || close <= domStart + 1) return -1;
+        if (close >= maxClose || text[close] != ']' || close <= domStart + 1) return -1;
         var inner = text.Substring(domStart + 1, close - domStart - 1);
         if (inner.StartsWith("IPv6:", StringComparison.OrdinalIgnoreCase))
         {
@@ -4962,7 +4971,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         return kind is DomainCharKind.Letter or DomainCharKind.Digit or DomainCharKind.Hyphen || text[pos] == '_';
     }
 
-    private static int FindEmailDomainEnd(string text, int domStart)
+    private static int FindEmailDomainEnd(string text, int domStart, bool requireDot = false)
     {
         if (domStart < text.Length && text[domStart] == '[')
         {
@@ -4971,6 +4980,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         var k = domStart;
         var labelStart = domStart;
         var labelHasLetter = false;
+        var hasDot = false;
         var lastKind = DomainCharKind.Other;
         var bestEnd = -1;
         while (k < text.Length)
@@ -4985,6 +4995,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                 if (k == labelStart || lastKind == DomainCharKind.Hyphen) break;
                 labelStart = k + step;
                 labelHasLetter = false;
+                hasDot = true;
             }
             else if (kind == DomainCharKind.Digit)
             {
@@ -5005,7 +5016,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                 ClassifyDomainCharAt(text, k, out var dotStep) == DomainCharKind.Dot &&
                 k + dotStep < text.Length &&
                 ClassifyDomainCharAt(text, k + dotStep, out _) is DomainCharKind.Letter or DomainCharKind.Digit;
-            if (k > labelStart && labelHasLetter && lastKind != DomainCharKind.Hyphen && atBoundary && !continuesDomain)
+            if ((!requireDot || hasDot) && k > labelStart && labelHasLetter && lastKind != DomainCharKind.Hyphen && atBoundary && !continuesDomain)
             {
                 bestEnd = k;
             }
@@ -5746,7 +5757,12 @@ public sealed class CoreTelemetryService : ITelemetryService
                     {
                         // Fail closed in BOTH managed and native state so an earlier native consent update
                         // (before an I/O failure) cannot leave native telemetry enabled for a queued flush.
-                        RevokeLocked(out toCancel, "telemetry rollback purge failed: ", ref purgeNotify, ref purgeNotifyValue);
+                        RevokeLocked(
+                            out toCancel,
+                            "telemetry rollback purge failed: ",
+                            ref purgeNotify,
+                            ref purgeNotifyValue,
+                            ResolveForeignKeepGenerationPrefixLocked());
                         Log.For("telemetry").Warn("failed to update telemetry consent; failing closed to Off: " + ex.Message);
                         result = false;
                     }
@@ -6221,9 +6237,17 @@ public sealed class CoreTelemetryService : ITelemetryService
         try
         {
             _client.SetConsent(TelemetryConsentState.Denied);
-            var cleanOk = ownBufferOnly
+            var ownOk = ownBufferOnly
                 ? TryDeleteOwnBufferAndGenerationTemps(_activeBufferPath, ownGenerationPrefix)
-                : TryDeleteForeignGenerationBuffers(keepForeignGenerationPrefix) && TryDeleteSiblingTempFiles(keepForeignGenerationPrefix);
+                : (!string.IsNullOrWhiteSpace(_activeBufferPath) &&
+                   !string.Equals(_activeBufferPath, _bufferPath, StringComparison.Ordinal)
+                    ? TryDeleteSingleBufferAndTemps(_activeBufferPath)
+                    : true);
+            var cleanOk = ownBufferOnly
+                ? ownOk
+                : ownOk &&
+                  TryDeleteForeignGenerationBuffers(keepForeignGenerationPrefix) &&
+                  TryDeleteSiblingTempFiles(keepForeignGenerationPrefix);
             UpdatePurgeFailedLocked(!cleanOk, ref purgeNotify, ref purgeNotifyValue);
         }
         catch (AunException ex)
@@ -6394,8 +6418,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         var currentToken = ReadExternalTokenSafe();
         if (string.IsNullOrEmpty(currentToken)) return null;
         var currentGenPrefix = ResolveGenerationPrefix(currentToken);
-        if (string.IsNullOrEmpty(currentGenPrefix)) return null;
-        return string.Equals(currentGenPrefix, _activeGenerationPrefix, StringComparison.Ordinal) ? null : currentGenPrefix;
+        return string.IsNullOrEmpty(currentGenPrefix) ? null : currentGenPrefix;
     }
 
     private string? ReadExternalTokenSafe()
@@ -6542,9 +6565,9 @@ public sealed class CoreTelemetryService : ITelemetryService
             if (orphans.Count == 0) return;
 
             orphans.Sort(static (a, b) => a.LastWriteUtc.CompareTo(b.LastWriteUtc));
-            var mergedEvents = new List<JsonElement>();
+            var mergedEvents = new List<AdoptedEvent>();
             var seenIds = new HashSet<string>(StringComparer.Ordinal);
-            var latestBreadcrumbs = new List<JsonElement>();
+            var latestBreadcrumbs = new List<AdoptedBreadcrumb>();
 
             if (File.Exists(targetBufferPath) &&
                 !ReadPersistedBufferInto(targetBufferPath, mergedEvents, seenIds, latestBreadcrumbs))
@@ -6570,21 +6593,24 @@ public sealed class CoreTelemetryService : ITelemetryService
                     writer.WriteStartObject();
                     writer.WritePropertyName("events");
                     writer.WriteStartArray();
-                    foreach (var ev in mergedEvents) ev.WriteTo(writer);
+                    foreach (var ev in mergedEvents) WriteAdoptedEvent(writer, ev);
                     writer.WriteEndArray();
                     writer.WritePropertyName("breadcrumbs");
                     writer.WriteStartArray();
-                    foreach (var crumb in latestBreadcrumbs) crumb.WriteTo(writer);
+                    foreach (var crumb in latestBreadcrumbs) WriteAdoptedBreadcrumb(writer, crumb);
                     writer.WriteEndArray();
                     writer.WriteEndObject();
                 }
                 File.Move(tmpPath, targetBufferPath, overwrite: true);
             }
 
+            var adoptedNames = new HashSet<string>(adoptedPaths.Count, StringComparer.Ordinal);
             foreach (var orphanPath in adoptedPaths)
             {
-                TryDeleteSingleBufferAndTemps(orphanPath);
+                TryDeleteSingleFile(orphanPath);
+                adoptedNames.Add(Path.GetFileName(orphanPath));
             }
+            TryDeleteAdoptedOrphanTempFiles(dir, generationPrefix, ext, adoptedNames);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
@@ -6606,8 +6632,130 @@ public sealed class CoreTelemetryService : ITelemetryService
         }
     }
 
+    private static void TryDeleteAdoptedOrphanTempFiles(
+        string dir, string generationPrefix, string ext, HashSet<string> adoptedNames)
+    {
+        if (adoptedNames.Count == 0) return;
+        try
+        {
+            var extDot = ext + ".";
+            var minExtIdx = 1 + generationPrefix.Length;
+            foreach (var tmp in Directory.EnumerateFiles(dir, $".{generationPrefix}*{ext}.*.tmp"))
+            {
+                var name = Path.GetFileName(tmp);
+                if (name.Length <= minExtIdx || name[0] != '.') continue;
+                var extIdx = name.IndexOf(extDot, minExtIdx, StringComparison.Ordinal);
+                if (extIdx < minExtIdx) continue;
+                var ownerName = name.Substring(1, extIdx + ext.Length - 1);
+                if (adoptedNames.Contains(ownerName))
+                {
+                    TryDeleteSingleFile(tmp);
+                }
+            }
+        }
+        catch (Exception ex) when (ex is DirectoryNotFoundException or IOException or UnauthorizedAccessException)
+        {
+        }
+    }
+
+    private readonly struct AdoptedPropValue
+    {
+        public readonly JsonValueKind Kind;
+        public readonly bool BoolValue;
+        public readonly long IntValue;
+        public readonly double FloatValue;
+        public readonly string? TextValue;
+        public readonly bool IsInt;
+
+        private AdoptedPropValue(JsonValueKind kind, bool b = false, long i = 0, double f = 0, string? s = null, bool isInt = false)
+        {
+            Kind = kind;
+            BoolValue = b;
+            IntValue = i;
+            FloatValue = f;
+            TextValue = s;
+            IsInt = isInt;
+        }
+
+        public static AdoptedPropValue FromBool(bool v) => new(v ? JsonValueKind.True : JsonValueKind.False, b: v);
+        public static AdoptedPropValue FromInt(long v) => new(JsonValueKind.Number, i: v, isInt: true);
+        public static AdoptedPropValue FromFloat(double v) => new(JsonValueKind.Number, f: v);
+        public static AdoptedPropValue FromText(string v) => new(JsonValueKind.String, s: v);
+    }
+
+    private sealed class AdoptedBreadcrumb
+    {
+        public long TimestampMs;
+        public string Category = string.Empty;
+        public string Message = string.Empty;
+        public string? Level;
+    }
+
+    private sealed class AdoptedEvent
+    {
+        public string Id = string.Empty;
+        public string Kind = string.Empty;
+        public string Name = string.Empty;
+        public long TimestampMs;
+        public string SessionId = string.Empty;
+        public Dictionary<string, AdoptedPropValue>? Properties;
+        public List<AdoptedBreadcrumb>? Breadcrumbs;
+    }
+
+    private static void WriteAdoptedEvent(Utf8JsonWriter writer, AdoptedEvent ev)
+    {
+        writer.WriteStartObject();
+        writer.WriteString("id", ev.Id);
+        writer.WriteString("kind", ev.Kind);
+        writer.WriteString("name", ev.Name);
+        writer.WriteNumber("timestamp_ms", ev.TimestampMs);
+        writer.WriteString("session_id", ev.SessionId);
+        if (ev.Properties != null)
+        {
+            writer.WritePropertyName("properties");
+            writer.WriteStartObject();
+            foreach (var kv in ev.Properties)
+            {
+                writer.WritePropertyName(kv.Key);
+                switch (kv.Value.Kind)
+                {
+                    case JsonValueKind.True:
+                    case JsonValueKind.False:
+                        writer.WriteBooleanValue(kv.Value.BoolValue);
+                        break;
+                    case JsonValueKind.Number:
+                        if (kv.Value.IsInt) writer.WriteNumberValue(kv.Value.IntValue);
+                        else writer.WriteNumberValue(kv.Value.FloatValue);
+                        break;
+                    case JsonValueKind.String:
+                        writer.WriteStringValue(kv.Value.TextValue);
+                        break;
+                }
+            }
+            writer.WriteEndObject();
+        }
+        if (ev.Breadcrumbs is { Count: > 0 })
+        {
+            writer.WritePropertyName("breadcrumbs");
+            writer.WriteStartArray();
+            foreach (var crumb in ev.Breadcrumbs) WriteAdoptedBreadcrumb(writer, crumb);
+            writer.WriteEndArray();
+        }
+        writer.WriteEndObject();
+    }
+
+    private static void WriteAdoptedBreadcrumb(Utf8JsonWriter writer, AdoptedBreadcrumb crumb)
+    {
+        writer.WriteStartObject();
+        writer.WriteNumber("timestamp_ms", crumb.TimestampMs);
+        writer.WriteString("category", crumb.Category);
+        writer.WriteString("message", crumb.Message);
+        if (crumb.Level != null) writer.WriteString("level", crumb.Level);
+        writer.WriteEndObject();
+    }
+
     private static bool ReadPersistedBufferInto(
-        string path, List<JsonElement> mergedEvents, HashSet<string> seenIds, List<JsonElement> latestBreadcrumbs)
+        string path, List<AdoptedEvent> mergedEvents, HashSet<string> seenIds, List<AdoptedBreadcrumb> latestBreadcrumbs)
     {
         try
         {
@@ -6615,25 +6763,32 @@ public sealed class CoreTelemetryService : ITelemetryService
             if (bytes.Length == 0) return true;
             using var doc = JsonDocument.Parse(bytes);
             if (doc.RootElement.ValueKind != JsonValueKind.Object) return true;
-            if (doc.RootElement.TryGetProperty("events", out var eventsEl) && eventsEl.ValueKind == JsonValueKind.Array)
+            var seenRootKeys = new HashSet<string>(StringComparer.Ordinal);
+            JsonElement? eventsEl = null;
+            JsonElement? crumbsEl = null;
+            foreach (var prop in doc.RootElement.EnumerateObject())
             {
-                foreach (var ev in eventsEl.EnumerateArray())
+                if (!seenRootKeys.Add(prop.Name)) return true;
+                if (prop.Name == "events") eventsEl = prop.Value;
+                else if (prop.Name == "breadcrumbs") crumbsEl = prop.Value;
+            }
+            if (eventsEl is { ValueKind: JsonValueKind.Array } evArray)
+            {
+                foreach (var ev in evArray.EnumerateArray())
                 {
-                    if (!IsValidPersistedEvent(ev, out var id)) continue;
-                    if (seenIds.Add(id))
+                    if (!TryParsePersistedEvent(ev, out var parsed)) continue;
+                    if (seenIds.Add(parsed.Id))
                     {
-                        mergedEvents.Add(ev.Clone());
+                        mergedEvents.Add(parsed);
                     }
                 }
             }
-            if (doc.RootElement.TryGetProperty("breadcrumbs", out var crumbsEl) &&
-                crumbsEl.ValueKind == JsonValueKind.Array &&
-                crumbsEl.GetArrayLength() > 0)
+            if (crumbsEl is { ValueKind: JsonValueKind.Array } crArray && crArray.GetArrayLength() > 0)
             {
-                var validCrumbs = new List<JsonElement>();
-                foreach (var crumb in crumbsEl.EnumerateArray())
+                var validCrumbs = new List<AdoptedBreadcrumb>();
+                foreach (var crumb in crArray.EnumerateArray())
                 {
-                    if (IsValidPersistedBreadcrumb(crumb)) validCrumbs.Add(crumb.Clone());
+                    if (TryParsePersistedBreadcrumb(crumb, out var parsedCrumb)) validCrumbs.Add(parsedCrumb);
                 }
                 if (validCrumbs.Count > 0)
                 {
@@ -6653,62 +6808,157 @@ public sealed class CoreTelemetryService : ITelemetryService
         }
     }
 
-    private static bool IsValidPersistedEvent(JsonElement ev, out string id)
+    private static bool TryParsePersistedEvent(JsonElement ev, out AdoptedEvent parsed)
     {
-        id = string.Empty;
+        parsed = null!;
         if (ev.ValueKind != JsonValueKind.Object) return false;
-        if (!ev.TryGetProperty("id", out var idEl) || idEl.ValueKind != JsonValueKind.String) return false;
-        id = idEl.GetString() ?? string.Empty;
-        if (!ev.TryGetProperty("kind", out var kindEl) || kindEl.ValueKind != JsonValueKind.String) return false;
-        var kind = kindEl.GetString();
-        if (kind is not ("analytics" or "qoe" or "error" or "crash")) return false;
-        if (!ev.TryGetProperty("name", out var nameEl) || nameEl.ValueKind != JsonValueKind.String) return false;
-        if (!ev.TryGetProperty("timestamp_ms", out var tsEl) || tsEl.ValueKind != JsonValueKind.Number || !tsEl.TryGetInt64(out _))
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        string? id = null;
+        string? kind = null;
+        string? name = null;
+        long timestampMs = 0;
+        var hasTimestamp = false;
+        string? sessionId = null;
+        Dictionary<string, AdoptedPropValue>? props = null;
+        List<AdoptedBreadcrumb>? crumbs = null;
+        foreach (var field in ev.EnumerateObject())
         {
-            return false;
-        }
-        if (!ev.TryGetProperty("session_id", out var sidEl) || sidEl.ValueKind != JsonValueKind.String) return false;
-        if (ev.TryGetProperty("properties", out var propsEl))
-        {
-            if (propsEl.ValueKind != JsonValueKind.Object) return false;
-            foreach (var prop in propsEl.EnumerateObject())
+            if (!seen.Add(field.Name)) return false;
+            switch (field.Name)
             {
-                if (!IsValidPersistedPropValue(prop.Value)) return false;
+                case "id":
+                    if (field.Value.ValueKind != JsonValueKind.String) return false;
+                    id = field.Value.GetString() ?? string.Empty;
+                    break;
+                case "kind":
+                    if (field.Value.ValueKind != JsonValueKind.String) return false;
+                    var k = field.Value.GetString();
+                    if (k is not ("analytics" or "qoe" or "error" or "crash")) return false;
+                    kind = k;
+                    break;
+                case "name":
+                    if (field.Value.ValueKind != JsonValueKind.String) return false;
+                    name = field.Value.GetString() ?? string.Empty;
+                    break;
+                case "timestamp_ms":
+                    if (field.Value.ValueKind != JsonValueKind.Number || !field.Value.TryGetInt64(out timestampMs)) return false;
+                    hasTimestamp = true;
+                    break;
+                case "session_id":
+                    if (field.Value.ValueKind != JsonValueKind.String) return false;
+                    sessionId = field.Value.GetString() ?? string.Empty;
+                    break;
+                case "properties":
+                    if (field.Value.ValueKind != JsonValueKind.Object) return false;
+                    props = new Dictionary<string, AdoptedPropValue>(StringComparer.Ordinal);
+                    foreach (var prop in field.Value.EnumerateObject())
+                    {
+                        if (!TryParsePersistedPropValue(prop.Value, out var propVal) || !props.TryAdd(prop.Name, propVal))
+                        {
+                            return false;
+                        }
+                    }
+                    break;
+                case "breadcrumbs":
+                    if (field.Value.ValueKind != JsonValueKind.Array) return false;
+                    crumbs = new List<AdoptedBreadcrumb>();
+                    foreach (var crumb in field.Value.EnumerateArray())
+                    {
+                        if (!TryParsePersistedBreadcrumb(crumb, out var parsedCrumb)) return false;
+                        crumbs.Add(parsedCrumb);
+                    }
+                    break;
             }
         }
-        if (ev.TryGetProperty("breadcrumbs", out var crumbsEl))
+        if (id == null || kind == null || name == null || !hasTimestamp || sessionId == null) return false;
+        parsed = new AdoptedEvent
         {
-            if (crumbsEl.ValueKind != JsonValueKind.Array) return false;
-            foreach (var crumb in crumbsEl.EnumerateArray())
-            {
-                if (!IsValidPersistedBreadcrumb(crumb)) return false;
-            }
-        }
+            Id = id,
+            Kind = kind,
+            Name = name,
+            TimestampMs = timestampMs,
+            SessionId = sessionId,
+            Properties = props,
+            Breadcrumbs = crumbs,
+        };
         return true;
     }
 
-    private static bool IsValidPersistedPropValue(JsonElement value) => value.ValueKind switch
+    private static bool TryParsePersistedPropValue(JsonElement value, out AdoptedPropValue parsed)
     {
-        JsonValueKind.True or JsonValueKind.False or JsonValueKind.String => true,
-        JsonValueKind.Number => value.TryGetInt64(out _) || (value.TryGetDouble(out var d) && double.IsFinite(d)),
-        _ => false,
-    };
+        switch (value.ValueKind)
+        {
+            case JsonValueKind.True:
+                parsed = AdoptedPropValue.FromBool(true);
+                return true;
+            case JsonValueKind.False:
+                parsed = AdoptedPropValue.FromBool(false);
+                return true;
+            case JsonValueKind.String:
+                parsed = AdoptedPropValue.FromText(value.GetString() ?? string.Empty);
+                return true;
+            case JsonValueKind.Number:
+                if (value.TryGetInt64(out var i))
+                {
+                    parsed = AdoptedPropValue.FromInt(i);
+                    return true;
+                }
+                if (value.TryGetDouble(out var d) && double.IsFinite(d))
+                {
+                    parsed = AdoptedPropValue.FromFloat(d);
+                    return true;
+                }
+                parsed = default;
+                return false;
+            default:
+                parsed = default;
+                return false;
+        }
+    }
 
-    private static bool IsValidPersistedBreadcrumb(JsonElement crumb)
+    private static bool TryParsePersistedBreadcrumb(JsonElement crumb, out AdoptedBreadcrumb parsed)
     {
+        parsed = null!;
         if (crumb.ValueKind != JsonValueKind.Object) return false;
-        if (!crumb.TryGetProperty("timestamp_ms", out var tsEl) || tsEl.ValueKind != JsonValueKind.Number || !tsEl.TryGetInt64(out _))
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        long timestampMs = 0;
+        var hasTimestamp = false;
+        string? category = null;
+        string? message = null;
+        string? level = null;
+        foreach (var field in crumb.EnumerateObject())
         {
-            return false;
+            if (!seen.Add(field.Name)) return false;
+            switch (field.Name)
+            {
+                case "timestamp_ms":
+                    if (field.Value.ValueKind != JsonValueKind.Number || !field.Value.TryGetInt64(out timestampMs)) return false;
+                    hasTimestamp = true;
+                    break;
+                case "category":
+                    if (field.Value.ValueKind != JsonValueKind.String) return false;
+                    category = field.Value.GetString() ?? string.Empty;
+                    break;
+                case "message":
+                    if (field.Value.ValueKind != JsonValueKind.String) return false;
+                    message = field.Value.GetString() ?? string.Empty;
+                    break;
+                case "level":
+                    if (field.Value.ValueKind != JsonValueKind.String) return false;
+                    var lvl = field.Value.GetString();
+                    if (lvl is not ("debug" or "info" or "warning" or "error")) return false;
+                    level = lvl;
+                    break;
+            }
         }
-        if (!crumb.TryGetProperty("category", out var catEl) || catEl.ValueKind != JsonValueKind.String) return false;
-        if (!crumb.TryGetProperty("message", out var msgEl) || msgEl.ValueKind != JsonValueKind.String) return false;
-        if (crumb.TryGetProperty("level", out var lvlEl))
+        if (!hasTimestamp || category == null || message == null) return false;
+        parsed = new AdoptedBreadcrumb
         {
-            if (lvlEl.ValueKind != JsonValueKind.String) return false;
-            var level = lvlEl.GetString();
-            if (level is not ("debug" or "info" or "warning" or "error")) return false;
-        }
+            TimestampMs = timestampMs,
+            Category = category,
+            Message = message,
+            Level = level,
+        };
         return true;
     }
 
@@ -6831,10 +7081,11 @@ public sealed class CoreTelemetryService : ITelemetryService
         if (string.IsNullOrWhiteSpace(_bufferPath)) return true;
         var activePath = _activeBufferPath ?? _bufferPath;
         var ext = Path.GetExtension(_bufferPath);
-        var activeKept = keepForeignGenerationPrefix != null &&
+        var isPerInstanceActive = !string.Equals(activePath, _bufferPath, StringComparison.Ordinal);
+        var activeKept = !isPerInstanceActive && keepForeignGenerationPrefix != null &&
             IsBufferFileInGeneration(Path.GetFileName(activePath), keepForeignGenerationPrefix, ext);
-        var mainOk = activeKept ? true : TryDeleteSingleFile(activePath);
-        if (!string.Equals(activePath, _bufferPath, StringComparison.Ordinal) &&
+        var mainOk = activeKept ? true : (isPerInstanceActive ? TryDeleteSingleBufferAndTemps(activePath) : TryDeleteSingleFile(activePath));
+        if (isPerInstanceActive &&
             (keepForeignGenerationPrefix == null ||
              !IsBufferFileInGeneration(Path.GetFileName(_bufferPath), keepForeignGenerationPrefix, ext)))
         {

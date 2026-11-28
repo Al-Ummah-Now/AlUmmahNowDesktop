@@ -150,7 +150,7 @@ namespace AlUmmahNow.App.Services
                 if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
                 var existing = LoadTelemetryConsentToken();
                 string token;
-                if (!string.IsNullOrEmpty(existing))
+                if (existing is { Length: > 0 })
                 {
                     var baseGen = ExtractBaseGenerationToken(existing);
                     token = baseGen + ":" + Guid.NewGuid().ToString("N");
@@ -179,7 +179,7 @@ namespace AlUmmahNow.App.Services
         /// </summary>
         public bool RollbackTelemetryEnabled(string? expectedToken)
         {
-            if (string.IsNullOrEmpty(expectedToken)) return false;
+            if (expectedToken is not { Length: > 0 }) return false;
             using var crossProcessLock = TryAcquireConsentLock(
                 createDirectory: false,
                 out var directoryMissing,
