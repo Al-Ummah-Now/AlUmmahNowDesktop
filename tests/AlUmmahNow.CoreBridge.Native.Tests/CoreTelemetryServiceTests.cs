@@ -3200,19 +3200,26 @@ public class CoreTelemetryServiceTests
 
         var json = CoreTelemetryService.SerializeProperties(new Dictionary<string, object>
         {
-            ["quotedCred"] = "{\"challenge.verificationCode\":\"482731\"} pwd=shortsecret",
+            ["quotedCred"] = "{\"challenge.verificationCode\":\"482731\"} pwd=shortsecret token=cobalt-orchard",
+            ["personalText"] = "fullName=\"Alice Wonderland\" displayName='Bob Smith' address=\"123 Main St, Apt 4\"",
             ["http://u:p@localhost/x"] = "https://1drv.ms/u/s!Aq82F1ZLPx0K",
             ["algNone"] = "IHsiYWxnIjoibm9uZSJ9.eyJzdWIiOiJhbGljZSJ9.",
             ["longJwt"] = longSignedJwt,
             ["safeId"] = "eyJunction.load.failed",
-            ["nbPhone"] = "+33\u202F6\u202F12\u202F34\u202F56\u202F78",
-            ["minusPhone"] = "+1\u2212212\u2212555\u22120123",
-            ["shortPhone"] = "12 34 56 78 and 2026-11-27",
+            ["nbText"] = "+33\u202F6\u202F12\u202F34\u202F56\u202F78",
+            ["minusText"] = "+1\u2212212\u2212555\u22120123",
+            ["detailText"] = "12 34 56 78 and 2026-11-27",
         });
 
         Assert.NotNull(json);
         Assert.DoesNotContain("482731", json);
         Assert.DoesNotContain("shortsecret", json);
+        Assert.DoesNotContain("cobalt-orchard", json);
+        Assert.DoesNotContain("[redacted]]", json);
+        Assert.DoesNotContain("Alice", json);
+        Assert.DoesNotContain("Wonderland", json);
+        Assert.DoesNotContain("Bob Smith", json);
+        Assert.DoesNotContain("Main St", json);
         Assert.DoesNotContain("u:p@localhost", json);
         Assert.DoesNotContain("u:[redacted-email]", json);
         Assert.DoesNotContain("Aq82F1ZLPx0K", json);

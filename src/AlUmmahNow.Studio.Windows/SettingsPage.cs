@@ -79,10 +79,11 @@ internal sealed class SettingsPage
         var telemetryBody = new StackPanel { Spacing = 8 };
         telemetryBody.Children.Add(Heading(l["settings.telemetry.title"]));
         telemetryBody.Children.Add(new TextBlock { Text = l["settings.telemetry.body"], TextWrapping = TextWrapping.Wrap, Foreground = LanternGlass.Res("StudioMutedBrush") });
-        settings.TelemetryEnabled = store.LoadTelemetryEnabled();
-        var telemetryToggle = new ToggleSwitch { Header = l["settings.telemetry.toggle"], IsOn = settings.TelemetryEnabled };
+        var telemetryUnavailable = telemetry is NullTelemetryService;
+        settings.TelemetryEnabled = !telemetryUnavailable && store.LoadTelemetryEnabled() && (telemetry == null || telemetry.Consent == TelemetryConsent.Full);
+        var telemetryToggle = new ToggleSwitch { Header = l["settings.telemetry.toggle"], IsOn = settings.TelemetryEnabled, IsEnabled = !telemetryUnavailable };
         AutomationProperties.SetAutomationId(telemetryToggle, "SettingsTelemetryToggle");
-        var initialPurgeFailed = telemetry?.LastPurgeFailed ?? false;
+        var initialPurgeFailed = !telemetryUnavailable && (telemetry?.LastPurgeFailed ?? false);
         var purgeWarningText = l["settings.telemetry.purgeWarning"];
         var disableErrorText = l["settings.telemetry.disableError"];
         var revokingOtherText = l["settings.telemetry.revokingOtherWindow"];
@@ -93,9 +94,27 @@ internal sealed class SettingsPage
             Text = initialPurgeFailed ? purgeWarningText : string.Empty,
         };
         AutomationProperties.SetAutomationId(telemetryNotice, "SettingsTelemetryNotice");
+        AutomationProperties.SetLiveSetting(telemetryNotice, Microsoft.UI.Xaml.Automation.Peers.AutomationLiveSetting.Assertive);
+        void SetTelemetryNotice(string text)
+        {
+            var changed = telemetryNotice.Text != text;
+            telemetryNotice.Text = text;
+            telemetryNotice.Visibility = string.IsNullOrEmpty(text) ? Visibility.Collapsed : Visibility.Visible;
+            if (changed && !string.IsNullOrEmpty(text))
+            {
+                var peer = Microsoft.UI.Xaml.Automation.Peers.FrameworkElementAutomationPeer.FromElement(telemetryNotice)
+                    ?? Microsoft.UI.Xaml.Automation.Peers.FrameworkElementAutomationPeer.CreatePeerForElement(telemetryNotice);
+                peer?.RaiseAutomationEvent(Microsoft.UI.Xaml.Automation.Peers.AutomationEvents.LiveRegionChanged);
+                peer?.RaiseNotificationEvent(
+                    Microsoft.UI.Xaml.Automation.Peers.AutomationNotificationKind.ActionAborted,
+                    Microsoft.UI.Xaml.Automation.Peers.AutomationNotificationProcessing.ImportantMostRecent,
+                    text,
+                    "telemetry-notice");
+            }
+        }
         var disableSaveFailed = false;
         var pendingOtherRevocation = false;
-        if (telemetry != null)
+        if (telemetry != null && !telemetryUnavailable)
         {
             void SyncPurgeNotice()
             {
@@ -114,10 +133,9 @@ internal sealed class SettingsPage
                             settings.TelemetryEnabled = true;
                             telemetryToggle.IsOn = true;
                         }
-                        telemetryNotice.Text = failed
+                        SetTelemetryNotice(failed
                             ? disableErrorText + "\n" + purgeWarningText
-                            : disableErrorText;
-                        telemetryNotice.Visibility = Visibility.Visible;
+                            : disableErrorText);
                         return;
                     }
                 }
@@ -144,29 +162,34 @@ internal sealed class SettingsPage
                     {
                         telemetry.SetConsent(TelemetryConsent.Full);
                     }
-                    if (!settings.TelemetryEnabled)
+                    if (telemetry.Consent == TelemetryConsent.Full)
                     {
-                        settings.TelemetryEnabled = true;
-                        telemetryToggle.IsOn = true;
+                        if (!settings.TelemetryEnabled)
+                        {
+                            settings.TelemetryEnabled = true;
+                            telemetryToggle.IsOn = true;
+                        }
+                        if (!string.IsNullOrEmpty(telemetryNotice.Text))
+                        {
+                            SetTelemetryNotice(string.Empty);
+                        }
+                        return;
                     }
-                    if (!string.IsNullOrEmpty(telemetryNotice.Text))
+                    if (settings.TelemetryEnabled)
                     {
-                        telemetryNotice.Text = string.Empty;
-                        telemetryNotice.Visibility = Visibility.Collapsed;
+                        settings.TelemetryEnabled = false;
+                        telemetryToggle.IsOn = false;
                     }
-                    return;
                 }
                 if (pendingOtherRevocation)
                 {
-                    telemetryNotice.Text = failed && telemetry.Consent == TelemetryConsent.Off
+                    SetTelemetryNotice(failed && telemetry.Consent == TelemetryConsent.Off
                         ? revokingOtherText + "\n" + purgeWarningText
-                        : revokingOtherText;
-                    telemetryNotice.Visibility = Visibility.Visible;
+                        : revokingOtherText);
                 }
                 else if (failed && telemetry.Consent == TelemetryConsent.Off)
                 {
-                    telemetryNotice.Text = purgeWarningText;
-                    telemetryNotice.Visibility = Visibility.Visible;
+                    SetTelemetryNotice(purgeWarningText);
                 }
                 else
                 {
@@ -177,8 +200,7 @@ internal sealed class SettingsPage
                         currentNotice == disableErrorText ||
                         currentNotice == disableErrorText + "\n" + purgeWarningText)
                     {
-                        telemetryNotice.Text = string.Empty;
-                        telemetryNotice.Visibility = Visibility.Collapsed;
+                        SetTelemetryNotice(string.Empty);
                     }
                 }
             }
@@ -216,6 +238,11 @@ internal sealed class SettingsPage
         }
         telemetryToggle.Toggled += (_, _) =>
         {
+            if (telemetryUnavailable)
+            {
+                if (telemetryToggle.IsOn) telemetryToggle.IsOn = false;
+                return;
+            }
             var enabled = telemetryToggle.IsOn;
             if (settings.TelemetryEnabled == enabled) return;
             if (enabled)
@@ -224,8 +251,7 @@ internal sealed class SettingsPage
                 {
                     settings.TelemetryEnabled = false;
                     telemetryToggle.IsOn = false;
-                    telemetryNotice.Text = l["settings.telemetry.enableError"];
-                    telemetryNotice.Visibility = Visibility.Visible;
+                    SetTelemetryNotice(l["settings.telemetry.enableError"]);
                     return;
                 }
                 var confirmationFailed = false;
@@ -246,23 +272,20 @@ internal sealed class SettingsPage
                     {
                         settings.TelemetryEnabled = true;
                         telemetryToggle.IsOn = true;
-                        telemetryNotice.Text = purged
+                        SetTelemetryNotice(purged
                             ? disableErrorText
-                            : disableErrorText + "\n" + purgeWarningText;
-                        telemetryNotice.Visibility = Visibility.Visible;
+                            : disableErrorText + "\n" + purgeWarningText);
                         return;
                     }
                     settings.TelemetryEnabled = false;
                     telemetryToggle.IsOn = false;
-                    telemetryNotice.Text = confirmationFailed ? string.Empty : l["settings.telemetry.enableError"];
-                    telemetryNotice.Visibility = confirmationFailed ? Visibility.Collapsed : Visibility.Visible;
+                    SetTelemetryNotice(confirmationFailed ? string.Empty : l["settings.telemetry.enableError"]);
                     return;
                 }
                 disableSaveFailed = false;
                 pendingOtherRevocation = false;
                 settings.TelemetryEnabled = true;
-                telemetryNotice.Text = string.Empty;
-                telemetryNotice.Visibility = Visibility.Collapsed;
+                SetTelemetryNotice(string.Empty);
             }
             else
             {
@@ -274,23 +297,20 @@ internal sealed class SettingsPage
                 {
                     settings.TelemetryEnabled = true;
                     telemetryToggle.IsOn = true;
-                    telemetryNotice.Text = purged
+                    SetTelemetryNotice(purged
                         ? disableErrorText
-                        : disableErrorText + "\n" + purgeWarningText;
-                    telemetryNotice.Visibility = Visibility.Visible;
+                        : disableErrorText + "\n" + purgeWarningText);
                     return;
                 }
                 settings.TelemetryEnabled = false;
                 if (pendingOtherRevocation)
                 {
-                    telemetryNotice.Text = purged
+                    SetTelemetryNotice(purged
                         ? revokingOtherText
-                        : revokingOtherText + "\n" + purgeWarningText;
-                    telemetryNotice.Visibility = Visibility.Visible;
+                        : revokingOtherText + "\n" + purgeWarningText);
                     return;
                 }
-                telemetryNotice.Text = purged ? string.Empty : purgeWarningText;
-                telemetryNotice.Visibility = purged ? Visibility.Collapsed : Visibility.Visible;
+                SetTelemetryNotice(purged ? string.Empty : purgeWarningText);
             }
         };
         telemetryBody.Children.Add(telemetryToggle);

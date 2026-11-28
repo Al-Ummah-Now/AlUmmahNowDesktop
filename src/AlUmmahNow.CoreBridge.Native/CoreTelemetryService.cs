@@ -8329,19 +8329,46 @@ public sealed class CoreTelemetryService : ITelemetryService
         "secretkey", "sessionid", "sessionkey", "codeverifier",
         "verificationcode", "authcode", "recoverycode", "clientsecret",
         "accesstoken", "refreshtoken", "idtoken", "sessiontoken", "securitytoken",
+        "apitoken", "authtoken",
+        "email", "mail", "phone", "phonenumber", "msisdn", "mobile", "tel", "telephone",
+        "ssn", "ipaddress", "address", "street", "streetaddress", "homeaddress",
+        "card", "creditcard", "cvv", "cvc", "iban", "pan",
+        "dob", "birthdate", "dateofbirth",
+        "firstname", "lastname", "fullname", "displayname", "givenname", "familyname",
+        "username", "passport", "session", "login",
     };
 
-    private static bool IsAuthHeaderPropertyKey(string key)
+    private static readonly string[] HighValueKeySubstrings =
+    [
+        "apikey", "accesskey", "secret", "token", "password", "passwd",
+        "credential", "authorization", "privatekey", "cookie", "signature",
+    ];
+
+    private static bool IsSensitiveKeyName(ReadOnlySpan<char> key)
     {
-        var trimmed = key.AsSpan().Trim();
-        if (IsKnownAuthHeaderName(trimmed)) return true;
-        var segments = SplitKeySegments(trimmed);
+        var squashed = new StringBuilder(key.Length);
+        foreach (var c in key)
+        {
+            if (char.IsLetterOrDigit(c)) squashed.Append(char.ToLowerInvariant(c));
+        }
+        var squashedStr = squashed.ToString();
+        foreach (var sub in HighValueKeySubstrings)
+        {
+            if (squashedStr.Contains(sub, StringComparison.Ordinal)) return true;
+        }
+        var segments = SplitKeySegments(key);
         for (var i = 0; i < segments.Count; i++)
         {
             if (SensitiveKeySegments.Contains(segments[i])) return true;
             if (i + 1 < segments.Count && SensitiveKeySegments.Contains(segments[i] + segments[i + 1])) return true;
         }
         return false;
+    }
+
+    private static bool IsAuthHeaderPropertyKey(string key)
+    {
+        var trimmed = key.AsSpan().Trim();
+        return IsKnownAuthHeaderName(trimmed) || IsSensitiveKeyName(trimmed);
     }
 
     private static List<string> SplitKeySegments(ReadOnlySpan<char> key)
@@ -8497,14 +8524,28 @@ public sealed class CoreTelemetryService : ITelemetryService
     }
 
     private static readonly Regex KeyValueCredentialRegex = new(
-        @"(?<![A-Za-z0-9_])((?:[A-Za-z0-9_.-]*[._-])?(?:token|secret|jwt|passphrase|credential|credentials|verification[_-]?code|auth[_-]?code|recovery[_-]?code|passcode|otp|pin|client[_-]?secret|access[_-]?token|refresh[_-]?token|id[_-]?token|api[_-]?key|api[_-]?token|auth[_-]?token|session[_-]?token|security[_-]?token|private[_-]?key|secret[_-]?key|access[_-]?key|code[_-]?verifier|session[_-]?id|session[_-]?key|password|passwd|pwd)(?:\\?[""'])?\s*[=:]\s*)(?:\\""(?:\\\\.|[^""\\])*\\""|""(?:\\.|[^""\\])*""|'(?:\\.|[^'\\])*'|[^\s,;}\]""']+)",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        @"(?<![A-Za-z0-9_])([A-Za-z0-9_.-]{2,64})((?:\\?[""'])?\s*[=:]\s*)(?:\[redacted(?:-[a-z]+)?\]|\\""(?:\\\\.|[^""\\])*\\""|""(?:\\.|[^""\\])*""|'(?:\\.|[^'\\])*'|[^\s,;}\]""']+)",
+        RegexOptions.Compiled);
+
+    private static string ScrubSensitiveKeyValues(string text) =>
+        KeyValueCredentialRegex.Replace(text, static m =>
+        {
+            var key = m.Groups[1].ValueSpan;
+            if (key.Equals("authorization", StringComparison.OrdinalIgnoreCase) ||
+                key.Equals("proxy-authorization", StringComparison.OrdinalIgnoreCase))
+            {
+                return m.Value;
+            }
+            return IsSensitiveKeyName(key)
+                ? m.Groups[1].Value + m.Groups[2].Value + "[redacted]"
+                : m.Value;
+        });
 
     private static string SanitizeDiagnosticText(string text)
     {
-        var pre = KeyValueCredentialRegex.Replace(text, "$1[redacted]");
+        var pre = ScrubSensitiveKeyValues(text);
         var safe = SanitizeLocalPaths(pre);
-        safe = KeyValueCredentialRegex.Replace(safe, "$1[redacted]");
+        safe = ScrubSensitiveKeyValues(safe);
         safe = Ipv6InKeyRegex.Replace(safe, "[redacted-ip]");
         safe = Ipv4InKeyRegex.Replace(safe, "[redacted-ip]");
         safe = ScrubUnicodePhoneNumbers(safe);
