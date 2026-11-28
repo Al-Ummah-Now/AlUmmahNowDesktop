@@ -553,6 +553,57 @@ namespace AlUmmahNow.App.Services
             }
         }
 
+        /// <summary>
+        /// Returns true if another process currently holds an active flush guard in the shared config directory.
+        /// Cleans up unlocked leftover guard files from exited processes.
+        /// </summary>
+        public bool HasActiveFlushGuards()
+        {
+            var directory = Path.GetDirectoryName(_telemetryConsentPath);
+            if (string.IsNullOrEmpty(directory)) return false;
+            string[] guards;
+            try
+            {
+                guards = Directory.GetFiles(directory, "telemetry-flush-active.*.lock");
+            }
+            catch (DirectoryNotFoundException)
+            {
+                return false;
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+            {
+                return true;
+            }
+            if (guards.Length == 0) return false;
+            var anyLive = false;
+            foreach (var guardPath in guards)
+            {
+                try
+                {
+                    using (new FileStream(guardPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+                    {
+                    }
+                    try { File.Delete(guardPath); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+                }
+                catch (FileNotFoundException)
+                {
+                }
+                catch (DirectoryNotFoundException)
+                {
+                    return false;
+                }
+                catch (IOException)
+                {
+                    anyLive = true;
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    anyLive = true;
+                }
+            }
+            return anyLive;
+        }
+
         private bool WaitForActiveFlushRevocationsUnlocked(int timeoutMs)
         {
             var directory = Path.GetDirectoryName(_telemetryConsentPath);

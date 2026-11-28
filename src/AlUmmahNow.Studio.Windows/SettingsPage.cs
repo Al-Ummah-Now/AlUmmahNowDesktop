@@ -94,31 +94,51 @@ internal sealed class SettingsPage
         };
         AutomationProperties.SetAutomationId(telemetryNotice, "SettingsTelemetryNotice");
         var disableSaveFailed = false;
+        var pendingOtherRevocation = false;
         if (telemetry != null)
         {
             void SyncPurgeNotice()
             {
                 var failed = telemetry.LastPurgeFailed;
+                var persistedEnabled = store.LoadTelemetryEnabled();
                 if (disableSaveFailed)
                 {
-                    if (!settings.TelemetryEnabled)
+                    if (!persistedEnabled)
                     {
-                        settings.TelemetryEnabled = true;
-                        telemetryToggle.IsOn = true;
+                        disableSaveFailed = false;
                     }
-                    telemetryNotice.Text = failed
-                        ? disableErrorText + "\n" + purgeWarningText
-                        : disableErrorText;
-                    telemetryNotice.Visibility = Visibility.Visible;
-                    return;
+                    else
+                    {
+                        if (!settings.TelemetryEnabled)
+                        {
+                            settings.TelemetryEnabled = true;
+                            telemetryToggle.IsOn = true;
+                        }
+                        telemetryNotice.Text = failed
+                            ? disableErrorText + "\n" + purgeWarningText
+                            : disableErrorText;
+                        telemetryNotice.Visibility = Visibility.Visible;
+                        return;
+                    }
                 }
-                var persistedEnabled = store.LoadTelemetryEnabled();
-                if (!persistedEnabled && telemetry.Consent == TelemetryConsent.Off && settings.TelemetryEnabled)
+                if (pendingOtherRevocation && (persistedEnabled || !store.HasActiveFlushGuards()))
                 {
-                    settings.TelemetryEnabled = false;
-                    telemetryToggle.IsOn = false;
+                    pendingOtherRevocation = false;
                 }
-                else if (persistedEnabled)
+                if (!persistedEnabled)
+                {
+                    if (telemetry.Consent != TelemetryConsent.Off)
+                    {
+                        telemetry.SetConsent(TelemetryConsent.Off);
+                        failed = telemetry.LastPurgeFailed;
+                    }
+                    if (settings.TelemetryEnabled)
+                    {
+                        settings.TelemetryEnabled = false;
+                        telemetryToggle.IsOn = false;
+                    }
+                }
+                else
                 {
                     if (telemetry.Consent == TelemetryConsent.Off)
                     {
@@ -129,16 +149,37 @@ internal sealed class SettingsPage
                         settings.TelemetryEnabled = true;
                         telemetryToggle.IsOn = true;
                     }
+                    if (!string.IsNullOrEmpty(telemetryNotice.Text))
+                    {
+                        telemetryNotice.Text = string.Empty;
+                        telemetryNotice.Visibility = Visibility.Collapsed;
+                    }
+                    return;
                 }
-                if (failed && telemetry.Consent == TelemetryConsent.Off)
+                if (pendingOtherRevocation)
+                {
+                    telemetryNotice.Text = failed && telemetry.Consent == TelemetryConsent.Off
+                        ? revokingOtherText + "\n" + purgeWarningText
+                        : revokingOtherText;
+                    telemetryNotice.Visibility = Visibility.Visible;
+                }
+                else if (failed && telemetry.Consent == TelemetryConsent.Off)
                 {
                     telemetryNotice.Text = purgeWarningText;
                     telemetryNotice.Visibility = Visibility.Visible;
                 }
-                else if (!failed && telemetryNotice.Text == purgeWarningText)
+                else
                 {
-                    telemetryNotice.Text = string.Empty;
-                    telemetryNotice.Visibility = Visibility.Collapsed;
+                    var currentNotice = telemetryNotice.Text;
+                    if (currentNotice == purgeWarningText ||
+                        currentNotice == revokingOtherText ||
+                        currentNotice == revokingOtherText + "\n" + purgeWarningText ||
+                        currentNotice == disableErrorText ||
+                        currentNotice == disableErrorText + "\n" + purgeWarningText)
+                    {
+                        telemetryNotice.Text = string.Empty;
+                        telemetryNotice.Visibility = Visibility.Collapsed;
+                    }
                 }
             }
             Action<bool> onPurgeChanged = _ => telemetryNotice.DispatcherQueue?.TryEnqueue(SyncPurgeNotice);
@@ -218,6 +259,7 @@ internal sealed class SettingsPage
                     return;
                 }
                 disableSaveFailed = false;
+                pendingOtherRevocation = false;
                 settings.TelemetryEnabled = true;
                 telemetryNotice.Text = string.Empty;
                 telemetryNotice.Visibility = Visibility.Collapsed;
@@ -227,6 +269,7 @@ internal sealed class SettingsPage
                 var optOut = store.SaveTelemetryOptOut();
                 var purged = telemetry?.SetConsent(TelemetryConsent.Off) ?? true;
                 disableSaveFailed = optOut == SettingsStore.TelemetryOptOutResult.SaveFailed;
+                pendingOtherRevocation = optOut == SettingsStore.TelemetryOptOutResult.PendingOtherProcessRevocation;
                 if (disableSaveFailed)
                 {
                     settings.TelemetryEnabled = true;
@@ -238,7 +281,7 @@ internal sealed class SettingsPage
                     return;
                 }
                 settings.TelemetryEnabled = false;
-                if (optOut == SettingsStore.TelemetryOptOutResult.PendingOtherProcessRevocation)
+                if (pendingOtherRevocation)
                 {
                     telemetryNotice.Text = purged
                         ? revokingOtherText

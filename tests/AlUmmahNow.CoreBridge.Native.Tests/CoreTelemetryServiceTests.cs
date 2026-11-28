@@ -3190,6 +3190,42 @@ public class CoreTelemetryServiceTests
         }
     }
 
+    [Fact]
+    public void Diagnostic_sanitizer_handles_quoted_credentials_userinfo_jose_edge_cases_and_unicode_phones()
+    {
+        var longHeaderJson = " {\"alg\":\"HS256\",\"pad\":\"" + new string('a', 600) + "\"}";
+        var longHeaderB64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(longHeaderJson))
+            .TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        var longSignedJwt = $"{longHeaderB64}.eyJzdWIiOiJhbGljZSJ9.sigValue123";
+
+        var json = CoreTelemetryService.SerializeProperties(new Dictionary<string, object>
+        {
+            ["quotedCred"] = "{\"challenge.verificationCode\":\"482731\"} pwd=shortsecret",
+            ["http://u:p@localhost/x"] = "https://1drv.ms/u/s!Aq82F1ZLPx0K",
+            ["algNone"] = "IHsiYWxnIjoibm9uZSJ9.eyJzdWIiOiJhbGljZSJ9.",
+            ["longJwt"] = longSignedJwt,
+            ["safeId"] = "eyJunction.load.failed",
+            ["nbPhone"] = "+33\u202F6\u202F12\u202F34\u202F56\u202F78",
+            ["minusPhone"] = "+1\u2212212\u2212555\u22120123",
+            ["shortPhone"] = "12 34 56 78 and 2026-11-27",
+        });
+
+        Assert.NotNull(json);
+        Assert.DoesNotContain("482731", json);
+        Assert.DoesNotContain("shortsecret", json);
+        Assert.DoesNotContain("u:p@localhost", json);
+        Assert.DoesNotContain("u:[redacted-email]", json);
+        Assert.DoesNotContain("Aq82F1ZLPx0K", json);
+        Assert.DoesNotContain("eyJzdWIiOiJhbGljZSJ9", json);
+        Assert.DoesNotContain("sigValue123", json);
+        Assert.Contains("eyJunction.load.failed", json);
+        Assert.DoesNotContain("56\u202F78", json);
+        Assert.DoesNotContain("0123", json);
+        Assert.DoesNotContain("12 34 56 78", json);
+        Assert.Contains("2026-11-27", json);
+        Assert.Equal("http://[redacted]@localhost/x", CoreTelemetryService.SanitizeLocalPaths("http://u:p@localhost/x"));
+    }
+
     private sealed class CallbackDisposable : IDisposable
     {
         private Action? _onDispose;

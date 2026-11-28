@@ -898,11 +898,21 @@ public sealed class CoreTelemetryService : ITelemetryService
         @"(;[a-z0-9_-]*(?:session|jsessionid|phpsessid|sid|token|secret|auth|key|pass|pwd|cred|jwt|sig|code|otp|ticket|cookie)[a-z0-9_-]*=)[^/?#;\s]+",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+    private static readonly Regex OneDriveShareTokenRegex = new(
+        @"((?:/|%2[fF])s!)[^\s?#]+",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex UrlUserinfoRegex = new(
+        @"^([a-zA-Z][a-zA-Z0-9+.-]*://)([^/\s?#]+)@",
+        RegexOptions.Compiled);
+
     private static string RedactUrlPathSecrets(string url)
     {
-        var result = ReplaceUrlPathSecret(url, WebhookPathTokenRegex);
+        var result = UrlUserinfoRegex.Replace(url, "$1[redacted]@");
+        result = ReplaceUrlPathSecret(result, WebhookPathTokenRegex);
         result = RedactSlackWebhookUrl(result);
         result = ReplaceUrlPathSecret(result, TelegramBotTokenUrlRegex);
+        result = ReplaceUrlPathSecret(result, OneDriveShareTokenRegex);
         result = ReplaceUrlPathSecret(result, UrlMatrixParamRegex);
         result = RedactEncodedJoseTokensInUrl(result);
         return result;
@@ -1317,6 +1327,21 @@ public sealed class CoreTelemetryService : ITelemetryService
         totalEnd = 0;
         hasQf = false;
         var p = sep + 3;
+        var lastAt = -1;
+        for (var q = p; q < text.Length; q++)
+        {
+            var ch = text[q];
+            if (ch == '@')
+            {
+                lastAt = q;
+                continue;
+            }
+            if (char.IsWhiteSpace(ch) || ch is '/' or '?' or '#' or '"' or '\'' or '<' or '>' or '\\' or '{' or '}' or '\r' or '\n')
+            {
+                break;
+            }
+        }
+        if (lastAt > p) p = lastAt + 1;
         if (!TryScanUrlHost(text, ref p)) return false;
         if (p < text.Length && text[p] == ':')
         {
@@ -2675,7 +2700,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     }
 
     private static readonly Regex JwtTokenRegex = new(
-        @"(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]+){1,3}(?![A-Za-z0-9_-])",
+        @"(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{8,}\.(?:[A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]+){1,3}|[A-Za-z0-9_-]+\.)(?![A-Za-z0-9_-])",
         RegexOptions.Compiled);
 
     private static bool IsCompactJoseToken(string token)
@@ -2683,8 +2708,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         var dot = token.IndexOf('.');
         if (dot < 8) return false;
         var header = token.Substring(0, dot);
-        if (header.StartsWith("eyJ", StringComparison.Ordinal)) return true;
-        if (header.Length > 512) return false;
+        if (header.Length > 8192) return false;
         try
         {
             var std = header.Replace('-', '+').Replace('_', '/');
@@ -8299,7 +8323,7 @@ public sealed class CoreTelemetryService : ITelemetryService
 
     private static readonly HashSet<string> SensitiveKeySegments = new(StringComparer.Ordinal)
     {
-        "token", "secret", "jwt", "bearer", "password", "passwd", "passphrase",
+        "token", "secret", "jwt", "bearer", "password", "passwd", "pwd", "passphrase",
         "credential", "credentials", "otp", "pin", "passcode", "cookie",
         "authorization", "signature", "apikey", "accesskey", "privatekey",
         "secretkey", "sessionid", "sessionkey", "codeverifier",
@@ -8391,16 +8415,21 @@ public sealed class CoreTelemetryService : ITelemetryService
     private static readonly Regex OpaqueSecretInKeyRegex = new(@"(?<![A-Za-z0-9_])[A-Za-z0-9+/=_-]{32,}(?![A-Za-z0-9_])", RegexOptions.Compiled);
     private static readonly Regex UuidExactRegex = new(@"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", RegexOptions.Compiled);
 
+    private static readonly Regex IsoDateExactRegex = new(
+        @"^(?:\d{4}[-/.]\d{2}[-/.]\d{2}|\d{2}[-/.]\d{2}[-/.]\d{4})$",
+        RegexOptions.Compiled);
+
     private static bool IsPhoneBoundaryWordRune(System.Text.Rune r) =>
         System.Text.Rune.IsLetterOrDigit(r) || r.Value == '_';
 
     private static bool IsPhoneSeparatorRune(System.Text.Rune r) =>
-        r.Value is ' ' or '\t' or '(' or ')' or '.' ||
+        (System.Text.Rune.IsWhiteSpace(r) && r.Value is not ('\r' or '\n')) ||
+        r.Value is '(' or ')' or '.' or '\u2212' ||
         System.Text.Rune.GetUnicodeCategory(r) == System.Globalization.UnicodeCategory.DashPunctuation;
 
     private static string ScrubUnicodePhoneNumbers(string text)
     {
-        if (text.Length < 9) return text;
+        if (text.Length < 8) return text;
         var runes = new List<(System.Text.Rune Rune, int Offset, int Length)>();
         var idx = 0;
         while (idx < text.Length)
@@ -8425,6 +8454,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                 var j = startsWithPlus ? i + 1 : i;
                 var digits = 0;
                 var lastDigitIdx = -1;
+                var hasPhoneFormatting = startsWithPlus;
                 while (j < runes.Count)
                 {
                     var cur = runes[j].Rune;
@@ -8436,6 +8466,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                     }
                     else if (IsPhoneSeparatorRune(cur))
                     {
+                        if (cur.Value != '.') hasPhoneFormatting = true;
                         j++;
                     }
                     else
@@ -8444,15 +8475,18 @@ public sealed class CoreTelemetryService : ITelemetryService
                     }
                 }
                 var afterOk = lastDigitIdx >= 0 && (lastDigitIdx + 1 >= runes.Count || !IsPhoneBoundaryWordRune(runes[lastDigitIdx + 1].Rune));
-                if (digits >= 9 && afterOk)
+                if (afterOk && (digits >= 9 || (digits == 8 && hasPhoneFormatting)))
                 {
                     var startOff = runes[i].Offset;
                     var endOff = runes[lastDigitIdx].Offset + runes[lastDigitIdx].Length;
-                    sb ??= new StringBuilder(text.Length);
-                    sb.Append(text, copied, startOff - copied).Append("[redacted-phone]");
-                    copied = endOff;
-                    i = lastDigitIdx + 1;
-                    continue;
+                    if (digits >= 9 || !IsoDateExactRegex.IsMatch(text.AsSpan(startOff, endOff - startOff)))
+                    {
+                        sb ??= new StringBuilder(text.Length);
+                        sb.Append(text, copied, startOff - copied).Append("[redacted-phone]");
+                        copied = endOff;
+                        i = lastDigitIdx + 1;
+                        continue;
+                    }
                 }
             }
             i++;
@@ -8463,13 +8497,14 @@ public sealed class CoreTelemetryService : ITelemetryService
     }
 
     private static readonly Regex KeyValueCredentialRegex = new(
-        @"(?<![A-Za-z0-9_])(token|secret|jwt|passphrase|credential|credentials|verification[_-]?code|auth[_-]?code|recovery[_-]?code|passcode|otp|pin|client[_-]?secret|access[_-]?token|refresh[_-]?token|id[_-]?token|api[_-]?key|api[_-]?token|auth[_-]?token|session[_-]?token|security[_-]?token|private[_-]?key|secret[_-]?key|access[_-]?key|code[_-]?verifier|session[_-]?id|session[_-]?key|password|passwd)(\s*[=:]\s*)(?:""(?:\\.|[^""\\])*""|'(?:\\.|[^'\\])*'|[^\s,;}\]]+)",
+        @"(?<![A-Za-z0-9_])((?:[A-Za-z0-9_.-]*[._-])?(?:token|secret|jwt|passphrase|credential|credentials|verification[_-]?code|auth[_-]?code|recovery[_-]?code|passcode|otp|pin|client[_-]?secret|access[_-]?token|refresh[_-]?token|id[_-]?token|api[_-]?key|api[_-]?token|auth[_-]?token|session[_-]?token|security[_-]?token|private[_-]?key|secret[_-]?key|access[_-]?key|code[_-]?verifier|session[_-]?id|session[_-]?key|password|passwd|pwd)(?:\\?[""'])?\s*[=:]\s*)(?:\\""(?:\\\\.|[^""\\])*\\""|""(?:\\.|[^""\\])*""|'(?:\\.|[^'\\])*'|[^\s,;}\]""']+)",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static string SanitizeDiagnosticText(string text)
     {
-        var safe = SanitizeLocalPaths(text);
-        safe = KeyValueCredentialRegex.Replace(safe, "$1$2[redacted]");
+        var pre = KeyValueCredentialRegex.Replace(text, "$1[redacted]");
+        var safe = SanitizeLocalPaths(pre);
+        safe = KeyValueCredentialRegex.Replace(safe, "$1[redacted]");
         safe = Ipv6InKeyRegex.Replace(safe, "[redacted-ip]");
         safe = Ipv4InKeyRegex.Replace(safe, "[redacted-ip]");
         safe = ScrubUnicodePhoneNumbers(safe);

@@ -317,4 +317,33 @@ public class SettingsStoreTests
             if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
         }
     }
+
+    [Fact]
+    public void HasActiveFlushGuards_tracks_live_guards_and_cleans_up_unlocked_leftovers()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "aun-settings-guards-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var store = new SettingsStore(Path.Combine(dir, "settings.json"));
+            Assert.False(store.HasActiveFlushGuards());
+
+            var staleGuard = Path.Combine(dir, "telemetry-flush-active.stale01.lock");
+            File.WriteAllText(staleGuard, string.Empty);
+            Assert.False(store.HasActiveFlushGuards());
+            Assert.False(File.Exists(staleGuard));
+
+            using (var activeGuard = store.TryAcquireActiveFlushGuard())
+            {
+                Assert.NotNull(activeGuard);
+                Assert.True(store.HasActiveFlushGuards());
+            }
+
+            Assert.False(store.HasActiveFlushGuards());
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+    }
 }
