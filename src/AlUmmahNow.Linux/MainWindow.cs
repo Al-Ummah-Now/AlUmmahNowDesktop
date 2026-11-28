@@ -356,7 +356,7 @@ public sealed partial class MainWindow
                     using var alertHandle = GObject.Internal.ValueArray2OwnedHandle.Create(alertValues);
                     Gtk.Internal.Accessible.UpdateProperty(telemetryNotice.Handle.DangerousGetHandle(), 1, new[] { Gtk.AccessibleProperty.Label }, alertHandle);
                     GC.KeepAlive(alertValues);
-                    telemetryNotice.Announce(text, Gtk.AccessibleAnnouncementPriority.High);
+                    UpdateViews.AnnounceIfHeard(telemetryNotice, text, Gtk.AccessibleAnnouncementPriority.High);
                 }
             }
         }

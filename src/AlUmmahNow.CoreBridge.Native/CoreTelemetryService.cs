@@ -906,6 +906,10 @@ public sealed class CoreTelemetryService : ITelemetryService
         @"^([a-zA-Z][a-zA-Z0-9+.-]*://)([^/\s?#]+)@",
         RegexOptions.Compiled);
 
+    private static readonly Regex UrlPathKeyValueRegex = new(
+        @"(?<![A-Za-z0-9_])([A-Za-z0-9_.-]{2,64})([=:])([^/?#&\s;]+)",
+        RegexOptions.Compiled);
+
     private static string RedactUrlPathSecrets(string url)
     {
         var result = UrlUserinfoRegex.Replace(url, "$1[redacted]@");
@@ -914,8 +918,45 @@ public sealed class CoreTelemetryService : ITelemetryService
         result = ReplaceUrlPathSecret(result, TelegramBotTokenUrlRegex);
         result = ReplaceUrlPathSecret(result, OneDriveShareTokenRegex);
         result = ReplaceUrlPathSecret(result, UrlMatrixParamRegex);
+        result = RedactEncodedKeyValuesInUrl(result);
         result = RedactEncodedJoseTokensInUrl(result);
         return result;
+    }
+
+    private static string RedactEncodedKeyValuesInUrl(string url)
+    {
+        string decoded;
+        int[]? origOffsets = null;
+        if (url.IndexOf('%') >= 0)
+        {
+            (decoded, origOffsets) = DecodeUrlForPathSecretMatch(url);
+        }
+        else
+        {
+            decoded = url;
+        }
+        var schemeIdx = decoded.IndexOf("://", StringComparison.Ordinal);
+        if (schemeIdx < 0) return url;
+        var pathSlash = decoded.IndexOf('/', schemeIdx + 3);
+        if (pathSlash < 0) return url;
+        var matches = UrlPathKeyValueRegex.Matches(decoded, pathSlash);
+        if (matches.Count == 0) return url;
+        StringBuilder? sb = null;
+        var copied = 0;
+        foreach (Match match in matches)
+        {
+            if (!IsSensitiveKeyName(match.Groups[1].ValueSpan)) continue;
+            var valGroup = match.Groups[3];
+            var start = origOffsets != null ? origOffsets[valGroup.Index] : valGroup.Index;
+            if (start < copied) continue;
+            var end = origOffsets != null ? origOffsets[valGroup.Index + valGroup.Length] : valGroup.Index + valGroup.Length;
+            sb ??= new StringBuilder(url.Length);
+            sb.Append(url, copied, start - copied).Append("[redacted]");
+            copied = end;
+        }
+        if (sb == null) return url;
+        sb.Append(url, copied, url.Length - copied);
+        return sb.ToString();
     }
 
     private static string RedactEncodedJoseTokensInUrl(string url)
@@ -8523,29 +8564,124 @@ public sealed class CoreTelemetryService : ITelemetryService
         return sb.ToString();
     }
 
-    private static readonly Regex KeyValueCredentialRegex = new(
-        @"(?<![A-Za-z0-9_])([A-Za-z0-9_.-]{2,64})((?:\\?[""'])?\s*[=:]\s*)(?:\[redacted(?:-[a-z]+)?\]|\\""(?:\\\\.|[^""\\])*\\""|""(?:\\.|[^""\\])*""|'(?:\\.|[^'\\])*'|[^\s,;}\]""']+)",
+    private static readonly Regex PercentEncodedUrlRegex = new(
+        @"(?<![A-Za-z0-9+.-])(?:[a-zA-Z][a-zA-Z0-9+.-]*(?:%3[aA]%2[fF]%2[fF]|%253[aA]%252[fF]%252[fF]))[^\s""'<>]+",
         RegexOptions.Compiled);
 
-    private static string ScrubSensitiveKeyValues(string text) =>
-        KeyValueCredentialRegex.Replace(text, static m =>
+    private static string RedactPercentEncodedUrls(string text)
+    {
+        if (text.IndexOf('%') < 0) return text;
+        return PercentEncodedUrlRegex.Replace(text, static m =>
         {
-            var key = m.Groups[1].ValueSpan;
-            if (key.Equals("authorization", StringComparison.OrdinalIgnoreCase) ||
-                key.Equals("proxy-authorization", StringComparison.OrdinalIgnoreCase))
+            var raw = m.Value;
+            if (raw.IndexOf("%253", StringComparison.OrdinalIgnoreCase) >= 0) return "[redacted-url]";
+            try
+            {
+                var decoded = Uri.UnescapeDataString(raw);
+                return SanitizeLocalPaths(decoded);
+            }
+            catch (UriFormatException)
+            {
+                return "[redacted-url]";
+            }
+        });
+    }
+
+    private static readonly HashSet<string> MultiWordSensitiveSegments = new(StringComparer.Ordinal)
+    {
+        "fullname", "displayname", "firstname", "lastname", "givenname", "familyname",
+        "address", "street", "streetaddress", "homeaddress", "passphrase", "pass", "password", "passwd",
+    };
+
+    private static bool IsMultiWordSensitiveKey(ReadOnlySpan<char> key)
+    {
+        var segments = SplitKeySegments(key);
+        for (var i = 0; i < segments.Count; i++)
+        {
+            if (MultiWordSensitiveSegments.Contains(segments[i])) return true;
+            if (i + 1 < segments.Count && MultiWordSensitiveSegments.Contains(segments[i] + segments[i + 1])) return true;
+        }
+        return false;
+    }
+
+    private static readonly Regex MultiWordValueRegex = new(
+        @"(?<![A-Za-z0-9_])((?:[A-Za-z0-9_.-]|\\u[0-9A-Fa-f]{4}){2,64})((?:\\?[""']|[\u201D\u2019\u00BB\u300D\u300F])?\s*[=:]\s*)(?![""'\u201C\u2018\u00AB\u201E\u300C\u300E\\])([^\r\n,;}\]]+)",
+        RegexOptions.Compiled);
+
+    private static readonly Regex NextKeyValueBoundaryRegex = new(
+        @"\s+(?:[A-Za-z0-9_.-]{2,48}\s*[=:])",
+        RegexOptions.Compiled);
+
+    private static string ScrubUnquotedMultiWordSensitiveValues(string text, bool quoteReplacement) =>
+        MultiWordValueRegex.Replace(text, m =>
+        {
+            var decodedKey = DecodeJsonUnicodeEscapes(m.Groups[1].Value);
+            var trimmed = decodedKey.AsSpan().Trim("\"'");
+            if (trimmed.Equals("authorization", StringComparison.OrdinalIgnoreCase) ||
+                trimmed.Equals("proxy-authorization", StringComparison.OrdinalIgnoreCase))
             {
                 return m.Value;
             }
-            return IsSensitiveKeyName(key)
-                ? m.Groups[1].Value + m.Groups[2].Value + "[redacted]"
-                : m.Value;
+            if (!IsMultiWordSensitiveKey(decodedKey.AsSpan())) return m.Value;
+            var val = m.Groups[3].Value;
+            if (val.StartsWith("[redacted]", StringComparison.Ordinal)) return m.Value;
+            var boundary = NextKeyValueBoundaryRegex.Match(val);
+            var tail = boundary.Success ? val.Substring(boundary.Index) : string.Empty;
+            var repl = quoteReplacement ? "\"[redacted]\"" : "[redacted]";
+            return m.Groups[1].Value + m.Groups[2].Value + repl + tail;
+        });
+
+    private static readonly Regex KeyValueCredentialRegex = new(
+        @"(?<![A-Za-z0-9_])((?:[A-Za-z0-9_.-]|\\u[0-9A-Fa-f]{4}){2,64})((?:\\?[""']|[\u201D\u2019\u00BB\u300D\u300F])?\s*[=:]\s*)(\[redacted(?:-[a-z]+)?\]|\\""(?:\\\\.|[^""\\])*\\""|""(?:\\.|[^""\\])*""|'(?:\\.|[^'\\])*'|\u201C[^\u201D\r\n]*\u201D|\u2018[^\u2019\r\n]*\u2019|\u00AB[^\u00BB\r\n]*\u00BB|\u201E[^\u201D\r\n]*\u201D|\u300C[^\u300D\r\n]*\u300D|\u300E[^\u300F\r\n]*\u300F|[^\s,;}\]""'\u201C\u201D\u2018\u2019\u00AB\u00BB\u201E\u300C\u300D\u300E\u300F]+)",
+        RegexOptions.Compiled);
+
+    private static string DecodeJsonUnicodeEscapes(string raw)
+    {
+        if (raw.IndexOf("\\u", StringComparison.Ordinal) < 0) return raw;
+        var sb = new StringBuilder(raw.Length);
+        for (var i = 0; i < raw.Length;)
+        {
+            if (raw[i] == '\\' && i + 5 < raw.Length && raw[i + 1] == 'u' &&
+                TryParseHexByte(raw[i + 2], raw[i + 3], out var hi) &&
+                TryParseHexByte(raw[i + 4], raw[i + 5], out var lo))
+            {
+                sb.Append((char)((hi << 8) | lo));
+                i += 6;
+            }
+            else
+            {
+                sb.Append(raw[i]);
+                i++;
+            }
+        }
+        return sb.ToString();
+    }
+
+    private static string ScrubSensitiveKeyValues(string text, bool quoteReplacement) =>
+        KeyValueCredentialRegex.Replace(text, m =>
+        {
+            var decodedKey = DecodeJsonUnicodeEscapes(m.Groups[1].Value);
+            var trimmed = decodedKey.AsSpan().Trim("\"'");
+            if (trimmed.Equals("authorization", StringComparison.OrdinalIgnoreCase) ||
+                trimmed.Equals("proxy-authorization", StringComparison.OrdinalIgnoreCase))
+            {
+                return m.Value;
+            }
+            if (!IsSensitiveKeyName(decodedKey.AsSpan())) return m.Value;
+            var val = m.Groups[3].Value;
+            if (val.StartsWith("[redacted", StringComparison.Ordinal) || val == "\"[redacted]\"") return m.Value;
+            var repl = quoteReplacement ? "\"[redacted]\"" : "[redacted]";
+            return m.Groups[1].Value + m.Groups[2].Value + repl;
         });
 
     private static string SanitizeDiagnosticText(string text)
     {
-        var pre = ScrubSensitiveKeyValues(text);
+        var pre = RedactPercentEncodedUrls(text);
+        pre = ScrubUnquotedMultiWordSensitiveValues(pre, quoteReplacement: true);
+        pre = ScrubSensitiveKeyValues(pre, quoteReplacement: true);
         var safe = SanitizeLocalPaths(pre);
-        safe = ScrubSensitiveKeyValues(safe);
+        safe = ScrubUnquotedMultiWordSensitiveValues(safe, quoteReplacement: false);
+        safe = ScrubSensitiveKeyValues(safe, quoteReplacement: false);
         safe = Ipv6InKeyRegex.Replace(safe, "[redacted-ip]");
         safe = Ipv4InKeyRegex.Replace(safe, "[redacted-ip]");
         safe = ScrubUnicodePhoneNumbers(safe);

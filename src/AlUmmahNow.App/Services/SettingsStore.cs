@@ -300,12 +300,48 @@ namespace AlUmmahNow.App.Services
 
         private readonly object _optOutStateGate = new();
         private string? _failedOptOutToken;
+        private string? _lastKnownEnabledBaseToken;
         private bool _pendingOtherProcessRevocation;
+
+        private bool TryConfirmOptedOutOnDisk()
+        {
+            try
+            {
+                using var stream = new FileStream(
+                    _telemetryConsentPath,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.ReadWrite | FileShare.Delete);
+                using var reader = new StreamReader(stream);
+                var firstLine = reader.ReadLine()?.Trim();
+                if (firstLine is not { Length: > 0 }) return true;
+                if (!string.Equals(firstLine, "enabled", StringComparison.OrdinalIgnoreCase) &&
+                    !firstLine.StartsWith("enabled:", StringComparison.Ordinal))
+                {
+                    return true;
+                }
+                var secondLine = reader.ReadLine()?.Trim();
+                return secondLine != null && secondLine.StartsWith("pending:", StringComparison.Ordinal);
+            }
+            catch (FileNotFoundException)
+            {
+                return true;
+            }
+            catch (DirectoryNotFoundException)
+            {
+                return true;
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+            {
+                return false;
+            }
+        }
 
         /// <summary>
         /// Returns true when an earlier opt-out or rollback in this process failed to update the shared
-        /// consent sidecar and the same stale opt-in generation is still present on disk. Automatically
-        /// clears once another window opts out or starts a newer opt-in generation.
+        /// consent sidecar and the same stale opt-in generation is still present on disk (or disk state
+        /// cannot be verified due to transient permission/I/O errors). Automatically clears only when
+        /// disk confirms opt-out or a newer opt-in generation.
         /// </summary>
         public bool IsTelemetryDisableSaveFailed()
         {
@@ -315,7 +351,7 @@ namespace AlUmmahNow.App.Services
             var current = LoadTelemetryConsentToken();
             if (current == null)
             {
-                if (!LoadTelemetryEnabled())
+                if (TryConfirmOptedOutOnDisk())
                 {
                     lock (_optOutStateGate)
                     {
@@ -358,12 +394,21 @@ namespace AlUmmahNow.App.Services
         private void RecordDisableSaveFailed()
         {
             var current = LoadTelemetryConsentToken();
-            var token = current is { Length: > 0 } ? ExtractBaseGenerationToken(current) : "__failed__";
             lock (_optOutStateGate)
             {
+                var token = current is { Length: > 0 }
+                    ? ExtractBaseGenerationToken(current)
+                    : (_lastKnownEnabledBaseToken ?? "__failed__");
                 _failedOptOutToken = token;
                 _pendingOtherProcessRevocation = false;
             }
+        }
+
+        private void RecordKnownEnabledToken(string? token)
+        {
+            if (token is not { Length: > 0 }) return;
+            var baseToken = ExtractBaseGenerationToken(token);
+            lock (_optOutStateGate) _lastKnownEnabledBaseToken = baseToken;
         }
 
         private void RecordOptOutResult(TelemetryOptOutResult result)
@@ -486,7 +531,11 @@ namespace AlUmmahNow.App.Services
                 }
                 WriteConsentSidecarUnlocked(token, nextPending);
                 writtenToken = token;
-                if (confirmImmediately) ClearOptOutTracking();
+                if (confirmImmediately)
+                {
+                    RecordKnownEnabledToken(token);
+                    ClearOptOutTracking();
+                }
                 return true;
             }
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
@@ -515,12 +564,14 @@ namespace AlUmmahNow.App.Services
             }
             if (pendingClaims == null)
             {
+                RecordKnownEnabledToken(current);
                 ClearOptOutTracking();
                 return true;
             }
             try
             {
                 WriteConsentSidecarUnlocked(current, pendingClaims: null);
+                RecordKnownEnabledToken(current);
                 ClearOptOutTracking();
                 return true;
             }

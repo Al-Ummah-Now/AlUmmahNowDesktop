@@ -201,21 +201,31 @@ public sealed class UpdateViews : IUpdateViews, IDisposable
 
     private void Speak(string text)
     {
+        AnnounceIfHeard(_window, text, Gtk.AccessibleAnnouncementPriority.Medium);
+    }
+
+    /// <summary>
+    /// Announces <paramref name="text"/> via AT-SPI only when the widget's accessibility context is
+    /// <c>GtkAtSpiContext</c>, avoiding GTK 4.14's segfault when no accessibility bus is present.
+    /// </summary>
+    public static void AnnounceIfHeard(Gtk.Widget widget, string text, Gtk.AccessibleAnnouncementPriority priority)
+    {
+        if (string.IsNullOrEmpty(text)) return;
         // Once the window is there: before it, no screen reader listens
         GLib.Functions.IdleAdd(GLib.Constants.PRIORITY_LOW, () =>
         {
-            if (IsHeard()) _window.Announce(text, Gtk.AccessibleAnnouncementPriority.Medium);
+            if (IsHeard(widget)) widget.Announce(text, priority);
             return false;
         });
     }
 
     /// <summary>
-    /// Whether the window's accessibility context is AT-SPI's. Without an accessibility bus GTK gives a stand-in, and GTK 4.14
+    /// Whether the widget's accessibility context is AT-SPI's. Without an accessibility bus GTK gives a stand-in, and GTK 4.14
     /// announces into it all the same: the app was gone with a segmentation fault (CI Linux runs its update scenes so).
     /// </summary>
-    private bool IsHeard()
+    private static bool IsHeard(Gtk.Widget widget)
     {
-        var context = gtk_accessible_get_at_context(_window.Handle.DangerousGetHandle());
+        var context = gtk_accessible_get_at_context(widget.Handle.DangerousGetHandle());
         if (context == IntPtr.Zero) return false;
         var isHeard = Marshal.PtrToStringUTF8(g_type_name_from_instance(context)) == "GtkAtSpiContext";
         g_object_unref(context);

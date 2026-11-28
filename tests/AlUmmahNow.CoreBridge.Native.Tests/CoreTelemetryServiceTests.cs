@@ -3200,8 +3200,8 @@ public class CoreTelemetryServiceTests
 
         var json = CoreTelemetryService.SerializeProperties(new Dictionary<string, object>
         {
-            ["quotedCred"] = "{\"challenge.verificationCode\":\"482731\"} pass=\"correct horse battery staple\" {\"pass\":\"multi word phrase\"} pwd=shortsecret token=cobalt-orchard",
-            ["personalText"] = "fullName=\"Alice Wonderland\" displayName='Bob Smith' address=\"123 Main St, Apt 4\" phone_2025550123",
+            ["quotedCred"] = "{\"challenge.verificationCode\":\"482731\"} {\"home\\u0041ddress\":\"12 Cedar Rd\"} password=\u201Corchid velvet\u201D pass=\"correct horse battery staple\" {\"pass\":\"multi word phrase\"} pwd=shortsecret token=cobalt-orchard",
+            ["personalText"] = "fullName=\"Alice Wonderland\" displayName=Alice Smith address=\"123 Main St, Apt 4\" phone_2025550123 https://example.test/password%3Dshortcredential https%3A%2F%2Fexample.test%2F%3Fcode%3Dorchid-meadow",
             ["http://u:p@localhost/x"] = "https://1drv.ms/u/s!Aq82F1ZLPx0K",
             ["algNone"] = "IHsiYWxnIjoibm9uZSJ9.eyJzdWIiOiJhbGljZSJ9.",
             ["longJwt"] = longSignedJwt,
@@ -3213,6 +3213,10 @@ public class CoreTelemetryServiceTests
 
         Assert.NotNull(json);
         Assert.DoesNotContain("482731", json);
+        Assert.DoesNotContain("12 Cedar Rd", json);
+        Assert.DoesNotContain("orchid", json);
+        Assert.DoesNotContain("velvet", json);
+        Assert.DoesNotContain("shortcredential", json);
         Assert.DoesNotContain("horse battery staple", json);
         Assert.DoesNotContain("word phrase", json);
         Assert.DoesNotContain("2025550123", json);
@@ -3221,7 +3225,8 @@ public class CoreTelemetryServiceTests
         Assert.DoesNotContain("[redacted]]", json);
         Assert.DoesNotContain("Alice", json);
         Assert.DoesNotContain("Wonderland", json);
-        Assert.DoesNotContain("Bob Smith", json);
+        Assert.DoesNotContain("Smith", json);
+        Assert.DoesNotContain("orchid-meadow", json);
         Assert.DoesNotContain("Main St", json);
         Assert.DoesNotContain("u:p@localhost", json);
         Assert.DoesNotContain("u:[redacted-email]", json);

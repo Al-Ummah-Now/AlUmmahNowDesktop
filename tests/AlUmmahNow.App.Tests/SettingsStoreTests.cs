@@ -380,6 +380,21 @@ public class SettingsStoreTests
                 // the failed opt-out remains tracked for the stale generation until resolved.
                 Assert.True(store.IsTelemetryDisableSaveFailed());
 
+                // A temporarily inaccessible config directory (chmod 000) must NEVER clear the failure
+                // or treat unreadable state as opted out, even across repeated checks before access returns.
+                File.SetUnixFileMode(dir, UnixFileMode.None);
+                try
+                {
+                    Assert.Equal(SettingsStore.TelemetryOptOutResult.SaveFailed, store.SaveTelemetryOptOut());
+                    Assert.True(store.IsTelemetryDisableSaveFailed());
+                    Assert.True(store.IsTelemetryDisableSaveFailed());
+                }
+                finally
+                {
+                    File.SetUnixFileMode(dir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+                }
+                Assert.True(store.IsTelemetryDisableSaveFailed());
+
                 // Once another window opts out, the failure clears.
                 Assert.Equal(SettingsStore.TelemetryOptOutResult.Saved, otherStore.SaveTelemetryOptOut());
                 Assert.False(store.IsTelemetryDisableSaveFailed());
