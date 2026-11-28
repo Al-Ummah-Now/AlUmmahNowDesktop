@@ -91,8 +91,8 @@ namespace AlUmmahNow.CoreBridge.Temporary
                     + "&code_challenge_method=S256"));
 
                 var query = await WaitForCallbackAsync(listener, timeout.Token).ConfigureAwait(false);
-                if (query.TryGetValue("error", out var error)) throw new AuthFailedException("Authorization failed: " + error);
                 if (!query.TryGetValue("state", out var returned) || returned != state) throw new AuthFailedException("State mismatch");
+                if (query.TryGetValue("error", out var error)) throw new AuthFailedException("Authorization failed: " + error);
                 if (!query.TryGetValue("code", out var code)) throw new AuthFailedException("No authorization code");
 
                 var tokens = await RequestTokensAsync(new Dictionary<string, string>
@@ -242,8 +242,13 @@ namespace AlUmmahNow.CoreBridge.Temporary
                     using (var stream = client.GetStream())
                     {
                         var line = await ReadRequestLineAsync(stream, cancellationToken).ConfigureAwait(false);
-                        var path = line?.Split(' ').Length >= 2 ? line.Split(' ')[1] : "";
-                        if (!path.StartsWith("/auth/callback", StringComparison.Ordinal))
+                        var parts = line?.Split(' ');
+                        var method = parts != null && parts.Length >= 2 ? parts[0] : "";
+                        var path = parts != null && parts.Length >= 2 ? parts[1] : "";
+                        var isCallback = string.Equals(method, "GET", StringComparison.Ordinal)
+                            && (string.Equals(path, "/auth/callback", StringComparison.Ordinal)
+                                || path.StartsWith("/auth/callback?", StringComparison.Ordinal));
+                        if (!isCallback)
                         {
                             // Browsers also ask for /favicon.ico; keep waiting for the real callback.
                             await WriteAsync(stream, "404 Not Found", "", cancellationToken).ConfigureAwait(false);
@@ -289,7 +294,16 @@ namespace AlUmmahNow.CoreBridge.Temporary
             foreach (var pair in path.Substring(mark + 1).Split('&'))
             {
                 var eq = pair.IndexOf('=');
-                if (eq > 0) result[pair.Substring(0, eq)] = WebUtility.UrlDecode(pair.Substring(eq + 1));
+                if (eq > 0)
+                {
+                    var key = WebUtility.UrlDecode(pair.Substring(0, eq));
+                    if ((key == "state" || key == "code" || key == "error") && result.ContainsKey(key))
+                    {
+                        throw new AuthFailedException("Duplicate OAuth parameter: " + key);
+                    }
+
+                    result[key] = WebUtility.UrlDecode(pair.Substring(eq + 1));
+                }
             }
 
             return result;

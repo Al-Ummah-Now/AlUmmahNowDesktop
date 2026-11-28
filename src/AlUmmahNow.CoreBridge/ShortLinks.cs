@@ -67,7 +67,9 @@ namespace AlUmmahNow.CoreBridge
         public static bool IsSafeHandle(string? value) =>
             !string.IsNullOrEmpty(value)
             && value!.Length <= 100
-            && !value.Any(c => c == '/' || c == '?' || c == '#' || char.IsWhiteSpace(c));
+            && value != "."
+            && value != ".."
+            && !value.Any(c => c == '/' || c == '\\' || c == '?' || c == '#' || char.IsWhiteSpace(c) || char.IsControl(c));
 
         public static string? Video(
             string id,
@@ -281,9 +283,12 @@ namespace AlUmmahNow.CoreBridge
                 ? new List<KeyValuePair<string, string>> { new KeyValuePair<string, string>("lang", "ar") }
                 : new List<KeyValuePair<string, string>>();
 
-        private static string BuildUrl(string host, string path, IReadOnlyList<KeyValuePair<string, string>> query)
+        private static readonly Regex SafeHostRegex = new Regex("^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$", RegexOptions.Compiled);
+
+        private static string? BuildUrl(string host, string path, IReadOnlyList<KeyValuePair<string, string>> query)
         {
             var cleanHost = (host ?? ProdHost).Trim().TrimEnd('/');
+            if (!SafeHostRegex.IsMatch(cleanHost)) return null;
             if (query.Count == 0) return "https://" + cleanHost + path;
             var qs = string.Join("&", query.Select(kv => Uri.EscapeDataString(kv.Key) + "=" + Uri.EscapeDataString(kv.Value)));
             return "https://" + cleanHost + path + "?" + qs;

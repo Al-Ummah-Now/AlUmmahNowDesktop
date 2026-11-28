@@ -33,6 +33,14 @@ public sealed class StagedPackage
     /// <exception cref="IOException">The folder isn't private.</exception>
     public static StagedPackage Prepare(string folder, string fileName, ReleaseFile file, string? root = null)
     {
+        if (string.IsNullOrEmpty(fileName)
+            || fileName is "." or ".."
+            || fileName.IndexOfAny(new[] { '/', '\\', '\0' }) >= 0
+            || System.IO.Path.GetFileName(fileName) != fileName)
+        {
+            throw new ArgumentException("Invalid staged package filename.", nameof(fileName));
+        }
+
         root ??= PrivateFolder.UserRoot;
         PrivateFolder.Ensure(folder, root);
         Clear(folder);

@@ -36,7 +36,13 @@ namespace AlUmmahNow.App.Media
                 }
                 else if (pending != null && line.Length > 0 && line[0] != '#')
                 {
-                    result.Add(new HlsVariant(Height(pending), Bandwidth(pending), new Uri(baseUri, line).ToString()));
+                    if (Uri.TryCreate(baseUri, line, out var variantUri)
+                        && variantUri.IsAbsoluteUri
+                        && (variantUri.Scheme == Uri.UriSchemeHttps || (variantUri.Scheme == Uri.UriSchemeHttp && baseUri.Scheme == Uri.UriSchemeHttp)))
+                    {
+                        result.Add(new HlsVariant(Height(pending), Bandwidth(pending), variantUri.ToString()));
+                    }
+
                     pending = null;
                 }
             }

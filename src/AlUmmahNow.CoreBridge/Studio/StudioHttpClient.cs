@@ -32,7 +32,7 @@ namespace AlUmmahNow.CoreBridge.Studio
             _base = new Uri(videosApi.AbsoluteUri.TrimEnd('/') + "/");
             _token = accessToken;
             _ownsHttp = true;
-            _http = handler == null ? new HttpClient() : new HttpClient(handler, true);
+            _http = handler == null ? new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }, true) : new HttpClient(handler, true);
             _http.Timeout = Timeout.InfiniteTimeSpan;
             _http.DefaultRequestHeaders.UserAgent.TryParseAdd(userAgent);
             _http.DefaultRequestHeaders.TryAddWithoutValidation(AunClient.Header, AunClient.FromUserAgent(userAgent));
@@ -135,6 +135,11 @@ namespace AlUmmahNow.CoreBridge.Studio
 
         private Uri Url(string path, IReadOnlyDictionary<string, string>? query)
         {
+            if (string.IsNullOrEmpty(path) || path.Contains("://") || path.StartsWith("//", StringComparison.Ordinal) || path.IndexOfAny(new[] { '\\', '\r', '\n', '\0' }) >= 0)
+            {
+                throw new ArgumentException("API path must be a relative path.", nameof(path));
+            }
+
             var sb = new StringBuilder(path.TrimStart('/'));
             if (query != null && query.Count > 0)
             {
@@ -142,8 +147,21 @@ namespace AlUmmahNow.CoreBridge.Studio
                 sb.Append(string.Join("&", query.Select(kv => Uri.EscapeDataString(kv.Key) + "=" + Uri.EscapeDataString(kv.Value))));
             }
 
-            return new Uri(_base, sb.ToString());
+            var uri = new Uri(_base, sb.ToString());
+            if (!SameOrigin(_base, uri))
+            {
+                throw new ArgumentException("API path escaped the configured base host.", nameof(path));
+            }
+
+            return uri;
         }
+
+        private static bool SameOrigin(Uri expected, Uri actual) =>
+            actual.IsAbsoluteUri
+            && string.Equals(expected.Scheme, actual.Scheme, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(expected.Host, actual.Host, StringComparison.OrdinalIgnoreCase)
+            && expected.Port == actual.Port
+            && string.IsNullOrEmpty(actual.UserInfo);
 
         internal static StudioApiException Error(string what, int status, byte[] body)
         {

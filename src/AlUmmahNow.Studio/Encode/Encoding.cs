@@ -299,6 +299,8 @@ public static class GstPipeline
 
     private static string EncoderElement(EncoderChoice encoder, int kbps)
     {
+        if (string.IsNullOrEmpty(encoder.Name) || !encoder.Name.All(c => (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-'))
+            throw new ArgumentException("Invalid GStreamer encoder element name.", nameof(encoder));
         var rate = kbps.ToString(CultureInfo.InvariantCulture);
         return encoder.Name switch
         {
@@ -308,5 +310,9 @@ public static class GstPipeline
         };
     }
 
-    private static string Quote(string value) => "\"" + value.Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";
+    private static string Quote(string value)
+    {
+        if (value.IndexOfAny(new[] { '\0', '\r', '\n' }) >= 0) throw new ArgumentException("Path contains control characters.", nameof(value));
+        return "\"" + value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";
+    }
 }

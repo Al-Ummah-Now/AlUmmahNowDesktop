@@ -42,7 +42,7 @@ namespace AlUmmahNow.CoreBridge.Temporary
 
         public async Task<Video> GetVideoAsync(string id, CancellationToken cancellationToken = default)
         {
-            var url = new Uri(_baseUri, "/api/videos/" + Uri.EscapeDataString(id)).ToString();
+            var url = SharedHttpHelper.ResolveSameOrigin(_baseUri, "/api/videos/" + SharedHttpHelper.SafePathSegment(id, nameof(id))).ToString();
             using var doc = await GetJsonAsync(url, cancellationToken).ConfigureAwait(false);
             var root = doc.RootElement;
             if (root.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Object) root = data;
@@ -51,7 +51,7 @@ namespace AlUmmahNow.CoreBridge.Temporary
 
         public async Task<IReadOnlyList<SubtitleTrack>> GetSubtitleTracksAsync(string videoId, CancellationToken cancellationToken = default)
         {
-            var url = new Uri(_baseUri, "/api/videos/" + Uri.EscapeDataString(videoId) + "/subtitles").ToString();
+            var url = SharedHttpHelper.ResolveSameOrigin(_baseUri, "/api/videos/" + SharedHttpHelper.SafePathSegment(videoId, nameof(videoId)) + "/subtitles").ToString();
             using var doc = await GetJsonAsync(url, cancellationToken).ConfigureAwait(false);
             var result = new List<SubtitleTrack>();
             if (doc.RootElement.TryGetProperty("data", out var data)
@@ -73,12 +73,18 @@ namespace AlUmmahNow.CoreBridge.Temporary
 
         public async Task<string> GetTextAsync(string url, CancellationToken cancellationToken = default)
         {
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var parsed)
+                || (parsed.Scheme != Uri.UriSchemeHttps && !(parsed.Scheme == Uri.UriSchemeHttp && parsed.IsLoopback)))
+            {
+                throw new CatalogException("Refusing insecure URL");
+            }
+
             try
             {
-                using var response = await _http.GetAsync(url, cancellationToken).ConfigureAwait(false);
+                using var response = await _http.GetAsync(parsed, cancellationToken).ConfigureAwait(false);
                 if (!response.IsSuccessStatusCode)
                 {
-                    throw new CatalogException("HTTP " + (int)response.StatusCode + " for " + new Uri(url).AbsolutePath, isNotFound: response.StatusCode == System.Net.HttpStatusCode.NotFound);
+                    throw new CatalogException("HTTP " + (int)response.StatusCode + " for " + parsed.AbsolutePath, isNotFound: response.StatusCode == System.Net.HttpStatusCode.NotFound);
                 }
 
                 return await SharedHttpHelper.ReadTextAsync(response.Content).ConfigureAwait(false);

@@ -280,6 +280,36 @@ namespace AlUmmahNow.CoreBridge.Temporary
 
     internal static class SharedHttpHelper
     {
+        internal static Uri ResolveSameOrigin(Uri baseUri, string path)
+        {
+            if (string.IsNullOrEmpty(path) || !path.StartsWith("/", StringComparison.Ordinal) || path.StartsWith("//", StringComparison.Ordinal) || path.IndexOfAny(new[] { '\\', '\r', '\n', '\0' }) >= 0)
+            {
+                throw new ArgumentException("API path must start with a single '/'.", nameof(path));
+            }
+
+            var target = new Uri(baseUri, path);
+            if (!target.IsAbsoluteUri
+                || !string.Equals(baseUri.Scheme, target.Scheme, StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(baseUri.Host, target.Host, StringComparison.OrdinalIgnoreCase)
+                || baseUri.Port != target.Port
+                || !string.IsNullOrEmpty(target.UserInfo))
+            {
+                throw new ArgumentException("API path escaped the configured base host.", nameof(path));
+            }
+
+            return target;
+        }
+
+        internal static string SafePathSegment(string value, string paramName)
+        {
+            if (string.IsNullOrEmpty(value) || value == "." || value == ".." || value.All(c => c == '.'))
+            {
+                throw new ArgumentException("Invalid path segment.", paramName);
+            }
+
+            return Uri.EscapeDataString(value);
+        }
+
         internal static async Task<JsonDocument> SendJsonAsync(
             HttpClient http,
             Uri baseUri,
@@ -289,7 +319,8 @@ namespace AlUmmahNow.CoreBridge.Temporary
             string? bearerToken,
             CancellationToken ct)
         {
-            using var req = new HttpRequestMessage(method, new Uri(baseUri, path));
+            var target = ResolveSameOrigin(baseUri, path);
+            using var req = new HttpRequestMessage(method, target);
             req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
             if (!string.IsNullOrEmpty(bearerToken))
             {

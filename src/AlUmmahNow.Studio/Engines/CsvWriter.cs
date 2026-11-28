@@ -24,7 +24,12 @@ public sealed class CsvWriter
         if (text.Length > 0)
         {
             var first = text[0];
-            if (first is '=' or '+' or '@' or '\t' or '\r' || (first == '-' && !double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out _)))
+            var trimmed = text.TrimStart(' ');
+            var lead = trimmed.Length > 0 ? trimmed[0] : first;
+            var isFormulaTrigger = first is '\t' or '\r' or '\n'
+                || lead is '=' or '+' or '@' or '\t' or '\r' or '\n'
+                || (lead == '-' && !double.TryParse(trimmed, NumberStyles.Float, CultureInfo.InvariantCulture, out _));
+            if (isFormulaTrigger)
             {
                 text = "'" + text;
             }

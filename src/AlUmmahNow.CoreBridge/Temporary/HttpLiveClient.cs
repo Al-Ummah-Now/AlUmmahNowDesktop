@@ -156,7 +156,7 @@ namespace AlUmmahNow.CoreBridge.Temporary
 
         private async Task<JsonDocument> SendAsync(HttpMethod method, string path, string? body, string? token, CancellationToken cancellationToken, string contentType = "application/json")
         {
-            using var request = new HttpRequestMessage(method, new Uri(_baseUri, path));
+            using var request = new HttpRequestMessage(method, SharedHttpHelper.ResolveSameOrigin(_baseUri, path));
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
             if (!string.IsNullOrEmpty(token)) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
             if (body != null) request.Content = new StringContent(body, Encoding.UTF8, contentType);
@@ -201,7 +201,7 @@ namespace AlUmmahNow.CoreBridge.Temporary
         private static TimeSpan? PollAfter(JsonElement e) =>
             Num(e, "pollAfterMs") is { } ms && ms > 0 && !double.IsInfinity(ms) ? TimeSpan.FromMilliseconds(Math.Min(ms, 86_400_000)) : (TimeSpan?)null;
 
-        private static string Path(string id) => "/api/live-streams/" + Uri.EscapeDataString(id);
+        private static string Path(string id) => "/api/live-streams/" + SharedHttpHelper.SafePathSegment(id, nameof(id));
 
         private static JsonElement Result(JsonDocument doc) =>
             doc.RootElement.ValueKind == JsonValueKind.Object && doc.RootElement.TryGetProperty("result", out var r) && r.ValueKind == JsonValueKind.Object

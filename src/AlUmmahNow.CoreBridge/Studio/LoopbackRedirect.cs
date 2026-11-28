@@ -55,8 +55,12 @@ namespace AlUmmahNow.CoreBridge.Studio
                     {
                         var line = await ReadRequestLineAsync(stream, cancellationToken).ConfigureAwait(false);
                         var parts = line?.Split(' ');
+                        var method = parts != null && parts.Length >= 2 ? parts[0] : "";
                         var path = parts != null && parts.Length >= 2 ? parts[1] : "";
-                        if (!path.StartsWith(CallbackPath, StringComparison.Ordinal))
+                        var isCallback = string.Equals(method, "GET", StringComparison.Ordinal)
+                            && (string.Equals(path, CallbackPath, StringComparison.Ordinal)
+                                || path.StartsWith(CallbackPath + "?", StringComparison.Ordinal));
+                        if (!isCallback)
                         {
                             await WriteAsync(stream, "404 Not Found", "", cancellationToken).ConfigureAwait(false);
                             continue;
