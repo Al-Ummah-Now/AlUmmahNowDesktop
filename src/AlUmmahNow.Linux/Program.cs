@@ -82,7 +82,8 @@ var telemetry = CoreTelemetryService.CreateOrNull(
     initialEnabled: settings.TelemetryEnabled,
     demo: isDemo,
     externalConsentToken: () => store.LoadTelemetryConsentToken(),
-    acquireExternalConsentLock: () => store.TryAcquireTelemetryConsentLock());
+    acquireExternalConsentLock: () => store.TryAcquireTelemetryConsentLock(),
+    externalConsentTokenForClaim: claim => store.LoadTelemetryConsentTokenForClaim(claim));
 AppDomain.CurrentDomain.UnhandledException += (_, e) =>
 {
     if (e.ExceptionObject is Exception ex) telemetry.ReportCrash(ex.GetType().FullName ?? ex.GetType().Name, ex.GetType().Name, ex.StackTrace);

@@ -81,8 +81,9 @@ namespace AlUmmahNow.App.Services
         }
 
         /// <summary>
-        /// Reads the standalone telemetry consent generation token, or <c>null</c> when disabled, missing, or unreadable.
-        /// Each opt-in writes a fresh unique token so another running instance can detect an intervening opt-out + re-enable.
+        /// Reads the standalone confirmed telemetry consent generation token, or <c>null</c> when disabled,
+        /// unconfirmed/pending, missing, or unreadable. Each opt-in writes a fresh unique token so another
+        /// running instance can detect an intervening opt-out + re-enable.
         /// </summary>
         public string? LoadTelemetryConsentToken()
         {
@@ -96,12 +97,35 @@ namespace AlUmmahNow.App.Services
                     FileShare.ReadWrite | FileShare.Delete);
                 using var reader = new StreamReader(stream);
                 var first = reader.ReadLine()?.Trim();
-                return IsValidEnabledToken(first) ? first : null;
+                if (!IsValidEnabledToken(first)) return null;
+                return HasPendingPrefixOnNextLine(reader) ? null : first;
             }
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
             {
                 return null;
             }
+        }
+
+        /// <summary>
+        /// Reads the consent generation token for an in-progress opt-in claim (<paramref name="pendingClaimToken"/>).
+        /// Accepts a confirmed sidecar or an unconfirmed sidecar only when <paramref name="pendingClaimToken"/> is
+        /// an active pending claim in that generation.
+        /// </summary>
+        public string? LoadTelemetryConsentTokenForClaim(string? pendingClaimToken)
+        {
+            if (pendingClaimToken is not { Length: > 0 }) return LoadTelemetryConsentToken();
+            ReadConsentSidecarUnlocked(out var token, out var pendingClaims);
+            if (token is not { Length: > 0 }) return null;
+            if (pendingClaims == null) return token;
+            if (!string.Equals(ExtractBaseGenerationToken(token), ExtractBaseGenerationToken(pendingClaimToken), StringComparison.Ordinal))
+            {
+                return null;
+            }
+            foreach (var claim in pendingClaims)
+            {
+                if (string.Equals(claim, pendingClaimToken, StringComparison.Ordinal)) return token;
+            }
+            return null;
         }
 
         private static bool IsValidEnabledToken(string? raw) =>

@@ -149,7 +149,16 @@ public sealed class SettingsPage
                     telemetryNotice.SetVisible(true);
                     return;
                 }
-                if (!(telemetry?.SetConsent(TelemetryConsent.Full) ?? true))
+                var confirmationFailed = false;
+                var activated = telemetry != null
+                    ? telemetry.SetConsent(TelemetryConsent.Full, writtenToken, () =>
+                    {
+                        var confirmed = store.ConfirmTelemetryEnabled(writtenToken);
+                        if (!confirmed) confirmationFailed = true;
+                        return confirmed;
+                    })
+                    : (confirmationFailed = !store.ConfirmTelemetryEnabled(writtenToken)) == false;
+                if (!activated)
                 {
                     var rolledBack = store.RollbackTelemetryEnabled(writtenToken);
                     var purged = telemetry?.SetConsent(TelemetryConsent.Off) ?? true;
@@ -166,29 +175,8 @@ public sealed class SettingsPage
                     }
                     settings.TelemetryEnabled = false;
                     telemetryCheck.SetActive(false);
-                    telemetryNotice.SetText(l["settings.telemetry.enableError"]);
-                    telemetryNotice.SetVisible(true);
-                    return;
-                }
-                if (!store.ConfirmTelemetryEnabled(writtenToken))
-                {
-                    var rolledBack = store.RollbackTelemetryEnabled(writtenToken);
-                    var purged = telemetry?.SetConsent(TelemetryConsent.Off) ?? true;
-                    disableSaveFailed = !rolledBack;
-                    if (!rolledBack)
-                    {
-                        settings.TelemetryEnabled = true;
-                        telemetryCheck.SetActive(true);
-                        telemetryNotice.SetText(purged
-                            ? disableErrorText
-                            : disableErrorText + "\n" + purgeWarningText);
-                        telemetryNotice.SetVisible(true);
-                        return;
-                    }
-                    settings.TelemetryEnabled = false;
-                    telemetryCheck.SetActive(false);
-                    telemetryNotice.SetText(string.Empty);
-                    telemetryNotice.SetVisible(false);
+                    telemetryNotice.SetText(confirmationFailed ? string.Empty : l["settings.telemetry.enableError"]);
+                    telemetryNotice.SetVisible(!confirmationFailed);
                     return;
                 }
                 disableSaveFailed = false;

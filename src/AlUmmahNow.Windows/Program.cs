@@ -123,7 +123,8 @@ public sealed partial class App : Application
             initialEnabled: settings.TelemetryEnabled,
             demo: isDemo,
             externalConsentToken: () => store.LoadTelemetryConsentToken(),
-            acquireExternalConsentLock: () => store.TryAcquireTelemetryConsentLock());
+            acquireExternalConsentLock: () => store.TryAcquireTelemetryConsentLock(),
+            externalConsentTokenForClaim: claim => store.LoadTelemetryConsentTokenForClaim(claim));
         var updateStore = new UpdateStore(Path.Combine(dataRoot, "updates.json"));
         var updates = updateScene?.Service ?? WindowsInstall.Service("viewer", environment.VideosApi, version, "AlUmmahNowWindows/" + version,
             dataRoot, updateStore, isDemo, IsBusy, WindowsEnd.Close);

@@ -162,7 +162,16 @@ internal sealed class SettingsPage
                     telemetryNotice.Visibility = Visibility.Visible;
                     return;
                 }
-                if (!(telemetry?.SetConsent(TelemetryConsent.Full) ?? true))
+                var confirmationFailed = false;
+                var activated = telemetry != null
+                    ? telemetry.SetConsent(TelemetryConsent.Full, writtenToken, () =>
+                    {
+                        var confirmed = store.ConfirmTelemetryEnabled(writtenToken);
+                        if (!confirmed) confirmationFailed = true;
+                        return confirmed;
+                    })
+                    : (confirmationFailed = !store.ConfirmTelemetryEnabled(writtenToken)) == false;
+                if (!activated)
                 {
                     var rolledBack = store.RollbackTelemetryEnabled(writtenToken);
                     var purged = telemetry?.SetConsent(TelemetryConsent.Off) ?? true;
@@ -179,29 +188,8 @@ internal sealed class SettingsPage
                     }
                     settings.TelemetryEnabled = false;
                     telemetryToggle.IsOn = false;
-                    telemetryNotice.Text = l["settings.telemetry.enableError"];
-                    telemetryNotice.Visibility = Visibility.Visible;
-                    return;
-                }
-                if (!store.ConfirmTelemetryEnabled(writtenToken))
-                {
-                    var rolledBack = store.RollbackTelemetryEnabled(writtenToken);
-                    var purged = telemetry?.SetConsent(TelemetryConsent.Off) ?? true;
-                    disableSaveFailed = !rolledBack;
-                    if (!rolledBack)
-                    {
-                        settings.TelemetryEnabled = true;
-                        telemetryToggle.IsOn = true;
-                        telemetryNotice.Text = purged
-                            ? disableErrorText
-                            : disableErrorText + "\n" + purgeWarningText;
-                        telemetryNotice.Visibility = Visibility.Visible;
-                        return;
-                    }
-                    settings.TelemetryEnabled = false;
-                    telemetryToggle.IsOn = false;
-                    telemetryNotice.Text = string.Empty;
-                    telemetryNotice.Visibility = Visibility.Collapsed;
+                    telemetryNotice.Text = confirmationFailed ? string.Empty : l["settings.telemetry.enableError"];
+                    telemetryNotice.Visibility = confirmationFailed ? Visibility.Collapsed : Visibility.Visible;
                     return;
                 }
                 disableSaveFailed = false;

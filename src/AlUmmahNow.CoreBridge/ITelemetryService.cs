@@ -46,6 +46,12 @@ namespace AlUmmahNow.CoreBridge
         /// succeeded. Opting out always disables collection immediately even if disk purge fails.
         /// </summary>
         bool SetConsent(TelemetryConsent consent);
+
+        /// <summary>
+        /// Atomically activates telemetry consent for an in-progress opt-in claim and confirms the
+        /// persisted consent sidecar before releasing internal/cross-process locks.
+        /// </summary>
+        bool SetConsent(TelemetryConsent consent, string? pendingConsentToken, Func<bool>? confirmPendingConsent);
         void Track(string name, IReadOnlyDictionary<string, object>? properties = null);
         void TrackError(string code, IReadOnlyDictionary<string, object>? properties = null);
         void AddBreadcrumb(string category, string message, TelemetryBreadcrumbSeverity level = TelemetryBreadcrumbSeverity.Info);
@@ -68,6 +74,7 @@ namespace AlUmmahNow.CoreBridge
         public event Action<TelemetryConsent>? ConsentChanged { add { } remove { } }
 
         public bool SetConsent(TelemetryConsent consent) => consent == TelemetryConsent.Off;
+        public bool SetConsent(TelemetryConsent consent, string? pendingConsentToken, Func<bool>? confirmPendingConsent) => consent == TelemetryConsent.Off;
         public void Track(string name, IReadOnlyDictionary<string, object>? properties = null) { }
         public void TrackError(string code, IReadOnlyDictionary<string, object>? properties = null) { }
         public void AddBreadcrumb(string category, string message, TelemetryBreadcrumbSeverity level = TelemetryBreadcrumbSeverity.Info) { }

@@ -2773,6 +2773,18 @@ public class CoreTelemetryServiceTests
             "[redacted-path]",
             CoreTelemetryService.SanitizeLocalPaths("\\Confidential\\Payroll"));
         Assert.Equal(
+            "[redacted-path]",
+            CoreTelemetryService.SanitizeLocalPaths("Acquisition.blend"));
+        Assert.Equal(
+            "https://example.com/reset/[redacted]",
+            CoreTelemetryService.SanitizeLocalPaths("https://example.com/reset/super-secret-token"));
+        Assert.Equal(
+            "X-Amz-Security-Token: [redacted]",
+            CoreTelemetryService.SanitizeLocalPaths("X-Amz-Security-Token: secretcredential"));
+        Assert.Equal(
+            "{\"X-Amz-Security-Token\":\"[redacted]\"}",
+            CoreTelemetryService.SerializeProperties(new Dictionary<string, object> { ["X-Amz-Security-Token"] = "secretcredential" }));
+        Assert.Equal(
             "https://[redacted-email]",
             CoreTelemetryService.SanitizeLocalPaths("https://example.com/users/alice%40%65xample.com"));
         Assert.Equal(
@@ -2864,6 +2876,68 @@ public class CoreTelemetryServiceTests
             // and instance A calls SetConsent(Off). B's persisted buffer MUST remain intact.
             Assert.True(instA.SetConsent(TelemetryConsent.Off));
             Assert.True(File.Exists(bufferB));
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Startup_does_not_activate_on_unconfirmed_pending_claim_and_ReportCrash_persists_under_lock_contention()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "aun-tel-pending-crash-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var bufferPath = Path.Combine(dir, "telemetry-buffer.json");
+        try
+        {
+            string? confirmedToken = null;
+            string? pendingToken = "enabled:pendingGen1";
+
+            // Startup with stale initialEnabled=true must NOT activate when externalConsentToken returns null (unconfirmed pending).
+            using (var staleStartup = new CoreTelemetryService(
+                platform: "linux",
+                appVersion: "1.0.0",
+                locale: "en",
+                videosApiBaseUrl: null,
+                userAgent: "AlUmmahNowLinux/1.0.0",
+                bufferPath: bufferPath,
+                initialEnabled: true,
+                externalConsentToken: () => Volatile.Read(ref confirmedToken),
+                acquireExternalConsentLock: () => new NoOpDisposable(),
+                externalConsentTokenForClaim: claim => claim == pendingToken ? pendingToken : Volatile.Read(ref confirmedToken)))
+            {
+                Assert.Equal(TelemetryConsent.Off, staleStartup.Consent);
+                Assert.Equal(AlUmmahNow.Core.TelemetryConsentState.Denied, staleStartup.NativeConsentForTesting);
+            }
+
+            // Atomic SetConsent(Full, pendingToken, confirm) activates and confirms; subsequent ReportCrash persists even when lock is contended.
+            var lockContended = false;
+            using (var owner = new CoreTelemetryService(
+                platform: "linux",
+                appVersion: "1.0.0",
+                locale: "en",
+                videosApiBaseUrl: null,
+                userAgent: "AlUmmahNowLinux/1.0.0",
+                bufferPath: bufferPath,
+                initialEnabled: false,
+                externalConsentToken: () => Volatile.Read(ref confirmedToken),
+                acquireExternalConsentLock: () => Volatile.Read(ref lockContended) ? null : new NoOpDisposable(),
+                externalConsentTokenForClaim: claim => claim == pendingToken ? pendingToken : Volatile.Read(ref confirmedToken)))
+            {
+                Assert.True(owner.SetConsent(TelemetryConsent.Full, pendingToken, () =>
+                {
+                    Volatile.Write(ref confirmedToken, pendingToken);
+                    return true;
+                }));
+                Assert.Equal(TelemetryConsent.Full, owner.Consent);
+
+                Volatile.Write(ref lockContended, true);
+                owner.ReportCrash("InvalidOperationException", "fatal under lock contention", "at App.Main()");
+                var ownerBuffer = owner.ActiveBufferPathForTesting!;
+                Assert.True(File.Exists(ownerBuffer));
+                Assert.Contains("InvalidOperationException", File.ReadAllText(ownerBuffer));
+            }
         }
         finally
         {

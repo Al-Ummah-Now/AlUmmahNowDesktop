@@ -108,7 +108,8 @@ public sealed partial class App : Application
             initialEnabled: settings.TelemetryEnabled,
             demo: demo,
             externalConsentToken: () => settingsStore.LoadTelemetryConsentToken(),
-            acquireExternalConsentLock: () => settingsStore.TryAcquireTelemetryConsentLock());
+            acquireExternalConsentLock: () => settingsStore.TryAcquireTelemetryConsentLock(),
+            externalConsentTokenForClaim: claim => settingsStore.LoadTelemetryConsentTokenForClaim(claim));
 
         // The passkey sheet is modal to the Studio window; its handle is filled in once it exists.
         var hwnd = IntPtr.Zero;

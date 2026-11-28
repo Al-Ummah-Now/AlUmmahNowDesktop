@@ -178,26 +178,33 @@ public class SettingsStoreTests
             Assert.True(storeA.TrySaveTelemetryEnabled(true, out var gen2));
             Assert.False(string.IsNullOrEmpty(gen2));
             Assert.NotEqual(gen1, gen2);
-            // An unconfirmed pending opt-in must NOT report enabled on restart before ConfirmTelemetryEnabled.
+            // An unconfirmed pending opt-in must NOT report enabled or expose a confirmed token on restart before ConfirmTelemetryEnabled.
             Assert.False(storeA.LoadTelemetryEnabled());
             Assert.False(storeA.Load().TelemetryEnabled);
-            Assert.Equal(gen2, storeA.LoadTelemetryConsentToken());
+            Assert.Null(storeA.LoadTelemetryConsentToken());
+            Assert.Equal(gen2, storeA.LoadTelemetryConsentTokenForClaim(gen2));
+            Assert.Null(storeA.LoadTelemetryConsentTokenForClaim("enabled:unrelated"));
 
             Assert.True(storeB.TrySaveTelemetryEnabled(true, out var joinedGen2));
             Assert.StartsWith(gen2 + ":", joinedGen2);
+            Assert.Null(storeB.LoadTelemetryConsentToken());
+            Assert.Equal(joinedGen2, storeB.LoadTelemetryConsentTokenForClaim(joinedGen2));
             Assert.True(storeB.RollbackTelemetryEnabled(joinedGen2));
-            Assert.Equal(gen2, storeA.LoadTelemetryConsentToken());
+            Assert.Null(storeA.LoadTelemetryConsentToken());
+            Assert.Equal(gen2, storeA.LoadTelemetryConsentTokenForClaim(gen2));
 
             // Rolling back the remaining unconfirmed opt-in clears the sidecar so two failed opt-ins never leave telemetry enabled.
             Assert.True(storeA.RollbackTelemetryEnabled(gen2));
             Assert.False(storeA.LoadTelemetryEnabled());
             Assert.Null(storeB.LoadTelemetryConsentToken());
+            Assert.Null(storeA.LoadTelemetryConsentTokenForClaim(gen2));
 
             // Same behavior when the first caller rolls back before the second caller.
             Assert.True(storeA.TrySaveTelemetryEnabled(true, out var gen3A));
             Assert.True(storeB.TrySaveTelemetryEnabled(true, out var gen3B));
             Assert.True(storeA.RollbackTelemetryEnabled(gen3A));
-            Assert.Equal(gen3B, storeB.LoadTelemetryConsentToken());
+            Assert.Null(storeB.LoadTelemetryConsentToken());
+            Assert.Equal(gen3B, storeB.LoadTelemetryConsentTokenForClaim(gen3B));
             Assert.True(storeB.RollbackTelemetryEnabled(gen3B));
             Assert.False(storeA.LoadTelemetryEnabled());
             Assert.Null(storeA.LoadTelemetryConsentToken());
@@ -206,6 +213,7 @@ public class SettingsStoreTests
             Assert.True(storeA.TrySaveTelemetryEnabled(true, out var gen4A));
             Assert.True(storeB.TrySaveTelemetryEnabled(true, out var gen4B));
             Assert.True(storeA.ConfirmTelemetryEnabled(gen4A));
+            Assert.NotNull(storeA.LoadTelemetryConsentToken());
             Assert.True(storeB.RollbackTelemetryEnabled(gen4B));
             Assert.True(storeA.RollbackTelemetryEnabled(gen4A));
             Assert.True(storeA.LoadTelemetryEnabled());
@@ -299,8 +307,9 @@ public class SettingsStoreTests
                 Assert.True(results[1]);
                 Assert.False(string.IsNullOrEmpty(newerToken));
                 // Regardless of serialization order (rollback->enable or enable->rollback),
-                // the newer opt-in token must always survive on disk.
-                Assert.Equal(newerToken, storeA.LoadTelemetryConsentToken());
+                // the newer opt-in claim must always survive on disk while remaining unconfirmed until ConfirmTelemetryEnabled.
+                Assert.Null(storeA.LoadTelemetryConsentToken());
+                Assert.Equal(newerToken, storeA.LoadTelemetryConsentTokenForClaim(newerToken));
             }
         }
         finally

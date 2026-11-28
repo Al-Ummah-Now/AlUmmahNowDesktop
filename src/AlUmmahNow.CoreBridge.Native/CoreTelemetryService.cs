@@ -33,7 +33,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         "kt", "java", "swift", "cs", "cpp", "cc", "c", "h", "hpp", "rs", "py", "js", "ts", "go", "rb", "m", "mm"
     };
     private static readonly Regex KeywordAssignedPathRegex = new(@"(\b(?:file|path|filename|filepath)\s*[:=]\s*)(?!\u001E)[^\r\n\u001E\u001F]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex BareFilenameRegex = new(@"(^|[\r\n:=;\u001F""])([ \t]*)(?=[^\r\n:=;\u001E\u001F"" \t])[^\r\n:=;\u001E\u001F""]*\.(?!ts:\d+)(?:mov|mp4|m4v|mkv|webm|avi|ts|m3u8|mpd|mp3|m4a|wav|aac|flac|ogg|opus|jpg|jpeg|png|gif|webp|heic|svg|pdf|txt|md|rtf|doc|docx|xls|xlsx|ppt|pptx|csv|json|xml|yaml|yml|toml|ini|cfg|conf|log|srt|vtt|ass|ssa|zip|tar|gz|tgz|bz2|xz|7z|rar|dmg|pkg|msi|exe|apk|aab|ipa|pem|key|crt|cer|p12|pfx|jks|keystore|db|sqlite|sqlite3|bin|dat|tmp|bak|proj|aun|env)\b(?!\()", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex BareFilenameRegex = new(@"(^|[\r\n:=;\u001F""])([ \t]*)(?=[^\r\n:=;\u001E\u001F"" \t])[^\r\n:=;\u001E\u001F""]*\.(?!ts:\d+)(?:mov|mp4|m4v|mkv|webm|avi|flv|wmv|ogv|3gp|ts|m3u8|mpd|mp3|m4a|wav|aac|flac|ogg|opus|wma|aiff|alac|mid|midi|jpg|jpeg|png|gif|webp|heic|svg|tif|tiff|bmp|ico|avif|jxl|raw|cr2|cr3|nef|arw|dng|blend|psd|psb|ai|eps|indd|aep|prproj|drp|fcpx|fcpxml|kdenlive|mlt|veg|xcf|kra|fig|sketch|afdesign|afphoto|fbx|obj|gltf|glb|stl|usd|usdz|pdf|txt|md|rtf|doc|docx|xls|xlsx|ppt|pptx|odt|ods|odp|pages|numbers|keynote|epub|mobi|csv|json|xml|yaml|yml|toml|ini|cfg|conf|log|srt|vtt|ass|ssa|parquet|avro|orc|feather|hdf5|h5|zip|tar|gz|tgz|bz2|xz|7z|rar|dmg|pkg|msi|exe|apk|aab|ipa|iso|img|vhd|vhdx|vmdk|ova|ovf|deb|rpm|appimage|snap|flatpak|cab|jar|war|ear|whl|egg|nupkg|vsix|crx|xpi|pem|key|crt|cer|cert|der|p12|pfx|jks|jceks|keystore|kdbx|ovpn|ppk|pub|asc|gpg|pgp|sig|db|sqlite|sqlite3|sql|dump|pkl|pickle|joblib|pt|pth|onnx|safetensors|gguf|bin|dat|tmp|bak|old|orig|swp|swo|proj|aun|env|har|pcap|pcapng|dmp|hdmp|mdmp|heapsnapshot)\b(?!\()", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly string[] KnownAuthSchemeList =
     {
         "Bearer", "Basic", "Digest", "Token", "Api-Key", "ApiKey",
@@ -48,6 +48,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     private readonly string _clientHeader;
     private readonly string? _bufferPath;
     private readonly Func<string?>? _externalConsentToken;
+    private readonly Func<string?, string?>? _externalConsentTokenForClaim;
     private readonly Func<IDisposable?>? _acquireExternalConsentLock;
     private readonly object _externalLockGate = new();
     private IDisposable? _heldExternalLock;
@@ -108,10 +109,12 @@ public sealed class CoreTelemetryService : ITelemetryService
         string? bufferPath,
         bool initialEnabled = false,
         Func<string?>? externalConsentToken = null,
-        Func<IDisposable?>? acquireExternalConsentLock = null)
+        Func<IDisposable?>? acquireExternalConsentLock = null,
+        Func<string?, string?>? externalConsentTokenForClaim = null)
     {
         _bufferPath = bufferPath;
         _externalConsentToken = externalConsentToken;
+        _externalConsentTokenForClaim = externalConsentTokenForClaim;
         _acquireExternalConsentLock = acquireExternalConsentLock;
         var os = AunClient.CurrentOs();
         _app = new TelemetryAppInfo(
@@ -131,13 +134,17 @@ public sealed class CoreTelemetryService : ITelemetryService
         _client = CreateClient(_activeBufferPath);
         if (initialEnabled)
         {
-            if (!SetConsent(TelemetryConsent.Full) && _externalConsentToken != null)
+            if (!SetConsent(TelemetryConsent.Full))
             {
                 lock (_gate)
                 {
-                    if (_lastEnableBlockedByExternalLock && !string.IsNullOrEmpty(ReadExternalTokenSafe()))
+                    if (_externalConsentToken != null && _lastEnableBlockedByExternalLock && !string.IsNullOrEmpty(ReadExternalTokenSafe()))
                     {
                         _pendingInitialEnable = true;
+                    }
+                    else
+                    {
+                        try { _client.SetConsent(TelemetryConsentState.Denied); } catch (AunException) { }
                     }
                 }
             }
@@ -207,14 +214,15 @@ public sealed class CoreTelemetryService : ITelemetryService
         bool initialEnabled,
         bool demo = false,
         Func<string?>? externalConsentToken = null,
-        Func<IDisposable?>? acquireExternalConsentLock = null)
+        Func<IDisposable?>? acquireExternalConsentLock = null,
+        Func<string?, string?>? externalConsentTokenForClaim = null)
     {
         if (demo) return NullTelemetryService.Instance;
         try
         {
             return new CoreTelemetryService(
                 platform, appVersion, locale, videosApiBaseUrl, userAgent, bufferPath,
-                initialEnabled, externalConsentToken, acquireExternalConsentLock);
+                initialEnabled, externalConsentToken, acquireExternalConsentLock, externalConsentTokenForClaim);
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException or AunException)
         {
@@ -858,7 +866,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     }
 
     private static readonly Regex WebhookPathTokenRegex = new(
-        @"((?:^|/|%2[fF])webhooks?(?:/|%2[fF]))[^\s?#]+",
+        @"((?:^|/|%2[fF])(?:webhooks?|reset|reset-password|password-reset|forgot-password|verify|verify-email|confirm|confirm-email|activate|magic|magic-link|invite|invitations?|tokens?|auth|oauth2?|callback|sessions?|unsubscribe|secrets?|keys?|api-?keys?|credentials?|sign-?in|login|sso|redeem|claim|recovery?|passwords?)(?:/|%2[fF]))[^\s?#]+",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex SlackWebhookHostRegex = new(
@@ -3265,7 +3273,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             if (coreLen > 0) sawTrailingPad = true;
             return true;
         }
-        if (sawTrailingPad || coreLen >= 23) return false;
+        if (sawTrailingPad || coreLen >= 48) return false;
         core[coreLen++] = ch;
         return true;
     }
@@ -3322,7 +3330,7 @@ public sealed class CoreTelemetryService : ITelemetryService
 
     private static int TryRedactEscapedQuotedAuthHeader(string text, int pos, AuthJsonScanCache cache, AuthHeaderWriter writer)
     {
-        Span<char> core = stackalloc char[24];
+        Span<char> core = stackalloc char[48];
         var coreLen = 0;
         var sawTrailingPad = false;
         var sawPad = false;
@@ -3613,11 +3621,53 @@ public sealed class CoreTelemetryService : ITelemetryService
         return null;
     }
 
+    private static readonly HashSet<string> SensitiveCustomHeaderSegments = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "token", "secret", "key", "auth", "authorization",
+        "password", "passwd", "credential", "credentials", "signature", "session", "cookie"
+    };
+
+    private static bool IsSensitiveCustomHeader(ReadOnlySpan<char> trimmed)
+    {
+        if (trimmed.Length < 4 || trimmed.Length > 48) return false;
+        if ((trimmed[0] != 'x' && trimmed[0] != 'X') || (trimmed[1] != '-' && trimmed[1] != '_')) return false;
+        for (var i = 2; i < trimmed.Length; i++)
+        {
+            var c = trimmed[i];
+            var ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_';
+            if (!ok) return false;
+        }
+        var segStart = 2;
+        for (var i = 2; i <= trimmed.Length; i++)
+        {
+            if (i == trimmed.Length || trimmed[i] == '-' || trimmed[i] == '_')
+            {
+                if (i > segStart && SensitiveCustomHeaderSegments.Contains(new string(trimmed[segStart..i])))
+                {
+                    return true;
+                }
+                segStart = i + 1;
+            }
+        }
+        return false;
+    }
+
     private static bool IsKnownAuthHeaderName(ReadOnlySpan<char> trimmed) =>
         trimmed.Equals("authorization".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
         trimmed.Equals("proxy-authorization".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
         trimmed.Equals("cookie".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
         trimmed.Equals("set-cookie".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("x-amz-security-token".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("x-amz-credential".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("x-amz-signature".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("x-goog-api-key".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("x-csrf-token".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("x-xsrf-token".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("x-session-token".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("x-session-id".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("x-secret-key".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("x-client-secret".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("x-token".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
         trimmed.Equals("x-api-key".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
         trimmed.Equals("api-key".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
         trimmed.Equals("api_key".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
@@ -3632,13 +3682,29 @@ public sealed class CoreTelemetryService : ITelemetryService
         trimmed.Equals("refresh-token".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
         trimmed.Equals("id_token".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
         trimmed.Equals("id-token".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("session_token".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("session-token".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("security_token".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("security-token".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("session_key".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("session-key".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("session_id".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("session-id".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("private_key".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("private-key".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("secret_key".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("secret-key".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("access_key".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("access-key".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
         trimmed.Equals("code_verifier".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
         trimmed.Equals("code-verifier".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
         trimmed.Equals("client_secret".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
         trimmed.Equals("client-secret".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
         trimmed.Equals("authorizationsignature".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
         trimmed.Equals("authorization-signature".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
-        trimmed.Equals("password".AsSpan(), StringComparison.OrdinalIgnoreCase);
+        trimmed.Equals("password".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("passwd".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        IsSensitiveCustomHeader(trimmed);
 
     private static bool IsJsonStringStartBoundary(string text, int open)
     {
@@ -3701,6 +3767,17 @@ public sealed class CoreTelemetryService : ITelemetryService
             MatchesUnquotedAuthKey(text, pos, "authorization", out keyEnd) ||
             MatchesUnquotedAuthKey(text, pos, "set-cookie", out keyEnd) ||
             MatchesUnquotedAuthKey(text, pos, "cookie", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "x-amz-security-token", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "x-amz-credential", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "x-amz-signature", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "x-goog-api-key", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "x-csrf-token", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "x-xsrf-token", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "x-session-token", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "x-session-id", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "x-secret-key", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "x-client-secret", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "x-token", out keyEnd) ||
             MatchesUnquotedAuthKey(text, pos, "x-api-key", out keyEnd) ||
             MatchesUnquotedAuthKey(text, pos, "api-key", out keyEnd) ||
             MatchesUnquotedAuthKey(text, pos, "api_key", out keyEnd) ||
@@ -3715,15 +3792,47 @@ public sealed class CoreTelemetryService : ITelemetryService
             MatchesUnquotedAuthKey(text, pos, "refresh-token", out keyEnd) ||
             MatchesUnquotedAuthKey(text, pos, "id_token", out keyEnd) ||
             MatchesUnquotedAuthKey(text, pos, "id-token", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "session_token", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "session-token", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "security_token", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "security-token", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "session_key", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "session-key", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "session_id", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "session-id", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "private_key", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "private-key", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "secret_key", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "secret-key", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "access_key", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "access-key", out keyEnd) ||
             MatchesUnquotedAuthKey(text, pos, "code_verifier", out keyEnd) ||
             MatchesUnquotedAuthKey(text, pos, "code-verifier", out keyEnd) ||
             MatchesUnquotedAuthKey(text, pos, "client_secret", out keyEnd) ||
             MatchesUnquotedAuthKey(text, pos, "client-secret", out keyEnd) ||
-            MatchesUnquotedAuthKey(text, pos, "password", out keyEnd))
+            MatchesUnquotedAuthKey(text, pos, "password", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "passwd", out keyEnd) ||
+            MatchesUnquotedCustomXHeader(text, pos, out keyEnd))
         {
             return true;
         }
         return false;
+    }
+
+    private static bool MatchesUnquotedCustomXHeader(string text, int pos, out int keyEnd)
+    {
+        keyEnd = pos;
+        if (pos + 2 >= text.Length) return false;
+        var c0 = text[pos];
+        var c1 = text[pos + 1];
+        if ((c0 != 'x' && c0 != 'X') || (c1 != '-' && c1 != '_')) return false;
+        var end = pos + 2;
+        var limit = Math.Min(text.Length, pos + 48);
+        while (end < limit && IsAuthKeyWordChar(text[end])) end++;
+        if (end < text.Length && IsAuthKeyWordChar(text[end])) return false;
+        if (!IsSensitiveCustomHeader(text.AsSpan(pos, end - pos))) return false;
+        keyEnd = end;
+        return true;
     }
 
     private static bool MatchesUnquotedAuthKey(string text, int pos, string literal, out int keyEnd)
@@ -3748,7 +3857,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         isTupleCandidate = false;
         failedTopEnd = -1;
         normalizedKey = null;
-        Span<char> core = stackalloc char[24];
+        Span<char> core = stackalloc char[48];
         var coreLen = 0;
         var sawTrailingPad = false;
         var sawPad = false;
@@ -5945,7 +6054,19 @@ public sealed class CoreTelemetryService : ITelemetryService
     public event Action<bool>? PurgeFailureChanged;
     public event Action<TelemetryConsent>? ConsentChanged;
 
-    public bool SetConsent(TelemetryConsent consent)
+    public bool SetConsent(TelemetryConsent consent) =>
+        SetConsentInternal(consent, pendingConsentToken: null, confirmPendingConsent: null);
+
+    public bool SetConsent(
+        TelemetryConsent consent,
+        string? pendingConsentToken,
+        Func<bool>? confirmPendingConsent) =>
+        SetConsentInternal(consent, pendingConsentToken, confirmPendingConsent);
+
+    private bool SetConsentInternal(
+        TelemetryConsent consent,
+        string? pendingConsentToken,
+        Func<bool>? confirmPendingConsent)
     {
         var state = consent switch
         {
@@ -6034,7 +6155,9 @@ public sealed class CoreTelemetryService : ITelemetryService
                     string? externalToken = null;
                     if (_externalConsentToken != null)
                     {
-                        externalToken = ReadExternalTokenSafe();
+                        externalToken = !string.IsNullOrEmpty(pendingConsentToken) && _externalConsentTokenForClaim != null
+                            ? ReadExternalTokenForClaimSafe(pendingConsentToken)
+                            : ReadExternalTokenSafe();
                         if (string.IsNullOrEmpty(externalToken))
                         {
                             return false;
@@ -6089,15 +6212,28 @@ public sealed class CoreTelemetryService : ITelemetryService
                     try
                     {
                         _client.SetConsent(state);
-                        if (_consent == TelemetryConsent.Full && consent != TelemetryConsent.Full)
+                        if (confirmPendingConsent != null && !confirmPendingConsent())
                         {
-                            _analyticsEpoch++;
+                            RevokeLocked(
+                                out toCancel,
+                                "telemetry rollback purge failed after confirmation race: ",
+                                ref purgeNotify,
+                                ref purgeNotifyValue,
+                                ResolveForeignKeepGenerationPrefixLocked());
+                            result = false;
                         }
-                        _consent = consent;
-                        _observedExternalToken = NormalizeConsentGenerationToken(externalToken);
-                        _pendingInitialEnable = false;
-                        UpdatePurgeFailedLocked(false, ref purgeNotify, ref purgeNotifyValue);
-                        result = true;
+                        else
+                        {
+                            if (_consent == TelemetryConsent.Full && consent != TelemetryConsent.Full)
+                            {
+                                _analyticsEpoch++;
+                            }
+                            _consent = consent;
+                            _observedExternalToken = NormalizeConsentGenerationToken(externalToken);
+                            _pendingInitialEnable = false;
+                            UpdatePurgeFailedLocked(false, ref purgeNotify, ref purgeNotifyValue);
+                            result = true;
+                        }
                     }
                     catch (AunException ex)
                     {
@@ -6127,7 +6263,24 @@ public sealed class CoreTelemetryService : ITelemetryService
         return result;
     }
 
-    private void WithPersistingConsent(bool requiresFull, Action nativeAction, long? expectedEpoch = null)
+    private string? ReadExternalTokenForClaimSafe(string pendingClaimToken)
+    {
+        if (_externalConsentTokenForClaim == null) return ReadExternalTokenSafe();
+        try
+        {
+            return _externalConsentTokenForClaim(pendingClaimToken);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private void WithPersistingConsent(
+        bool requiresFull,
+        Action nativeAction,
+        long? expectedEpoch = null,
+        bool allowUnlockedDoubleCheckedFallback = false)
     {
         TryCompletePendingInitialEnable();
         lock (_gate)
@@ -6149,6 +6302,16 @@ public sealed class CoreTelemetryService : ITelemetryService
             {
                 lock (_gate)
                 {
+                    if (!EnsureExternalConsentLocked(out toCancel)) goto CancelAndReturn;
+                    if (!allowUnlockedDoubleCheckedFallback) return;
+                    var activeEpoch = requiresFull ? _analyticsEpoch : _consentEpoch;
+                    if (_disposeRequested || _clientDisposed || _consent == TelemetryConsent.Off ||
+                        (requiresFull && _consent != TelemetryConsent.Full) ||
+                        (expectedEpoch.HasValue && activeEpoch != expectedEpoch.Value))
+                    {
+                        return;
+                    }
+                    nativeAction();
                     EnsureExternalConsentLocked(out toCancel);
                 }
                 if (toCancel != null) CancelQuietly(toCancel);
@@ -6292,7 +6455,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             {
                 Log.For("telemetry").Warn("telemetry crash record skipped: " + ex.Message);
             }
-        }, captureEpoch);
+        }, captureEpoch, allowUnlockedDoubleCheckedFallback: true);
     }
 
     public void Persist()
