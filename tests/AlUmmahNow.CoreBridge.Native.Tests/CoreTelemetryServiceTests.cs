@@ -3200,9 +3200,10 @@ public class CoreTelemetryServiceTests
 
         var json = CoreTelemetryService.SerializeProperties(new Dictionary<string, object>
         {
-            ["quotedCred"] = "{\"challenge.verificationCode\":\"482731\"} {\"home\\u0041ddress\":\"12 Cedar Rd\"} status=\"password=first;second\" password=\u201Corchid velvet\u201D pass=\"correct horse battery staple\" {\"pass\":\"multi word phrase\"} pwd=shortsecret token=cobalt-orchard",
+            ["quotedCred"] = "{\"challenge.verificationCode\":\"482731\"} {\"home\\u0041ddress\":\"12 Cedar Rd\"} {\"userId\":[\"alice42\", \"bob73\"]} status=\"password=first;second\" password=\u201Corchid velvet\u201D pass=\"correct horse battery staple\" {\"pass\":\"multi word phrase\"} pwd=shortsecret token=cobalt-orchard",
             ["user_id"] = "alice123",
-            ["personalText"] = "fullName=\"Alice Wonderland\" displayName=Alice Smith username=Jane Doe address=\"123 Main St, Apt 4\" phone_2025550123 C:ProjectCodename https://example.test/password%3Dshortcredential https%3A%2F%2Fexample.test%2F%3Fcode%3Dorchid-meadow",
+            ["p\\u0061ssword"] = "violet-sparrow",
+            ["personalText"] = "fullName=\"Alice Wonderland\" displayName=Alice Smith username=Jane Doe address=\"123 Main St, Apt 4\" phone_2025550123 C:ProjectCodename C:秘密 https://example.test/password%3Dshortcredential https%3A%2F%2Fexample.test%2F%3Fcode%3Dorchid-meadow",
             ["token violet7"] = "ok",
             ["http://u:p@localhost/x"] = "https://1drv.ms/u/s!Aq82F1ZLPx0K",
             ["algNone"] = "IHsiYWxnIjoibm9uZSJ9.eyJzdWIiOiJhbGljZSJ9.",
@@ -3218,6 +3219,10 @@ public class CoreTelemetryServiceTests
         Assert.DoesNotContain("first;second", json);
         Assert.DoesNotContain("second", json);
         Assert.DoesNotContain("alice123", json);
+        Assert.DoesNotContain("alice42", json);
+        Assert.DoesNotContain("bob73", json);
+        Assert.DoesNotContain("violet-sparrow", json);
+        Assert.DoesNotContain("秘密", json);
         Assert.DoesNotContain("12 Cedar Rd", json);
         Assert.DoesNotContain("orchid", json);
         Assert.DoesNotContain("velvet", json);

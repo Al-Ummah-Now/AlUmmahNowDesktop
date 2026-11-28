@@ -109,6 +109,8 @@ public sealed partial class App : Application
         var localizer = new Localizer(Environment.GetEnvironmentVariable("AUN_LANG") is { Length: > 0 } l ? l : settings.Language);
         var userAgent = "AlUmmahNowStudioWindows/" + version;
         var initialConsentToken = demo ? null : settingsStore.LoadTelemetryConsentToken();
+        var initialTelemetryEnabled = initialConsentToken != null;
+        settings.TelemetryEnabled = initialTelemetryEnabled;
         _telemetry = CoreTelemetryService.CreateOrNull(
             platform: "windows",
             appVersion: version,
@@ -116,14 +118,14 @@ public sealed partial class App : Application
             videosApiBaseUrl: environment.VideosApi.AbsoluteUri,
             userAgent: userAgent,
             bufferPath: Path.Combine(dataRoot, "telemetry-buffer.json"),
-            initialEnabled: settings.TelemetryEnabled,
+            initialEnabled: initialTelemetryEnabled,
             demo: demo,
             externalConsentToken: () => settingsStore.LoadTelemetryConsentToken(),
             acquireExternalConsentLock: () => settingsStore.TryAcquireTelemetryConsentLock(),
             externalConsentTokenForClaim: claim => settingsStore.LoadTelemetryConsentTokenForClaim(claim),
             acquireActiveFlushGuard: () => settingsStore.TryAcquireActiveFlushGuard());
         if (!demo &&
-            settings.TelemetryEnabled &&
+            initialTelemetryEnabled &&
             _telemetry.Consent == AlUmmahNow.CoreBridge.TelemetryConsent.Off &&
             CoreTelemetryService.ShouldClearStaleStartupConsent(_telemetry) &&
             settingsStore.ClearTelemetryConsentIfTokenMatches(initialConsentToken))

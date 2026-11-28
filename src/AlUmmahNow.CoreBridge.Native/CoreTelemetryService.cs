@@ -8410,7 +8410,8 @@ public sealed class CoreTelemetryService : ITelemetryService
 
     private static bool IsAuthHeaderPropertyKey(string key)
     {
-        var trimmed = key.AsSpan().Trim();
+        var decoded = DecodeJsonUnicodeEscapes(key);
+        var trimmed = decoded.AsSpan().Trim();
         return IsKnownAuthHeaderName(trimmed) || IsSensitiveKeyName(trimmed);
     }
 
@@ -8725,19 +8726,98 @@ public sealed class CoreTelemetryService : ITelemetryService
         });
 
     private static readonly Regex WindowsDriveRelativePathRegex = new(
-        @"(?<![A-Za-z0-9_:])[A-Za-z]:(?![/\\])(?!\d+:\d+)[A-Za-z_.][A-Za-z0-9_.\\/-]+",
+        @"(?<![A-Za-z0-9_:])[A-Za-z]:(?![/\\])(?!\d+:\d+)(?:[\p{L}\p{M}_.][\p{L}\p{M}\p{Nd}_.\\/-]+|[^\u0000-\u007F\s,;}\]""'<>()]+)",
         RegexOptions.Compiled);
 
     private static readonly Regex SpaceDelimitedCredentialRegex = new(
         @"(?<![A-Za-z0-9_])((?:api[_-]?key|api[_-]?token|access[_-]?token|refresh[_-]?token|id[_-]?token|auth[_-]?token|session[_-]?token|security[_-]?token|client[_-]?secret|private[_-]?key|secret[_-]?key|access[_-]?key|verification[_-]?code|auth[_-]?code|recovery[_-]?code|passphrase|password|passwd|passcode|credential|credentials|token|secret|jwt|otp|pin|pwd)[ \t]+)(?!\[redacted(?:-[a-z]+)?\])(?!""\[redacted\]"")(?:\\""(?:\\\\.|[^""\\])*\\""|""(?:\\.|[^""\\])*""|'(?:\\.|[^'\\])*'|\u201C[^\u201D\r\n]*\u201D|\u2018[^\u2019\r\n]*\u2019|[^\s,;}\]""'=:\u201C\u201D\u2018\u2019]+)",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+    private static int ScanBalancedContainerEnd(string text, int start)
+    {
+        var open = text[start];
+        var close = open == '[' ? ']' : '}';
+        var depth = 0;
+        var inQuote = '\0';
+        var escaped = false;
+        for (var i = start; i < text.Length; i++)
+        {
+            var c = text[i];
+            if (inQuote == '\u0001')
+            {
+                if (c == '\\' && i + 1 < text.Length)
+                {
+                    if (text[i + 1] == '"') inQuote = '\0';
+                    i++;
+                }
+                else if (c == '"')
+                {
+                    inQuote = '\0';
+                }
+                continue;
+            }
+            if (inQuote != '\0')
+            {
+                if (escaped) { escaped = false; continue; }
+                if (c == '\\') { escaped = true; continue; }
+                if (c == inQuote) { inQuote = '\0'; continue; }
+                continue;
+            }
+            if (c == '\\' && i + 1 < text.Length && text[i + 1] == '"') { inQuote = '\u0001'; i++; continue; }
+            if (c is '"' or '\'') { inQuote = c; continue; }
+            if (c == open) { depth++; continue; }
+            if (c == close)
+            {
+                depth--;
+                if (depth == 0) return i + 1;
+            }
+        }
+        return text.Length;
+    }
+
+    private static string ScrubSensitiveContainerValues(string text, string replacement)
+    {
+        if (text.IndexOf('[') < 0 && text.IndexOf('{') < 0) return text;
+        StringBuilder? sb = null;
+        var copied = 0;
+        var searchPos = 0;
+        while (searchPos < text.Length)
+        {
+            var match = MultiWordKeySepRegex.Match(text, searchPos);
+            if (!match.Success) break;
+            var valStart = match.Index + match.Length;
+            searchPos = valStart;
+            if (valStart >= text.Length) break;
+            var open = text[valStart];
+            if (open is not ('[' or '{')) continue;
+            if (text.AsSpan(valStart).StartsWith("[redacted", StringComparison.Ordinal)) continue;
+            var decodedKey = DecodeJsonUnicodeEscapes(match.Groups[1].Value);
+            var trimmed = decodedKey.AsSpan().Trim("\"'");
+            if (trimmed.Equals("authorization", StringComparison.OrdinalIgnoreCase) ||
+                trimmed.Equals("proxy-authorization", StringComparison.OrdinalIgnoreCase) ||
+                !IsSensitiveKeyName(decodedKey.AsSpan()))
+            {
+                continue;
+            }
+            var valEnd = ScanBalancedContainerEnd(text, valStart);
+            sb ??= new StringBuilder(text.Length);
+            sb.Append(text, copied, valStart - copied).Append('"').Append(replacement).Append('"');
+            copied = valEnd;
+            searchPos = valEnd;
+        }
+        if (sb == null) return text;
+        sb.Append(text, copied, text.Length - copied);
+        return sb.ToString();
+    }
+
     private static string SanitizeDiagnosticText(string text)
     {
         var pre = RedactPercentEncodedUrls(text);
+        pre = ScrubSensitiveContainerValues(pre, RedactedSentinel);
         pre = ScrubUnquotedMultiWordSensitiveValues(pre, RedactedSentinel);
         pre = ScrubSensitiveKeyValues(pre, RedactedSentinel);
         var safe = SanitizeLocalPaths(pre).Replace(RedactedSentinel, "[redacted]", StringComparison.Ordinal);
+        safe = ScrubSensitiveContainerValues(safe, "[redacted]");
         safe = ScrubUnquotedMultiWordSensitiveValues(safe, "[redacted]");
         safe = ScrubSensitiveKeyValues(safe, "[redacted]");
         safe = SpaceDelimitedCredentialRegex.Replace(safe, "$1[redacted]");

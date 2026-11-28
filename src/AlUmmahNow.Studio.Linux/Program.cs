@@ -55,6 +55,8 @@ var localizer = new Localizer(Environment.GetEnvironmentVariable("AUN_LANG") is 
 
 var userAgent = "AlUmmahNowStudioLinux/" + version;
 var initialConsentToken = demo ? null : settingsStore.LoadTelemetryConsentToken();
+var initialTelemetryEnabled = initialConsentToken != null;
+settings.TelemetryEnabled = initialTelemetryEnabled;
 var telemetry = CoreTelemetryService.CreateOrNull(
     platform: "linux",
     appVersion: version,
@@ -62,14 +64,14 @@ var telemetry = CoreTelemetryService.CreateOrNull(
     videosApiBaseUrl: environment.VideosApi.AbsoluteUri,
     userAgent: userAgent,
     bufferPath: Path.Combine(stateDir, "telemetry-buffer.json"),
-    initialEnabled: settings.TelemetryEnabled,
+    initialEnabled: initialTelemetryEnabled,
     demo: demo,
     externalConsentToken: () => settingsStore.LoadTelemetryConsentToken(),
     acquireExternalConsentLock: () => settingsStore.TryAcquireTelemetryConsentLock(),
     externalConsentTokenForClaim: claim => settingsStore.LoadTelemetryConsentTokenForClaim(claim),
     acquireActiveFlushGuard: () => settingsStore.TryAcquireActiveFlushGuard());
 if (!demo &&
-    settings.TelemetryEnabled &&
+    initialTelemetryEnabled &&
     telemetry.Consent == AlUmmahNow.CoreBridge.TelemetryConsent.Off &&
     CoreTelemetryService.ShouldClearStaleStartupConsent(telemetry) &&
     settingsStore.ClearTelemetryConsentIfTokenMatches(initialConsentToken))

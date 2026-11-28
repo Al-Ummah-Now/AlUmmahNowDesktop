@@ -148,13 +148,16 @@ namespace AlUmmahNow.App.Services
             return true;
         }
 
-        private void ReadConsentSidecarUnlocked(out string? token, out List<string>? pendingClaims)
+        private void ReadConsentSidecarUnlocked(out string? token, out List<string>? pendingClaims) =>
+            ReadConsentSidecarUnlocked(out token, out pendingClaims, out _);
+
+        private void ReadConsentSidecarUnlocked(out string? token, out List<string>? pendingClaims, out bool readFailed)
         {
             token = null;
             pendingClaims = null;
+            readFailed = false;
             try
             {
-                if (!File.Exists(_telemetryConsentPath)) return;
                 string rawText;
                 using (var stream = new FileStream(
                     _telemetryConsentPath,
@@ -195,10 +198,23 @@ namespace AlUmmahNow.App.Services
                     RecordKnownEnabledToken(token);
                 }
             }
+            catch (FileNotFoundException)
+            {
+                token = null;
+                pendingClaims = null;
+                readFailed = false;
+            }
+            catch (DirectoryNotFoundException)
+            {
+                token = null;
+                pendingClaims = null;
+                readFailed = false;
+            }
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
             {
                 token = null;
                 pendingClaims = null;
+                readFailed = true;
             }
         }
 
@@ -253,8 +269,17 @@ namespace AlUmmahNow.App.Services
                 timeoutMs: 10000,
                 serializeMutation: true);
             if (directoryMissing) return true;
-            if (crossProcessLock == null) return false;
-            ReadConsentSidecarUnlocked(out var current, out var pendingClaims);
+            if (crossProcessLock == null)
+            {
+                RecordDisableSaveFailed();
+                return false;
+            }
+            ReadConsentSidecarUnlocked(out var current, out var pendingClaims, out var readFailed);
+            if (readFailed)
+            {
+                RecordDisableSaveFailed();
+                return false;
+            }
             if (current is not { Length: > 0 })
             {
                 CleanupOrphanConsentTempFilesUnlocked();
@@ -266,7 +291,9 @@ namespace AlUmmahNow.App.Services
             {
                 return false;
             }
-            return ClearConsentSidecarUnlocked();
+            var result = ClearConsentSidecarUnlockedResult();
+            RecordOptOutResult(result);
+            return result != TelemetryOptOutResult.SaveFailed;
         }
 
         /// <summary>

@@ -125,6 +125,8 @@ public sealed partial class App : Application
         var dataRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AlUmmahNow");
         var isDemo = Environment.GetEnvironmentVariable("AUN_DEMO") == "1";
         var initialConsentToken = isDemo ? null : store.LoadTelemetryConsentToken();
+        var initialTelemetryEnabled = initialConsentToken != null;
+        settings.TelemetryEnabled = initialTelemetryEnabled;
         _telemetry = CoreTelemetryService.CreateOrNull(
             platform: "windows",
             appVersion: version,
@@ -132,14 +134,14 @@ public sealed partial class App : Application
             videosApiBaseUrl: environment.VideosApi.AbsoluteUri,
             userAgent: "AlUmmahNowWindows/" + version,
             bufferPath: Path.Combine(dataRoot, "telemetry-buffer.json"),
-            initialEnabled: settings.TelemetryEnabled,
+            initialEnabled: initialTelemetryEnabled,
             demo: isDemo,
             externalConsentToken: () => store.LoadTelemetryConsentToken(),
             acquireExternalConsentLock: () => store.TryAcquireTelemetryConsentLock(),
             externalConsentTokenForClaim: claim => store.LoadTelemetryConsentTokenForClaim(claim),
             acquireActiveFlushGuard: () => store.TryAcquireActiveFlushGuard());
         if (!isDemo &&
-            settings.TelemetryEnabled &&
+            initialTelemetryEnabled &&
             _telemetry.Consent == AlUmmahNow.CoreBridge.TelemetryConsent.Off &&
             CoreTelemetryService.ShouldClearStaleStartupConsent(_telemetry) &&
             store.ClearTelemetryConsentIfTokenMatches(initialConsentToken))

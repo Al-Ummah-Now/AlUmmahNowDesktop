@@ -421,6 +421,22 @@ public class SettingsStoreTests
                 Assert.Equal(SettingsStore.TelemetryOptOutResult.Saved, otherStore.SaveTelemetryOptOut());
                 Assert.True(otherStore.SaveTelemetryEnabled(true));
                 Assert.False(freshStore.IsTelemetryDisableSaveFailed());
+
+                // Unreadable consent file (chmod 000 on sidecar while dir and lock remain writable) must cause
+                // ClearTelemetryConsentIfTokenMatches to return false and record the failure rather than treating it as absent.
+                var tokenForClear = otherStore.LoadTelemetryConsentToken();
+                Assert.NotNull(tokenForClear);
+                File.SetUnixFileMode(consentPath, UnixFileMode.None);
+                try
+                {
+                    Assert.False(freshStore.ClearTelemetryConsentIfTokenMatches(tokenForClear));
+                    Assert.True(freshStore.IsTelemetryDisableSaveFailed());
+                }
+                finally
+                {
+                    File.SetUnixFileMode(consentPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+                }
+                Assert.True(otherStore.LoadTelemetryEnabled());
             }
         }
         finally

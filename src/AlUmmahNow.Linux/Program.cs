@@ -73,6 +73,8 @@ var version = UpdateText.VersionOf(typeof(MainWindow).Assembly);
 var stateHome = Environment.GetEnvironmentVariable("XDG_STATE_HOME");
 if (string.IsNullOrEmpty(stateHome)) stateHome = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "state");
 var initialConsentToken = isDemo ? null : store.LoadTelemetryConsentToken();
+var initialTelemetryEnabled = initialConsentToken != null;
+settings.TelemetryEnabled = initialTelemetryEnabled;
 var telemetry = CoreTelemetryService.CreateOrNull(
     platform: "linux",
     appVersion: version,
@@ -80,14 +82,14 @@ var telemetry = CoreTelemetryService.CreateOrNull(
     videosApiBaseUrl: environment.VideosApi.AbsoluteUri,
     userAgent: "AlUmmahNowLinux/" + version,
     bufferPath: Path.Combine(stateHome, "alummahnow", "telemetry-buffer.json"),
-    initialEnabled: settings.TelemetryEnabled,
+    initialEnabled: initialTelemetryEnabled,
     demo: isDemo,
     externalConsentToken: () => store.LoadTelemetryConsentToken(),
     acquireExternalConsentLock: () => store.TryAcquireTelemetryConsentLock(),
     externalConsentTokenForClaim: claim => store.LoadTelemetryConsentTokenForClaim(claim),
     acquireActiveFlushGuard: () => store.TryAcquireActiveFlushGuard());
 if (!isDemo &&
-    settings.TelemetryEnabled &&
+    initialTelemetryEnabled &&
     telemetry.Consent == AlUmmahNow.CoreBridge.TelemetryConsent.Off &&
     CoreTelemetryService.ShouldClearStaleStartupConsent(telemetry) &&
     store.ClearTelemetryConsentIfTokenMatches(initialConsentToken))
