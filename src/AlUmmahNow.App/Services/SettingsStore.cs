@@ -601,6 +601,10 @@ namespace AlUmmahNow.App.Services
                 ClearOptOutTracking();
                 return true;
             }
+            if (!pendingClaims.Contains(expectedToken))
+            {
+                return false;
+            }
             try
             {
                 WriteConsentSidecarUnlocked(current, pendingClaims: null);

@@ -108,7 +108,9 @@ public sealed partial class App : Application
         // The saved language (Settings), Arabic by default; CI and screenshots force one with AUN_LANG.
         var localizer = new Localizer(Environment.GetEnvironmentVariable("AUN_LANG") is { Length: > 0 } l ? l : settings.Language);
         var userAgent = "AlUmmahNowStudioWindows/" + version;
-        var telemetryDemo = demo || Environment.GetEnvironmentVariable("AUN_SIMULATE_UPLOADS") == "1";
+        var telemetryDemo = demo
+            || Environment.GetEnvironmentVariable("AUN_SIMULATE_UPLOADS") == "1"
+            || Environment.GetEnvironmentVariable("AUN_DEMO_UPDATE") is { Length: > 0 };
         var initialConsentToken = telemetryDemo ? null : settingsStore.LoadTelemetryConsentToken();
         var initialTelemetryEnabled = initialConsentToken != null;
         settings.TelemetryEnabled = initialTelemetryEnabled;

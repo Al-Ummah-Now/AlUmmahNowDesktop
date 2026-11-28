@@ -54,7 +54,8 @@ if (Environment.GetEnvironmentVariable("AUN_THEME") is "dark" or "light") settin
 var localizer = new Localizer(Environment.GetEnvironmentVariable("AUN_LANG") is { Length: > 0 } lang ? lang : settings.Language);
 
 var userAgent = "AlUmmahNowStudioLinux/" + version;
-var initialConsentToken = demo ? null : settingsStore.LoadTelemetryConsentToken();
+var telemetryDemo = demo || Environment.GetEnvironmentVariable("AUN_DEMO_UPDATE") is { Length: > 0 };
+var initialConsentToken = telemetryDemo ? null : settingsStore.LoadTelemetryConsentToken();
 var initialTelemetryEnabled = initialConsentToken != null;
 settings.TelemetryEnabled = initialTelemetryEnabled;
 var telemetryBufferPath = Path.Combine(stateDir, "telemetry", "telemetry-buffer.json");
@@ -66,13 +67,13 @@ var telemetry = CoreTelemetryService.CreateOrNull(
     userAgent: userAgent,
     bufferPath: telemetryBufferPath,
     initialEnabled: initialTelemetryEnabled,
-    demo: demo,
+    demo: telemetryDemo,
     externalConsentToken: () => settingsStore.LoadTelemetryConsentToken(),
     acquireExternalConsentLock: () => settingsStore.TryAcquireTelemetryConsentLock(),
     externalConsentTokenForClaim: claim => settingsStore.LoadTelemetryConsentTokenForClaim(claim),
     acquireActiveFlushGuard: () => settingsStore.TryAcquireActiveFlushGuard(),
     isLocalOptOutSuppressed: () => settingsStore.IsTelemetryDisableSaveFailed());
-if (!demo &&
+if (!telemetryDemo &&
     initialTelemetryEnabled &&
     telemetry.Consent == AlUmmahNow.CoreBridge.TelemetryConsent.Off &&
     CoreTelemetryService.ShouldClearStaleStartupConsent(telemetry) &&

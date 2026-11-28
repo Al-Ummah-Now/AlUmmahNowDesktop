@@ -67,6 +67,7 @@ var coreVersion = CoreRuntime.VersionOrNone();
 var isDemo = Environment.GetEnvironmentVariable("AUN_DEMO") == "1"
     || Environment.GetEnvironmentVariable("AUN_DEMO_AUTH") is { Length: > 0 }
     || Environment.GetEnvironmentVariable("AUN_DEMO_LIVE") is "1" or "off"
+    || Environment.GetEnvironmentVariable("AUN_DEMO_UPDATE") is { Length: > 0 }
     || Environment.GetEnvironmentVariable("AUN_FIXTURE_MEDIA") is { Length: > 0 };
 var updateInstall = isDemo ? UpdateInstall.Development : UpdateInstalls.OnLinux(UpdateInstalls.IsReleaseBuild, File.Exists("/.flatpak-info"), AppContext.BaseDirectory, UpdateApp.Viewer);
 MainWindow? viewer = null;

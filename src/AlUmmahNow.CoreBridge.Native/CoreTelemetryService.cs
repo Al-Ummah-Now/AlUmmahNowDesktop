@@ -59,6 +59,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     private readonly object _gate = new();
     private readonly string _instanceId = Guid.NewGuid().ToString("N")[..12];
     private TelemetryClient _client;
+    private bool _clientHasDiskBuffer;
     private string? _activeBufferPath;
     private string? _activeGenerationPrefix;
     private FileStream? _instanceOwnerLock;
@@ -69,6 +70,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     private bool _pendingInitialEnable;
     private bool _lastEnableBlockedByExternalLock;
     private CancellationTokenSource _flushCts = new();
+    private readonly HashSet<Task> _pendingEnqueueTasks = new();
     private int _inFlightFlushes;
     private long _consentEpoch;
     private long _analyticsEpoch;
@@ -139,8 +141,13 @@ public sealed class CoreTelemetryService : ITelemetryService
         var initialToken = initialEnabled && _externalConsentToken != null ? ReadExternalTokenSafe() : null;
         _activeGenerationPrefix = ResolveGenerationPrefix(initialToken);
         _activeBufferPath = ResolveBufferPathForToken(initialToken);
-        EnsureBufferLockFileExists();
-        _client = CreateClient(_activeBufferPath);
+        var bufferDir = !string.IsNullOrWhiteSpace(_bufferPath) ? Path.GetDirectoryName(_bufferPath) : null;
+        var bufferDirExists = !string.IsNullOrEmpty(bufferDir) && Directory.Exists(bufferDir);
+        if (initialEnabled || bufferDirExists)
+        {
+            EnsureBufferLockFileExists(createDirectory: initialEnabled);
+        }
+        _client = CreateClient(_activeBufferPath, createDirectory: initialEnabled);
         if (initialEnabled)
         {
             if (!SetConsent(TelemetryConsent.Full))
@@ -162,46 +169,55 @@ public sealed class CoreTelemetryService : ITelemetryService
         {
             // Startup with telemetry disabled revokes this instance and cleans up any orphaned
             // buffers under the shared cross-process buffer lock, preserving any active generation
-            // currently recorded in external consent.
+            // currently recorded in external consent, without creating directories or modifying parent modes.
             _consent = TelemetryConsent.Off;
             _observedExternalToken = null;
             _suppressedExternalToken = NormalizeConsentGenerationToken(ReadExternalTokenSafe());
-            using var crossProcessLock = AcquireCrossProcessBufferLock(timeoutMs: 0);
-            try
+            if (!bufferDirExists)
             {
-                _client.SetConsent(TelemetryConsentState.Denied);
-                if (crossProcessLock != null || string.IsNullOrWhiteSpace(_bufferPath))
-                {
-                    var keepGen = ResolveForeignKeepGenerationPrefixLocked();
-                    _lastPurgeFailed = !(TryDeleteForeignGenerationBuffers(keepGen) && TryDeleteSiblingTempFiles(keepGen));
-                }
-                else
-                {
-                    TryDeleteSingleBufferAndTemps(_activeBufferPath);
-                    _lastPurgeFailed = true;
-                }
+                try { _client.SetConsent(TelemetryConsentState.Denied); } catch (AunException) { }
+                _lastPurgeFailed = false;
             }
-            catch (AunException ex)
+            else
             {
-                if (crossProcessLock != null)
+                using var crossProcessLock = AcquireCrossProcessBufferLock(timeoutMs: 0, createDirectory: false);
+                try
                 {
-                    TryDeleteBufferFallback(ResolveForeignKeepGenerationPrefixLocked());
+                    _client.SetConsent(TelemetryConsentState.Denied);
+                    if (crossProcessLock != null || string.IsNullOrWhiteSpace(_bufferPath))
+                    {
+                        var keepGen = ResolveForeignKeepGenerationPrefixLocked();
+                        _lastPurgeFailed = !(TryDeleteForeignGenerationBuffers(keepGen) && TryDeleteSiblingTempFiles(keepGen));
+                    }
+                    else
+                    {
+                        TryDeleteSingleBufferAndTemps(_activeBufferPath);
+                        _lastPurgeFailed = true;
+                    }
                 }
-                else
+                catch (AunException ex)
                 {
-                    TryDeleteSingleBufferAndTemps(_activeBufferPath);
+                    if (crossProcessLock != null)
+                    {
+                        TryDeleteBufferFallback(ResolveForeignKeepGenerationPrefixLocked());
+                    }
+                    else
+                    {
+                        TryDeleteSingleBufferAndTemps(_activeBufferPath);
+                    }
+                    _lastPurgeFailed = true;
+                    Log.For("telemetry").Error("telemetry disk purge failed on startup opt-out: " + ex.Message);
                 }
-                _lastPurgeFailed = true;
-                Log.For("telemetry").Error("telemetry disk purge failed on startup opt-out: " + ex.Message);
             }
         }
     }
 
-    private TelemetryClient CreateClient(string? bufferPath)
+    private TelemetryClient CreateClient(string? bufferPath, bool createDirectory = true)
     {
-        var effectivePath = !string.IsNullOrWhiteSpace(bufferPath) && EnsurePrivateBufferDirectory(bufferPath)
+        var effectivePath = !string.IsNullOrWhiteSpace(bufferPath) && EnsurePrivateBufferDirectory(bufferPath, createDirectory)
             ? bufferPath
             : null;
+        _clientHasDiskBuffer = effectivePath != null;
         var config = new TelemetryClientConfig(
             _app,
             _ingestUrl,
@@ -230,7 +246,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         }
     }
 
-    private static bool EnsurePrivateBufferDirectory(string? bufferPath)
+    private static bool EnsurePrivateBufferDirectory(string? bufferPath, bool createDirectory = true)
     {
         if (string.IsNullOrWhiteSpace(bufferPath)) return true;
         var dir = Path.GetDirectoryName(bufferPath);
@@ -239,7 +255,11 @@ public sealed class CoreTelemetryService : ITelemetryService
         {
             if (OperatingSystem.IsWindows())
             {
-                if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
+                if (!Directory.Exists(dir))
+                {
+                    if (!createDirectory) return false;
+                    Directory.CreateDirectory(dir);
+                }
                 return true;
             }
             if (IsSharedTempDirectory(dir)) return false;
@@ -263,12 +283,6 @@ public sealed class CoreTelemetryService : ITelemetryService
                     return false;
                 }
                 var ancestorMode = File.GetUnixFileMode(ancestor);
-                if (isImmediateParent && !isSharedTemp &&
-                    (ancestorMode & nonOwnerWriteMask) != 0 && (ancestorMode & UnixFileMode.StickyBit) == 0)
-                {
-                    File.SetUnixFileMode(ancestor, ancestorMode & ~nonOwnerWriteMask);
-                    ancestorMode = File.GetUnixFileMode(ancestor);
-                }
                 if ((ancestorMode & nonOwnerWriteMask) != 0 && (ancestorMode & UnixFileMode.StickyBit) == 0)
                 {
                     return false;
@@ -277,10 +291,12 @@ public sealed class CoreTelemetryService : ITelemetryService
 
             if (!Directory.Exists(dir))
             {
+                if (!createDirectory) return false;
                 Directory.CreateDirectory(dir, ownerDirMode);
             }
             var dirInfo = new DirectoryInfo(dir);
             if (dirInfo.LinkTarget != null) return false;
+            if (!createDirectory) return true;
             var current = File.GetUnixFileMode(dir);
             if ((current & nonOwnerMask) != 0)
             {
@@ -6743,10 +6759,28 @@ public sealed class CoreTelemetryService : ITelemetryService
                 }
                 else
                 {
-                    if (!string.IsNullOrWhiteSpace(_bufferPath) && !EnsurePrivateBufferDirectory(_activeBufferPath))
+                    if (!string.IsNullOrWhiteSpace(_bufferPath) && !EnsurePrivateBufferDirectory(_activeBufferPath, createDirectory: true))
                     {
                         Log.For("telemetry").Warn("refusing to enable telemetry: buffer directory is not private");
                         return false;
+                    }
+                    if (!string.IsNullOrWhiteSpace(_activeBufferPath) && !_clientHasDiskBuffer)
+                    {
+                        if (_inFlightFlushes > 0) return false;
+                        TelemetryClient? nextClient = null;
+                        try
+                        {
+                            nextClient = CreateClient(_activeBufferPath, createDirectory: true);
+                            _client.Dispose();
+                            _client = nextClient;
+                            nextClient = null;
+                        }
+                        catch (AunException ex)
+                        {
+                            nextClient?.Dispose();
+                            Log.For("telemetry").Warn("failed to bind telemetry buffer: " + ex.Message);
+                            return false;
+                        }
                     }
                     string? externalToken = null;
                     if (_externalConsentToken != null)
@@ -6999,18 +7033,134 @@ public sealed class CoreTelemetryService : ITelemetryService
         }, captureEpoch);
     }
 
+    private bool TryPrepareEnqueue(out long captureEpoch, out string? expectedExternalToken)
+    {
+        captureEpoch = 0;
+        expectedExternalToken = null;
+        bool canSyncExternal;
+        string? suppressedToken;
+        lock (_gate)
+        {
+            if (_disposeRequested || _clientDisposed) return false;
+            if (_consent == TelemetryConsent.Full)
+            {
+                captureEpoch = _analyticsEpoch;
+                return true;
+            }
+            canSyncExternal = _consent == TelemetryConsent.Off && _externalConsentToken != null;
+            suppressedToken = _suppressedExternalToken;
+        }
+        if (!canSyncExternal) return false;
+        if (_isLocalOptOutSuppressed != null)
+        {
+            try
+            {
+                if (_isLocalOptOutSuppressed()) return false;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+        var externalToken = NormalizeConsentGenerationToken(ReadExternalTokenSafe());
+        if (string.IsNullOrEmpty(externalToken)) return false;
+        if (!string.IsNullOrEmpty(suppressedToken) &&
+            string.Equals(suppressedToken, externalToken, StringComparison.Ordinal))
+        {
+            return false;
+        }
+        expectedExternalToken = externalToken;
+        return true;
+    }
+
+    private void TrackPendingEnqueue(Action work)
+    {
+        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        lock (_gate)
+        {
+            if (_disposeRequested || _clientDisposed) return;
+            _pendingEnqueueTasks.Add(tcs.Task);
+        }
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                work();
+            }
+            finally
+            {
+                lock (_gate)
+                {
+                    _pendingEnqueueTasks.Remove(tcs.Task);
+                }
+                tcs.TrySetResult();
+            }
+        });
+    }
+
+    private Task[] SnapshotPendingEnqueues()
+    {
+        lock (_gate)
+        {
+            if (_pendingEnqueueTasks.Count == 0) return Array.Empty<Task>();
+            var arr = new Task[_pendingEnqueueTasks.Count];
+            _pendingEnqueueTasks.CopyTo(arr);
+            return arr;
+        }
+    }
+
+    private async Task WaitForPendingEnqueuesAsync(CancellationToken cancellationToken)
+    {
+        var pending = SnapshotPendingEnqueues();
+        if (pending.Length == 0) return;
+        try
+        {
+            await Task.WhenAll(pending).WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private void WaitForPendingEnqueuesSync()
+    {
+        var pending = SnapshotPendingEnqueues();
+        if (pending.Length == 0) return;
+        try
+        {
+            Task.WhenAll(pending).Wait(TimeSpan.FromSeconds(1));
+        }
+        catch
+        {
+        }
+    }
+
+    private bool ResolveEnqueuedEpoch(long captureEpoch, string? expectedExternalToken, out long epoch)
+    {
+        epoch = captureEpoch;
+        if (expectedExternalToken == null) return true;
+        TryCompletePendingInitialEnable();
+        TrySyncExternalOptIn();
+        lock (_gate)
+        {
+            if (_disposeRequested || _clientDisposed || _consent != TelemetryConsent.Full ||
+                !string.Equals(NormalizeConsentGenerationToken(_observedExternalToken), expectedExternalToken, StringComparison.Ordinal))
+            {
+                return false;
+            }
+            epoch = _analyticsEpoch;
+            return true;
+        }
+    }
+
     public void EnqueueTrack(string name, IReadOnlyDictionary<string, object>? properties = null)
     {
         if (string.IsNullOrWhiteSpace(name)) return;
-        long captureEpoch;
-        lock (_gate)
-        {
-            if (_disposeRequested || _clientDisposed || _consent != TelemetryConsent.Full) return;
-            captureEpoch = _analyticsEpoch;
-        }
+        if (!TryPrepareEnqueue(out var captureEpoch, out var expectedExternalToken)) return;
         var snapshot = properties != null ? new Dictionary<string, object>(properties) : null;
-        _ = Task.Run(() =>
+        TrackPendingEnqueue(() =>
         {
+            if (!ResolveEnqueuedEpoch(captureEpoch, expectedExternalToken, out var epoch)) return;
             var safeName = SanitizePropertyKey(name);
             if (string.IsNullOrWhiteSpace(safeName)) return;
             var json = SerializeProperties(snapshot);
@@ -7024,7 +7174,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                 {
                     Log.For("telemetry").Warn("telemetry track skipped: " + ex.Message);
                 }
-            }, captureEpoch);
+            }, epoch);
         });
     }
 
@@ -7058,15 +7208,11 @@ public sealed class CoreTelemetryService : ITelemetryService
     public void EnqueueTrackError(string code, IReadOnlyDictionary<string, object>? properties = null)
     {
         if (string.IsNullOrWhiteSpace(code)) return;
-        long captureEpoch;
-        lock (_gate)
-        {
-            if (_disposeRequested || _clientDisposed || _consent != TelemetryConsent.Full) return;
-            captureEpoch = _analyticsEpoch;
-        }
+        if (!TryPrepareEnqueue(out var captureEpoch, out var expectedExternalToken)) return;
         var snapshot = properties != null ? new Dictionary<string, object>(properties) : null;
-        _ = Task.Run(() =>
+        TrackPendingEnqueue(() =>
         {
+            if (!ResolveEnqueuedEpoch(captureEpoch, expectedExternalToken, out var epoch)) return;
             var safeCode = SanitizePropertyKey(code);
             if (string.IsNullOrWhiteSpace(safeCode)) return;
             var json = SerializeProperties(snapshot);
@@ -7080,7 +7226,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                 {
                     Log.For("telemetry").Warn("telemetry error skipped: " + ex.Message);
                 }
-            }, captureEpoch);
+            }, epoch);
         });
     }
 
@@ -7184,6 +7330,7 @@ public sealed class CoreTelemetryService : ITelemetryService
 
     public void Persist()
     {
+        WaitForPendingEnqueuesSync();
         WithPersistingConsent(requiresFull: false, () =>
         {
             try
@@ -7203,7 +7350,10 @@ public sealed class CoreTelemetryService : ITelemetryService
     private async Task<bool> FlushInternalAsync(CancellationToken cancellationToken, bool scheduleRetryOnLockContention)
     {
         if (cancellationToken.IsCancellationRequested) return true;
+        await WaitForPendingEnqueuesAsync(cancellationToken).ConfigureAwait(false);
+        if (cancellationToken.IsCancellationRequested) return true;
         TryCompletePendingInitialEnable();
+        TrySyncExternalOptIn();
 
         CancellationToken revokeToken;
         long flushEpoch;
@@ -7657,13 +7807,13 @@ public sealed class CoreTelemetryService : ITelemetryService
         return string.IsNullOrEmpty(dir) ? $".{stem}.lock" : Path.Combine(dir, $".{stem}.lock");
     }
 
-    private void EnsureBufferLockFileExists()
+    private void EnsureBufferLockFileExists(bool createDirectory = true)
     {
         var lockPath = GetBufferLockPath();
         if (string.IsNullOrEmpty(lockPath)) return;
         try
         {
-            EnsurePrivateBufferDirectory(lockPath);
+            if (!EnsurePrivateBufferDirectory(lockPath, createDirectory)) return;
             var dir = Path.GetDirectoryName(lockPath);
             if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir) && !File.Exists(lockPath))
             {
@@ -7676,16 +7826,16 @@ public sealed class CoreTelemetryService : ITelemetryService
         }
     }
 
-    private IDisposable? AcquireCrossProcessBufferLock(int timeoutMs = 2000) =>
-        AcquireCrossProcessBufferLockForPath(_bufferPath, timeoutMs);
+    private IDisposable? AcquireCrossProcessBufferLock(int timeoutMs = 2000, bool createDirectory = true) =>
+        AcquireCrossProcessBufferLockForPath(_bufferPath, timeoutMs, createDirectory);
 
-    private static IDisposable? AcquireCrossProcessBufferLockForPath(string? bufferPath, int timeoutMs = 2000)
+    private static IDisposable? AcquireCrossProcessBufferLockForPath(string? bufferPath, int timeoutMs = 2000, bool createDirectory = true)
     {
         var lockPath = GetBufferLockPathForPath(bufferPath);
         if (string.IsNullOrEmpty(lockPath)) return null;
         try
         {
-            EnsurePrivateBufferDirectory(lockPath);
+            if (!EnsurePrivateBufferDirectory(lockPath, createDirectory)) return null;
             var deadline = timeoutMs > 0 ? DateTime.UtcNow.AddMilliseconds(timeoutMs) : DateTime.MinValue;
             while (true)
             {
