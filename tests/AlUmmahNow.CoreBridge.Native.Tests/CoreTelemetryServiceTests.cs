@@ -3203,7 +3203,7 @@ public class CoreTelemetryServiceTests
             ["quotedCred"] = "{\"challenge.verificationCode\":\"482731\"} {\"home\\u0041ddress\":\"12 Cedar Rd\"} {\"userId\":[\"alice42\", \"bob73\"]} status=\"password=first;second\" password=\u201Corchid velvet\u201D pass=\"correct horse battery staple\" {\"pass\":\"multi word phrase\"} pwd=shortsecret token=cobalt-orchard",
             ["user_id"] = "alice123",
             ["p\\u0061ssword"] = "violet-sparrow",
-            ["personalText"] = "fullName=\"Alice Wonderland\" displayName=Alice Smith username=Jane Doe address=\"123 Main St, Apt 4\" phone_2025550123 C:ProjectCodename C:秘密 https://example.test/password%3Dshortcredential https%3A%2F%2Fexample.test%2F%3Fcode%3Dorchid-meadow",
+            ["personalText"] = "fullName=\"Alice Wonderland\" displayName=Alice Smith username=Jane Doe address=\"123 Main St, Apt 4\" phone_2025550123 C:ProjectCodename C:秘密 https://example.test/password%3Dshortcredential https%3A%2F%2Fexample.test%2F%3Fcode%3Dorchid-meadow https://example.org/r/Abcdefghijklmno1%41Pqrstuvwxyzabcd2 https://example.org/u/alice%40example.com",
             ["token violet7"] = "ok",
             ["http://u:p@localhost/x"] = "https://1drv.ms/u/s!Aq82F1ZLPx0K",
             ["algNone"] = "IHsiYWxnIjoibm9uZSJ9.eyJzdWIiOiJhbGljZSJ9.",
@@ -3223,6 +3223,11 @@ public class CoreTelemetryServiceTests
         Assert.DoesNotContain("bob73", json);
         Assert.DoesNotContain("violet-sparrow", json);
         Assert.DoesNotContain("秘密", json);
+        Assert.DoesNotContain("Abcdefghijklmno1", json);
+        Assert.DoesNotContain("Pqrstuvwxyzabcd2", json);
+        Assert.DoesNotContain("alice%40example.com", json);
+        Assert.Equal("https://example.org/r/[redacted]",
+            CoreTelemetryService.SanitizeLocalPaths("https://example.org/r/Abcdefghijklmno1%41Pqrstuvwxyzabcd2"));
         Assert.DoesNotContain("12 Cedar Rd", json);
         Assert.DoesNotContain("orchid", json);
         Assert.DoesNotContain("velvet", json);
@@ -3253,6 +3258,51 @@ public class CoreTelemetryServiceTests
         Assert.DoesNotContain("12 34 56 78", json);
         Assert.Contains("2026-11-27", json);
         Assert.Equal("http://[redacted]@localhost/x", CoreTelemetryService.SanitizeLocalPaths("http://u:p@localhost/x"));
+    }
+
+    [Fact]
+    public void ReportCrash_syncs_cross_process_opt_in_when_not_locally_suppressed()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "aun-tel-crash-sync-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var bufferPath = Path.Combine(dir, "telemetry-buffer.json");
+        string? sharedToken = null;
+        var suppressed = false;
+        try
+        {
+            using var service = new CoreTelemetryService(
+                platform: "linux",
+                appVersion: "1.0.0",
+                locale: "en",
+                videosApiBaseUrl: null,
+                userAgent: "AlUmmahNowLinux/1.0.0",
+                bufferPath: bufferPath,
+                initialEnabled: false,
+                externalConsentToken: () => Volatile.Read(ref sharedToken),
+                isLocalOptOutSuppressed: () => Volatile.Read(ref suppressed));
+
+            Assert.Equal(TelemetryConsent.Off, service.Consent);
+
+            // Another process opts in while this instance stays outside Settings.
+            Volatile.Write(ref sharedToken, "enabled:genB");
+            service.ReportCrash("TestException", "fatal", "https://example.org/r/Abcdefghijklmno1%41Pqrstuvwxyzabcd2");
+            Assert.Equal(TelemetryConsent.Full, service.Consent);
+            var persisted = File.ReadAllText(service.ActiveBufferPathForTesting!);
+            Assert.Contains("TestException", persisted);
+            Assert.DoesNotContain("Abcdefghijklmno1", persisted);
+            Assert.DoesNotContain("Pqrstuvwxyzabcd2", persisted);
+
+            // Local failed opt-out suppresses automatic crash-time re-enable for the stale token.
+            Volatile.Write(ref suppressed, true);
+            service.SetConsent(TelemetryConsent.Off);
+            Assert.Equal(TelemetryConsent.Off, service.Consent);
+            service.ReportCrash("SuppressedException", "should not record");
+            Assert.Equal(TelemetryConsent.Off, service.Consent);
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
     }
 
     private sealed class CallbackDisposable : IDisposable

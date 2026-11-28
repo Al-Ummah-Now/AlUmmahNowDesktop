@@ -52,6 +52,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     private readonly Func<string?, string?>? _externalConsentTokenForClaim;
     private readonly Func<IDisposable?>? _acquireExternalConsentLock;
     private readonly Func<IDisposable?>? _acquireActiveFlushGuard;
+    private readonly Func<bool>? _isLocalOptOutSuppressed;
     private readonly object _externalLockGate = new();
     private IDisposable? _heldExternalLock;
     private int _externalLockRefs;
@@ -64,6 +65,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     private string? _instanceOwnerLockPath;
     private TelemetryConsent _consent = TelemetryConsent.Off;
     private string? _observedExternalToken;
+    private string? _suppressedExternalToken;
     private bool _pendingInitialEnable;
     private bool _lastEnableBlockedByExternalLock;
     private CancellationTokenSource _flushCts = new();
@@ -113,13 +115,15 @@ public sealed class CoreTelemetryService : ITelemetryService
         Func<string?>? externalConsentToken = null,
         Func<IDisposable?>? acquireExternalConsentLock = null,
         Func<string?, string?>? externalConsentTokenForClaim = null,
-        Func<IDisposable?>? acquireActiveFlushGuard = null)
+        Func<IDisposable?>? acquireActiveFlushGuard = null,
+        Func<bool>? isLocalOptOutSuppressed = null)
     {
         _bufferPath = bufferPath;
         _externalConsentToken = externalConsentToken;
         _externalConsentTokenForClaim = externalConsentTokenForClaim;
         _acquireExternalConsentLock = acquireExternalConsentLock;
         _acquireActiveFlushGuard = acquireActiveFlushGuard;
+        _isLocalOptOutSuppressed = isLocalOptOutSuppressed;
         var os = AunClient.CurrentOs();
         _app = new TelemetryAppInfo(
             platform,
@@ -221,14 +225,16 @@ public sealed class CoreTelemetryService : ITelemetryService
         Func<string?>? externalConsentToken = null,
         Func<IDisposable?>? acquireExternalConsentLock = null,
         Func<string?, string?>? externalConsentTokenForClaim = null,
-        Func<IDisposable?>? acquireActiveFlushGuard = null)
+        Func<IDisposable?>? acquireActiveFlushGuard = null,
+        Func<bool>? isLocalOptOutSuppressed = null)
     {
         if (demo) return NullTelemetryService.Instance;
         try
         {
             return new CoreTelemetryService(
                 platform, appVersion, locale, videosApiBaseUrl, userAgent, bufferPath,
-                initialEnabled, externalConsentToken, acquireExternalConsentLock, externalConsentTokenForClaim, acquireActiveFlushGuard);
+                initialEnabled, externalConsentToken, acquireExternalConsentLock, externalConsentTokenForClaim,
+                acquireActiveFlushGuard, isLocalOptOutSuppressed);
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException or AunException)
         {
@@ -920,7 +926,106 @@ public sealed class CoreTelemetryService : ITelemetryService
         result = ReplaceUrlPathSecret(result, UrlMatrixParamRegex);
         result = RedactEncodedKeyValuesInUrl(result);
         result = RedactEncodedJoseTokensInUrl(result);
+        result = RedactEncodedOpaqueSegmentsInUrl(result);
         return result;
+    }
+
+    private static string RedactEncodedOpaqueSegmentsInUrl(string url)
+    {
+        if (url.IndexOf('%') < 0) return url;
+        var schemeIdx = url.IndexOf("://", StringComparison.Ordinal);
+        if (schemeIdx < 0) return url;
+        var pathSlash = url.IndexOf('/', schemeIdx + 3);
+        if (pathSlash < 0) return url;
+        var pathEnd = url.IndexOfAny(['?', '#'], pathSlash);
+        if (pathEnd < 0) pathEnd = url.Length;
+        StringBuilder? sb = null;
+        var copied = 0;
+        var segStart = pathSlash + 1;
+        while (segStart < pathEnd)
+        {
+            var nextSlash = url.IndexOf('/', segStart, pathEnd - segStart);
+            var segEnd = nextSlash < 0 ? pathEnd : nextSlash;
+            var semi = url.IndexOf(';', segStart, segEnd - segStart);
+            var coreEnd = semi < 0 ? segEnd : semi;
+            if (coreEnd > segStart && url.IndexOf('%', segStart, coreEnd - segStart) >= 0)
+            {
+                var rawSeg = url.Substring(segStart, coreEnd - segStart);
+                var (decodedSeg, offsets) = DecodeUrlSegmentFull(rawSeg);
+                var redactedWhole = !decodedSeg.StartsWith("[redacted", StringComparison.Ordinal) &&
+                    IsOpaqueUrlSecretSegment(decodedSeg.AsSpan());
+                if (redactedWhole)
+                {
+                    sb ??= new StringBuilder(url.Length);
+                    sb.Append(url, copied, segStart - copied).Append("[redacted]");
+                    copied = coreEnd;
+                }
+                else if (decodedSeg.IndexOf('/') >= 0)
+                {
+                    var subStart = 0;
+                    while (subStart < decodedSeg.Length)
+                    {
+                        var subSlash = decodedSeg.IndexOf('/', subStart);
+                        var subEnd = subSlash < 0 ? decodedSeg.Length : subSlash;
+                        var sub = decodedSeg.AsSpan(subStart, subEnd - subStart);
+                        if (sub.Length > 0 && !sub.StartsWith("[redacted", StringComparison.Ordinal) &&
+                            IsOpaqueUrlSecretSegment(sub))
+                        {
+                            var origStart = segStart + offsets[subStart];
+                            var origEnd = segStart + offsets[subEnd];
+                            if (origStart >= copied)
+                            {
+                                sb ??= new StringBuilder(url.Length);
+                                sb.Append(url, copied, origStart - copied).Append("[redacted]");
+                                copied = origEnd;
+                            }
+                        }
+                        subStart = subSlash < 0 ? decodedSeg.Length : subSlash + 1;
+                    }
+                }
+            }
+            segStart = nextSlash < 0 ? pathEnd : nextSlash + 1;
+        }
+        if (sb == null) return url;
+        sb.Append(url, copied, url.Length - copied);
+        return sb.ToString();
+    }
+
+    private static (string Decoded, int[] OrigOffsets) DecodeUrlSegmentFull(string raw)
+    {
+        var sb = new StringBuilder(raw.Length);
+        var offsets = new List<int>(raw.Length + 1);
+        for (var i = 0; i < raw.Length;)
+        {
+            offsets.Add(i);
+            if (raw[i] == '%' && i + 2 < raw.Length && TryParseHexByte(raw[i + 1], raw[i + 2], out var b) &&
+                b >= 0x21 && b <= 0x7E && b is not (byte)'?' and not (byte)'#')
+            {
+                sb.Append((char)b);
+                i += 3;
+            }
+            else
+            {
+                sb.Append(raw[i]);
+                i++;
+            }
+        }
+        offsets.Add(raw.Length);
+        return (sb.ToString(), offsets.ToArray());
+    }
+
+    private static bool IsOpaqueUrlSecretSegment(ReadOnlySpan<char> segment)
+    {
+        if (segment.Length < 32 || UuidExactRegex.IsMatch(segment)) return false;
+        var hasLetter = false;
+        var hasDigit = false;
+        foreach (var c in segment)
+        {
+            if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) hasLetter = true;
+            else if (c >= '0' && c <= '9') hasDigit = true;
+            else if (c is not ('-' or '_' or '+' or '/' or '=')) return false;
+        }
+        return hasLetter && hasDigit;
     }
 
     private static string RedactEncodedKeyValuesInUrl(string url)
@@ -6352,6 +6457,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                 var priorConsent = _consent;
                 if (consent == TelemetryConsent.Off)
                 {
+                    _suppressedExternalToken = NormalizeConsentGenerationToken(ReadExternalTokenSafe()) ?? _observedExternalToken;
                     if (needsBufferLock && crossProcessLock == null)
                     {
                         // Lock unavailable during opt-out: revoke local collection and remove our own
@@ -6464,6 +6570,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                             }
                             _consent = consent;
                             _observedExternalToken = NormalizeConsentGenerationToken(externalToken);
+                            _suppressedExternalToken = null;
                             _pendingInitialEnable = false;
                             UpdatePurgeFailedLocked(false, ref purgeNotify, ref purgeNotifyValue);
                             result = true;
@@ -6682,9 +6789,42 @@ public sealed class CoreTelemetryService : ITelemetryService
         if (toCancel != null) CancelQuietly(toCancel);
     }
 
+    private void TrySyncExternalOptInBeforeCrash()
+    {
+        if (_externalConsentToken == null) return;
+        lock (_gate)
+        {
+            if (_disposeRequested || _clientDisposed || _consent != TelemetryConsent.Off) return;
+        }
+        if (_isLocalOptOutSuppressed != null)
+        {
+            try
+            {
+                if (_isLocalOptOutSuppressed()) return;
+            }
+            catch
+            {
+                return;
+            }
+        }
+        var externalToken = NormalizeConsentGenerationToken(ReadExternalTokenSafe());
+        if (string.IsNullOrEmpty(externalToken)) return;
+        lock (_gate)
+        {
+            if (_disposeRequested || _clientDisposed || _consent != TelemetryConsent.Off) return;
+            if (!string.IsNullOrEmpty(_suppressedExternalToken) &&
+                string.Equals(_suppressedExternalToken, externalToken, StringComparison.Ordinal))
+            {
+                return;
+            }
+        }
+        SetConsent(TelemetryConsent.Full);
+    }
+
     public void ReportCrash(string kind, string message, string? stack = null, bool fromPreviousSession = false)
     {
         TryCompletePendingInitialEnable();
+        TrySyncExternalOptInBeforeCrash();
         long captureEpoch;
         lock (_gate)
         {

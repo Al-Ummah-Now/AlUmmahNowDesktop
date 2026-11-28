@@ -69,7 +69,8 @@ var telemetry = CoreTelemetryService.CreateOrNull(
     externalConsentToken: () => settingsStore.LoadTelemetryConsentToken(),
     acquireExternalConsentLock: () => settingsStore.TryAcquireTelemetryConsentLock(),
     externalConsentTokenForClaim: claim => settingsStore.LoadTelemetryConsentTokenForClaim(claim),
-    acquireActiveFlushGuard: () => settingsStore.TryAcquireActiveFlushGuard());
+    acquireActiveFlushGuard: () => settingsStore.TryAcquireActiveFlushGuard(),
+    isLocalOptOutSuppressed: () => settingsStore.IsTelemetryDisableSaveFailed());
 if (!demo &&
     initialTelemetryEnabled &&
     telemetry.Consent == AlUmmahNow.CoreBridge.TelemetryConsent.Off &&

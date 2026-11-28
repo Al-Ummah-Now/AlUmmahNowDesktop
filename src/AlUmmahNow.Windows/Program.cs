@@ -139,7 +139,8 @@ public sealed partial class App : Application
             externalConsentToken: () => store.LoadTelemetryConsentToken(),
             acquireExternalConsentLock: () => store.TryAcquireTelemetryConsentLock(),
             externalConsentTokenForClaim: claim => store.LoadTelemetryConsentTokenForClaim(claim),
-            acquireActiveFlushGuard: () => store.TryAcquireActiveFlushGuard());
+            acquireActiveFlushGuard: () => store.TryAcquireActiveFlushGuard(),
+            isLocalOptOutSuppressed: () => store.IsTelemetryDisableSaveFailed());
         if (!isDemo &&
             initialTelemetryEnabled &&
             _telemetry.Consent == AlUmmahNow.CoreBridge.TelemetryConsent.Off &&
