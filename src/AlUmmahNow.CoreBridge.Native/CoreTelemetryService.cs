@@ -39,7 +39,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         "Bearer", "Basic", "Digest", "Token", "Api-Key", "ApiKey",
         "OAuth", "Negotiate", "Mutual", "HOBA", "Vapid", "SCRAM-SHA-256", "AWS4-HMAC-SHA256"
     };
-    private static readonly Regex BasicTokenRegex = new(@"\b(Basic)\s+(?:(""|'|\\""|\\u0022)([A-Za-z0-9+/_-]{2,}={0,2})(?![A-Za-z0-9+/_=-])(\2|\\""|\\u0022|(?=[\t\p{Zs}]*(?:\r|\n|$)))|([A-Za-z0-9+/_-]{2,}={0,2})(?![A-Za-z0-9+/_=-]))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex BasicTokenRegex = new(@"\b(Basic)\s+(?:(""|'|\\""|\\u0022)[\t\p{Zs}]*([A-Za-z0-9+/_-]{2,}={0,2})(?![A-Za-z0-9+/_=-])(?:[\t\p{Zs}]*(\2|\\""|\\u0022)|(?=[\t\p{Zs}]*(?:\r|\n|\\r|\\n|$)))|([A-Za-z0-9+/_-]{2,}={0,2})(?![A-Za-z0-9+/_=-]))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly System.Text.UTF8Encoding StrictUtf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
 
     private readonly TelemetryAppInfo _app;
@@ -2583,18 +2583,19 @@ public sealed class CoreTelemetryService : ITelemetryService
                 continue;
             }
             sb ??= new StringBuilder(text.Length);
-            sb.Append(text, copied, match.Index - copied);
             if (isQuoted)
             {
-                sb.Append(match.Groups[1].Value).Append(' ')
-                    .Append(match.Groups[2].Value).Append("[redacted]").Append(match.Groups[4].Value);
+                var tok = match.Groups[3];
+                sb.Append(text, copied, tok.Index - copied).Append("[redacted]");
+                copied = tok.Index + tok.Length;
             }
             else
             {
-                sb.Append(match.Groups[1].Value).Append(" [redacted]");
+                sb.Append(text, copied, match.Index - copied)
+                    .Append(match.Groups[1].Value).Append(" [redacted]");
+                copied = match.Index + match.Length;
             }
-            copied = match.Index + match.Length;
-            pos = copied;
+            pos = match.Index + match.Length;
         }
         return sb == null ? text : sb.Append(text, copied, text.Length - copied).ToString();
     }
@@ -2721,7 +2722,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             var openQuoteLen = OpeningBearerQuoteLen(text, wsEnd, wsCh, inEscapedQuote, inLiteralDoubleQuote, inDecodedSpan);
             if (openQuoteLen > 0)
             {
-                var innerStart = wsEnd + openQuoteLen;
+                var innerStart = SkipHorizontalBearerSpaces(text, wsEnd + openQuoteLen, openQuoteLen > 1);
                 var stopEsc = openQuoteLen > 1;
                 if (IsRedactedBearerPlaceholderAt(text, innerStart, stopEsc))
                 {
@@ -2729,18 +2730,13 @@ public sealed class CoreTelemetryService : ITelemetryService
                     continue;
                 }
                 var innerEnd = ScanBearerTokenEnd(text, innerStart, stopEsc);
-                var closeQuoteLen = openQuoteLen == 1
-                    ? (innerEnd < text.Length && text[innerEnd] == wsCh ? 1 : 0)
-                    : EscapedDoubleQuoteLen(text, innerEnd);
-                if (innerEnd > innerStart && IsValidQuotedBearerEnd(text, innerEnd, closeQuoteLen))
+                if (TryResolveQuotedBearerEnd(text, innerEnd, openQuoteLen, wsCh, out var afterEnd))
                 {
-                    ranges.Add((innerStart, innerEnd, true));
-                    i = innerEnd + closeQuoteLen;
-                    continue;
-                }
-                if (innerEnd == innerStart && closeQuoteLen > 0)
-                {
-                    i = innerEnd + closeQuoteLen;
+                    if (innerEnd > innerStart)
+                    {
+                        ranges.Add((innerStart, innerEnd, true));
+                    }
+                    i = afterEnd;
                     continue;
                 }
                 i = wsEnd;
@@ -2777,12 +2773,65 @@ public sealed class CoreTelemetryService : ITelemetryService
         return EscapedDoubleQuoteLen(text, pos);
     }
 
-    private static bool IsValidQuotedBearerEnd(string text, int innerEnd, int closeLen)
+    private static int SkipHorizontalBearerSpaces(string text, int pos, bool allowEscaped)
     {
-        if (closeLen > 0) return true;
-        var tail = innerEnd;
-        while (tail < text.Length && char.IsWhiteSpace(text[tail]) && text[tail] is not ('\r' or '\n')) tail++;
-        return tail >= text.Length || text[tail] is '\r' or '\n';
+        var p = pos;
+        while (p < text.Length)
+        {
+            var ch = text[p];
+            if (char.IsWhiteSpace(ch) && ch is not ('\r' or '\n'))
+            {
+                p++;
+                continue;
+            }
+            if (allowEscaped && ch == '\\' && p + 1 < text.Length)
+            {
+                if (text[p + 1] == 't')
+                {
+                    p += 2;
+                    continue;
+                }
+                if (text[p + 1] == 'u' && p + 5 < text.Length && TryParseHex4(text, p + 2, out var code))
+                {
+                    var decoded = (char)code;
+                    if (char.IsWhiteSpace(decoded) && decoded is not ('\r' or '\n'))
+                    {
+                        p += 6;
+                        continue;
+                    }
+                }
+            }
+            break;
+        }
+        return p;
+    }
+
+    private static bool IsEscapedNewlineAt(string text, int pos)
+    {
+        if (pos + 1 >= text.Length || text[pos] != '\\') return false;
+        var esc = text[pos + 1];
+        if (esc is 'n' or 'r') return true;
+        return esc == 'u' && pos + 5 < text.Length && TryParseHex4(text, pos + 2, out var code) && code is '\r' or '\n';
+    }
+
+    private static bool TryResolveQuotedBearerEnd(string text, int innerEnd, int openLen, char openCh, out int afterEnd)
+    {
+        var tail = SkipHorizontalBearerSpaces(text, innerEnd, allowEscaped: openLen > 1);
+        var closeLen = openLen == 1
+            ? (tail < text.Length && text[tail] == openCh ? 1 : 0)
+            : EscapedDoubleQuoteLen(text, tail);
+        if (closeLen > 0)
+        {
+            afterEnd = tail + closeLen;
+            return true;
+        }
+        if (tail >= text.Length || text[tail] is '\r' or '\n' || (openLen > 1 && IsEscapedNewlineAt(text, tail)))
+        {
+            afterEnd = innerEnd;
+            return true;
+        }
+        afterEnd = innerEnd;
+        return false;
     }
 
     private static bool HasBearerTokenAt(
@@ -2793,14 +2842,11 @@ public sealed class CoreTelemetryService : ITelemetryService
         var openLen = OpeningBearerQuoteLen(text, pos, wsCh, inEscapedQuote, inLiteralDoubleQuote, inDecodedSpan);
         if (openLen > 0)
         {
-            var innerStart = pos + openLen;
+            var innerStart = SkipHorizontalBearerSpaces(text, pos + openLen, openLen > 1);
             var stopEsc = openLen > 1;
             if (IsRedactedBearerPlaceholderAt(text, innerStart, stopEsc)) return true;
             var innerEnd = ScanBearerTokenEnd(text, innerStart, stopEsc);
-            var closeLen = openLen == 1
-                ? (innerEnd < text.Length && text[innerEnd] == wsCh ? 1 : 0)
-                : EscapedDoubleQuoteLen(text, innerEnd);
-            return innerEnd > innerStart && IsValidQuotedBearerEnd(text, innerEnd, closeLen);
+            return innerEnd > innerStart && TryResolveQuotedBearerEnd(text, innerEnd, openLen, wsCh, out _);
         }
         return IsRedactedBearerPlaceholderAt(text, pos, inEscapedQuote) ||
                ScanBearerTokenEnd(text, pos, inEscapedQuote) > pos;
@@ -2863,6 +2909,19 @@ public sealed class CoreTelemetryService : ITelemetryService
                     break;
                 }
                 if (IsBearerEscapeTerminator(text, p, stopAtEscapedQuote)) break;
+                if (!stopAtEscapedQuote)
+                {
+                    var escQ = EscapedDoubleQuoteLen(text, p);
+                    if (escQ > 0)
+                    {
+                        var afterQ = p + escQ;
+                        if (afterQ >= text.Length || char.IsWhiteSpace(text[afterQ]) ||
+                            IsBearerStopPunct(text[afterQ]) || IsBearerEscapeTerminator(text, afterQ, true))
+                        {
+                            break;
+                        }
+                    }
+                }
                 var next = text[p + 1];
                 p += next == 'u' && p + 5 < text.Length && TryParseHex4(text, p + 2, out _) ? 6 : 2;
                 continue;

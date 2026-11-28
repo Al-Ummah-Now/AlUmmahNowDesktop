@@ -2522,6 +2522,24 @@ public class CoreTelemetryServiceTests
             "Basic \"[redacted] ",
             CoreTelemetryService.SanitizeLocalPaths("Basic \"dTpw "));
         Assert.Equal(
+            "Bearer \"[redacted] \"",
+            CoreTelemetryService.SanitizeLocalPaths("Bearer \"opaqueSecret123 \""));
+        Assert.Equal(
+            "Basic \"[redacted] \"",
+            CoreTelemetryService.SanitizeLocalPaths("Basic \"dTpw \""));
+        var bearerEscapedNewline = CoreTelemetryService.SanitizeLocalPaths("Bearer \\\"opaqueSecret123\\nnext");
+        Assert.DoesNotContain("opaqueSecret123", bearerEscapedNewline);
+        Assert.StartsWith("Bearer \\\"", bearerEscapedNewline);
+        var basicEscapedNewline = CoreTelemetryService.SanitizeLocalPaths("Basic \\\"dTpw\\nnext");
+        Assert.DoesNotContain("dTpw", basicEscapedNewline);
+        Assert.StartsWith("Basic \\\"", basicEscapedNewline);
+        Assert.Equal(
+            "Bearer \\\"[redacted]\\\"",
+            CoreTelemetryService.SanitizeLocalPaths("Bearer \\\"opaqueSecret123\\\""));
+        Assert.Equal(
+            "{\"msg\":\"Bearer [redacted]\\\" next\"}",
+            CoreTelemetryService.SanitizeLocalPaths("{\"msg\":\"Bearer opaqueSecret123\\\" next\"}"));
+        Assert.Equal(
             "https://[redacted-email]",
             CoreTelemetryService.SanitizeLocalPaths("https://example.org/users/alice/@example.com"));
         Assert.Equal(
