@@ -70,11 +70,6 @@ public sealed partial class Shell
             if (navigator.Current is not Route.Watch && navigator.Current is not Route.Live) _ = RefreshLiveAsync();
         };
         localizer.LanguageChanged += (_, _) => Render();
-        updates.PropertyChanged += (_, e) =>
-        {
-            // Settings always has Diagnostics; the updates card comes and goes with the server's switch
-            if (e.PropertyName == nameof(UpdateService.IsSectionVisible)) Render();
-        };
         // Every brush follows high contrast itself: no box behind a text on a highlight
         _root.HighContrastAdjustment = ElementHighContrastAdjustment.None;
         AddKey(VirtualKey.Space, () => Watch?.TogglePlay());
@@ -304,15 +299,12 @@ public sealed partial class Shell
         var column = new StackPanel { Spacing = 18, Padding = new Thickness(24, 18, 24, 24) };
         column.Children.Add(title);
         column.Children.Add(BuildDiagnostics());
-        if (_updates.IsSectionVisible)
-        {
-            var body = new StackPanel { Spacing = 14 };
-            body.Children.Add(Updates.SectionBody);
-            body.Children.Add(Updates.SectionActions);
-            var card = Updates.Card(body);
-            Updates.UseSection(card);
-            column.Children.Add(card);
-        }
+        var body = new StackPanel { Spacing = 14 };
+        body.Children.Add(Updates.SectionBody);
+        body.Children.Add(Updates.SectionActions);
+        var card = Updates.Card(body);
+        Updates.UseSection(card);
+        column.Children.Add(card);
         return new ScrollViewer { Content = column };
     }
 

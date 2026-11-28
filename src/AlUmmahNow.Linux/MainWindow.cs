@@ -77,11 +77,6 @@ public sealed partial class MainWindow
         };
         localizer.LanguageChanged += (_, _) => Render();
         auth.PropertyChanged += (_, _) => Render();
-        updates.PropertyChanged += (_, e) =>
-        {
-            // Settings always has Diagnostics; the updates card comes and goes with the server's switch
-            if (e.PropertyName == nameof(UpdateService.IsSectionVisible)) Render();
-        };
     }
 
     /// <summary>The update bar, screen and section of the page that is there.</summary>
@@ -335,17 +330,14 @@ public sealed partial class MainWindow
         title.AddCssClass("title-1");
         column.Append(title);
         column.Append(BuildDiagnostics());
-        if (_updates.IsSectionVisible)
-        {
-            var card = Gtk.Box.New(Gtk.Orientation.Vertical, 14);
-            card.AddCssClass("update-card");
-            card.AddCssClass("update-settings");
-            Updates.SectionActions.SetHalign(Gtk.Align.Start);
-            card.Append(Updates.SectionBody);
-            card.Append(Updates.SectionActions);
-            column.Append(card);
-            Updates.UseSection(card);
-        }
+        var card = Gtk.Box.New(Gtk.Orientation.Vertical, 14);
+        card.AddCssClass("update-card");
+        card.AddCssClass("update-settings");
+        Updates.SectionActions.SetHalign(Gtk.Align.Start);
+        card.Append(Updates.SectionBody);
+        card.Append(Updates.SectionActions);
+        column.Append(card);
+        Updates.UseSection(card);
         var page = Gtk.ScrolledWindow.New();
         page.SetVexpand(true);
         page.SetChild(column);

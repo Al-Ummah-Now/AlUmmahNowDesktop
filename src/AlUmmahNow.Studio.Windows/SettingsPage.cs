@@ -69,6 +69,11 @@ internal sealed class SettingsPage
             store.Save(settings);
             Changed();
         }));
+        // Only while the server's switch is on
+        _updatesCard = LanternGlass.Card(updates.SectionBody, updates.SectionActions);
+        left.Children.Add(_updatesCard);
+        updates.UseSection(_updatesCard);
+
         // Diagnostics: off until turned on; turning it off deletes what was kept.
         left.Children.Add(Choice(l["settings.telemetry"], new[] { l["settings.telemetry.off"], l["settings.telemetry.on"] }, settings.TelemetryEnabled ? 1 : 0, i =>
         {
@@ -76,10 +81,6 @@ internal sealed class SettingsPage
             store.Save(settings);
             telemetry.SetEnabled(settings.TelemetryEnabled);
         }, l["settings.telemetry.note"]));
-        // Only while the server's switch is on
-        _updatesCard = LanternGlass.Card(updates.SectionBody, updates.SectionActions);
-        left.Children.Add(_updatesCard);
-        updates.UseSection(_updatesCard);
 
         var accountsBody = new StackPanel { Spacing = 8 };
         accountsBody.Children.Add(Heading(l[IdentityMenu.AccountsHeadingKey]));
