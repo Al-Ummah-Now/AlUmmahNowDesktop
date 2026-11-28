@@ -30,7 +30,7 @@ public sealed partial class App : Application
         InitializeComponent();
         UnhandledException += (_, e) =>
         {
-            _telemetry.ReportCrash(e.Exception.GetType().Name, e.Exception.Message, e.Exception.StackTrace);
+            _telemetry.ReportCrash(e.Exception.GetType().FullName ?? e.Exception.GetType().Name, e.Exception.GetType().Name, e.Exception.StackTrace);
             ReportCrash("unhandled: " + e.Message + "\n" + e.Exception);
         };
     }

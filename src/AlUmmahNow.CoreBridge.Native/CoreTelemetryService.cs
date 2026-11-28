@@ -33,7 +33,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         "kt", "java", "swift", "cs", "cpp", "cc", "c", "h", "hpp", "rs", "py", "js", "ts", "go", "rb", "m", "mm"
     };
     private static readonly Regex KeywordAssignedPathRegex = new(@"(\b(?:file|path|filename|filepath)\s*[:=]\s*)(?!\u001E)[^\r\n\u001E\u001F]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex BareFilenameRegex = new(@"(^|[\r\n:=;\u001F""])([ \t]*)(?=[^\r\n:=;\u001E\u001F"" \t])[^\r\n:=;\u001E\u001F""]*\.(?!ts:\d+)(?:mov|mp4|m4v|mkv|webm|avi|ts|m3u8|mpd|mp3|m4a|wav|aac|flac|ogg|opus|jpg|jpeg|png|gif|webp|heic|svg|pdf|txt|md|rtf|doc|docx|xls|xlsx|ppt|pptx|csv|json|xml|yaml|yml|toml|ini|cfg|conf|log|srt|vtt|ass|ssa|zip|tar|gz|tgz|bz2|xz|7z|rar|dmg|pkg|msi|exe|apk|aab|ipa|pem|key|crt|cer|p12|pfx|jks|keystore|db|sqlite|sqlite3|bin|dat|tmp|bak|proj|aun)\b(?!\()", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex BareFilenameRegex = new(@"(^|[\r\n:=;\u001F""])([ \t]*)(?=[^\r\n:=;\u001E\u001F"" \t])[^\r\n:=;\u001E\u001F""]*\.(?!ts:\d+)(?:mov|mp4|m4v|mkv|webm|avi|ts|m3u8|mpd|mp3|m4a|wav|aac|flac|ogg|opus|jpg|jpeg|png|gif|webp|heic|svg|pdf|txt|md|rtf|doc|docx|xls|xlsx|ppt|pptx|csv|json|xml|yaml|yml|toml|ini|cfg|conf|log|srt|vtt|ass|ssa|zip|tar|gz|tgz|bz2|xz|7z|rar|dmg|pkg|msi|exe|apk|aab|ipa|pem|key|crt|cer|p12|pfx|jks|keystore|db|sqlite|sqlite3|bin|dat|tmp|bak|proj|aun|env)\b(?!\()", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly string[] KnownAuthSchemeList =
     {
         "Bearer", "Basic", "Digest", "Token", "Api-Key", "ApiKey",
@@ -1292,11 +1292,43 @@ public sealed class CoreTelemetryService : ITelemetryService
             {
                 var bs = 0;
                 while (p - 1 - bs > start && text[p - 1 - bs] == '\\') bs++;
-                if ((bs & 1) == 0) break;
+                if ((bs & 1) == 0)
+                {
+                    if ((angleStopMask & 4) == 0 && p > start && text[p - 1] is '=' or '?' or '&' or '#')
+                    {
+                        p = ScanEmbeddedQueryQuote(text, p, '"', requireClose: false);
+                        continue;
+                    }
+                    break;
+                }
+            }
+            if (ch == '\'' && (angleStopMask & 4) == 0 && p > start && text[p - 1] is '=' or '?' or '&' or '#')
+            {
+                var afterSingle = ScanEmbeddedQueryQuote(text, p, '\'', requireClose: true);
+                if (afterSingle > p)
+                {
+                    p = afterSingle;
+                    continue;
+                }
             }
             p++;
         }
         return p;
+    }
+
+    private static int ScanEmbeddedQueryQuote(string text, int openPos, char quote, bool requireClose)
+    {
+        var idx = openPos + 1;
+        var escaped = false;
+        while (idx < text.Length)
+        {
+            var c = text[idx];
+            if (c is '\r' or '\n') return requireClose ? openPos : idx;
+            if (c == quote && !escaped) return idx + 1;
+            escaped = c == '\\' && !escaped;
+            idx++;
+        }
+        return requireClose ? openPos : idx;
     }
 
     private static bool TryScanUrlHost(string text, ref int p)
@@ -7423,6 +7455,54 @@ public sealed class CoreTelemetryService : ITelemetryService
         }
     }
 
+    private static bool IsValidBufferSegment(ReadOnlySpan<char> seg)
+    {
+        if (seg.IsEmpty) return false;
+        foreach (var ch in seg)
+        {
+            if (!(char.IsAsciiLetterOrDigit(ch) || ch is '-' or '_')) return false;
+        }
+        return true;
+    }
+
+    private static bool IsManagedTelemetryBufferFileName(string name, string stem, string ext)
+    {
+        if (string.Equals(name, stem + ext, StringComparison.Ordinal)) return true;
+        if (!name.StartsWith(stem + ".", StringComparison.Ordinal) ||
+            !name.EndsWith(ext, StringComparison.Ordinal))
+        {
+            return false;
+        }
+        var middleStart = stem.Length + 1;
+        var middleLen = name.Length - ext.Length - middleStart;
+        if (middleLen <= 2) return false;
+        var middle = name.AsSpan(middleStart, middleLen);
+        var dot = middle.IndexOf('.');
+        if (dot <= 0 || dot == middle.Length - 1) return false;
+        var gen = middle.Slice(0, dot);
+        var inst = middle.Slice(dot + 1);
+        if (inst.IndexOf('.') >= 0) return false;
+        return IsValidBufferSegment(gen) && IsValidBufferSegment(inst);
+    }
+
+    private static bool IsManagedTelemetrySidecarFileName(string name, string stem, string ext, string suffix)
+    {
+        if (!name.StartsWith(".", StringComparison.Ordinal) || !name.EndsWith(suffix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+        var inner = name.Substring(1, name.Length - 1 - suffix.Length);
+        if (suffix == ".owner")
+        {
+            return IsManagedTelemetryBufferFileName(inner, stem, ext);
+        }
+        // Temp files are named `.<bufferFileName>.<nonce>.tmp`.
+        var lastDot = inner.LastIndexOf('.');
+        if (lastDot <= 0) return false;
+        var bufferName = inner.Substring(0, lastDot);
+        return IsManagedTelemetryBufferFileName(bufferName, stem, ext);
+    }
+
     private bool TryDeleteForeignGenerationBuffers(string? keepGenerationPrefix)
     {
         if (string.IsNullOrWhiteSpace(_bufferPath)) return true;
@@ -7435,16 +7515,11 @@ public sealed class CoreTelemetryService : ITelemetryService
         {
             if (Directory.Exists(dir))
             {
-                var baseName = stem + ext;
                 foreach (var candidate in Directory.EnumerateFiles(dir, $"{stem}*{ext}"))
                 {
                     var name = Path.GetFileName(candidate);
+                    if (!IsManagedTelemetryBufferFileName(name, stem, ext)) continue;
                     if (keepGenerationPrefix != null && IsBufferFileInGeneration(name, keepGenerationPrefix, ext)) continue;
-                    if (!string.Equals(name, baseName, StringComparison.Ordinal) &&
-                        !name.StartsWith(stem + ".", StringComparison.Ordinal))
-                    {
-                        continue;
-                    }
                     try
                     {
                         File.Delete(candidate);
@@ -7457,6 +7532,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                 foreach (var tmp in Directory.EnumerateFiles(dir, $".{stem}*.tmp"))
                 {
                     var name = Path.GetFileName(tmp);
+                    if (!IsManagedTelemetrySidecarFileName(name, stem, ext, ".tmp")) continue;
                     if (keepGenerationPrefix != null && IsTempFileInGeneration(name, keepGenerationPrefix, ext)) continue;
                     try
                     {
@@ -7470,6 +7546,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                 foreach (var owner in Directory.EnumerateFiles(dir, $".{stem}*.owner"))
                 {
                     var name = Path.GetFileName(owner);
+                    if (!IsManagedTelemetrySidecarFileName(name, stem, ext, ".owner")) continue;
                     if (keepGenerationPrefix != null && IsTempFileInGeneration(name, keepGenerationPrefix, ext)) continue;
                     TryDeleteSingleFile(owner);
                 }

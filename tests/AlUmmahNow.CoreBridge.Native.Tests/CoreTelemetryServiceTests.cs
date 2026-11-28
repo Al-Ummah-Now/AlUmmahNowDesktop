@@ -2355,6 +2355,38 @@ public class CoreTelemetryServiceTests
     }
 
     [Fact]
+    public void Disabled_startup_purge_preserves_unrelated_json_files_sharing_stem_prefix()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "aun-tel-unrelated-backup-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var bufferPath = Path.Combine(dir, "telemetry-buffer.json");
+        var unrelatedBackup = Path.Combine(dir, "telemetry-buffer.backup.json");
+        var staleGenBuffer = Path.Combine(dir, "telemetry-buffer.oldgen.abcdef123456.json");
+        try
+        {
+            File.WriteAllText(unrelatedBackup, "{\"user\":\"backup\"}");
+            File.WriteAllText(staleGenBuffer, "{\"events\":[]}");
+            using (var service = new CoreTelemetryService(
+                platform: "linux",
+                appVersion: "1.0.0",
+                locale: "en",
+                videosApiBaseUrl: null,
+                userAgent: "AlUmmahNowLinux/1.0.0",
+                bufferPath: bufferPath,
+                initialEnabled: false))
+            {
+                Assert.Equal(TelemetryConsent.Off, service.Consent);
+            }
+            Assert.True(File.Exists(unrelatedBackup));
+            Assert.False(File.Exists(staleGenBuffer));
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
     public void SanitizeLocalPaths_NormalizesSlackDotSegments_PreservesPathColons_AndRedactsContentUris()
     {
         Assert.Equal(
@@ -2725,6 +2757,18 @@ public class CoreTelemetryServiceTests
         Assert.Equal(
             "jwt=[redacted]",
             CoreTelemetryService.SanitizeLocalPaths("jwt=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTYifQ.sigSecret"));
+        Assert.Equal(
+            "https://example.com/?[redacted]",
+            CoreTelemetryService.SanitizeLocalPaths("https://example.com/?access_token=\"super secret\""));
+        Assert.Equal(
+            "https://example.com/?[redacted]",
+            CoreTelemetryService.SanitizeLocalPaths("https://example.com/?session_key=\"super secret\""));
+        Assert.Equal(
+            "https://example.com/?[redacted]",
+            CoreTelemetryService.SanitizeLocalPaths("https://example.com/?session_key='super secret'"));
+        Assert.Equal(
+            "[redacted-path]",
+            CoreTelemetryService.SanitizeLocalPaths(".env"));
         Assert.Equal(
             "https://[redacted-email]",
             CoreTelemetryService.SanitizeLocalPaths("https://example.com/users/alice%40%65xample.com"));

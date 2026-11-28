@@ -196,11 +196,12 @@ public class SettingsStoreTests
             Assert.True(storeB.RollbackTelemetryEnabled(gen3B));
             Assert.False(storeA.LoadTelemetryEnabled());
 
-            // Once one caller confirms activation, rolling back a concurrent caller keeps telemetry enabled.
+            // Once one caller confirms activation, rolling back either caller keeps telemetry enabled.
             Assert.True(storeA.TrySaveTelemetryEnabled(true, out var gen4A));
             Assert.True(storeB.TrySaveTelemetryEnabled(true, out var gen4B));
             Assert.True(storeA.ConfirmTelemetryEnabled(gen4A));
             Assert.True(storeB.RollbackTelemetryEnabled(gen4B));
+            Assert.True(storeA.RollbackTelemetryEnabled(gen4A));
             Assert.True(storeA.LoadTelemetryEnabled());
         }
         finally

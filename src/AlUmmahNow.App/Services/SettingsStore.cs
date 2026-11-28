@@ -86,8 +86,17 @@ namespace AlUmmahNow.App.Services
         /// </summary>
         public string? LoadTelemetryConsentToken()
         {
-            ReadConsentSidecarUnlocked(out var token, out _);
-            return token;
+            try
+            {
+                if (!File.Exists(_telemetryConsentPath)) return null;
+                using var reader = new StreamReader(_telemetryConsentPath);
+                var first = reader.ReadLine()?.Trim();
+                return IsValidEnabledToken(first) ? first : null;
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+            {
+                return null;
+            }
         }
 
         private static bool IsValidEnabledToken(string? raw) =>
@@ -113,12 +122,13 @@ namespace AlUmmahNow.App.Services
                     if (second.StartsWith("pending:", StringComparison.Ordinal))
                     {
                         pendingClaims = new List<string>();
+                        var seen = new HashSet<string>(StringComparer.Ordinal);
                         var parts = second.Substring("pending:".Length)
                             .Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
                         foreach (var part in parts)
                         {
                             var claim = part.Trim();
-                            if (claim.Length > 0 && !pendingClaims.Contains(claim))
+                            if (claim.Length > 0 && seen.Add(claim))
                             {
                                 pendingClaims.Add(claim);
                             }
@@ -294,15 +304,8 @@ namespace AlUmmahNow.App.Services
                     return false;
                 }
             }
-            if (!string.Equals(current, expectedToken, StringComparison.Ordinal))
-            {
-                return true;
-            }
-            if (IsJoinedGenerationToken(expectedToken))
-            {
-                return true;
-            }
-            return ClearConsentSidecarUnlocked();
+            // Once the generation is confirmed (no pending line), a stale rollback never erases consent.
+            return true;
         }
 
         private static string ExtractBaseGenerationToken(string token)

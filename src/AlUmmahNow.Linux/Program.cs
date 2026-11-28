@@ -85,7 +85,7 @@ var telemetry = CoreTelemetryService.CreateOrNull(
     acquireExternalConsentLock: () => store.TryAcquireTelemetryConsentLock());
 AppDomain.CurrentDomain.UnhandledException += (_, e) =>
 {
-    if (e.ExceptionObject is Exception ex) telemetry.ReportCrash(ex.GetType().Name, ex.Message, ex.StackTrace);
+    if (e.ExceptionObject is Exception ex) telemetry.ReportCrash(ex.GetType().FullName ?? ex.GetType().Name, ex.GetType().Name, ex.StackTrace);
 };
 var updateStore = new UpdateStore(Path.Combine(configHome, "alummahnow", "updates.json"));
 var app = Adw.Application.New("net.alummahnow.AlUmmahNow", Gio.ApplicationFlags.NonUnique);
