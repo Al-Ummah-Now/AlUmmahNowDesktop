@@ -2227,6 +2227,96 @@ public class CoreTelemetryServiceTests
         var repeatedSlackHosts =
             "https://hooks.slack.com" + string.Concat(Enumerable.Repeat("/https://hooks.slack.com", 2000)) + "/x";
         Assert.Equal(repeatedSlackHosts, CoreTelemetryService.SanitizeLocalPaths(repeatedSlackHosts));
+        Assert.Equal("X-API-Key: [redacted]", CoreTelemetryService.SanitizeLocalPaths("X-API-Key: secret123"));
+        Assert.Equal("Api-Key: [redacted]", CoreTelemetryService.SanitizeLocalPaths("Api-Key: secret123"));
+        Assert.Equal("X-Auth-Token: [redacted]", CoreTelemetryService.SanitizeLocalPaths("X-Auth-Token: secret123"));
+        Assert.Equal("X-Access-Token: [redacted]", CoreTelemetryService.SanitizeLocalPaths("X-Access-Token: secret123"));
+        Assert.Equal(
+            "{\"X-API-Key\":\"[redacted]\",\"Api-Key\":\"[redacted]\",\"X-Auth-Token\":\"[redacted]\"}",
+            CoreTelemetryService.SanitizeLocalPaths(
+                "{\"X-API-Key\":\"secret123\",\"Api-Key\":\"secret456\",\"X-Auth-Token\":\"tok789\"}"));
+        Assert.Equal(
+            "https://example.com:/api?[redacted]",
+            CoreTelemetryService.SanitizeLocalPaths("https://example.com:/api?token=secret123"));
+        Assert.Equal(
+            "https://example.com:?[redacted]",
+            CoreTelemetryService.SanitizeLocalPaths("https://example.com:?token=secret123"));
+        Assert.Equal(
+            "https://example.com:#[redacted]",
+            CoreTelemetryService.SanitizeLocalPaths("https://example.com:#secret123"));
+        var propJson = CoreTelemetryService.SerializeProperties(new Dictionary<string, object>
+        {
+            ["X-API-Key"] = "apiSecret789",
+            ["X-Auth-Token"] = "authTok999",
+            ["screen"] = "home",
+        });
+        Assert.NotNull(propJson);
+        Assert.DoesNotContain("apiSecret789", propJson);
+        Assert.DoesNotContain("authTok999", propJson);
+        Assert.Contains("\"X-API-Key\":\"[redacted]\"", propJson);
+        Assert.Contains("\"X-Auth-Token\":\"[redacted]\"", propJson);
+    }
+
+    [Fact]
+    public void Concurrent_same_generation_instances_preserve_each_others_queued_crashes_and_adopt_on_restart()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "aun-tel-multi-crash-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var bufferPath = Path.Combine(dir, "telemetry-buffer.json");
+        string? sharedToken = "enabled:gen1";
+        try
+        {
+            using var instanceB = new CoreTelemetryService(
+                platform: "linux",
+                appVersion: "1.0.0",
+                locale: "en",
+                videosApiBaseUrl: null,
+                userAgent: "AlUmmahNowLinux/1.0.0",
+                bufferPath: bufferPath,
+                initialEnabled: true,
+                externalConsentToken: () => Volatile.Read(ref sharedToken));
+
+            string bufferA;
+            using (var instanceA = new CoreTelemetryService(
+                platform: "linux",
+                appVersion: "1.0.0",
+                locale: "en",
+                videosApiBaseUrl: null,
+                userAgent: "AlUmmahNowLinux/1.0.0",
+                bufferPath: bufferPath,
+                initialEnabled: true,
+                externalConsentToken: () => Volatile.Read(ref sharedToken)))
+            {
+                bufferA = instanceA.ActiveBufferPathForTesting!;
+                Assert.NotEqual(bufferA, instanceB.ActiveBufferPathForTesting);
+                instanceA.ReportCrash("TestCrash", "queued by A");
+                Assert.True(File.Exists(bufferA));
+                Assert.Contains("TestCrash", File.ReadAllText(bufferA));
+            }
+
+            // Instance B has an empty queue; persisting B must NOT erase instance A's queued crash.
+            instanceB.Persist();
+            Assert.True(File.Exists(bufferA));
+            Assert.Contains("TestCrash", File.ReadAllText(bufferA));
+
+            // A newly started instance C in the same generation adopts exited A's queued crash without touching live B.
+            using var instanceC = new CoreTelemetryService(
+                platform: "linux",
+                appVersion: "1.0.0",
+                locale: "en",
+                videosApiBaseUrl: null,
+                userAgent: "AlUmmahNowLinux/1.0.0",
+                bufferPath: bufferPath,
+                initialEnabled: true,
+                externalConsentToken: () => Volatile.Read(ref sharedToken));
+            Assert.Equal(1, instanceC.PendingCount);
+            Assert.False(File.Exists(bufferA));
+            Assert.True(File.Exists(instanceB.ActiveBufferPathForTesting!));
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
     }
 
     private sealed class CallbackDisposable : IDisposable
