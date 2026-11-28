@@ -61,6 +61,8 @@ public sealed class CoreTelemetryService : ITelemetryService
     private string? _instanceOwnerLockPath;
     private TelemetryConsent _consent = TelemetryConsent.Off;
     private string? _observedExternalToken;
+    private bool _pendingInitialEnable;
+    private bool _lastEnableBlockedByExternalLock;
     private CancellationTokenSource _flushCts = new();
     private int _inFlightFlushes;
     private long _consentEpoch;
@@ -124,7 +126,16 @@ public sealed class CoreTelemetryService : ITelemetryService
         _client = CreateClient(_activeBufferPath);
         if (initialEnabled)
         {
-            SetConsent(TelemetryConsent.Full);
+            if (!SetConsent(TelemetryConsent.Full) && _externalConsentToken != null)
+            {
+                lock (_gate)
+                {
+                    if (_lastEnableBlockedByExternalLock && !string.IsNullOrEmpty(ReadExternalTokenSafe()))
+                    {
+                        _pendingInitialEnable = true;
+                    }
+                }
+            }
         }
         else
         {
@@ -4377,17 +4388,22 @@ public sealed class CoreTelemetryService : ITelemetryService
             {
                 continue;
             }
-            if (IsNumericDotToken(text, segStart, dot, extStart, extEnd)) continue;
+            var skipTo = SkipNumericDotRun(text, segStart, dot, extStart, extEnd);
+            if (skipTo >= -1)
+            {
+                dot = skipTo + 1;
+                continue;
+            }
             return (dot, extEnd);
         }
         return (-1, -1);
     }
 
-    private static bool IsNumericDotToken(string text, int segStart, int dot, int extStart, int extEnd)
+    private static int SkipNumericDotRun(string text, int segStart, int dot, int extStart, int extEnd)
     {
         for (var i = extStart; i < extEnd; i++)
         {
-            if (!char.IsAsciiDigit(text[i])) return false;
+            if (!char.IsAsciiDigit(text[i])) return -2;
         }
         var p = dot - 1;
         var hasDigitBefore = false;
@@ -4396,7 +4412,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             if (char.IsAsciiDigit(text[p])) hasDigitBefore = true;
             p--;
         }
-        return hasDigitBefore && (p < segStart || !IsAsciiWordChar(text[p]));
+        return hasDigitBefore && (p < segStart || !IsAsciiWordChar(text[p])) ? p : -2;
     }
 
     private static bool IsAsciiAlphaNum(char ch) =>
@@ -4761,6 +4777,10 @@ public sealed class CoreTelemetryService : ITelemetryService
                 }
                 q--;
             }
+            return atPos;
+        }
+        if (atPos > minPos && text[atPos - 1] == '/')
+        {
             return atPos;
         }
         var localStart = atPos;
@@ -5503,6 +5523,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     {
         get
         {
+            TryCompletePendingInitialEnable();
             CancellationTokenSource? toCancel = null;
             TelemetryConsent current;
             lock (_gate)
@@ -5515,6 +5536,36 @@ public sealed class CoreTelemetryService : ITelemetryService
             }
             if (toCancel != null) CancelQuietly(toCancel);
             return current;
+        }
+    }
+
+    private void TryCompletePendingInitialEnable()
+    {
+        lock (_gate)
+        {
+            if (!_pendingInitialEnable || _disposeRequested || _clientDisposed || _consent != TelemetryConsent.Off)
+            {
+                return;
+            }
+            if (string.IsNullOrEmpty(ReadExternalTokenSafe()))
+            {
+                _pendingInitialEnable = false;
+                return;
+            }
+        }
+        if (SetConsent(TelemetryConsent.Full))
+        {
+            lock (_gate) _pendingInitialEnable = false;
+        }
+        else
+        {
+            lock (_gate)
+            {
+                if (!_lastEnableBlockedByExternalLock || string.IsNullOrEmpty(ReadExternalTokenSafe()))
+                {
+                    _pendingInitialEnable = false;
+                }
+            }
         }
     }
 
@@ -5557,11 +5608,24 @@ public sealed class CoreTelemetryService : ITelemetryService
         TelemetryConsent consentNotifyValue = TelemetryConsent.Off;
         bool result;
         IDisposable? externalConsentLock = null;
+        if (consent == TelemetryConsent.Off)
+        {
+            lock (_gate)
+            {
+                _pendingInitialEnable = false;
+                _lastEnableBlockedByExternalLock = false;
+            }
+        }
+        else
+        {
+            lock (_gate) _lastEnableBlockedByExternalLock = false;
+        }
         if (consent != TelemetryConsent.Off && _acquireExternalConsentLock != null)
         {
             externalConsentLock = TryAcquireExternalConsentLease();
             if (externalConsentLock == null)
             {
+                lock (_gate) _lastEnableBlockedByExternalLock = true;
                 return false;
             }
         }
@@ -5673,7 +5737,8 @@ public sealed class CoreTelemetryService : ITelemetryService
                     {
                         _client.SetConsent(state);
                         _consent = consent;
-                        _observedExternalToken = externalToken;
+                        _observedExternalToken = NormalizeConsentGenerationToken(externalToken);
+                        _pendingInitialEnable = false;
                         UpdatePurgeFailedLocked(false, ref purgeNotify, ref purgeNotifyValue);
                         result = true;
                     }
@@ -5702,6 +5767,7 @@ public sealed class CoreTelemetryService : ITelemetryService
 
     private void WithPersistingConsent(bool requiresFull, Action nativeAction)
     {
+        TryCompletePendingInitialEnable();
         lock (_gate)
         {
             if (_disposeRequested || _clientDisposed || _consent == TelemetryConsent.Off ||
@@ -5750,6 +5816,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     public void Track(string name, IReadOnlyDictionary<string, object>? properties = null)
     {
         if (string.IsNullOrWhiteSpace(name)) return;
+        TryCompletePendingInitialEnable();
         lock (_gate)
         {
             if (_disposeRequested || _clientDisposed || _consent != TelemetryConsent.Full) return;
@@ -5773,6 +5840,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     public void TrackError(string code, IReadOnlyDictionary<string, object>? properties = null)
     {
         if (string.IsNullOrWhiteSpace(code)) return;
+        TryCompletePendingInitialEnable();
         lock (_gate)
         {
             if (_disposeRequested || _clientDisposed || _consent != TelemetryConsent.Full) return;
@@ -5796,6 +5864,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     public void AddBreadcrumb(string category, string message, TelemetryBreadcrumbSeverity level = TelemetryBreadcrumbSeverity.Info)
     {
         if (string.IsNullOrWhiteSpace(category)) return;
+        TryCompletePendingInitialEnable();
         lock (_gate)
         {
             if (_disposeRequested || _clientDisposed || _consent == TelemetryConsent.Off) return;
@@ -5823,6 +5892,7 @@ public sealed class CoreTelemetryService : ITelemetryService
 
     public void ReportCrash(string kind, string message, string? stack = null, bool fromPreviousSession = false)
     {
+        TryCompletePendingInitialEnable();
         lock (_gate)
         {
             if (_disposeRequested || _clientDisposed || _consent == TelemetryConsent.Off) return;
@@ -5869,6 +5939,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     public async Task FlushAsync(CancellationToken cancellationToken = default)
     {
         if (cancellationToken.IsCancellationRequested) return;
+        TryCompletePendingInitialEnable();
 
         CancellationToken revokeToken;
         long flushEpoch;
@@ -6083,7 +6154,8 @@ public sealed class CoreTelemetryService : ITelemetryService
         {
             currentToken = null;
         }
-        if (!string.IsNullOrEmpty(currentToken) && string.Equals(currentToken, _observedExternalToken, StringComparison.Ordinal))
+        if (!string.IsNullOrEmpty(currentToken) &&
+            string.Equals(NormalizeConsentGenerationToken(currentToken), _observedExternalToken, StringComparison.Ordinal))
         {
             return true;
         }
@@ -6301,6 +6373,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         {
             if (_disposeRequested) return;
             _disposeRequested = true;
+            _pendingInitialEnable = false;
             _consent = TelemetryConsent.Off;
             toCancel = _flushCts;
             if (_inFlightFlushes == 0)
@@ -6338,6 +6411,14 @@ public sealed class CoreTelemetryService : ITelemetryService
         }
     }
 
+    private static string? NormalizeConsentGenerationToken(string? externalToken)
+    {
+        if (string.IsNullOrEmpty(externalToken)) return null;
+        if (!externalToken.StartsWith("enabled:", StringComparison.Ordinal)) return externalToken;
+        var secondColon = externalToken.IndexOf(':', "enabled:".Length);
+        return secondColon >= 0 ? externalToken.Substring(0, secondColon) : externalToken;
+    }
+
     private string? ResolveGenerationPrefix(string? externalToken)
     {
         if (string.IsNullOrWhiteSpace(_bufferPath) || _externalConsentToken == null || string.IsNullOrWhiteSpace(externalToken))
@@ -6346,8 +6427,9 @@ public sealed class CoreTelemetryService : ITelemetryService
         }
         var stem = Path.GetFileNameWithoutExtension(_bufferPath);
         if (string.IsNullOrEmpty(stem)) return null;
-        var rawGen = externalToken.StartsWith("enabled:", StringComparison.Ordinal)
-            ? externalToken["enabled:".Length..]
+        var normalized = NormalizeConsentGenerationToken(externalToken) ?? string.Empty;
+        var rawGen = normalized.StartsWith("enabled:", StringComparison.Ordinal)
+            ? normalized["enabled:".Length..]
             : "legacy";
         var safeGen = new string(rawGen.Where(static ch => char.IsAsciiLetterOrDigit(ch) || ch is '-' or '_').ToArray());
         if (string.IsNullOrEmpty(safeGen)) safeGen = "legacy";
@@ -6537,11 +6619,8 @@ public sealed class CoreTelemetryService : ITelemetryService
             {
                 foreach (var ev in eventsEl.EnumerateArray())
                 {
-                    string? id = ev.ValueKind == JsonValueKind.Object &&
-                        ev.TryGetProperty("id", out var idEl) && idEl.ValueKind == JsonValueKind.String
-                        ? idEl.GetString()
-                        : null;
-                    if (id == null || seenIds.Add(id))
+                    if (!IsValidPersistedEvent(ev, out var id)) continue;
+                    if (seenIds.Add(id))
                     {
                         mergedEvents.Add(ev.Clone());
                     }
@@ -6551,10 +6630,15 @@ public sealed class CoreTelemetryService : ITelemetryService
                 crumbsEl.ValueKind == JsonValueKind.Array &&
                 crumbsEl.GetArrayLength() > 0)
             {
-                latestBreadcrumbs.Clear();
+                var validCrumbs = new List<JsonElement>();
                 foreach (var crumb in crumbsEl.EnumerateArray())
                 {
-                    latestBreadcrumbs.Add(crumb.Clone());
+                    if (IsValidPersistedBreadcrumb(crumb)) validCrumbs.Add(crumb.Clone());
+                }
+                if (validCrumbs.Count > 0)
+                {
+                    latestBreadcrumbs.Clear();
+                    latestBreadcrumbs.AddRange(validCrumbs);
                 }
             }
             return true;
@@ -6567,6 +6651,65 @@ public sealed class CoreTelemetryService : ITelemetryService
         {
             return false;
         }
+    }
+
+    private static bool IsValidPersistedEvent(JsonElement ev, out string id)
+    {
+        id = string.Empty;
+        if (ev.ValueKind != JsonValueKind.Object) return false;
+        if (!ev.TryGetProperty("id", out var idEl) || idEl.ValueKind != JsonValueKind.String) return false;
+        id = idEl.GetString() ?? string.Empty;
+        if (!ev.TryGetProperty("kind", out var kindEl) || kindEl.ValueKind != JsonValueKind.String) return false;
+        var kind = kindEl.GetString();
+        if (kind is not ("analytics" or "qoe" or "error" or "crash")) return false;
+        if (!ev.TryGetProperty("name", out var nameEl) || nameEl.ValueKind != JsonValueKind.String) return false;
+        if (!ev.TryGetProperty("timestamp_ms", out var tsEl) || tsEl.ValueKind != JsonValueKind.Number || !tsEl.TryGetInt64(out _))
+        {
+            return false;
+        }
+        if (!ev.TryGetProperty("session_id", out var sidEl) || sidEl.ValueKind != JsonValueKind.String) return false;
+        if (ev.TryGetProperty("properties", out var propsEl))
+        {
+            if (propsEl.ValueKind != JsonValueKind.Object) return false;
+            foreach (var prop in propsEl.EnumerateObject())
+            {
+                if (!IsValidPersistedPropValue(prop.Value)) return false;
+            }
+        }
+        if (ev.TryGetProperty("breadcrumbs", out var crumbsEl))
+        {
+            if (crumbsEl.ValueKind != JsonValueKind.Array) return false;
+            foreach (var crumb in crumbsEl.EnumerateArray())
+            {
+                if (!IsValidPersistedBreadcrumb(crumb)) return false;
+            }
+        }
+        return true;
+    }
+
+    private static bool IsValidPersistedPropValue(JsonElement value) => value.ValueKind switch
+    {
+        JsonValueKind.True or JsonValueKind.False or JsonValueKind.String => true,
+        JsonValueKind.Number => value.TryGetInt64(out _) || (value.TryGetDouble(out var d) && double.IsFinite(d)),
+        _ => false,
+    };
+
+    private static bool IsValidPersistedBreadcrumb(JsonElement crumb)
+    {
+        if (crumb.ValueKind != JsonValueKind.Object) return false;
+        if (!crumb.TryGetProperty("timestamp_ms", out var tsEl) || tsEl.ValueKind != JsonValueKind.Number || !tsEl.TryGetInt64(out _))
+        {
+            return false;
+        }
+        if (!crumb.TryGetProperty("category", out var catEl) || catEl.ValueKind != JsonValueKind.String) return false;
+        if (!crumb.TryGetProperty("message", out var msgEl) || msgEl.ValueKind != JsonValueKind.String) return false;
+        if (crumb.TryGetProperty("level", out var lvlEl))
+        {
+            if (lvlEl.ValueKind != JsonValueKind.String) return false;
+            var level = lvlEl.GetString();
+            if (level is not ("debug" or "info" or "warning" or "error")) return false;
+        }
+        return true;
     }
 
     private bool TryDeleteOwnBufferAndGenerationTemps(string? targetPath, string? ownGenerationPrefix)

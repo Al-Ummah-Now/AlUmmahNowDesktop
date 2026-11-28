@@ -2268,6 +2268,14 @@ public class CoreTelemetryServiceTests
         Assert.Equal(
             "{\"uri\":\"[redacted-path]\",\"ok\":true}",
             CoreTelemetryService.SanitizeLocalPaths("{\"uri\":\"file:\\/Users\\/alice\\/secret.txt\",\"ok\":true}"));
+        Assert.Equal(
+            "https://registry.npmjs.org/@angular/core",
+            CoreTelemetryService.SanitizeLocalPaths("https://registry.npmjs.org/@angular/core"));
+        Assert.Equal(
+            "https://registry.npmjs.org/%40angular/core",
+            CoreTelemetryService.SanitizeLocalPaths("https://registry.npmjs.org/%40angular/core"));
+        var dottedNumbers = "read " + string.Concat(Enumerable.Repeat("1.", 20000)) + "1";
+        Assert.Equal(dottedNumbers, CoreTelemetryService.SanitizeLocalPaths(dottedNumbers));
     }
 
     [Fact]
@@ -2312,6 +2320,10 @@ public class CoreTelemetryServiceTests
             Assert.True(File.Exists(bufferA));
             Assert.Contains("TestCrash", File.ReadAllText(bufferA));
 
+            // A malformed sibling orphan in the same generation must NOT poison valid queued crashes.
+            var malformedOrphan = Path.Combine(dir, "telemetry-buffer.gen1.invalid01.json");
+            File.WriteAllText(malformedOrphan, "{\"events\":[{}],\"breadcrumbs\":[]}");
+
             // A newly started instance C in the same generation adopts exited A's queued crash without touching live B.
             using var instanceC = new CoreTelemetryService(
                 platform: "linux",
@@ -2324,6 +2336,7 @@ public class CoreTelemetryServiceTests
                 externalConsentToken: () => Volatile.Read(ref sharedToken));
             Assert.Equal(1, instanceC.PendingCount);
             Assert.False(File.Exists(bufferA));
+            Assert.False(File.Exists(malformedOrphan));
             Assert.True(File.Exists(instanceB.ActiveBufferPathForTesting!));
 
             if (!OperatingSystem.IsWindows())
@@ -2350,6 +2363,76 @@ public class CoreTelemetryServiceTests
                     File.SetUnixFileMode(unreadableOrphan, UnixFileMode.UserRead | UnixFileMode.UserWrite);
                 }
             }
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Second_opt_in_reuses_generation_and_startup_recovers_after_slow_flush_releases_lock()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "aun-tel-second-optin-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var bufferPath = Path.Combine(dir, "telemetry-buffer.json");
+        string? sharedToken = null;
+        try
+        {
+            using var instanceA = new CoreTelemetryService(
+                platform: "linux",
+                appVersion: "1.0.0",
+                locale: "en",
+                videosApiBaseUrl: null,
+                userAgent: "AlUmmahNowLinux/1.0.0",
+                bufferPath: bufferPath,
+                initialEnabled: false,
+                externalConsentToken: () => Volatile.Read(ref sharedToken));
+            using var instanceB = new CoreTelemetryService(
+                platform: "linux",
+                appVersion: "1.0.0",
+                locale: "en",
+                videosApiBaseUrl: null,
+                userAgent: "AlUmmahNowLinux/1.0.0",
+                bufferPath: bufferPath,
+                initialEnabled: false,
+                externalConsentToken: () => Volatile.Read(ref sharedToken));
+
+            // Instance A enables diagnostics and queues a crash.
+            Volatile.Write(ref sharedToken, "enabled:gen1");
+            Assert.True(instanceA.SetConsent(TelemetryConsent.Full));
+            instanceA.ReportCrash("CrashA", "queued by A");
+            var bufferA = instanceA.ActiveBufferPathForTesting!;
+            Assert.True(File.Exists(bufferA));
+
+            // Instance B (still showing Off) enables diagnostics: joined-generation claim token keeps gen1 alive.
+            Volatile.Write(ref sharedToken, "enabled:gen1:claim2");
+            Assert.True(instanceB.SetConsent(TelemetryConsent.Full));
+            Assert.True(File.Exists(bufferA));
+            Assert.Equal(TelemetryConsent.Full, instanceA.Consent);
+            Assert.Equal(1, instanceA.PendingCount);
+
+            // Simulate a slow flush holding the external consent lock while a new instance C starts up.
+            var lockBusy = 1;
+            using var instanceC = new CoreTelemetryService(
+                platform: "linux",
+                appVersion: "1.0.0",
+                locale: "en",
+                videosApiBaseUrl: null,
+                userAgent: "AlUmmahNowLinux/1.0.0",
+                bufferPath: bufferPath,
+                initialEnabled: true,
+                externalConsentToken: () => Volatile.Read(ref sharedToken),
+                acquireExternalConsentLock: () => Volatile.Read(ref lockBusy) == 1 ? null : new NoOpDisposable());
+            Assert.Equal(TelemetryConsent.Off, instanceC.Consent);
+            await instanceC.FlushAsync();
+            Assert.Equal(TelemetryConsent.Off, instanceC.Consent);
+
+            // Once the slow flush releases the lock, instance C activates cleanly on its next check/flush.
+            Volatile.Write(ref lockBusy, 0);
+            Assert.Equal(TelemetryConsent.Full, instanceC.Consent);
+            instanceC.Track("screen_view");
+            Assert.Equal(1, instanceC.PendingCount);
         }
         finally
         {

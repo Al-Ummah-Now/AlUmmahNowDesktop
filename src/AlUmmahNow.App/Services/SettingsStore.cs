@@ -148,7 +148,17 @@ namespace AlUmmahNow.App.Services
             {
                 var directory = Path.GetDirectoryName(_telemetryConsentPath);
                 if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
-                var token = "enabled:" + Guid.NewGuid().ToString("N");
+                var existing = LoadTelemetryConsentToken();
+                string token;
+                if (!string.IsNullOrEmpty(existing))
+                {
+                    var baseGen = ExtractBaseGenerationToken(existing);
+                    token = baseGen + ":" + Guid.NewGuid().ToString("N");
+                }
+                else
+                {
+                    token = "enabled:" + Guid.NewGuid().ToString("N");
+                }
                 var temp = _telemetryConsentPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
                 File.WriteAllText(temp, token);
                 ReplaceFile(temp, _telemetryConsentPath);
@@ -164,6 +174,7 @@ namespace AlUmmahNow.App.Services
         /// <summary>
         /// Rolls back a failed opt-in only if the on-disk consent token still matches <paramref name="expectedToken"/>.
         /// If another process already wrote a newer generation token, leaves the newer opt-in untouched and returns <c>true</c>.
+        /// If this opt-in only joined an already-enabled generation, leaves consent enabled for existing instances.
         /// Returns <c>false</c> when <paramref name="expectedToken"/> is missing or the cross-process lock cannot be acquired.
         /// </summary>
         public bool RollbackTelemetryEnabled(string? expectedToken)
@@ -180,8 +191,26 @@ namespace AlUmmahNow.App.Services
             {
                 return true;
             }
+            if (IsJoinedGenerationToken(expectedToken))
+            {
+                return true;
+            }
             return ClearConsentSidecarUnlocked();
         }
+
+        private static string ExtractBaseGenerationToken(string token)
+        {
+            if (!token.StartsWith("enabled:", StringComparison.Ordinal))
+            {
+                return "enabled:legacy";
+            }
+            var secondColon = token.IndexOf(':', "enabled:".Length);
+            return secondColon >= 0 ? token.Substring(0, secondColon) : token;
+        }
+
+        private static bool IsJoinedGenerationToken(string token) =>
+            token.StartsWith("enabled:", StringComparison.Ordinal) &&
+            token.IndexOf(':', "enabled:".Length) >= 0;
 
         private bool ClearConsentSidecarUnlocked()
         {

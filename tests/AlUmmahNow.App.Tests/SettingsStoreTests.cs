@@ -158,20 +158,30 @@ public class SettingsStoreTests
             Assert.Equal("enabled", storeB.LoadTelemetryConsentToken());
             Assert.True(storeB.LoadTelemetryEnabled());
 
-            // Opt-in -> opt-out -> opt-in writes distinct generation tokens across instances.
-            Assert.True(storeA.SaveTelemetryEnabled(true));
-            var gen1 = storeB.LoadTelemetryConsentToken();
+            // Opt-in while legacy marker is already active joins the legacy generation;
+            // rollback of the joined claim must not disable already-enabled consent.
+            Assert.True(storeA.TrySaveTelemetryEnabled(true, out var gen1));
             Assert.False(string.IsNullOrEmpty(gen1));
-            Assert.StartsWith("enabled:", gen1);
+            Assert.StartsWith("enabled:legacy:", gen1);
+            Assert.Equal(gen1, storeB.LoadTelemetryConsentToken());
+
+            Assert.True(storeB.TrySaveTelemetryEnabled(true, out var joinedGen1));
+            Assert.NotNull(joinedGen1);
+            Assert.StartsWith("enabled:legacy:", joinedGen1);
+            Assert.True(storeB.RollbackTelemetryEnabled(joinedGen1));
+            Assert.True(storeA.LoadTelemetryEnabled());
 
             Assert.True(storeA.SaveTelemetryEnabled(false));
             Assert.Null(storeB.LoadTelemetryConsentToken());
             Assert.False(storeB.LoadTelemetryEnabled());
 
-            Assert.True(storeA.SaveTelemetryEnabled(true));
-            var gen2 = storeB.LoadTelemetryConsentToken();
+            Assert.True(storeA.TrySaveTelemetryEnabled(true, out var gen2));
             Assert.False(string.IsNullOrEmpty(gen2));
             Assert.NotEqual(gen1, gen2);
+            Assert.True(storeB.TrySaveTelemetryEnabled(true, out var joinedGen2));
+            Assert.StartsWith(gen2 + ":", joinedGen2);
+            Assert.True(storeB.RollbackTelemetryEnabled(joinedGen2));
+            Assert.True(storeA.LoadTelemetryEnabled());
         }
         finally
         {
