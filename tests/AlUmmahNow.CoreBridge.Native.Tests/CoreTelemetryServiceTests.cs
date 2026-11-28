@@ -3014,10 +3014,12 @@ public class CoreTelemetryServiceTests
             }
 
             // Fallback service when native library is unavailable purges buffered files (including legacy .adopt.tmp)
-            // on opt-out, and fails closed without sweeping when consent lock is contended.
+            // even when external consent lock is absent (e.g. fresh XDG_CONFIG_HOME), and fails closed if buffer lock is held.
             var legacyAdoptTmp = Path.Combine(dir, ".telemetry-buffer.envgen1.123456.json.9999.adopt.tmp");
             File.WriteAllText(legacyAdoptTmp, "{\"events\":[]}");
             Volatile.Write(ref sharedToken, null);
+            var bufferLockPath = Path.Combine(dir, ".telemetry-buffer.lock");
+            using (new FileStream(bufferLockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
             using (var contendedFallback = CoreTelemetryService.CreateUnavailableFallbackForTesting(
                 bufferPath: bufferPath,
                 initialEnabled: true,
@@ -3028,20 +3030,70 @@ public class CoreTelemetryServiceTests
                 Assert.True(contendedFallback.LastPurgeFailed);
                 Assert.True(File.Exists(legacyAdoptTmp));
             }
-            using (var unavailable = CoreTelemetryService.CreateUnavailableFallbackForTesting(
+            using (var unavailableMissingConfig = CoreTelemetryService.CreateUnavailableFallbackForTesting(
+                bufferPath: bufferPath,
+                initialEnabled: false,
+                externalConsentToken: () => Volatile.Read(ref sharedToken),
+                acquireExternalConsentLock: () => null))
+            {
+                Assert.Equal(TelemetryConsent.Off, unavailableMissingConfig.Consent);
+                Assert.False(unavailableMissingConfig.LastPurgeFailed);
+                Assert.False(File.Exists(legacyAdoptTmp));
+                Assert.Empty(Directory.GetFiles(dir, "telemetry-buffer*.json"));
+                Assert.False(unavailableMissingConfig.SetConsent(TelemetryConsent.Full));
+                Assert.True(unavailableMissingConfig.SetConsent(TelemetryConsent.Off));
+            }
+            Volatile.Write(ref sharedToken, "enabled:envgen1");
+
+            // Interrupted pre-first-rename temp file in the same generation is cleaned up on next startup,
+            // while a live sibling's temp file is preserved; null active-flush guard fails closed without dispatching flush.
+            var preRenameOrphanTmp = Path.Combine(dir, ".telemetry-buffer.envgen1.deadinst1234.json.7777.tmp");
+            File.WriteAllText(preRenameOrphanTmp, "{\"events\":[]}");
+            var flushDispatchedWithNullGuard = false;
+            using (var guardFailClosed = new CoreTelemetryService(
+                platform: "linux",
+                appVersion: "1.0.0",
+                locale: "en",
+                videosApiBaseUrl: null,
+                userAgent: "AlUmmahNowLinux/1.0.0",
                 bufferPath: bufferPath,
                 initialEnabled: true,
                 externalConsentToken: () => Volatile.Read(ref sharedToken),
-                acquireExternalConsentLock: () => new NoOpDisposable()))
+                acquireExternalConsentLock: () => new NoOpDisposable(),
+                acquireActiveFlushGuard: () => null))
             {
-                Assert.Equal(TelemetryConsent.Off, unavailable.Consent);
-                Assert.False(unavailable.SetConsent(TelemetryConsent.Full));
-                Assert.True(unavailable.SetConsent(TelemetryConsent.Off));
-                Assert.False(unavailable.LastPurgeFailed);
-                Assert.False(File.Exists(legacyAdoptTmp));
-                Assert.Empty(Directory.GetFiles(dir, "telemetry-buffer*.json"));
+                Assert.False(File.Exists(preRenameOrphanTmp));
+                guardFailClosed.FlushOverrideForTesting = () =>
+                {
+                    flushDispatchedWithNullGuard = true;
+                    return Task.CompletedTask;
+                };
+                await guardFailClosed.FlushAsync();
+                Assert.False(flushDispatchedWithNullGuard);
+
+                // Arabic-Indic phone, JWT, IPv4 keys, 9+ digit numeric values, share-link tokens, and identifiers are scrubbed.
+                var scrubbed = CoreTelemetryService.SerializeProperties(new Dictionary<string, object>
+                {
+                    ["+٩٧١٥٠١٢٣٤٥٦"] = true,
+                    ["eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.sig_part-1"] = "failed",
+                    ["192.0.2.10"] = true,
+                    ["recipient"] = 12025550148L,
+                    ["share"] = "https://share.example.com/s/V8r2Qp6Lm4",
+                });
+                Assert.NotNull(scrubbed);
+                Assert.DoesNotContain("٩٧١٥٠١٢٣٤٥٦", scrubbed);
+                Assert.DoesNotContain("eyJhbGciOiJIUzI1NiJ9", scrubbed);
+                Assert.DoesNotContain("192.0.2.10", scrubbed);
+                Assert.DoesNotContain("12025550148", scrubbed);
+                Assert.DoesNotContain("V8r2Qp6Lm4", scrubbed);
+                Assert.Contains("https://share.example.com/s/[redacted]", scrubbed);
+
+                guardFailClosed.Track("4155550123");
+                guardFailClosed.AddBreadcrumb("4155550123", "opened");
+                guardFailClosed.ReportCrash("4155550123", "boom");
+                var persisted = File.ReadAllText(guardFailClosed.ActiveBufferPathForTesting!);
+                Assert.DoesNotContain("4155550123", persisted);
             }
-            Volatile.Write(ref sharedToken, "enabled:envgen1");
 
             // Active flush guard stays held until external opt-out triggers native revocation, even while HTTP stalls.
             var flushStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
