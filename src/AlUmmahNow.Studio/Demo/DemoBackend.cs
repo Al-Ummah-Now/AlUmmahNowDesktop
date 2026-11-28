@@ -14,11 +14,13 @@ public sealed class DemoAccounts : IStudioAccounts
     private readonly List<StudioAccount> _accounts;
 
     /// <param name="avatarUrl">Review frames: the accounts' picture; none, and so their initials, without it.</param>
-    public DemoAccounts(string? avatarUrl = null) => _accounts = new()
+    public DemoAccounts(string language, string? avatarUrl = null) => _accounts = new()
     {
-        new StudioAccount("demo-1", "amina@example.com", "Amina Studio", avatarUrl, null, false),
-        new StudioAccount("demo-2", "omar@example.com", "Omar", avatarUrl, null, false),
+        new StudioAccount("demo-1", "noor@example.org", PrimaryName(language), avatarUrl, null, false),
+        new StudioAccount("demo-2", "omar@example.org", language == "ar" ? "عمر حسن" : "Omar Hassan", avatarUrl, null, false),
     };
+
+    internal static string PrimaryName(string language) => language == "ar" ? "قناة النور" : "Noor Channel";
 
     private string? _active = "demo-1";
 
@@ -205,7 +207,7 @@ public sealed class DemoTransport : IApiTransport
                     success = true,
                     data = new object[]
                     {
-                        new { id = "demo-c1", userId = "demo-1", name = _language == "ar" ? "قناة النور" : "Noor Channel", handle = "alnoor", avatarUrl = Avatar, isMain = true, role = "owner", capabilities = Array.Empty<string>() },
+                        new { id = "demo-c1", userId = "demo-1", name = DemoAccounts.PrimaryName(_language), handle = "alnoor", avatarUrl = Avatar, isMain = true, role = "owner", capabilities = Array.Empty<string>() },
                         new { id = "demo-c2", userId = "demo-9", name = _language == "ar" ? "فريق إعلام المسجد" : "Masjid Media Team", handle = "masjidmedia", avatarUrl = Avatar, isMain = false, role = "editor", capabilities = new[] { "video.upload", "video.edit" } },
                     },
                 });

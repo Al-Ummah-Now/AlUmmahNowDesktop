@@ -38,8 +38,11 @@ jobs:
           LIBGL_ALWAYS_SOFTWARE: "1"
         run: |
           mkdir -p artifacts/diagnostics
-          for lang in en ar; do for theme in light dark; do
-            name="linux-viewer-diagnostics-$lang-$theme"
+          for lang in en ar; do for variant in light dark dark-on; do
+            theme=${variant%-on}
+            export AUN_DEMO_DIAGNOSTICS=off
+            if [[ $variant == dark-on ]]; then export AUN_DEMO_DIAGNOSTICS=on; fi
+            name="linux-viewer-diagnostics-$lang-$variant"
             frame="artifacts/diagnostics/$name"
             dbus-run-session -- xvfb-run -a -s "-screen 0 1280x800x24" \
               scripts/linux-scenario.sh "$lang" "$theme" diagnostics "$name" artifacts/diagnostics > "$frame.log" 2>&1

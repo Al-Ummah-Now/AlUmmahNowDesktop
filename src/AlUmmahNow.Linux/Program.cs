@@ -26,6 +26,7 @@ const string Css = """
     scale > trough > highlight, scale > trough > slider { background-color: @fanous_accent; }
     /* The toolkit dims with 55% opacity, under 4.5:1 in light mode: the theme's own second color instead. */
     .dim-label { opacity: 1; color: @fanous_text_secondary; }
+    .diagnostics-note { color: @fanous_text_muted; }
     /* The header is dark in both modes. */
     headerbar .dim-label { color: @headerbar_fg_color; }
     .aun-badge { border: 1px solid alpha(currentColor, 0.5); border-radius: 999px; padding: 2px 10px; min-height: 18px; font-size: 12px; font-weight: 600; }
@@ -66,6 +67,7 @@ AlUmmahNow.CoreBridge.ILiveClient live = Environment.GetEnvironmentVariable("AUN
 var coreVersion = CoreRuntime.VersionOrNone();
 // The check for a new version: none in a demo, or in a build that is no release.
 var isDemo = Environment.GetEnvironmentVariable("AUN_DEMO") == "1";
+if (isDemo && automation == "diagnostics") settings.TelemetryEnabled = Environment.GetEnvironmentVariable("AUN_DEMO_DIAGNOSTICS") == "on";
 var updateInstall = isDemo ? UpdateInstall.Development : UpdateInstalls.OnLinux(UpdateInstalls.IsReleaseBuild, File.Exists("/.flatpak-info"), AppContext.BaseDirectory, UpdateApp.Viewer);
 MainWindow? viewer = null;
 bool IsBusy() => viewer?.IsLivePlaying == true;

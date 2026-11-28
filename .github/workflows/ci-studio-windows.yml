@@ -34,13 +34,17 @@ jobs:
       - name: Build Studio
         run: dotnet build src/AlUmmahNow.Studio.Windows -c Release -p:Platform=x64
       - name: Diagnostics Settings frames
+        env:
+          AUN_DEMO_UPDATE: uptodate
         shell: pwsh
         run: |
           ./scripts/set-resolution.ps1 1920 1080
           $exe = Resolve-Path "src/AlUmmahNow.Studio.Windows/bin/x64/Release/net9.0-windows10.0.22621.0/win-x64/AlUmmahNowStudio.exe"
           $out = (New-Item -ItemType Directory -Force artifacts/diagnostics).FullName
-          foreach ($lang in "en","ar") { foreach ($theme in "light","dark") {
-            $name = "windows-studio-diagnostics-$lang-$theme"
+          foreach ($lang in "en","ar") { foreach ($variant in "light","dark","dark-on") {
+            $theme = $variant -replace "-on$"
+            $env:AUN_DEMO_DIAGNOSTICS = if ($variant -eq "dark-on") { "on" } else { "off" }
+            $name = "windows-studio-diagnostics-$lang-$variant"
             ./scripts/windows-studio-shot.ps1 $exe $lang $theme 1440x900 diagnostics $name $out settings
             if (-not (Test-Path "$out/$name.png") -or -not (Select-String -Quiet "page=settings .*RESULT PASS" "$out/$name.txt")) {
               throw "$name failed"
@@ -126,7 +130,7 @@ jobs:
           foreach ($n in "shell-en","shell-ar","videos-en","videos-ar") { if (-not (Select-String -Quiet -SimpleMatch "fieldFocused=False" "artifacts/studio/$n.txt")) { throw "$n opened with focus in a text field" } }
           if (-not (Select-String -Quiet -SimpleMatch "Masjid Media Team · Channel · Editor" artifacts/studio/channels-en.uia.txt)) { throw "channel options are not tagged 'Channel'" }
           if (-not (Select-String -Quiet -SimpleMatch "فريق إعلام المسجد، قناة، محرّر" artifacts/studio/channels-ar.uia.txt)) { throw "Arabic channel options are not tagged «قناة»" }
-          if (-not (Select-String -Quiet -SimpleMatch "Switch to Amina Studio" artifacts/studio/accounts-en.uia.txt)) { throw "people are not in the identity menu" }
+          if (-not (Select-String -Quiet -SimpleMatch "Switch to Noor Channel" artifacts/studio/accounts-en.uia.txt)) { throw "people are not in the identity menu" }
           if (-not (Select-String -Quiet "Sign out of" artifacts/studio/accounts-en.uia.txt)) { throw "account menu items not exposed" }
           if (-not (Select-String -Quiet "`tVideoSearch`tSearch your videos" artifacts/studio/videos-en.uia.txt)) { throw "video search has no accessible name" }
           if (-not (Select-String -Quiet "Select Seerah" artifacts/studio/videos-en.uia.txt)) { throw "row checkboxes have no accessible names" }

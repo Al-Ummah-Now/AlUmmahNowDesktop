@@ -48,6 +48,7 @@ log.Info($"Al Ummah Now Studio {version} for Linux, environment {environment.Nam
 
 var settingsStore = new SettingsStore(Path.Combine(configDir, "settings.json"));
 var settings = settingsStore.Load();
+if (demo && scene == "diagnostics") settings.TelemetryEnabled = Environment.GetEnvironmentVariable("AUN_DEMO_DIAGNOSTICS") == "on";
 // A forced theme is the one Settings shows as chosen.
 if (Environment.GetEnvironmentVariable("AUN_THEME") is "dark" or "light") settings.Theme = Environment.GetEnvironmentVariable("AUN_THEME") == "light" ? ThemePreference.Light : ThemePreference.Dark;
 // The saved language (Settings), Arabic by default; CI and screenshots force one with AUN_LANG.
@@ -62,7 +63,7 @@ IApiTransport transport;
 Func<string, IUploadService> uploadServiceFor;
 if (demo)
 {
-    accounts = new DemoAccounts();
+    accounts = new DemoAccounts(localizer.Language);
     transport = new DemoTransport(DemoTransport.FeaturesOff(Environment.GetEnvironmentVariable("AUN_DEMO_FEATURES_OFF")), Environment.GetEnvironmentVariable("AUN_DEMO_THUMBS"), localizer.Language, withDeleted: scene.StartsWith("deleted", StringComparison.Ordinal));
     uploadServiceFor = account => new SimulatedUploadService(account, TimeSpan.FromMilliseconds(250));
 }

@@ -66,6 +66,11 @@ public sealed class SettingsPage
             _restart.SetRevealed(settings.Language != l.Language);
         }));
 
+        // Only while the server's switch is on
+        var updatesCard = Ui.Card(updates.SectionBody, updates.SectionActions);
+        left.Append(updatesCard);
+        updates.UseSection(updatesCard);
+
         // Diagnostics: off until turned on; turning it off deletes what was kept.
         left.Append(Choice(l["settings.telemetry"], new[] { (l["settings.telemetry.off"], !settings.TelemetryEnabled), (l["settings.telemetry.on"], settings.TelemetryEnabled) }, i =>
         {
@@ -107,11 +112,6 @@ public sealed class SettingsPage
             store.Save(settings);
         }));
         right.Append(Ui.Card(watchBody, watchActions));
-
-        // Only while the server's switch is on
-        var updatesCard = Ui.Card(updates.SectionBody, updates.SectionActions);
-        right.Append(updatesCard);
-        updates.UseSection(updatesCard);
 
         Root = Gtk.ScrolledWindow.New();
         Root.SetPolicy(Gtk.PolicyType.Never, Gtk.PolicyType.Automatic);

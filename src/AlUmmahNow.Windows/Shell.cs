@@ -325,7 +325,13 @@ public sealed partial class Shell
             _telemetry.SetEnabled(_settings.TelemetryEnabled);
         };
         body.Children.Add(choice);
-        body.Children.Add(new TextBlock { Text = _localizer["settings.telemetry.note"], TextWrapping = TextWrapping.Wrap, TextReadingOrder = TextReadingOrder.UseFlowDirection });
+        body.Children.Add(new TextBlock
+        {
+            Text = _localizer["settings.telemetry.note"],
+            TextWrapping = TextWrapping.Wrap,
+            TextReadingOrder = TextReadingOrder.UseFlowDirection,
+            Foreground = ViewerTheme.Brush("TextMuted", IsDark, HighContrastRole.Text),
+        });
         return Updates.Card(body);
     }
 

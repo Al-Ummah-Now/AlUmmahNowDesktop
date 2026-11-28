@@ -312,7 +312,7 @@ public sealed partial class MainWindow
         note.SetHalign(Gtk.Align.Start);
         note.SetXalign(0);
         note.SetWrap(true);
-        note.AddCssClass("dim-label");
+        note.AddCssClass("diagnostics-note");
         card.Append(note);
         return card;
     }

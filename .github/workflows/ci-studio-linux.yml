@@ -26,6 +26,7 @@ jobs:
       - run: dotnet build src/AlUmmahNow.Studio.Linux -c Release
       - name: Diagnostics Settings frames
         env:
+          AUN_DEMO_UPDATE: uptodate
           AUN_WINDOW_SIZE: 1440x900
           AUN_STORE_SHOT: "1"
           GDK_BACKEND: x11
@@ -33,13 +34,16 @@ jobs:
           LIBGL_ALWAYS_SOFTWARE: "1"
         run: |
           mkdir -p artifacts/diagnostics
-          for lang in en ar; do for theme in light dark; do
-            name="linux-studio-diagnostics-$lang-$theme"
+          for lang in en ar; do for variant in light dark dark-on; do
+            theme=${variant%-on}
+            export AUN_DEMO_DIAGNOSTICS=off
+            if [[ $variant == dark-on ]]; then export AUN_DEMO_DIAGNOSTICS=on; fi
+            name="linux-studio-diagnostics-$lang-$variant"
             frame="artifacts/diagnostics/$name"
             AUN_THEME="$theme" dbus-run-session -- xvfb-run -a -s "-screen 0 1440x900x24" \
-              scripts/studio-scenario.sh "$lang" settings shell "$name" artifacts/diagnostics > "$frame.log" 2>&1
+              scripts/studio-scenario.sh "$lang" settings shell "$name" artifacts/diagnostics "" diagnostics > "$frame.log" 2>&1
             grep 'page=settings .*RESULT PASS' "$frame.log"
-            bash scripts/linux-assert-diagnostics.sh "$lang" "$frame"
+            bash scripts/linux-assert-diagnostics.sh "$lang" "$frame" studio
           done; done
       - uses: actions/upload-artifact@v4
         if: always()

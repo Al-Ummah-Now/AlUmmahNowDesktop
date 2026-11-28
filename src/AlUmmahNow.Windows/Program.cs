@@ -77,6 +77,8 @@ public sealed partial class App : Application
         if (Environment.GetEnvironmentVariable("AUN_LANG") is { Length: > 0 } lang) settings.Language = lang;
         if (Enum.TryParse<ThemePreference>(Environment.GetEnvironmentVariable("AUN_THEME"), true, out var theme)) settings.Theme = theme;
         var automation = Environment.GetEnvironmentVariable("AUN_AUTOMATION") ?? "";
+        if (Environment.GetEnvironmentVariable("AUN_DEMO") == "1" && automation == "diagnostics")
+            settings.TelemetryEnabled = Environment.GetEnvironmentVariable("AUN_DEMO_DIAGNOSTICS") == "on";
         var exitAfter = int.TryParse(Environment.GetEnvironmentVariable("AUN_EXIT_AFTER"), out var s) ? s : 0;
 
         var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };

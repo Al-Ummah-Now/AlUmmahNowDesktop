@@ -40,7 +40,7 @@
   "settings.telemetry": "Diagnostics",
   "settings.telemetry.off": "Don't send",
   "settings.telemetry.on": "Send crash reports and diagnostics",
-  "settings.telemetry.note": "Helps us find and fix problems. No e-mail, name or account details are sent.",
+  "settings.telemetry.note": "Off by default. Shares scrubbed crash reports and basic usage metrics to help fix bugs. Never includes personal data or viewing history.",
   "updates.title": "Updates",
   "updates.settings": "Settings",
   "updates.available": "A new version, {0}, is available.",

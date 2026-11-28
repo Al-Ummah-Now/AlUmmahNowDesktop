@@ -75,7 +75,7 @@ $g.Dispose(); $bmp.Dispose()
 $diagnosticsError = $null
 if ($Scene -eq "diagnostics") {
   try {
-    & "$PSScriptRoot/windows-assert-diagnostics.ps1" $h $Lang
+    & "$PSScriptRoot/windows-assert-diagnostics.ps1" $h $Lang -Studio
   } catch { $diagnosticsError = $_ }
 }
 if ($Scene -eq "highcontrastswitch") { Set-Content $end "" }
