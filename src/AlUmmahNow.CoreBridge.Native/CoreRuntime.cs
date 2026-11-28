@@ -64,10 +64,19 @@ public sealed class SystemConnectivity : Connectivity
     public NetworkState Current() => new(NetworkInterface.GetIsNetworkAvailable(), false);
 }
 
-/// <summary>Opens the default browser through the OS.</summary>
+/// <summary>Opens the default browser through the OS. Only absolute http(s) URLs are allowed.</summary>
 public sealed class ShellBrowserLauncher : IBrowserLauncher
 {
-    public void Open(Uri uri) => Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true })?.Dispose();
+    public static bool IsAllowedUri(Uri? uri) =>
+        uri is { IsAbsoluteUri: true }
+        && (uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp)
+        && !uri.AbsoluteUri.Any(c => char.IsControl(c));
+
+    public void Open(Uri uri)
+    {
+        if (!IsAllowedUri(uri)) throw new ArgumentException("Only http(s) URLs may be opened in the browser.", nameof(uri));
+        Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true })?.Dispose();
+    }
 }
 
 /// <summary>Windows: one DPAPI-protected file per key, readable only by the current user.</summary>

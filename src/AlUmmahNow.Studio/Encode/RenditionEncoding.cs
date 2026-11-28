@@ -31,6 +31,8 @@ public static class RungPipeline
         // Software x264 only: hardware encoders don't guarantee fixed keyframes without scene cuts.
         var encoder = $"x264enc bitrate={avgKbps} key-int-max={keyint} speed-preset=veryfast " +
             $"option-string=\"scenecut=0:keyint={keyint}:min-keyint={keyint}:vbv-maxrate={maxKbps}:vbv-bufsize={bufKbits}:force-cfr=1\"";
+        if (string.IsNullOrEmpty(rung.Profile) || !rung.Profile.All(c => (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-'))
+            throw new ArgumentException("Invalid H.264 profile.", nameof(rung));
         var video = $"queue ! videoflip video-direction=auto ! videoconvert ! videoscale{rate} ! " +
             $"video/x-raw,format=I420,width={I(rung.Width)},height={I(rung.Height)},pixel-aspect-ratio=1/1 ! {encoder} ! " +
             $"video/x-h264,profile={rung.Profile} ! h264parse";
@@ -53,7 +55,11 @@ public static class RungPipeline
 
     private static string I(int v) => v.ToString(CultureInfo.InvariantCulture);
 
-    private static string Quote(string value) => "\"" + value.Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";
+    private static string Quote(string value)
+    {
+        if (value.IndexOfAny(new[] { '\0', '\r', '\n' }) >= 0) throw new ArgumentException("Path contains control characters.", nameof(value));
+        return "\"" + value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";
+    }
 }
 
 public enum LocalRenditionStage { Probing, Encoding, Packaging, Uploading, Done }

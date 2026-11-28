@@ -25,5 +25,25 @@ namespace AlUmmahNow.CoreBridge.Logging
             s = Email.Replace(s, "[email]");
             return s;
         }
+
+        /// <summary>Scrubs secrets/PII and neutralizes CR/LF and C0 control characters to prevent log line forging.</summary>
+        public static string ScrubLine(string? text)
+        {
+            var scrubbed = Scrub(text);
+            if (scrubbed.Length == 0) return scrubbed;
+            var chars = scrubbed.ToCharArray();
+            var changed = false;
+            for (var i = 0; i < chars.Length; i++)
+            {
+                var c = chars[i];
+                if (c < 0x20 || c == 0x7F || c == '\u2028' || c == '\u2029')
+                {
+                    chars[i] = ' ';
+                    changed = true;
+                }
+            }
+
+            return changed ? new string(chars) : scrubbed;
+        }
     }
 }

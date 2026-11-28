@@ -77,7 +77,7 @@ namespace AlUmmahNow.CoreBridge.Logging
             if (level < MinimumLevel) return;
             var sinks = Volatile.Read(ref _sinks);
             if (sinks.Length == 0) return;
-            var entry = new LogEntry(DateTimeOffset.Now, level, category, LogScrubber.Scrub(message),
+            var entry = new LogEntry(DateTimeOffset.Now, level, LogScrubber.ScrubLine(category), LogScrubber.ScrubLine(message),
                 exception == null ? null : LogScrubber.Scrub(exception.ToString()));
             foreach (var sink in sinks)
             {

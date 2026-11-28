@@ -51,6 +51,8 @@ public sealed class AdminApiReviewService : IReviewService, IPushRegistry
 
     private async Task<HttpResponseMessage> SendAsync(HttpMethod method, Uri root, string path, IDictionary<string, string?>? query, object? body, CancellationToken ct)
     {
+        if (string.IsNullOrEmpty(path) || !path.StartsWith("/", StringComparison.Ordinal) || path.StartsWith("//", StringComparison.Ordinal) || path.IndexOfAny(new[] { '\\', '\r', '\n', '\0' }) >= 0)
+            throw new ArgumentException("API path must start with a single '/'.", nameof(path));
         var builder = new StringBuilder(root.AbsoluteUri.TrimEnd('/')).Append(path);
         if (query != null)
         {
@@ -64,7 +66,14 @@ public sealed class AdminApiReviewService : IReviewService, IPushRegistry
         }
 
         var uri = new Uri(builder.ToString());
-        if (!PrivateHttp.IsAllowed(uri)) throw new ReviewApiException(0, "insecure_url");
+        if (!PrivateHttp.IsAllowed(uri)
+            || !string.Equals(uri.Scheme, root.Scheme, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(uri.Host, root.Host, StringComparison.OrdinalIgnoreCase)
+            || uri.Port != root.Port
+            || !string.IsNullOrEmpty(uri.UserInfo))
+        {
+            throw new ReviewApiException(0, "insecure_url");
+        }
         var token = await _token(ct).ConfigureAwait(false) ?? throw new SignInRequiredException();
         using var request = new HttpRequestMessage(method, uri);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
@@ -173,7 +182,12 @@ public sealed class AdminApiReviewService : IReviewService, IPushRegistry
         }
     }
 
-    private static string Id(string id) => Uri.EscapeDataString(id);
+    private static string Id(string id)
+    {
+        if (string.IsNullOrEmpty(id) || id == "." || id == ".." || id.All(c => c == '.'))
+            throw new ArgumentException("Invalid review identifier.", nameof(id));
+        return Uri.EscapeDataString(id);
+    }
 
     // ---------- review ----------
 
