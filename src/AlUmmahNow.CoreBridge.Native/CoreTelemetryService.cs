@@ -20,12 +20,12 @@ namespace AlUmmahNow.CoreBridge.Native;
 public sealed class CoreTelemetryService : ITelemetryService
 {
     private static readonly Regex ParenPathRegex = new(@"(\()(?:/|~/|[A-Za-z]:[\\/]|\\\\)[^()\r\n\u001E]+(\))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex ParenRelativeSlashPathRegex = new(@"(\()(?![ \t]*(?:HTTP|TLS|SSL)/\d)(?![ \t]*\d+/\d+[.,;:!?\s]*\))[^\s/\\""'<>()\[\]{}:,;=\u001E\u001F]+/[^()\r\n\u001E]+(\))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex ParenRelativeSlashPathRegex = new(@"(\()(?![ \t]*(?:HTTP|TLS|SSL)/\d+(?:\.\d+)*[.,;:!?\s]*\))(?![ \t]*\d+/\d+[.,;:!?\s]*\))[^\s/\\""'<>()\[\]{}:,;=\u001E\u001F]+/[^()\r\n\u001E]+(\))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex WindowsPathRegex = new(@"(?:[A-Za-z]:[\\/]|\\\\)[^\S\r\n]*[^\r\n\u001E\s""](?:[^\r\n\u001E]*[^\r\n\u001E\s])?", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex RelativeBackslashPathRegex = new(@"(^|[\s(\[{""'=,:;<>)\u001F])[^\s\\/""'<>()\[{:,;=\u001E\u001F]+\\[^\r\n\u001E\u001F\s""](?:[^\r\n\u001E\u001F]*[^\r\n\u001E\u001F\s])?", RegexOptions.Compiled);
     private static readonly Regex QuotedSpacedRootPathRegex = new(@"[""']/[ \t]+[^\r\n\u001E\s""][^\r\n\u001E]*", RegexOptions.Compiled);
     private static readonly Regex UnixPathRegex = new(@"(?<![\p{L}\p{M}\p{N}._/-])(?:~/(?=[^\S\r\n]*[^\s""])|//+(?=[^\S\r\n]*[^\s/""])|/(?=[^\S\r\n]*[^\s/""]))[^\S\r\n]*[^\r\n\u001E\s](?:[^\r\n\u001E]*[^\r\n\u001E\s])?", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex RelativeSlashPathRegex = new(@"(^|[\s(\[{)\]}<>""'=,:;\u001F])(?!(?<!['""])(?:HTTP|TLS|SSL)/\d)(?!(?<!['""])\d+/\d+(?:$|[\s)\]},;:!?]|\.(?![A-Za-z0-9])))[^\s/\\""'<>()\[\]{}:,;=\u001E\u001F]+/[^\r\n\u001E\u001F\s""](?:[^\r\n\u001E\u001F]*[^\r\n\u001E\u001F\s])?", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex RelativeSlashPathRegex = new(@"(^|[\s(\[{)\]}<>""'=,:;\u001F])(?!(?<!['""])(?:HTTP|TLS|SSL)/\d+(?:\.\d+)*(?:$|[\s(\[{)\]},;:!?]|\.(?![A-Za-z0-9])))(?!(?<!['""])\d+/\d+(?:$|[\s)\]},;:!?]|\.(?![A-Za-z0-9])))[^\s/\\""'<>()\[\]{}:,;=\u001E\u001F]+/[^\r\n\u001E\u001F\s""](?:[^\r\n\u001E\u001F]*[^\r\n\u001E\u001F\s])?", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex KeywordQuotedPathRegex = new(@"\b(?:file|path|directory|folder|document)[^\S\r\n]+(?=[""'])", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex KeywordFilenamePrefixRegex = new(@"\b(?:open|opening|read|reading|write|writing|delete|deleting|remove|removing|rename|stat|create|creating|load|loading|save|saving|access|accessing|unlink|file|path|directory|folder|document|filename|filepath)\b(?:[^\S\r\n]*[:=][^\S\r\n]*|[^\S\r\n]+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly HashSet<string> SourceLineExtensions = new(StringComparer.OrdinalIgnoreCase)
@@ -2143,7 +2143,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     }
 
     private static bool MatchDecodedFileScheme(string text, int pos, int end) =>
-        MatchDecodedSchemePrefix(text, pos, end, "file://") || MatchDecodedSchemePrefix(text, pos, end, "content://");
+        MatchDecodedSchemePrefix(text, pos, end, "file:/") || MatchDecodedSchemePrefix(text, pos, end, "content://");
 
     private static bool MatchDecodedSchemePrefix(string text, int pos, int end, string target)
     {
@@ -2444,7 +2444,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         var spans = CollectBalancedDoubleQuoteSpans(text);
         if (spans.Count == 0) return RedactKeywordUnquotedFilenamesOnSource(text, text);
         var masked = BuildMaskedDoubleQuotes(text, spans);
-        var current = RedactKeywordUnquotedFilenamesOnSource(text, masked);
+        var current = RedactKeywordUnquotedFilenamesOnSource(text, masked, stopAtDoubleQuote: true);
         if (!ReferenceEquals(current, text))
         {
             if (current.IndexOf('"') < 0) return current;
@@ -2464,7 +2464,8 @@ public sealed class CoreTelemetryService : ITelemetryService
         return sb.Append(current, copied, current.Length - copied).ToString();
     }
 
-    private static string RedactKeywordUnquotedFilenamesOnSource(string text, string scanSource)
+    private static string RedactKeywordUnquotedFilenamesOnSource(
+        string text, string scanSource, bool stopAtDoubleQuote = false)
     {
         if (!scanSource.Contains('.')) return text;
         var hasAt = HasEmailAt(scanSource);
@@ -2474,7 +2475,9 @@ public sealed class CoreTelemetryService : ITelemetryService
         while (segStart < scanSource.Length)
         {
             var segEnd = segStart;
-            while (segEnd < scanSource.Length && scanSource[segEnd] is not ('\r' or '\n' or '\u001E' or '\u001F'))
+            while (segEnd < scanSource.Length &&
+                   scanSource[segEnd] is not ('\r' or '\n' or '\u001E' or '\u001F') &&
+                   (!stopAtDoubleQuote || scanSource[segEnd] != '"'))
             {
                 segEnd++;
             }
@@ -4374,9 +4377,26 @@ public sealed class CoreTelemetryService : ITelemetryService
             {
                 continue;
             }
+            if (IsNumericDotToken(text, segStart, dot, extStart, extEnd)) continue;
             return (dot, extEnd);
         }
         return (-1, -1);
+    }
+
+    private static bool IsNumericDotToken(string text, int segStart, int dot, int extStart, int extEnd)
+    {
+        for (var i = extStart; i < extEnd; i++)
+        {
+            if (!char.IsAsciiDigit(text[i])) return false;
+        }
+        var p = dot - 1;
+        var hasDigitBefore = false;
+        while (p >= segStart && (char.IsAsciiDigit(text[p]) || text[p] == '.'))
+        {
+            if (char.IsAsciiDigit(text[p])) hasDigitBefore = true;
+            p--;
+        }
+        return hasDigitBefore && (p < segStart || !IsAsciiWordChar(text[p]));
     }
 
     private static bool IsAsciiAlphaNum(char ch) =>
@@ -5282,6 +5302,10 @@ public sealed class CoreTelemetryService : ITelemetryService
         {
             return 7;
         }
+        if (pos + 6 <= text.Length && text.AsSpan(pos, 6).Equals("file:/", StringComparison.OrdinalIgnoreCase))
+        {
+            return 6;
+        }
         if (pos + 10 <= text.Length && text.AsSpan(pos, 10).Equals("content://", StringComparison.OrdinalIgnoreCase))
         {
             return 10;
@@ -5291,7 +5315,7 @@ public sealed class CoreTelemetryService : ITelemetryService
 
     private static string RedactFileUris(string text, string vaultPrefix)
     {
-        if (text.Length < 7) return text;
+        if (text.Length < 6) return text;
         var checkedQuotes = false;
         List<(int Open, int Close)>? quoteSpans = null;
         var spanIdx = 0;
@@ -6440,14 +6464,20 @@ public sealed class CoreTelemetryService : ITelemetryService
             var seenIds = new HashSet<string>(StringComparer.Ordinal);
             var latestBreadcrumbs = new List<JsonElement>();
 
-            if (File.Exists(targetBufferPath))
+            if (File.Exists(targetBufferPath) &&
+                !ReadPersistedBufferInto(targetBufferPath, mergedEvents, seenIds, latestBreadcrumbs))
             {
-                ReadPersistedBufferInto(targetBufferPath, mergedEvents, seenIds, latestBreadcrumbs);
+                return;
             }
+            var adoptedPaths = new List<string>(orphans.Count);
             foreach (var (orphanPath, _, _, _) in orphans)
             {
-                ReadPersistedBufferInto(orphanPath, mergedEvents, seenIds, latestBreadcrumbs);
+                if (ReadPersistedBufferInto(orphanPath, mergedEvents, seenIds, latestBreadcrumbs))
+                {
+                    adoptedPaths.Add(orphanPath);
+                }
             }
+            if (adoptedPaths.Count == 0) return;
 
             if (mergedEvents.Count > 0 || latestBreadcrumbs.Count > 0)
             {
@@ -6469,7 +6499,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                 File.Move(tmpPath, targetBufferPath, overwrite: true);
             }
 
-            foreach (var (orphanPath, _, _, _) in orphans)
+            foreach (var orphanPath in adoptedPaths)
             {
                 TryDeleteSingleBufferAndTemps(orphanPath);
             }
@@ -6494,15 +6524,15 @@ public sealed class CoreTelemetryService : ITelemetryService
         }
     }
 
-    private static void ReadPersistedBufferInto(
+    private static bool ReadPersistedBufferInto(
         string path, List<JsonElement> mergedEvents, HashSet<string> seenIds, List<JsonElement> latestBreadcrumbs)
     {
         try
         {
             var bytes = File.ReadAllBytes(path);
-            if (bytes.Length == 0) return;
+            if (bytes.Length == 0) return true;
             using var doc = JsonDocument.Parse(bytes);
-            if (doc.RootElement.ValueKind != JsonValueKind.Object) return;
+            if (doc.RootElement.ValueKind != JsonValueKind.Object) return true;
             if (doc.RootElement.TryGetProperty("events", out var eventsEl) && eventsEl.ValueKind == JsonValueKind.Array)
             {
                 foreach (var ev in eventsEl.EnumerateArray())
@@ -6527,9 +6557,15 @@ public sealed class CoreTelemetryService : ITelemetryService
                     latestBreadcrumbs.Add(crumb.Clone());
                 }
             }
+            return true;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        catch (JsonException)
         {
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
         }
     }
 

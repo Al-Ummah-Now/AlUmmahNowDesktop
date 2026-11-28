@@ -2255,6 +2255,19 @@ public class CoreTelemetryServiceTests
         Assert.DoesNotContain("authTok999", propJson);
         Assert.Contains("\"X-API-Key\":\"[redacted]\"", propJson);
         Assert.Contains("\"X-Auth-Token\":\"[redacted]\"", propJson);
+        Assert.Equal("[redacted-path]", CoreTelemetryService.SanitizeLocalPaths("HTTP/1/PrivateReorganization"));
+        Assert.Equal("([redacted-path])", CoreTelemetryService.SanitizeLocalPaths("(HTTP/1/PrivateReorganization)"));
+        Assert.Equal("HTTP/1.1 503 Service Unavailable", CoreTelemetryService.SanitizeLocalPaths("HTTP/1.1 503 Service Unavailable"));
+        Assert.Equal(
+            "open \"[redacted-path]\" then completed in 3.14 seconds",
+            CoreTelemetryService.SanitizeLocalPaths("open \"proposal.pdf\" then completed in 3.14 seconds"));
+        Assert.Equal(
+            "open failed after 3.14 seconds",
+            CoreTelemetryService.SanitizeLocalPaths("open failed after 3.14 seconds"));
+        Assert.Equal("failed [redacted-path]", CoreTelemetryService.SanitizeLocalPaths("failed file:/Users/alice/secret.txt"));
+        Assert.Equal(
+            "{\"uri\":\"[redacted-path]\",\"ok\":true}",
+            CoreTelemetryService.SanitizeLocalPaths("{\"uri\":\"file:\\/Users\\/alice\\/secret.txt\",\"ok\":true}"));
     }
 
     [Fact]
@@ -2312,6 +2325,31 @@ public class CoreTelemetryServiceTests
             Assert.Equal(1, instanceC.PendingCount);
             Assert.False(File.Exists(bufferA));
             Assert.True(File.Exists(instanceB.ActiveBufferPathForTesting!));
+
+            if (!OperatingSystem.IsWindows())
+            {
+                // An orphan buffer that cannot be read due to permissions must NOT be unlinked.
+                var unreadableOrphan = Path.Combine(dir, "telemetry-buffer.gen1.unreadable01.json");
+                File.WriteAllText(unreadableOrphan, "{\"events\":[{\"id\":\"keep-me\"}],\"breadcrumbs\":[]}");
+                File.SetUnixFileMode(unreadableOrphan, UnixFileMode.None);
+                try
+                {
+                    using var instanceD = new CoreTelemetryService(
+                        platform: "linux",
+                        appVersion: "1.0.0",
+                        locale: "en",
+                        videosApiBaseUrl: null,
+                        userAgent: "AlUmmahNowLinux/1.0.0",
+                        bufferPath: bufferPath,
+                        initialEnabled: true,
+                        externalConsentToken: () => Volatile.Read(ref sharedToken));
+                    Assert.True(File.Exists(unreadableOrphan));
+                }
+                finally
+                {
+                    File.SetUnixFileMode(unreadableOrphan, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+                }
+            }
         }
         finally
         {
