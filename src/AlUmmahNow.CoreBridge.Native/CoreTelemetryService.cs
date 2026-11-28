@@ -39,7 +39,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         "Bearer", "Basic", "Digest", "Token", "Api-Key", "ApiKey",
         "OAuth", "Negotiate", "Mutual", "HOBA", "Vapid", "SCRAM-SHA-256", "AWS4-HMAC-SHA256"
     };
-    private static readonly Regex BasicTokenRegex = new(@"\b(Basic)\s+(?:(""|'|\\""|\\u0022)([A-Za-z0-9+/_-]{2,}={0,2})(?![A-Za-z0-9+/_=-])(\2|\\""|\\u0022|$)|([A-Za-z0-9+/_-]{2,}={0,2})(?![A-Za-z0-9+/_=-]))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex BasicTokenRegex = new(@"\b(Basic)\s+(?:(""|'|\\""|\\u0022)([A-Za-z0-9+/_-]{2,}={0,2})(?![A-Za-z0-9+/_=-])(\2|\\""|\\u0022|(?=[\t\p{Zs}]*(?:\r|\n|$)))|([A-Za-z0-9+/_-]{2,}={0,2})(?![A-Za-z0-9+/_=-]))", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly System.Text.UTF8Encoding StrictUtf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
 
     private readonly TelemetryAppInfo _app;
@@ -2602,7 +2602,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     private static string RedactBearerTokens(string text)
     {
         if (text.IndexOf("bearer", StringComparison.OrdinalIgnoreCase) < 0) return text;
-        var ranges = FindBearerTokenRanges(text, allowLiteralQuoted: true, requireClosingLiteralQuote: true);
+        var ranges = FindBearerTokenRanges(text, inDecodedSpan: false);
         if (ranges.Count == 0) return text;
         var sb = new StringBuilder(text.Length);
         var copied = 0;
@@ -2627,8 +2627,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         return 0;
     }
 
-    private static List<(int Start, int End, bool RedactedOnly)> FindBearerTokenRanges(
-        string text, bool allowLiteralQuoted, bool requireClosingLiteralQuote)
+    private static List<(int Start, int End, bool RedactedOnly)> FindBearerTokenRanges(string text, bool inDecodedSpan)
     {
         var ranges = new List<(int Start, int End, bool RedactedOnly)>();
         var inEscapedQuote = false;
@@ -2702,7 +2701,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                 }
                 if (afterWs < text.Length &&
                     (HasRedactedBasicAt(text, afterWs) ||
-                     HasBearerTokenAt(text, afterWs, inEscapedQuote, inLiteralDoubleQuote, allowLiteralQuoted, requireClosingLiteralQuote)))
+                     HasBearerTokenAt(text, afterWs, inEscapedQuote, inLiteralDoubleQuote, inDecodedSpan)))
                 {
                     i = lastBearer;
                 }
@@ -2719,9 +2718,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                 continue;
             }
             var wsCh = text[wsEnd];
-            var openQuoteLen = !inEscapedQuote
-                ? (allowLiteralQuoted && (wsCh is '"' or '\'') ? 1 : EscapedDoubleQuoteLen(text, wsEnd))
-                : 0;
+            var openQuoteLen = OpeningBearerQuoteLen(text, wsEnd, wsCh, inEscapedQuote, inLiteralDoubleQuote, inDecodedSpan);
             if (openQuoteLen > 0)
             {
                 var innerStart = wsEnd + openQuoteLen;
@@ -2735,8 +2732,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                 var closeQuoteLen = openQuoteLen == 1
                     ? (innerEnd < text.Length && text[innerEnd] == wsCh ? 1 : 0)
                     : EscapedDoubleQuoteLen(text, innerEnd);
-                if (innerEnd > innerStart &&
-                    IsValidQuotedBearerEnd(text, innerEnd, openQuoteLen, wsCh, closeQuoteLen, inLiteralDoubleQuote, requireClosingLiteralQuote))
+                if (innerEnd > innerStart && IsValidQuotedBearerEnd(text, innerEnd, closeQuoteLen))
                 {
                     ranges.Add((innerStart, innerEnd, true));
                     i = innerEnd + closeQuoteLen;
@@ -2747,6 +2743,8 @@ public sealed class CoreTelemetryService : ITelemetryService
                     i = innerEnd + closeQuoteLen;
                     continue;
                 }
+                i = wsEnd;
+                continue;
             }
             if (IsRedactedBearerPlaceholderAt(text, wsEnd, inEscapedQuote))
             {
@@ -2770,23 +2768,29 @@ public sealed class CoreTelemetryService : ITelemetryService
     private static bool MatchesBearerPrefixAt(string text, int pos) =>
         pos + 6 < text.Length && MatchesAsciiIgnoreCase(text, pos, "bearer") && char.IsWhiteSpace(text[pos + 6]);
 
-    private static bool IsValidQuotedBearerEnd(
-        string text, int innerEnd, int openLen, char openCh, int closeLen, bool inLiteralDoubleQuote, bool requireClosingLiteralQuote)
+    private static int OpeningBearerQuoteLen(
+        string text, int pos, char wsCh, bool inEscapedQuote, bool inLiteralDoubleQuote, bool inDecodedSpan)
+    {
+        if (inEscapedQuote) return 0;
+        if (wsCh == '"') return !inLiteralDoubleQuote || inDecodedSpan ? 1 : 0;
+        if (wsCh == '\'') return 1;
+        return EscapedDoubleQuoteLen(text, pos);
+    }
+
+    private static bool IsValidQuotedBearerEnd(string text, int innerEnd, int closeLen)
     {
         if (closeLen > 0) return true;
-        if (openLen == 1 && !requireClosingLiteralQuote) return true;
-        if (openLen == 1 && openCh == '"' && inLiteralDoubleQuote) return false;
-        return innerEnd >= text.Length || text[innerEnd] is '\r' or '\n' or ',' or ';' or ')' or ']' or '}';
+        var tail = innerEnd;
+        while (tail < text.Length && char.IsWhiteSpace(text[tail]) && text[tail] is not ('\r' or '\n')) tail++;
+        return tail >= text.Length || text[tail] is '\r' or '\n';
     }
 
     private static bool HasBearerTokenAt(
-        string text, int pos, bool inEscapedQuote, bool inLiteralDoubleQuote, bool allowLiteralQuoted, bool requireClosingLiteralQuote)
+        string text, int pos, bool inEscapedQuote, bool inLiteralDoubleQuote, bool inDecodedSpan)
     {
         if (pos >= text.Length) return false;
         var wsCh = text[pos];
-        var openLen = !inEscapedQuote
-            ? (allowLiteralQuoted && (wsCh is '"' or '\'') ? 1 : EscapedDoubleQuoteLen(text, pos))
-            : 0;
+        var openLen = OpeningBearerQuoteLen(text, pos, wsCh, inEscapedQuote, inLiteralDoubleQuote, inDecodedSpan);
         if (openLen > 0)
         {
             var innerStart = pos + openLen;
@@ -2796,8 +2800,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             var closeLen = openLen == 1
                 ? (innerEnd < text.Length && text[innerEnd] == wsCh ? 1 : 0)
                 : EscapedDoubleQuoteLen(text, innerEnd);
-            return innerEnd > innerStart &&
-                IsValidQuotedBearerEnd(text, innerEnd, openLen, wsCh, closeLen, inLiteralDoubleQuote, requireClosingLiteralQuote);
+            return innerEnd > innerStart && IsValidQuotedBearerEnd(text, innerEnd, closeLen);
         }
         return IsRedactedBearerPlaceholderAt(text, pos, inEscapedQuote) ||
                ScanBearerTokenEnd(text, pos, inEscapedQuote) > pos;
@@ -2883,8 +2886,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             if (innerStart >= close || text.IndexOf('\\', innerStart, close - innerStart) < 0) continue;
             var (decoded, rawOffsets) = DecodeQuotedSpanWithOffsets(text, innerStart, close);
             if (decoded.IndexOf("bearer", StringComparison.OrdinalIgnoreCase) < 0) continue;
-            foreach (var (mStart, mEnd, redactedOnly) in FindBearerTokenRanges(
-                decoded, allowLiteralQuoted: true, requireClosingLiteralQuote: false))
+            foreach (var (mStart, mEnd, redactedOnly) in FindBearerTokenRanges(decoded, inDecodedSpan: true))
             {
                 var rawStart = rawOffsets[mStart];
                 var rawEnd = rawOffsets[mEnd];

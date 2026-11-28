@@ -2504,6 +2504,24 @@ public class CoreTelemetryServiceTests
             "Basic \\u0022[redacted]\\\"",
             CoreTelemetryService.SanitizeLocalPaths("Basic \\u0022dTpw\\\""));
         Assert.Equal(
+            "received Bearer \"[redacted] ",
+            CoreTelemetryService.SanitizeLocalPaths("received Bearer \"opaqueSecret123 "));
+        Assert.Equal(
+            "Bearer \"hello, world\"",
+            CoreTelemetryService.SanitizeLocalPaths("Bearer \"hello, world\""));
+        Assert.Equal(
+            "{\"msg\":\"Bearer \\\"hello world\\\"\"}",
+            CoreTelemetryService.SanitizeLocalPaths("{\"msg\":\"Bearer \\\"hello world\\\"\"}"));
+        Assert.Equal(
+            "{\"Bearer \":\"ok\"}",
+            CoreTelemetryService.SanitizeLocalPaths("{\"Bearer \":\"ok\"}"));
+        Assert.Equal(
+            "Basic \"[redacted]\nnext line",
+            CoreTelemetryService.SanitizeLocalPaths("Basic \"dTpw\nnext line"));
+        Assert.Equal(
+            "Basic \"[redacted] ",
+            CoreTelemetryService.SanitizeLocalPaths("Basic \"dTpw "));
+        Assert.Equal(
             "https://[redacted-email]",
             CoreTelemetryService.SanitizeLocalPaths("https://example.org/users/alice/@example.com"));
         Assert.Equal(
