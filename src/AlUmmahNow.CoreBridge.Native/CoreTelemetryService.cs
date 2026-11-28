@@ -7244,6 +7244,39 @@ public sealed class CoreTelemetryService : ITelemetryService
         });
     }
 
+    public void EnqueueTrackPlaybackError(TelemetryPlaybackErrorKind code, bool fatal = true, string detail = "")
+    {
+        if (!TryPrepareEnqueue(out var captureEpoch, out var expectedExternalToken)) return;
+        var mappedCode = code switch
+        {
+            TelemetryPlaybackErrorKind.Network => TelemetryPlaybackErrorCode.Network,
+            TelemetryPlaybackErrorKind.Timeout => TelemetryPlaybackErrorCode.Timeout,
+            TelemetryPlaybackErrorKind.SourceNotFound => TelemetryPlaybackErrorCode.SourceNotFound,
+            TelemetryPlaybackErrorKind.Forbidden => TelemetryPlaybackErrorCode.Forbidden,
+            TelemetryPlaybackErrorKind.Decode => TelemetryPlaybackErrorCode.Decode,
+            TelemetryPlaybackErrorKind.Drm => TelemetryPlaybackErrorCode.Drm,
+            TelemetryPlaybackErrorKind.UnsupportedFormat => TelemetryPlaybackErrorCode.UnsupportedFormat,
+            TelemetryPlaybackErrorKind.Renderer => TelemetryPlaybackErrorCode.Renderer,
+            _ => TelemetryPlaybackErrorCode.Unknown,
+        };
+        TrackPendingEnqueue(() =>
+        {
+            if (!ResolveEnqueuedEpoch(captureEpoch, expectedExternalToken, out var epoch)) return;
+            var safeDetail = string.IsNullOrWhiteSpace(detail) ? "" : SanitizeDiagnosticText(detail);
+            WithPersistingConsent(requiresFull: true, () =>
+            {
+                try
+                {
+                    _client.TrackPlaybackError("", mappedCode, fatal, safeDetail);
+                }
+                catch (AunException ex)
+                {
+                    Log.For("telemetry").Warn("telemetry playback error skipped: " + ex.Message);
+                }
+            }, epoch);
+        });
+    }
+
     public void AddBreadcrumb(string category, string message, TelemetryBreadcrumbSeverity level = TelemetryBreadcrumbSeverity.Info)
     {
         if (string.IsNullOrWhiteSpace(category)) return;
@@ -8691,9 +8724,32 @@ public sealed class CoreTelemetryService : ITelemetryService
     private bool TryDeleteForeignGenerationBuffers(string? keepGenerationPrefix) =>
         TryDeleteForeignGenerationBuffersForPath(_bufferPath, keepGenerationPrefix);
 
+    private static bool HasSymlinkInBufferDirectory(string? bufferPath)
+    {
+        if (OperatingSystem.IsWindows() || string.IsNullOrWhiteSpace(bufferPath)) return false;
+        var dir = Path.GetDirectoryName(bufferPath);
+        if (string.IsNullOrEmpty(dir)) return false;
+        try
+        {
+            if (Directory.Exists(dir) && new DirectoryInfo(dir).LinkTarget != null) return true;
+            var parent = Path.GetDirectoryName(Path.GetFullPath(dir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+            if (!string.IsNullOrEmpty(parent) && !IsSharedTempDirectory(parent) &&
+                Directory.Exists(parent) && new DirectoryInfo(parent).LinkTarget != null)
+            {
+                return true;
+            }
+            return false;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return true;
+        }
+    }
+
     private static bool TryDeleteForeignGenerationBuffersForPath(string? bufferPath, string? keepGenerationPrefix)
     {
         if (string.IsNullOrWhiteSpace(bufferPath)) return true;
+        if (HasSymlinkInBufferDirectory(bufferPath)) return false;
         var dir = Path.GetDirectoryName(bufferPath);
         var stem = Path.GetFileNameWithoutExtension(bufferPath);
         var ext = Path.GetExtension(bufferPath);
@@ -8855,6 +8911,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         public void TrackError(string code, IReadOnlyDictionary<string, object>? properties = null) { }
         public void EnqueueTrack(string name, IReadOnlyDictionary<string, object>? properties = null) { }
         public void EnqueueTrackError(string code, IReadOnlyDictionary<string, object>? properties = null) { }
+        public void EnqueueTrackPlaybackError(TelemetryPlaybackErrorKind code, bool fatal = true, string detail = "") { }
         public void AddBreadcrumb(string category, string message, TelemetryBreadcrumbSeverity level = TelemetryBreadcrumbSeverity.Info) { }
         public void ReportCrash(string kind, string message, string? stack = null, bool fromPreviousSession = false) { }
         public void Persist() { }
@@ -8865,6 +8922,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     private static bool TryDeleteSingleBufferAndTemps(string? targetPath)
     {
         if (string.IsNullOrWhiteSpace(targetPath)) return true;
+        if (HasSymlinkInBufferDirectory(targetPath)) return false;
         var mainOk = TryDeleteSingleFile(targetPath);
         var dir = Path.GetDirectoryName(targetPath);
         var fileName = Path.GetFileName(targetPath);
@@ -8910,6 +8968,7 @@ public sealed class CoreTelemetryService : ITelemetryService
 
     private static bool TryDeleteSingleFile(string path)
     {
+        if (HasSymlinkInBufferDirectory(path)) return false;
         try
         {
             // Do NOT pre-check with File.Exists/Directory.Exists: both return false when directory
@@ -8930,6 +8989,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     private bool TryDeleteSiblingTempFiles(string? keepForeignGenerationPrefix = null)
     {
         if (string.IsNullOrWhiteSpace(_bufferPath)) return true;
+        if (HasSymlinkInBufferDirectory(_bufferPath)) return false;
         var dir = Path.GetDirectoryName(_bufferPath);
         var stem = Path.GetFileNameWithoutExtension(_bufferPath);
         var ext = Path.GetExtension(_bufferPath);

@@ -22,6 +22,20 @@ namespace AlUmmahNow.CoreBridge
         Error = 3,
     }
 
+    /// <summary>Stable playback error category emitted as a <c>playback_error</c> event.</summary>
+    public enum TelemetryPlaybackErrorKind
+    {
+        Network = 0,
+        Timeout = 1,
+        SourceNotFound = 2,
+        Forbidden = 3,
+        Decode = 4,
+        Drm = 5,
+        UnsupportedFormat = 6,
+        Renderer = 7,
+        Unknown = 8,
+    }
+
     /// <summary>
     /// Opt-in, consent-gated telemetry and crash reporting backed by <c>aun-telemetry</c>.
     /// Nothing is recorded, persisted, or sent while <see cref="Consent"/> is <see cref="TelemetryConsent.Off"/>.
@@ -66,6 +80,11 @@ namespace AlUmmahNow.CoreBridge
         /// stays in the same epoch. Never records an error that happened before opt-in or across revocation.
         /// </summary>
         void EnqueueTrackError(string code, IReadOnlyDictionary<string, object>? properties = null);
+        /// <summary>
+        /// Captures the current consent state and analytics epoch synchronously and dispatches a
+        /// <c>playback_error</c> event off the caller thread so ingest classifies it as a player error.
+        /// </summary>
+        void EnqueueTrackPlaybackError(TelemetryPlaybackErrorKind code, bool fatal = true, string detail = "") { }
         void AddBreadcrumb(string category, string message, TelemetryBreadcrumbSeverity level = TelemetryBreadcrumbSeverity.Info);
         void ReportCrash(string kind, string message, string? stack = null, bool fromPreviousSession = false);
         void Persist();
@@ -91,6 +110,7 @@ namespace AlUmmahNow.CoreBridge
         public void TrackError(string code, IReadOnlyDictionary<string, object>? properties = null) { }
         public void EnqueueTrack(string name, IReadOnlyDictionary<string, object>? properties = null) { }
         public void EnqueueTrackError(string code, IReadOnlyDictionary<string, object>? properties = null) { }
+        public void EnqueueTrackPlaybackError(TelemetryPlaybackErrorKind code, bool fatal = true, string detail = "") { }
         public void AddBreadcrumb(string category, string message, TelemetryBreadcrumbSeverity level = TelemetryBreadcrumbSeverity.Info) { }
         public void ReportCrash(string kind, string message, string? stack = null, bool fromPreviousSession = false) { }
         public void Persist() { }

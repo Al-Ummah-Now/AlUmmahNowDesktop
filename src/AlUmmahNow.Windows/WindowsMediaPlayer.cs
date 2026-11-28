@@ -29,11 +29,14 @@ public sealed class WindowsMediaPlayer : IMediaPlayer
         {
             var error = e.Error;
             var errorMessage = e.ErrorMessage;
-            Telemetry?.EnqueueTrackError("playback_failed", new Dictionary<string, object>
+            var errorKind = error switch
             {
-                ["backend"] = "winui",
-                ["error"] = error.ToString(),
-            });
+                MediaPlayerError.NetworkError => TelemetryPlaybackErrorKind.Network,
+                MediaPlayerError.DecodingError => TelemetryPlaybackErrorKind.Decode,
+                MediaPlayerError.SourceNotSupported => TelemetryPlaybackErrorKind.UnsupportedFormat,
+                _ => TelemetryPlaybackErrorKind.Unknown,
+            };
+            Telemetry?.EnqueueTrackPlaybackError(errorKind, fatal: true, detail: "winui:" + error);
             _ui.TryEnqueue(() =>
             {
                 Log.For("player").Error("playback error: " + error + " " + errorMessage);
