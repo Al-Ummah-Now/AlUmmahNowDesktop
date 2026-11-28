@@ -130,7 +130,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             appVersion,
             string.IsNullOrEmpty(os.Version) ? os.Name : $"{os.Name} {os.Version}",
             "desktop",
-            locale);
+            SanitizeLocaleTag(locale));
 
         _ingestUrl = ResolveIngestUrl(videosApiBaseUrl);
         _ingestScope = ComputeIngestScope(_ingestUrl);
@@ -1001,7 +1001,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         {
             offsets.Add(i);
             if (raw[i] == '%' && i + 2 < raw.Length && TryParseHexByte(raw[i + 1], raw[i + 2], out var b) &&
-                b >= 0x21 && b <= 0x7E && b is not (byte)'?' and not (byte)'#')
+                b >= 0x20 && b <= 0x7E && b is not (byte)'?' and not (byte)'#')
             {
                 sb.Append((char)b);
                 i += 3;
@@ -1198,27 +1198,43 @@ public sealed class CoreTelemetryService : ITelemetryService
 
     private static (string Decoded, int[] OrigOffsets) DecodeUrlForPathSecretMatch(string url)
     {
-        var decoded = new StringBuilder(url.Length);
-        var offsets = new int[url.Length + 1];
-        var outLen = 0;
-        var i = 0;
-        while (i < url.Length)
+        var cur = url;
+        int[]? map = null;
+        for (var round = 0; round < 4 && cur.IndexOf('%') >= 0; round++)
         {
-            offsets[outLen++] = i;
-            if (url[i] == '%' && i + 2 < url.Length && TryParseHexByte(url[i + 1], url[i + 2], out var b) &&
-                b >= 0x21 && b <= 0x7E && b is not ((byte)'/' or (byte)'?' or (byte)'#'))
+            var decoded = new StringBuilder(cur.Length);
+            var nextOffsets = new int[cur.Length + 1];
+            var outLen = 0;
+            var changed = false;
+            var i = 0;
+            while (i < cur.Length)
             {
-                decoded.Append((char)b);
-                i += 3;
+                nextOffsets[outLen++] = map != null ? map[i] : i;
+                if (cur[i] == '%' && i + 2 < cur.Length && TryParseHexByte(cur[i + 1], cur[i + 2], out var b) &&
+                    b >= 0x21 && b <= 0x7E && b is not ((byte)'/' or (byte)'?' or (byte)'#'))
+                {
+                    decoded.Append((char)b);
+                    i += 3;
+                    changed = true;
+                }
+                else
+                {
+                    decoded.Append(cur[i]);
+                    i++;
+                }
             }
-            else
+            nextOffsets[outLen] = map != null ? map[cur.Length] : cur.Length;
+            if (!changed)
             {
-                decoded.Append(url[i]);
-                i++;
+                return (cur, map ?? nextOffsets);
             }
+            cur = decoded.ToString();
+            map = nextOffsets;
         }
-        offsets[outLen] = url.Length;
-        return (decoded.ToString(), offsets);
+        if (map != null) return (cur, map);
+        var identity = new int[url.Length + 1];
+        for (var k = 0; k <= url.Length; k++) identity[k] = k;
+        return (url, identity);
     }
 
     private static bool TryParseHexByte(char hi, char lo, out byte value)
@@ -8664,6 +8680,16 @@ public sealed class CoreTelemetryService : ITelemetryService
         !(telemetry is CoreTelemetryService svc && svc.IsPendingInitialEnable);
 
     internal bool IsPendingInitialEnable { get { lock (_gate) return _pendingInitialEnable; } }
+
+    private static readonly Regex SafeLocaleTagRegex = new(
+        @"^[A-Za-z]{2,3}(?:[-_][A-Za-z0-9]{2,8}){0,3}$",
+        RegexOptions.Compiled);
+
+    internal static string SanitizeLocaleTag(string? raw)
+    {
+        var trimmed = raw?.Trim();
+        return !string.IsNullOrEmpty(trimmed) && SafeLocaleTagRegex.IsMatch(trimmed) ? trimmed : "en";
+    }
 
     private const string Ipv4OctetPattern = @"(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)";
     private const string Ipv4CorePattern = @"(?:" + Ipv4OctetPattern + @"\.){3}" + Ipv4OctetPattern;

@@ -117,9 +117,13 @@ public sealed class GstMediaPlayer : IMediaPlayer
                 break;
             case Gst.MessageType.Error:
                 Log.For("player").Error("playback error: " + ReadError(message));
-                _telemetry?.TrackError("playback_failed", new Dictionary<string, object> { ["backend"] = "gstreamer" });
                 _open = false;
                 SetState(PlayerState.Failed);
+                if (_telemetry != null)
+                {
+                    var telemetry = _telemetry;
+                    _ = Task.Run(() => telemetry.TrackError("playback_failed", new Dictionary<string, object> { ["backend"] = "gstreamer" }));
+                }
                 break;
         }
 

@@ -130,7 +130,7 @@ app.OnActivate += async (_, _) =>
     _ = mpris.StartAsync();
 
     var player = new GstMediaPlayer(telemetry);
-    telemetry.Track("app_open");
+    _ = Task.Run(() => telemetry.Track("app_open"));
     MainWindow? window = null;
     app.OnShutdown += (_, _) => window?.Close();
     var updates = updateScene?.Service ?? new UpdateService(

@@ -135,7 +135,8 @@ public sealed partial class App : Application
             settings.TelemetryEnabled = false;
             _telemetry.SetConsent(AlUmmahNow.CoreBridge.TelemetryConsent.Off);
         }
-        _telemetry.Track("app_open");
+        var startupTelemetry = _telemetry;
+        _ = Task.Run(() => startupTelemetry.Track("app_open"));
 
         // The passkey sheet is modal to the Studio window; its handle is filled in once it exists.
         var hwnd = IntPtr.Zero;

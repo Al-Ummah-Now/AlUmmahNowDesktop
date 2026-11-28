@@ -28,12 +28,17 @@ public sealed class WindowsMediaPlayer : IMediaPlayer
         Player.MediaFailed += (_, e) => _ui.TryEnqueue(() =>
         {
             Log.For("player").Error("playback error: " + e.Error + " " + e.ErrorMessage);
-            Telemetry?.TrackError("playback_failed", new Dictionary<string, object>
-            {
-                ["backend"] = "winui",
-                ["error"] = e.Error.ToString(),
-            });
             SetState(PlayerState.Failed);
+            var telemetry = Telemetry;
+            if (telemetry != null)
+            {
+                var errorName = e.Error.ToString();
+                _ = Task.Run(() => telemetry.TrackError("playback_failed", new Dictionary<string, object>
+                {
+                    ["backend"] = "winui",
+                    ["error"] = errorName,
+                }));
+            }
         });
         Player.MediaEnded += (_, _) => _ui.TryEnqueue(() => SetState(PlayerState.Ended));
         Player.PlaybackSession.PlaybackStateChanged += (_, _) => _ui.TryEnqueue(SyncState);

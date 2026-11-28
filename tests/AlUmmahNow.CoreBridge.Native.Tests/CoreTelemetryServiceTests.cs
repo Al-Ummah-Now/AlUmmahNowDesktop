@@ -3236,6 +3236,14 @@ public class CoreTelemetryServiceTests
             CoreTelemetryService.SanitizeLocalPaths("https://example.test/lookup/%2B%31%32%30%32%35%35%35%30%31%32%33"));
         Assert.Equal("https://example.test/lookup/[redacted]",
             CoreTelemetryService.SanitizeLocalPaths("https://example.test/lookup/alice%2540example.test"));
+        Assert.Equal("https://example.test/contact/[redacted]",
+            CoreTelemetryService.SanitizeLocalPaths("https://example.test/contact/%2B%31%20%32%30%32%20%35%35%35%20%30%31%32%33"));
+        Assert.Equal("https://example.test/%72eset-password/[redacted]",
+            CoreTelemetryService.SanitizeLocalPaths("https://example.test/%72eset-password/AbCdEf123456"));
+        Assert.Equal("https://example.test/%2572eset-password/[redacted]",
+            CoreTelemetryService.SanitizeLocalPaths("https://example.test/%2572eset-password/AbCdEf123456"));
+        Assert.Equal("en", CoreTelemetryService.SanitizeLocaleTag("/Users/Ada/Private.mov"));
+        Assert.Equal("ar-SA", CoreTelemetryService.SanitizeLocaleTag("ar-SA"));
         var multiEnc = CoreTelemetryService.SerializeProperties(new Dictionary<string, object>
         {
             ["u"] = "https%25253A%25252F%25252Fexample.test%25252Flogin%25253Ftoken%25253Ds3cr3t",
