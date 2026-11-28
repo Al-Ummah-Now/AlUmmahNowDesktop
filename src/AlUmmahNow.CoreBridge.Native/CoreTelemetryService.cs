@@ -2667,7 +2667,40 @@ public sealed class CoreTelemetryService : ITelemetryService
             var wsEnd = i + 6;
             while (wsEnd < text.Length && char.IsWhiteSpace(text[wsEnd])) wsEnd++;
             if (wsEnd >= text.Length) break;
-            if (MatchesBearerOrBasicSchemePrefix(text, wsEnd))
+            if (MatchesBearerPrefixAt(text, wsEnd))
+            {
+                var prevBearer = i;
+                var lastBearer = wsEnd;
+                var afterWs = wsEnd;
+                while (true)
+                {
+                    var nextWs = lastBearer + 6;
+                    while (nextWs < text.Length && char.IsWhiteSpace(text[nextWs])) nextWs++;
+                    if (nextWs < text.Length && MatchesBearerPrefixAt(text, nextWs))
+                    {
+                        prevBearer = lastBearer;
+                        lastBearer = nextWs;
+                    }
+                    else
+                    {
+                        afterWs = nextWs;
+                        break;
+                    }
+                }
+                if (afterWs < text.Length &&
+                    (HasValidBasicCredentialAt(text, afterWs) ||
+                     HasBearerTokenAt(text, afterWs, inEscapedQuote, allowLiteralQuoted, requireClosingLiteralQuote)))
+                {
+                    i = lastBearer;
+                }
+                else
+                {
+                    ranges.Add((prevBearer, lastBearer + 6, false));
+                    i = lastBearer + 6;
+                }
+                continue;
+            }
+            if (HasValidBasicCredentialAt(text, wsEnd))
             {
                 i = wsEnd;
                 continue;
@@ -2720,9 +2753,68 @@ public sealed class CoreTelemetryService : ITelemetryService
         return ranges;
     }
 
-    private static bool MatchesBearerOrBasicSchemePrefix(string text, int pos) =>
-        (pos + 6 < text.Length && MatchesAsciiIgnoreCase(text, pos, "bearer") && char.IsWhiteSpace(text[pos + 6])) ||
-        (pos + 5 < text.Length && MatchesAsciiIgnoreCase(text, pos, "basic") && char.IsWhiteSpace(text[pos + 5]));
+    private static bool MatchesBearerPrefixAt(string text, int pos) =>
+        pos + 6 < text.Length && MatchesAsciiIgnoreCase(text, pos, "bearer") && char.IsWhiteSpace(text[pos + 6]);
+
+    private static bool HasBearerTokenAt(
+        string text, int pos, bool inEscapedQuote, bool allowLiteralQuoted, bool requireClosingLiteralQuote)
+    {
+        if (pos >= text.Length) return false;
+        var wsCh = text[pos];
+        var openLen = !inEscapedQuote
+            ? (allowLiteralQuoted && (wsCh is '"' or '\'') ? 1 : EscapedDoubleQuoteLen(text, pos))
+            : 0;
+        if (openLen > 0)
+        {
+            var innerStart = pos + openLen;
+            var stopEsc = openLen > 1;
+            if (IsRedactedBearerPlaceholderAt(text, innerStart, stopEsc)) return true;
+            var innerEnd = ScanBearerTokenEnd(text, innerStart, stopEsc);
+            var closeLen = openLen == 1
+                ? (innerEnd < text.Length && text[innerEnd] == wsCh ? 1 : 0)
+                : EscapedDoubleQuoteLen(text, innerEnd);
+            if (innerEnd > innerStart && (closeLen > 0 || (openLen == 1 && !requireClosingLiteralQuote))) return true;
+            return false;
+        }
+        return IsRedactedBearerPlaceholderAt(text, pos, inEscapedQuote) ||
+               ScanBearerTokenEnd(text, pos, inEscapedQuote) > pos;
+    }
+
+    private static bool IsBasicBase64Char(char ch) =>
+        (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') ||
+        ch is '+' or '/' or '_' or '-';
+
+    private static bool HasValidBasicCredentialAt(string text, int pos)
+    {
+        if (pos + 5 >= text.Length || !MatchesAsciiIgnoreCase(text, pos, "basic") || !char.IsWhiteSpace(text[pos + 5]))
+        {
+            return false;
+        }
+        var p = pos + 5;
+        while (p < text.Length && char.IsWhiteSpace(text[p])) p++;
+        if (p >= text.Length) return false;
+        var openCh = text[p];
+        var openLen = openCh is '"' or '\'' ? 1 : EscapedDoubleQuoteLen(text, p);
+        var tokStart = p + openLen;
+        var tokEnd = tokStart;
+        while (tokEnd < text.Length && IsBasicBase64Char(text[tokEnd])) tokEnd++;
+        var eqCount = 0;
+        while (tokEnd < text.Length && eqCount < 2 && text[tokEnd] == '=')
+        {
+            tokEnd++;
+            eqCount++;
+        }
+        if (tokEnd - tokStart - eqCount < 2) return false;
+        if (tokEnd < text.Length && (IsBasicBase64Char(text[tokEnd]) || text[tokEnd] == '=')) return false;
+        if (openLen > 0 && tokEnd < text.Length)
+        {
+            var closeOk = openLen == 1
+                ? text[tokEnd] == openCh
+                : EscapedDoubleQuoteLen(text, tokEnd) == openLen;
+            if (!closeOk) return false;
+        }
+        return IsBasicCredentialToken(text.Substring(tokStart, tokEnd - tokStart));
+    }
 
     private static bool IsBearerStopPunct(char ch) =>
         ch is '"' or '\'' or ',' or ';' or ')' or ']' or '}';
@@ -6802,15 +6894,36 @@ public sealed class CoreTelemetryService : ITelemetryService
             if (bytes.Length == 0) return true;
             using var doc = JsonDocument.Parse(bytes);
             if (doc.RootElement.ValueKind != JsonValueKind.Object) return true;
-            var seenRootKeys = new HashSet<string>(StringComparer.Ordinal);
+            var eventsCount = 0;
+            var crumbsCount = 0;
             JsonElement? eventsEl = null;
             JsonElement? crumbsEl = null;
             foreach (var prop in doc.RootElement.EnumerateObject())
             {
-                if (!seenRootKeys.Add(prop.Name)) return true;
-                if (prop.Name == "events") eventsEl = prop.Value;
-                else if (prop.Name == "breadcrumbs") crumbsEl = prop.Value;
+                bool isEvents;
+                bool isCrumbs;
+                try
+                {
+                    isEvents = prop.NameEquals("events");
+                    isCrumbs = !isEvents && prop.NameEquals("breadcrumbs");
+                }
+                catch (InvalidOperationException)
+                {
+                    continue;
+                }
+                if (isEvents)
+                {
+                    eventsCount++;
+                    eventsEl = prop.Value;
+                }
+                else if (isCrumbs)
+                {
+                    crumbsCount++;
+                    crumbsEl = prop.Value;
+                }
             }
+            if (eventsCount > 1) eventsEl = null;
+            if (crumbsCount > 1) crumbsEl = null;
             if (eventsEl is { ValueKind: JsonValueKind.Array } evArray)
             {
                 foreach (var ev in evArray.EnumerateArray())

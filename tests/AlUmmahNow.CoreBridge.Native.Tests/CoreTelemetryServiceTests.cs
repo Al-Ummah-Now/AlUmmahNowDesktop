@@ -2471,6 +2471,15 @@ public class CoreTelemetryServiceTests
             "Bearer Basic \"[redacted]\"",
             CoreTelemetryService.SanitizeLocalPaths("Bearer Basic \"dXNlcjpwYXNz\""));
         Assert.Equal(
+            "Bearer [redacted]\n",
+            CoreTelemetryService.SanitizeLocalPaths("Bearer Basic\n"));
+        Assert.Equal(
+            "Bearer [redacted]\n",
+            CoreTelemetryService.SanitizeLocalPaths("Bearer Bearer\n"));
+        Assert.Equal(
+            "Bearer [redacted] auth",
+            CoreTelemetryService.SanitizeLocalPaths("Bearer Basic auth"));
+        Assert.Equal(
             "Basic Basic \"[redacted]\"",
             CoreTelemetryService.SanitizeLocalPaths("Basic Basic \"dXNlcjpwYXNz\""));
         Assert.Equal(
@@ -2530,8 +2539,12 @@ public class CoreTelemetryServiceTests
             File.WriteAllText(
                 surrogateOrphan,
                 "{\"events\":[{\"id\":\"bad2\",\"kind\":\"crash\",\"name\":\"\\uD800\",\"timestamp_ms\":1,\"session_id\":\"s\"}],\"breadcrumbs\":[]}");
+            var surrogateRootKeyOrphan = Path.Combine(dir, "telemetry-buffer.gen1.surrog02.json");
+            File.WriteAllText(
+                surrogateRootKeyOrphan,
+                "{\"events\":[{\"id\":\"ok-with-bad-root-key\",\"kind\":\"crash\",\"name\":\"recovered\",\"timestamp_ms\":2,\"session_id\":\"s\"}],\"\\uD800\":0}");
 
-            // Restarting must adopt the valid crash without letting malformed orphans throw or poison it.
+            // Restarting must adopt both healthy crashes without letting malformed orphans throw or erase them.
             using var instA = new CoreTelemetryService(
                 platform: "linux",
                 appVersion: "1.0.0",
@@ -2543,10 +2556,11 @@ public class CoreTelemetryServiceTests
                 externalConsentToken: () => Volatile.Read(ref sharedToken),
                 acquireExternalConsentLock: () => new NoOpDisposable());
             Assert.Equal(TelemetryConsent.Full, instA.Consent);
-            Assert.Equal(1, instA.PendingCount);
+            Assert.Equal(2, instA.PendingCount);
             Assert.False(File.Exists(dupOrphan));
             Assert.False(File.Exists(dupTmp));
             Assert.False(File.Exists(surrogateOrphan));
+            Assert.False(File.Exists(surrogateRootKeyOrphan));
 
             // Start a second active instance B in the same generation and persist a crash in B's buffer.
             using var instB = new CoreTelemetryService(
