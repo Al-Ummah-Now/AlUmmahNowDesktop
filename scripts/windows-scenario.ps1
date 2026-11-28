@@ -23,8 +23,16 @@ $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
 $g = [System.Drawing.Graphics]::FromImage($bmp)
 $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
 $bmp.Save((Join-Path $Out "$Name.png"), [System.Drawing.Imaging.ImageFormat]::Png)
+$diagnosticsError = $null
+if ($Automation -eq "diagnostics") {
+  try {
+    $p.Refresh()
+    & "$PSScriptRoot/windows-assert-diagnostics.ps1" $p.MainWindowHandle $Lang
+  } catch { $diagnosticsError = $_ }
+}
 if ($Contrast -eq "switch") { Set-Content $end "" }
 if (-not $p.WaitForExit(25000)) { $p.Kill(); "EXIT HANG" | Add-Content "$env:AUN_RESULT.hang.txt" }
 if ($Contrast -eq "switch") { Remove-Item $end; $env:AUN_END_FILE = "" }
 "exit=$($p.ExitCode)"
 & "$PSScriptRoot/windows-result.ps1" $env:AUN_RESULT
+if ($diagnosticsError) { throw $diagnosticsError }

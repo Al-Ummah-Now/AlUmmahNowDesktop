@@ -209,7 +209,8 @@ public sealed partial class App : Application
             act.Start();
         }
 
-        if (automation.StartsWith("watch:", StringComparison.Ordinal)) navigator.Push(new Route.Watch(automation.Substring(6)));
+        if (Environment.GetEnvironmentVariable("AUN_DEMO") == "1" && automation == "diagnostics") navigator.Push(new Route.Settings());
+        else if (automation.StartsWith("watch:", StringComparison.Ordinal)) navigator.Push(new Route.Watch(automation.Substring(6)));
         if (LiveAutomation.RouteOf(automation) is { } route)
         {
             navigator.Push(route);

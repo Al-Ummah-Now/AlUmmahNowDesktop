@@ -33,6 +33,24 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "passkey tests failed" }
       - name: Build Studio
         run: dotnet build src/AlUmmahNow.Studio.Windows -c Release -p:Platform=x64
+      - name: Diagnostics Settings frames
+        shell: pwsh
+        run: |
+          ./scripts/set-resolution.ps1 1920 1080
+          $exe = Resolve-Path "src/AlUmmahNow.Studio.Windows/bin/x64/Release/net9.0-windows10.0.22621.0/win-x64/AlUmmahNowStudio.exe"
+          $out = (New-Item -ItemType Directory -Force artifacts/diagnostics).FullName
+          foreach ($lang in "en","ar") { foreach ($theme in "light","dark") {
+            $name = "windows-studio-diagnostics-$lang-$theme"
+            ./scripts/windows-studio-shot.ps1 $exe $lang $theme 1440x900 diagnostics $name $out settings
+            if (-not (Test-Path "$out/$name.png") -or -not (Select-String -Quiet "page=settings .*RESULT PASS" "$out/$name.txt")) {
+              throw "$name failed"
+            }
+          } }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-studio-diagnostics
+          path: artifacts/diagnostics
       - name: Run Studio scenarios
         env:
           AUN_DEMO_TODAY: "2026-11-21"  # one demo "today" for every frame (DemoClock)

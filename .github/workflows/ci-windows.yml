@@ -25,6 +25,26 @@ jobs:
           Install-WindowsFeature Server-Media-Foundation | Format-List
       - name: Build unpackaged app
         run: dotnet build src/AlUmmahNow.Windows -c Release -p:Platform=x64
+      - name: Diagnostics Settings frames
+        env:
+          AUN_DEMO: "1"
+          AUN_DEMO_LIVE: "off"
+        shell: pwsh
+        run: |
+          $exe = Resolve-Path "src/AlUmmahNow.Windows/bin/x64/Release/net9.0-windows10.0.22621.0/win-x64/AlUmmahNow.exe"
+          $out = (New-Item -ItemType Directory -Force artifacts/diagnostics).FullName
+          foreach ($lang in "en","ar") { foreach ($theme in "light","dark") {
+            $name = "windows-viewer-diagnostics-$lang-$theme"
+            ./scripts/windows-scenario.ps1 $exe $lang $theme diagnostics $name $out 10 15
+            if (-not (Test-Path "$out/$name.png") -or -not (Select-String -Quiet "RESULT PASS" "$out/$name.txt")) {
+              throw "$name failed"
+            }
+          } }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-viewer-diagnostics
+          path: artifacts/diagnostics
       - name: Run viewer scenarios (ar and en, home and watch)
         env:
           AUN_DEMO_TODAY: "2026-11-21"  # one demo "today" for every frame (DemoClock)
