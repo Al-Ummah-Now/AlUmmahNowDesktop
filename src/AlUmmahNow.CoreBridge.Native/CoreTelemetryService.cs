@@ -303,6 +303,14 @@ public sealed class CoreTelemetryService : ITelemetryService
         return sb.Append(text, copied, text.Length - copied).ToString();
     }
 
+    private static int ScanVaultIndexEnd(string text, int numStart, int limit)
+    {
+        var p = numStart;
+        var maxEnd = Math.Min(limit, numStart + 10);
+        while (p < maxEnd && text[p] is >= '0' and <= '9') p++;
+        return p > numStart && p < limit && text[p] == '\u001F' ? p : -1;
+    }
+
     private static void AppendRemappedEscapedVault(
         StringBuilder sb, string text, int start, int end, string prefix, List<string> vaultedUrls, List<string> innerVaulted)
     {
@@ -317,7 +325,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             }
             sb.Append(text, pos, found - pos);
             var numStart = found + EscVaultPrefix.Length;
-            var numEnd = text.IndexOf('\u001F', numStart, end - numStart);
+            var numEnd = ScanVaultIndexEnd(text, numStart, end);
             if (numEnd > numStart &&
                 int.TryParse(text.AsSpan(numStart, numEnd - numStart), out var innerIdx) &&
                 innerIdx >= 0 && innerIdx < innerVaulted.Count)
@@ -2893,7 +2901,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                     {
                         writer.AppendRedacted(i, keyEnd, text[i] + normalizedKey + text[i]);
                     }
-                    i = RedactAuthHeaderValue(text, tupleValStart, isJsonMember: true, allowTruncatedObject: false, -1, cache, writer);
+                    i = RedactAuthHeaderValue(text, tupleValStart, isJsonMember: true, allowTruncatedObject: false, allowTrailingProse, -1, cache, writer);
                     continue;
                 }
                 i = keyEnd;
@@ -2912,7 +2920,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             {
                 writer.AppendRedacted(i, keyEnd, text[i] + normalizedKey + text[i]);
             }
-            i = RedactAuthHeaderValue(text, valStart, isJsonMember, allowTruncatedObject, containerTrailingEnd, cache, writer);
+            i = RedactAuthHeaderValue(text, valStart, isJsonMember, allowTruncatedObject, allowTrailingProse, containerTrailingEnd, cache, writer);
         }
     }
 
@@ -3276,10 +3284,13 @@ public sealed class CoreTelemetryService : ITelemetryService
     private static string? MatchCanonicalAuthHeaderName(ReadOnlySpan<char> raw)
     {
         var trimmed = raw.Trim(" \t".AsSpan());
-        if (trimmed.Equals("authorization".AsSpan(), StringComparison.OrdinalIgnoreCase)) return "Authorization";
-        if (trimmed.Equals("proxy-authorization".AsSpan(), StringComparison.OrdinalIgnoreCase)) return "Proxy-Authorization";
-        if (trimmed.Equals("cookie".AsSpan(), StringComparison.OrdinalIgnoreCase)) return "Cookie";
-        if (trimmed.Equals("set-cookie".AsSpan(), StringComparison.OrdinalIgnoreCase)) return "Set-Cookie";
+        if (trimmed.Equals("authorization".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+            trimmed.Equals("proxy-authorization".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+            trimmed.Equals("cookie".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+            trimmed.Equals("set-cookie".AsSpan(), StringComparison.OrdinalIgnoreCase))
+        {
+            return new string(trimmed);
+        }
         return null;
     }
 
@@ -3437,7 +3448,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     }
 
     private static int RedactAuthHeaderValue(
-        string text, int valStart, bool isJsonMember, bool allowTruncatedObject, int failedTopEnd,
+        string text, int valStart, bool isJsonMember, bool allowTruncatedObject, bool allowTrailingProse, int failedTopEnd,
         AuthJsonScanCache cache, AuthHeaderWriter writer)
     {
         var ch = text[valStart];
@@ -3445,13 +3456,13 @@ public sealed class CoreTelemetryService : ITelemetryService
         {
             var afterQuote = RedactQuotedAuthString(text, valStart, ch, writer);
             var validJsonStr = isJsonMember && ch == '"' && ScanJsonStringEnd(text, valStart + 1) == afterQuote;
-            return RedactTrailingPlainAuthContinuation(text, afterQuote, validJsonStr, failedTopEnd, writer);
+            return RedactTrailingPlainAuthContinuation(text, afterQuote, validJsonStr, allowTrailingProse, failedTopEnd, writer);
         }
         if (ch == '[')
         {
             var afterArray = RedactAuthArrayValue(text, valStart + 1, isJsonMember, allowTruncatedObject, cache, writer);
             var validJsonArr = isJsonMember && TryParseJsonValue(text, valStart, ref cache.ValidJsonValueEnd) == afterArray;
-            return RedactTrailingPlainAuthContinuation(text, afterArray, validJsonArr, failedTopEnd, writer);
+            return RedactTrailingPlainAuthContinuation(text, afterArray, validJsonArr, allowTrailingProse, failedTopEnd, writer);
         }
         if (ch == '{')
         {
@@ -3459,7 +3470,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             if (objEnd > valStart)
             {
                 writer.AppendRedacted(valStart, objEnd, isJsonMember ? "\"[redacted]\"" : "[redacted]");
-                return RedactTrailingPlainAuthContinuation(text, objEnd, isJsonMember, failedTopEnd, writer);
+                return RedactTrailingPlainAuthContinuation(text, objEnd, isJsonMember, allowTrailingProse, failedTopEnd, writer);
             }
             if (isJsonMember || allowTruncatedObject)
             {
@@ -3467,7 +3478,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                 return text.Length;
             }
         }
-        if (isJsonMember && TryRedactJsonPrimitiveAuthValue(text, valStart, writer, out var afterPrim))
+        if (isJsonMember && TryRedactJsonPrimitiveAuthValue(text, valStart, allowTrailingProse, writer, out var afterPrim))
         {
             return afterPrim;
         }
@@ -3475,7 +3486,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     }
 
     private static bool TryRedactJsonPrimitiveAuthValue(
-        string text, int valStart, AuthHeaderWriter writer, out int endPos)
+        string text, int valStart, bool allowTrailingProse, AuthHeaderWriter writer, out int endPos)
     {
         endPos = valStart;
         var tokenEnd = valStart;
@@ -3492,7 +3503,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         var isNumber = !isNull && !isBool && IsJsonNumberSpan(span);
         if (!isNull && !isBool && !isNumber) return false;
         var next = SkipAuthWhitespace(text, tokenEnd, allowNewlines: true);
-        if (next < text.Length && !IsJsonMemberContinuationDelimiter(text, next)) return false;
+        if (next < text.Length && !IsJsonMemberContinuationDelimiter(text, next, allowTrailingProse)) return false;
         if (!isNull)
         {
             writer.AppendRedacted(valStart, tokenEnd, "\"[redacted]\"");
@@ -3537,9 +3548,9 @@ public sealed class CoreTelemetryService : ITelemetryService
     }
 
     private static int RedactTrailingPlainAuthContinuation(
-        string text, int afterPos, bool allowNewlines, int failedTopEnd, AuthHeaderWriter writer)
+        string text, int afterPos, bool allowNewlines, bool allowTrailingProse, int failedTopEnd, AuthHeaderWriter writer)
     {
-        var tailStart = FindTrailingPlainAuthStart(text, afterPos, allowNewlines);
+        var tailStart = FindTrailingPlainAuthStart(text, afterPos, allowNewlines, allowTrailingProse);
         if (tailStart >= 0) return RedactPlainAuthSpan(text, tailStart, failedTopEnd, writer);
         if (!allowNewlines && failedTopEnd > afterPos)
         {
@@ -3549,7 +3560,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         return afterPos;
     }
 
-    private static int FindTrailingPlainAuthStart(string text, int afterPos, bool isJsonMember)
+    private static int FindTrailingPlainAuthStart(string text, int afterPos, bool isJsonMember, bool allowTrailingProse)
     {
         var p = afterPos;
         while (p < text.Length)
@@ -3564,7 +3575,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             break;
         }
         if (p >= text.Length || text[p] is '\r' or '\n') return -1;
-        if (isJsonMember && IsJsonMemberContinuationDelimiter(text, p)) return -1;
+        if (isJsonMember && IsJsonMemberContinuationDelimiter(text, p, allowTrailingProse)) return -1;
         return p;
     }
 
@@ -3832,11 +3843,11 @@ public sealed class CoreTelemetryService : ITelemetryService
         return -1;
     }
 
-    private static bool IsJsonMemberContinuationDelimiter(string text, int pos)
+    private static bool IsJsonMemberContinuationDelimiter(string text, int pos, bool allowTrailingProse)
     {
         if (text[pos] is '}' or ']')
         {
-            return pos + 1 >= text.Length || text[pos + 1] is ' ' or '\t' or '\r' or '\n' or ',' or '}' or ']' or ')' or ';';
+            return allowTrailingProse || pos + 1 >= text.Length || text[pos + 1] is ' ' or '\t' or '\r' or '\n' or ',' or '}' or ']' or ')' or ';';
         }
         if (text[pos] != ',') return false;
         var next = SkipAuthWhitespace(text, pos + 1, allowNewlines: true);
@@ -5292,7 +5303,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             }
             sb.Append(text, pos, idx - pos);
             var numStart = idx + prefix.Length;
-            var numEnd = text.IndexOf('\u001F', numStart);
+            var numEnd = ScanVaultIndexEnd(text, numStart, text.Length);
             if (numEnd > numStart &&
                 int.TryParse(text.AsSpan(numStart, numEnd - numStart), out var urlIndex) &&
                 (uint)urlIndex < (uint)vaultedUrls.Count)

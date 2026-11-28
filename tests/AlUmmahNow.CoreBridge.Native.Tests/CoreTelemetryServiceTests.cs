@@ -1626,6 +1626,12 @@ public class CoreTelemetryServiceTests
                 CoreTelemetryService.SanitizeLocalPaths("[[\\\"Authorization\\\",\\\"opaqueSecret123\\\"\\n]]"));
             Assert.Equal("{\"m\":\"{\\\"Authorization\\\":\\\"[redacted]\\\"} after\",\"next\":1}",
                 CoreTelemetryService.SanitizeLocalPaths("{\"m\":\"{\\\"Authorization\\\":\\\"opaqueSecret123\\\"} after\",\"next\":1}"));
+            Assert.Equal("{\"m\":\"{\\\"Authorization\\\":\\\"[redacted]\\\"}after\",\"next\":1}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"m\":\"{\\\"Authorization\\\":\\\"opaqueSecret123\\\"}after\",\"next\":1}"));
+            Assert.Equal("{\"cookie\":\"[redacted]\",\"Cookie\":\"[redacted]\"}",
+                CoreTelemetryService.SanitizeLocalPaths("{\"\\u0063ookie\":\"firstSecret\",\"Cookie\":\"secondSecret\"}"));
+            var repeatedVaultPrefix = string.Concat(Enumerable.Repeat("\u001EAUNURLx ", 5000)) + "https://example/path";
+            Assert.Equal(repeatedVaultPrefix, CoreTelemetryService.SanitizeLocalPaths(repeatedVaultPrefix));
             Assert.Equal("{\\\"Authorization\\\":[\\\"[redacted]\\\"]}",
                 CoreTelemetryService.SanitizeLocalPaths("{\\\"Authorization\\\":[123456789]}"));
             Assert.Equal("{\\\"Authorization\\\":\\\"[redacted]\\\",\\\"next\\\":1}",
