@@ -232,10 +232,16 @@ public sealed class CoreTelemetryService : ITelemetryService
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException or AunException)
         {
-            Log.For("telemetry").Warn("telemetry unavailable, continuing with no-op service: " + ex.Message);
-            return NullTelemetryService.Instance;
+            Log.For("telemetry").Warn("telemetry unavailable, continuing with purge-capable fallback service: " + ex.Message);
+            return new UnavailableNativeTelemetryService(bufferPath, initialEnabled, externalConsentToken);
         }
     }
+
+    internal static ITelemetryService CreateUnavailableFallbackForTesting(
+        string? bufferPath,
+        bool initialEnabled = false,
+        Func<string?>? externalConsentToken = null) =>
+        new UnavailableNativeTelemetryService(bufferPath, initialEnabled, externalConsentToken);
 
     /// <summary>
     /// Constructs <c>https://&lt;host&gt;[:port]/api/v1/telemetry/batches</c> from a parsed HTTPS URI,
@@ -7703,12 +7709,56 @@ public sealed class CoreTelemetryService : ITelemetryService
         return IsManagedTelemetryBufferFileName(bufferName, stem, ext);
     }
 
-    private bool TryDeleteForeignGenerationBuffers(string? keepGenerationPrefix)
+    private static bool HasIngestScopePrefix(ReadOnlySpan<char> genSegment)
     {
-        if (string.IsNullOrWhiteSpace(_bufferPath)) return true;
-        var dir = Path.GetDirectoryName(_bufferPath);
-        var stem = Path.GetFileNameWithoutExtension(_bufferPath);
-        var ext = Path.GetExtension(_bufferPath);
+        if (genSegment.Length <= 9 || genSegment[8] != '_') return false;
+        for (var i = 0; i < 8; i++)
+        {
+            var c = genSegment[i];
+            if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return false;
+        }
+        return true;
+    }
+
+    private static ReadOnlySpan<char> ExtractConsentGenerationPart(ReadOnlySpan<char> genSegment) =>
+        HasIngestScopePrefix(genSegment) ? genSegment.Slice(9) : genSegment;
+
+    private static bool IsBufferFileInSameConsentGeneration(string fileName, string keepGenerationPrefix, string stem, string ext)
+    {
+        if (IsBufferFileInGeneration(fileName, keepGenerationPrefix, ext)) return true;
+        if (!keepGenerationPrefix.StartsWith(stem + ".", StringComparison.Ordinal)) return false;
+        if (!fileName.StartsWith(stem + ".", StringComparison.Ordinal) || !fileName.EndsWith(ext, StringComparison.Ordinal)) return false;
+        var keepGenPart = ExtractConsentGenerationPart(keepGenerationPrefix.AsSpan(stem.Length + 1));
+        var middleStart = stem.Length + 1;
+        var middleLen = fileName.Length - ext.Length - middleStart;
+        if (middleLen <= 0) return false;
+        var middle = fileName.AsSpan(middleStart, middleLen);
+        var dot = middle.IndexOf('.');
+        var candRawGen = dot >= 0 ? middle.Slice(0, dot) : middle;
+        var candGenPart = ExtractConsentGenerationPart(candRawGen);
+        return candGenPart.Equals(keepGenPart, StringComparison.Ordinal);
+    }
+
+    private static bool IsSidecarInSameConsentGeneration(string fileName, string keepGenerationPrefix, string stem, string ext, string suffix)
+    {
+        if (IsTempFileInGeneration(fileName, keepGenerationPrefix, ext)) return true;
+        if (!fileName.StartsWith(".", StringComparison.Ordinal) || !fileName.EndsWith(suffix, StringComparison.Ordinal)) return false;
+        var inner = fileName.Substring(1, fileName.Length - 1 - suffix.Length);
+        var bufferName = suffix == ".owner"
+            ? inner
+            : (inner.LastIndexOf('.') is var dot && dot > 0 ? inner.Substring(0, dot) : string.Empty);
+        return bufferName.Length > 0 && IsBufferFileInSameConsentGeneration(bufferName, keepGenerationPrefix, stem, ext);
+    }
+
+    private bool TryDeleteForeignGenerationBuffers(string? keepGenerationPrefix) =>
+        TryDeleteForeignGenerationBuffersForPath(_bufferPath, keepGenerationPrefix);
+
+    private static bool TryDeleteForeignGenerationBuffersForPath(string? bufferPath, string? keepGenerationPrefix)
+    {
+        if (string.IsNullOrWhiteSpace(bufferPath)) return true;
+        var dir = Path.GetDirectoryName(bufferPath);
+        var stem = Path.GetFileNameWithoutExtension(bufferPath);
+        var ext = Path.GetExtension(bufferPath);
         if (string.IsNullOrEmpty(dir) || string.IsNullOrEmpty(stem)) return true;
         var allDeleted = true;
         try
@@ -7719,7 +7769,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                 {
                     var name = Path.GetFileName(candidate);
                     if (!IsManagedTelemetryBufferFileName(name, stem, ext)) continue;
-                    if (keepGenerationPrefix != null && IsBufferFileInGeneration(name, keepGenerationPrefix, ext)) continue;
+                    if (keepGenerationPrefix != null && IsBufferFileInSameConsentGeneration(name, keepGenerationPrefix, stem, ext)) continue;
                     try
                     {
                         File.Delete(candidate);
@@ -7733,7 +7783,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                 {
                     var name = Path.GetFileName(tmp);
                     if (!IsManagedTelemetrySidecarFileName(name, stem, ext, ".tmp")) continue;
-                    if (keepGenerationPrefix != null && IsTempFileInGeneration(name, keepGenerationPrefix, ext)) continue;
+                    if (keepGenerationPrefix != null && IsSidecarInSameConsentGeneration(name, keepGenerationPrefix, stem, ext, ".tmp")) continue;
                     try
                     {
                         File.Delete(tmp);
@@ -7747,7 +7797,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                 {
                     var name = Path.GetFileName(owner);
                     if (!IsManagedTelemetrySidecarFileName(name, stem, ext, ".owner")) continue;
-                    if (keepGenerationPrefix != null && IsTempFileInGeneration(name, keepGenerationPrefix, ext)) continue;
+                    if (keepGenerationPrefix != null && IsSidecarInSameConsentGeneration(name, keepGenerationPrefix, stem, ext, ".owner")) continue;
                     TryDeleteSingleFile(owner);
                 }
             }
@@ -7761,6 +7811,90 @@ public sealed class CoreTelemetryService : ITelemetryService
         {
             return false;
         }
+    }
+
+    private sealed class UnavailableNativeTelemetryService : ITelemetryService
+    {
+        private readonly string? _bufferPath;
+        private readonly Func<string?>? _externalConsentToken;
+        private readonly object _gate = new();
+        private bool _lastPurgeFailed;
+
+        public UnavailableNativeTelemetryService(
+            string? bufferPath,
+            bool initialEnabled,
+            Func<string?>? externalConsentToken)
+        {
+            _bufferPath = bufferPath;
+            _externalConsentToken = externalConsentToken;
+            if (!initialEnabled)
+            {
+                PurgeBuffers();
+            }
+        }
+
+        public TelemetryConsent Consent => TelemetryConsent.Off;
+        public int PendingCount => 0;
+        public bool LastPurgeFailed { get { lock (_gate) return _lastPurgeFailed; } }
+        public event Action<bool>? PurgeFailureChanged;
+        public event Action<TelemetryConsent>? ConsentChanged { add { } remove { } }
+
+        public bool SetConsent(TelemetryConsent consent) => SetConsent(consent, null, null);
+
+        public bool SetConsent(TelemetryConsent consent, string? pendingConsentToken, Func<bool>? confirmPendingConsent)
+        {
+            if (consent != TelemetryConsent.Off) return false;
+            return PurgeBuffers();
+        }
+
+        private bool PurgeBuffers()
+        {
+            string? keepGenPrefix = null;
+            if (_externalConsentToken != null && !string.IsNullOrWhiteSpace(_bufferPath))
+            {
+                try
+                {
+                    var token = _externalConsentToken();
+                    if (!string.IsNullOrWhiteSpace(token))
+                    {
+                        var stem = Path.GetFileNameWithoutExtension(_bufferPath);
+                        var normalized = NormalizeConsentGenerationToken(token) ?? string.Empty;
+                        var rawGen = normalized.StartsWith("enabled:", StringComparison.Ordinal)
+                            ? normalized["enabled:".Length..]
+                            : "legacy";
+                        var safeGen = new string(rawGen.Where(static ch => char.IsAsciiLetterOrDigit(ch) || ch is '-' or '_').ToArray());
+                        if (string.IsNullOrEmpty(safeGen)) safeGen = "legacy";
+                        if (!string.IsNullOrEmpty(stem)) keepGenPrefix = $"{stem}.{safeGen}";
+                    }
+                }
+                catch
+                {
+                    keepGenPrefix = null;
+                }
+            }
+            var purged = TryDeleteForeignGenerationBuffersForPath(_bufferPath, keepGenPrefix);
+            Action<bool>? notify = null;
+            bool failed;
+            lock (_gate)
+            {
+                failed = !purged;
+                if (_lastPurgeFailed != failed)
+                {
+                    _lastPurgeFailed = failed;
+                    notify = PurgeFailureChanged;
+                }
+            }
+            NotifyPurgeFailureQuietly(notify, failed);
+            return purged;
+        }
+
+        public void Track(string name, IReadOnlyDictionary<string, object>? properties = null) { }
+        public void TrackError(string code, IReadOnlyDictionary<string, object>? properties = null) { }
+        public void AddBreadcrumb(string category, string message, TelemetryBreadcrumbSeverity level = TelemetryBreadcrumbSeverity.Info) { }
+        public void ReportCrash(string kind, string message, string? stack = null, bool fromPreviousSession = false) { }
+        public void Persist() { }
+        public Task FlushAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public void Dispose() { }
     }
 
     private static bool TryDeleteSingleBufferAndTemps(string? targetPath)
@@ -7842,7 +7976,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             foreach (var tmp in Directory.EnumerateFiles(dir, pattern))
             {
                 if (keepForeignGenerationPrefix != null &&
-                    IsTempFileInGeneration(Path.GetFileName(tmp), keepForeignGenerationPrefix, ext))
+                    IsSidecarInSameConsentGeneration(Path.GetFileName(tmp), keepForeignGenerationPrefix, stem, ext, ".tmp"))
                 {
                     continue;
                 }

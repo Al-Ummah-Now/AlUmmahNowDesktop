@@ -2955,6 +2955,7 @@ public class CoreTelemetryServiceTests
         try
         {
             string? sharedToken = "enabled:envgen1";
+            string? qaBufferPath;
             // QA instance persists a crash and exits.
             using (var qa = new CoreTelemetryService(
                 platform: "linux",
@@ -2968,10 +2969,13 @@ public class CoreTelemetryServiceTests
                 acquireExternalConsentLock: () => new NoOpDisposable()))
             {
                 qa.ReportCrash("InvalidOperationException", "qa crash", "at Qa.Main()");
+                qaBufferPath = qa.ActiveBufferPathForTesting;
                 Assert.Equal(1, qa.PendingCount);
             }
+            Assert.NotNull(qaBufferPath);
+            Assert.True(File.Exists(qaBufferPath));
 
-            // Prod instance with the same consent token and bufferPath MUST NOT adopt the QA crash.
+            // Prod instance with the same consent token and bufferPath MUST NOT adopt OR delete the QA crash.
             using (var prod = new CoreTelemetryService(
                 platform: "linux",
                 appVersion: "1.0.0",
@@ -2985,7 +2989,38 @@ public class CoreTelemetryServiceTests
             {
                 Assert.Equal(TelemetryConsent.Full, prod.Consent);
                 Assert.Equal(0, prod.PendingCount);
+                Assert.True(File.Exists(qaBufferPath));
             }
+
+            // Relaunching QA adopts its own preserved QA crash report.
+            using (var qaReload = new CoreTelemetryService(
+                platform: "linux",
+                appVersion: "1.0.0",
+                locale: "en",
+                videosApiBaseUrl: "https://qa.videos.api.alummahnow.net",
+                userAgent: "AlUmmahNowLinux/1.0.0",
+                bufferPath: bufferPath,
+                initialEnabled: true,
+                externalConsentToken: () => Volatile.Read(ref sharedToken),
+                acquireExternalConsentLock: () => new NoOpDisposable()))
+            {
+                Assert.Equal(1, qaReload.PendingCount);
+            }
+
+            // Fallback service when native library is unavailable purges buffered files on opt-out instead of silently succeeding.
+            Volatile.Write(ref sharedToken, null);
+            using (var unavailable = CoreTelemetryService.CreateUnavailableFallbackForTesting(
+                bufferPath: bufferPath,
+                initialEnabled: true,
+                externalConsentToken: () => Volatile.Read(ref sharedToken)))
+            {
+                Assert.Equal(TelemetryConsent.Off, unavailable.Consent);
+                Assert.False(unavailable.SetConsent(TelemetryConsent.Full));
+                Assert.True(unavailable.SetConsent(TelemetryConsent.Off));
+                Assert.False(unavailable.LastPurgeFailed);
+                Assert.Empty(Directory.GetFiles(dir, "telemetry-buffer*.json"));
+            }
+            Volatile.Write(ref sharedToken, "enabled:envgen1");
 
             // Active flush guard stays held until external opt-out triggers native revocation, even while HTTP stalls.
             var flushStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
