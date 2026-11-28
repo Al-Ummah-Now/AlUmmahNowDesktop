@@ -165,6 +165,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             // currently recorded in external consent.
             _consent = TelemetryConsent.Off;
             _observedExternalToken = null;
+            _suppressedExternalToken = NormalizeConsentGenerationToken(ReadExternalTokenSafe());
             using var crossProcessLock = AcquireCrossProcessBufferLock();
             try
             {
@@ -953,7 +954,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                 var rawSeg = url.Substring(segStart, coreEnd - segStart);
                 var (decodedSeg, offsets) = DecodeUrlSegmentFull(rawSeg);
                 var redactedWhole = !decodedSeg.StartsWith("[redacted", StringComparison.Ordinal) &&
-                    IsOpaqueUrlSecretSegment(decodedSeg.AsSpan());
+                    IsDecodedSensitiveUrlSegment(decodedSeg.AsSpan());
                 if (redactedWhole)
                 {
                     sb ??= new StringBuilder(url.Length);
@@ -969,7 +970,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                         var subEnd = subSlash < 0 ? decodedSeg.Length : subSlash;
                         var sub = decodedSeg.AsSpan(subStart, subEnd - subStart);
                         if (sub.Length > 0 && !sub.StartsWith("[redacted", StringComparison.Ordinal) &&
-                            IsOpaqueUrlSecretSegment(sub))
+                            IsDecodedSensitiveUrlSegment(sub))
                         {
                             var origStart = segStart + offsets[subStart];
                             var origEnd = segStart + offsets[subEnd];
@@ -1026,6 +1027,27 @@ public sealed class CoreTelemetryService : ITelemetryService
             else if (c is not ('-' or '_' or '+' or '/' or '=')) return false;
         }
         return hasLetter && hasDigit;
+    }
+
+    private static bool IsDecodedSensitiveUrlSegment(ReadOnlySpan<char> segment) =>
+        IsOpaqueUrlSecretSegment(segment) ||
+        IsDecodedPhoneUrlSegment(segment) ||
+        Ipv4InKeyRegex.IsMatch(segment) ||
+        Ipv6InKeyRegex.IsMatch(segment);
+
+    private static bool IsDecodedPhoneUrlSegment(ReadOnlySpan<char> segment)
+    {
+        if (segment.Length < 8) return false;
+        var digits = 0;
+        var hasFormatting = false;
+        foreach (var c in segment)
+        {
+            if (c >= '0' && c <= '9') digits++;
+            else if (c is '+' or '-' or '(' or ')' or '.' or ' ') { if (c != '.') hasFormatting = true; }
+            else return false;
+        }
+        if (digits >= 9) return true;
+        return digits == 8 && hasFormatting && !IsoDateExactRegex.IsMatch(segment);
     }
 
     private static string RedactEncodedKeyValuesInUrl(string url)
@@ -6710,6 +6732,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     {
         if (string.IsNullOrWhiteSpace(name)) return;
         TryCompletePendingInitialEnable();
+        TrySyncExternalOptIn();
         long captureEpoch;
         lock (_gate)
         {
@@ -6736,6 +6759,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     {
         if (string.IsNullOrWhiteSpace(code)) return;
         TryCompletePendingInitialEnable();
+        TrySyncExternalOptIn();
         long captureEpoch;
         lock (_gate)
         {
@@ -6762,6 +6786,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     {
         if (string.IsNullOrWhiteSpace(category)) return;
         TryCompletePendingInitialEnable();
+        TrySyncExternalOptIn();
         long captureEpoch;
         lock (_gate)
         {
@@ -6789,7 +6814,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         if (toCancel != null) CancelQuietly(toCancel);
     }
 
-    private void TrySyncExternalOptInBeforeCrash()
+    private void TrySyncExternalOptIn()
     {
         if (_externalConsentToken == null) return;
         lock (_gate)
@@ -6824,7 +6849,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     public void ReportCrash(string kind, string message, string? stack = null, bool fromPreviousSession = false)
     {
         TryCompletePendingInitialEnable();
-        TrySyncExternalOptInBeforeCrash();
+        TrySyncExternalOptIn();
         long captureEpoch;
         lock (_gate)
         {
@@ -8708,7 +8733,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     }
 
     private static readonly Regex PercentEncodedUrlRegex = new(
-        @"(?<![A-Za-z0-9+.-])(?:[a-zA-Z][a-zA-Z0-9+.-]*(?:%3[aA]%2[fF]%2[fF]|%253[aA]%252[fF]%252[fF]))[^\s""'<>]+",
+        @"(?<![A-Za-z0-9+.-])(?:[a-zA-Z][a-zA-Z0-9+.-]*(?:%(?:25)*3[aA]%(?:25)*2[fF]%(?:25)*2[fF]))[^\s""'<>]+",
         RegexOptions.Compiled);
 
     private static string RedactPercentEncodedUrls(string text)
@@ -8717,7 +8742,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         return PercentEncodedUrlRegex.Replace(text, static m =>
         {
             var raw = m.Value;
-            if (raw.IndexOf("%253", StringComparison.OrdinalIgnoreCase) >= 0) return "[redacted-url]";
+            if (raw.IndexOf("%25", StringComparison.OrdinalIgnoreCase) >= 0) return "[redacted-url]";
             try
             {
                 var decoded = Uri.UnescapeDataString(raw);
@@ -8873,6 +8898,10 @@ public sealed class CoreTelemetryService : ITelemetryService
         @"(?<![A-Za-z0-9_])((?:api[_-]?key|api[_-]?token|access[_-]?token|refresh[_-]?token|id[_-]?token|auth[_-]?token|session[_-]?token|security[_-]?token|client[_-]?secret|private[_-]?key|secret[_-]?key|access[_-]?key|verification[_-]?code|auth[_-]?code|recovery[_-]?code|passphrase|password|passwd|passcode|credential|credentials|token|secret|jwt|otp|pin|pwd)[ \t]+)(?!\[redacted(?:-[a-z]+)?\])(?!""\[redacted\]"")(?:\\""(?:\\\\.|[^""\\])*\\""|""(?:\\.|[^""\\])*""|'(?:\\.|[^'\\])*'|\u201C[^\u201D\r\n]*\u201D|\u2018[^\u2019\r\n]*\u2019|[^\s,;}\]""'=:\u201C\u201D\u2018\u2019]+)",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+    private static readonly Regex KnownPrefixCredentialRegex = new(
+        @"(?<![A-Za-z0-9_])(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|(?:sk|pk|rk)_(?:live|test)_[A-Za-z0-9]{16,}|sk-(?:proj-|ant-)?[A-Za-z0-9_-]{20,}|(?:AKIA|ASIA|ABIA|ACCA)[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{35}|hf_[A-Za-z0-9]{20,}|npm_[A-Za-z0-9]{20,}|pypi-[A-Za-z0-9_-]{20,}|SG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}|sq0(?:atp|csp)-[A-Za-z0-9_-]{20,})(?![A-Za-z0-9_])",
+        RegexOptions.Compiled);
+
     private static int ScanBalancedContainerEnd(string text, int start)
     {
         var open = text[start];
@@ -8961,6 +8990,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         safe = ScrubUnquotedMultiWordSensitiveValues(safe, "[redacted]");
         safe = ScrubSensitiveKeyValues(safe, "[redacted]");
         safe = SpaceDelimitedCredentialRegex.Replace(safe, "$1[redacted]");
+        safe = KnownPrefixCredentialRegex.Replace(safe, "[redacted]");
         safe = Ipv6InKeyRegex.Replace(safe, "[redacted-ip]");
         safe = Ipv4InKeyRegex.Replace(safe, "[redacted-ip]");
         safe = WindowsDriveRelativePathRegex.Replace(safe, "[redacted-path]");

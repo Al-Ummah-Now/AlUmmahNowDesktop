@@ -3232,6 +3232,16 @@ public class CoreTelemetryServiceTests
             CoreTelemetryService.SanitizeLocalPaths("https://uploads.example.test/upload/853876e8-cc19-465d-bafa-7459aba00936"));
         Assert.Equal("alummahnow://watch/[redacted]",
             CoreTelemetryService.SanitizeLocalPaths("alummahnow://watch/v1"));
+        Assert.Equal("https://example.test/lookup/[redacted]",
+            CoreTelemetryService.SanitizeLocalPaths("https://example.test/lookup/%2B%31%32%30%32%35%35%35%30%31%32%33"));
+        var multiEnc = CoreTelemetryService.SerializeProperties(new Dictionary<string, object>
+        {
+            ["u"] = "https%25253A%25252F%25252Fexample.test%25252Flogin%25253Ftoken%25253Ds3cr3t",
+            ["pat"] = "ghp_abcdefghijklmnopqrstuvwxyzABCDEFGHIJ",
+        });
+        Assert.NotNull(multiEnc);
+        Assert.DoesNotContain("s3cr3t", multiEnc);
+        Assert.DoesNotContain("ghp_abcdefghijklmnopqrstuvwxyzABCDEFGHIJ", multiEnc);
         Assert.DoesNotContain("12 Cedar Rd", json);
         Assert.DoesNotContain("orchid", json);
         Assert.DoesNotContain("velvet", json);
@@ -3289,9 +3299,11 @@ public class CoreTelemetryServiceTests
 
             // Another process opts in while this instance stays outside Settings.
             Volatile.Write(ref sharedToken, "enabled:genB");
-            service.ReportCrash("TestException", "fatal", "https://example.org/r/Abcdefghijklmno1%41Pqrstuvwxyzabcd2");
+            service.TrackError("playback_failed", new Dictionary<string, object> { ["backend"] = "gstreamer" });
             Assert.Equal(TelemetryConsent.Full, service.Consent);
+            service.ReportCrash("TestException", "fatal", "https://example.org/r/Abcdefghijklmno1%41Pqrstuvwxyzabcd2");
             var persisted = File.ReadAllText(service.ActiveBufferPathForTesting!);
+            Assert.Contains("playback_failed", persisted);
             Assert.Contains("TestException", persisted);
             Assert.DoesNotContain("Abcdefghijklmno1", persisted);
             Assert.DoesNotContain("Pqrstuvwxyzabcd2", persisted);

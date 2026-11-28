@@ -106,10 +106,13 @@ public sealed class SettingsPage
                 }
             }
         }
+        var telemetryToggleBusy = false;
+        var telemetryDestroyed = false;
         if (telemetry != null && !telemetryUnavailable)
         {
             void SyncPurgeNotice()
             {
+                if (telemetryToggleBusy) return;
                 var failed = telemetry.LastPurgeFailed;
                 if (store.IsTelemetryDisableSaveFailed())
                 {
@@ -196,7 +199,6 @@ public sealed class SettingsPage
             };
             Action<bool> onPurgeChanged = _ => scheduleSync();
             Action<TelemetryConsent> onConsentChanged = _ => scheduleSync();
-            var telemetryDestroyed = false;
             telemetry.PurgeFailureChanged += onPurgeChanged;
             telemetry.ConsentChanged += onConsentChanged;
             telemetryCheck.OnMap += (_, _) => SyncPurgeNotice();
@@ -214,8 +216,13 @@ public sealed class SettingsPage
             };
             SyncPurgeNotice();
         }
+        else
+        {
+            telemetryNotice.OnDestroy += (_, _) => telemetryDestroyed = true;
+        }
         telemetryCheck.OnToggled += (_, _) =>
         {
+            if (telemetryToggleBusy) return;
             if (telemetryUnavailable)
             {
                 if (telemetryCheck.GetActive()) telemetryCheck.SetActive(false);
@@ -223,68 +230,79 @@ public sealed class SettingsPage
             }
             var enabled = telemetryCheck.GetActive();
             if (settings.TelemetryEnabled == enabled) return;
-            if (enabled)
+            telemetryToggleBusy = true;
+            telemetryCheck.SetSensitive(false);
+            var enableErrorText = l["settings.telemetry.enableError"];
+            _ = Task.Run(() =>
             {
-                if (!store.TrySaveTelemetryEnabled(true, out var writtenToken))
+                if (enabled)
                 {
-                    settings.TelemetryEnabled = false;
-                    telemetryCheck.SetActive(false);
-                    SetTelemetryNotice(l["settings.telemetry.enableError"]);
-                    return;
+                    if (!store.TrySaveTelemetryEnabled(true, out var writtenToken))
+                    {
+                        return (FinalEnabled: false, Notice: enableErrorText);
+                    }
+                    var confirmationFailed = false;
+                    var activated = telemetry != null
+                        ? telemetry.SetConsent(TelemetryConsent.Full, writtenToken, () =>
+                        {
+                            var confirmed = store.ConfirmTelemetryEnabled(writtenToken);
+                            if (!confirmed) confirmationFailed = true;
+                            return confirmed;
+                        })
+                        : (confirmationFailed = !store.ConfirmTelemetryEnabled(writtenToken)) == false;
+                    if (!activated)
+                    {
+                        var rolledBack = store.RollbackTelemetryEnabled(writtenToken);
+                        var purged = telemetry?.SetConsent(TelemetryConsent.Off) ?? true;
+                        if (!rolledBack)
+                        {
+                            return (FinalEnabled: true, Notice: purged
+                                ? disableErrorText
+                                : disableErrorText + "\n" + purgeWarningText);
+                        }
+                        return (FinalEnabled: false, Notice: confirmationFailed ? string.Empty : enableErrorText);
+                    }
+                    return (FinalEnabled: true, Notice: string.Empty);
                 }
-                var confirmationFailed = false;
-                var activated = telemetry != null
-                    ? telemetry.SetConsent(TelemetryConsent.Full, writtenToken, () =>
-                    {
-                        var confirmed = store.ConfirmTelemetryEnabled(writtenToken);
-                        if (!confirmed) confirmationFailed = true;
-                        return confirmed;
-                    })
-                    : (confirmationFailed = !store.ConfirmTelemetryEnabled(writtenToken)) == false;
-                if (!activated)
+                else
                 {
-                    var rolledBack = store.RollbackTelemetryEnabled(writtenToken);
+                    var optOut = store.SaveTelemetryOptOut();
                     var purged = telemetry?.SetConsent(TelemetryConsent.Off) ?? true;
-                    if (!rolledBack)
+                    if (optOut == SettingsStore.TelemetryOptOutResult.SaveFailed)
                     {
-                        settings.TelemetryEnabled = true;
-                        telemetryCheck.SetActive(true);
-                        SetTelemetryNotice(purged
+                        return (FinalEnabled: true, Notice: purged
                             ? disableErrorText
                             : disableErrorText + "\n" + purgeWarningText);
-                        return;
                     }
-                    settings.TelemetryEnabled = false;
-                    telemetryCheck.SetActive(false);
-                    SetTelemetryNotice(confirmationFailed ? string.Empty : l["settings.telemetry.enableError"]);
-                    return;
+                    if (optOut == SettingsStore.TelemetryOptOutResult.PendingOtherProcessRevocation)
+                    {
+                        return (FinalEnabled: false, Notice: purged
+                            ? revokingOtherText
+                            : revokingOtherText + "\n" + purgeWarningText);
+                    }
+                    return (FinalEnabled: false, Notice: purged ? string.Empty : purgeWarningText);
                 }
-                settings.TelemetryEnabled = true;
-                SetTelemetryNotice(string.Empty);
-            }
-            else
+            }).ContinueWith(t =>
             {
-                var optOut = store.SaveTelemetryOptOut();
-                var purged = telemetry?.SetConsent(TelemetryConsent.Off) ?? true;
-                if (optOut == SettingsStore.TelemetryOptOutResult.SaveFailed)
+                var result = t.IsCompletedSuccessfully
+                    ? t.Result
+                    : (FinalEnabled: !enabled, Notice: enabled ? enableErrorText : disableErrorText);
+                GLib.Functions.IdleAdd(GLib.Constants.PRIORITY_DEFAULT_IDLE, () =>
                 {
-                    settings.TelemetryEnabled = true;
-                    telemetryCheck.SetActive(true);
-                    SetTelemetryNotice(purged
-                        ? disableErrorText
-                        : disableErrorText + "\n" + purgeWarningText);
-                    return;
-                }
-                settings.TelemetryEnabled = false;
-                if (optOut == SettingsStore.TelemetryOptOutResult.PendingOtherProcessRevocation)
-                {
-                    SetTelemetryNotice(purged
-                        ? revokingOtherText
-                        : revokingOtherText + "\n" + purgeWarningText);
-                    return;
-                }
-                SetTelemetryNotice(purged ? string.Empty : purgeWarningText);
-            }
+                    settings.TelemetryEnabled = result.FinalEnabled;
+                    if (!telemetryDestroyed)
+                    {
+                        if (telemetryCheck.GetActive() != result.FinalEnabled)
+                        {
+                            telemetryCheck.SetActive(result.FinalEnabled);
+                        }
+                        SetTelemetryNotice(result.Notice);
+                        telemetryCheck.SetSensitive(!telemetryUnavailable);
+                    }
+                    telemetryToggleBusy = false;
+                    return false;
+                });
+            });
         };
         telemetryBody.Append(telemetryCheck);
         telemetryBody.Append(telemetryNotice);
