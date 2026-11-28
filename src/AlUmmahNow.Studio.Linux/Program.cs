@@ -195,6 +195,14 @@ app.OnActivate += (_, _) =>
     {
         closing.Cancel();
         telemetry.Persist();
+        using var exitFlushCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        try
+        {
+            Task.Run(() => telemetry.FlushAsync(exitFlushCts.Token)).Wait(TimeSpan.FromSeconds(2));
+        }
+        catch
+        {
+        }
         uploadsVm.Dispose();
     };
 

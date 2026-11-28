@@ -2276,6 +2276,21 @@ public class CoreTelemetryServiceTests
             await worker.WaitAsync(TimeSpan.FromSeconds(2));
 
             Assert.Equal(0, service.PendingCount);
+
+            // Analytics must also be dropped when consent transitions through CrashOnly and back to Full.
+            using var entered2 = new ManualResetEventSlim(false);
+            using var release2 = new ManualResetEventSlim(false);
+            var blocker2 = new BlockingToStringValue(entered2, release2);
+            var worker2 = Task.Run(() =>
+                service.Track("screen_view", new Dictionary<string, object> { ["detail"] = blocker2 }));
+            Assert.True(entered2.Wait(TimeSpan.FromSeconds(2)));
+
+            Assert.True(service.SetConsent(TelemetryConsent.CrashOnly));
+            Assert.True(service.SetConsent(TelemetryConsent.Full));
+            release2.Set();
+            await worker2.WaitAsync(TimeSpan.FromSeconds(2));
+
+            Assert.Equal(0, service.PendingCount);
         }
         finally
         {
@@ -2647,6 +2662,13 @@ public class CoreTelemetryServiceTests
         Assert.Equal(
             "https://registry.npmjs.org/%40angular/core",
             CoreTelemetryService.SanitizeLocalPaths("https://registry.npmjs.org/%40angular/core"));
+        Assert.Equal(
+            "{\"refresh_token\":\"[redacted]\",\"access_token\":\"[redacted]\",\"id_token\":\"[redacted]\"}",
+            CoreTelemetryService.SanitizeLocalPaths(
+                "{\"refresh_token\":\"opaqueSecret123\",\"access_token\":\"accSecret456\",\"id_token\":\"idSecret789\"}"));
+        Assert.Equal(
+            "jwt=[redacted]",
+            CoreTelemetryService.SanitizeLocalPaths("jwt=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTYifQ.sigSecret"));
         Assert.Equal(
             "https://hooks.slack.com:/services/[redacted]",
             CoreTelemetryService.SanitizeLocalPaths("https://hooks.slack.com:/services/T000/B000/Canary"));

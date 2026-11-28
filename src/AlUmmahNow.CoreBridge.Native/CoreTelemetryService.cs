@@ -66,6 +66,7 @@ public sealed class CoreTelemetryService : ITelemetryService
     private CancellationTokenSource _flushCts = new();
     private int _inFlightFlushes;
     private long _consentEpoch;
+    private long _analyticsEpoch;
     private int _revokedFlushesRemaining;
     private bool _disposeRequested;
     private bool _clientDisposed;
@@ -2556,13 +2557,22 @@ public sealed class CoreTelemetryService : ITelemetryService
         }
     }
 
+    private static readonly Regex JwtTokenRegex = new(
+        @"\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}(?:\.[A-Za-z0-9_-]*)?",
+        RegexOptions.Compiled);
+
     private static string RedactAuthCredentials(string text)
     {
         var result = RedactAuthHeaders(text);
         result = RedactEscapedBasicInBalancedQuotes(result);
         result = RedactBasicTokens(result);
         result = RedactBearerTokens(result);
-        return RedactEscapedBearerInBalancedQuotes(result);
+        result = RedactEscapedBearerInBalancedQuotes(result);
+        if (result.IndexOf("eyJ", StringComparison.Ordinal) >= 0)
+        {
+            result = JwtTokenRegex.Replace(result, "[redacted]");
+        }
+        return result;
     }
 
     private static bool AreBasicQuotesCompatible(string openQ, string closeQ) =>
@@ -3223,7 +3233,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             if (coreLen > 0) sawTrailingPad = true;
             return true;
         }
-        if (sawTrailingPad || coreLen >= 19) return false;
+        if (sawTrailingPad || coreLen >= 23) return false;
         core[coreLen++] = ch;
         return true;
     }
@@ -3280,7 +3290,7 @@ public sealed class CoreTelemetryService : ITelemetryService
 
     private static int TryRedactEscapedQuotedAuthHeader(string text, int pos, AuthJsonScanCache cache, AuthHeaderWriter writer)
     {
-        Span<char> core = stackalloc char[20];
+        Span<char> core = stackalloc char[24];
         var coreLen = 0;
         var sawTrailingPad = false;
         var sawPad = false;
@@ -3578,9 +3588,25 @@ public sealed class CoreTelemetryService : ITelemetryService
         trimmed.Equals("set-cookie".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
         trimmed.Equals("x-api-key".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
         trimmed.Equals("api-key".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("api_key".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
         trimmed.Equals("x-auth-token".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
         trimmed.Equals("x-access-token".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
-        trimmed.Equals("x-api-token".AsSpan(), StringComparison.OrdinalIgnoreCase);
+        trimmed.Equals("x-api-token".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("auth_token".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("api_token".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("access_token".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("access-token".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("refresh_token".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("refresh-token".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("id_token".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("id-token".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("code_verifier".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("code-verifier".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("client_secret".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("client-secret".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("authorizationsignature".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("authorization-signature".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+        trimmed.Equals("password".AsSpan(), StringComparison.OrdinalIgnoreCase);
 
     private static bool IsJsonStringStartBoundary(string text, int open)
     {
@@ -3637,15 +3663,31 @@ public sealed class CoreTelemetryService : ITelemetryService
                 text, pos, ch, allowTrailingProse, cache, out keyEnd, out isJsonCandidate, out hasJsonPrefix, out isTupleCandidate, out failedTopEnd, out normalizedKey);
         }
         if (pos > 0 && IsAuthKeyWordChar(text[pos - 1])) return false;
-        if (MatchesUnquotedAuthKey(text, pos, "proxy-authorization", out keyEnd) ||
+        if (MatchesUnquotedAuthKey(text, pos, "authorization-signature", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "authorizationsignature", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "proxy-authorization", out keyEnd) ||
             MatchesUnquotedAuthKey(text, pos, "authorization", out keyEnd) ||
             MatchesUnquotedAuthKey(text, pos, "set-cookie", out keyEnd) ||
             MatchesUnquotedAuthKey(text, pos, "cookie", out keyEnd) ||
             MatchesUnquotedAuthKey(text, pos, "x-api-key", out keyEnd) ||
             MatchesUnquotedAuthKey(text, pos, "api-key", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "api_key", out keyEnd) ||
             MatchesUnquotedAuthKey(text, pos, "x-auth-token", out keyEnd) ||
             MatchesUnquotedAuthKey(text, pos, "x-access-token", out keyEnd) ||
-            MatchesUnquotedAuthKey(text, pos, "x-api-token", out keyEnd))
+            MatchesUnquotedAuthKey(text, pos, "x-api-token", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "auth_token", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "api_token", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "access_token", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "access-token", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "refresh_token", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "refresh-token", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "id_token", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "id-token", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "code_verifier", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "code-verifier", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "client_secret", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "client-secret", out keyEnd) ||
+            MatchesUnquotedAuthKey(text, pos, "password", out keyEnd))
         {
             return true;
         }
@@ -3674,7 +3716,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         isTupleCandidate = false;
         failedTopEnd = -1;
         normalizedKey = null;
-        Span<char> core = stackalloc char[20];
+        Span<char> core = stackalloc char[24];
         var coreLen = 0;
         var sawTrailingPad = false;
         var sawPad = false;
@@ -5944,6 +5986,10 @@ public sealed class CoreTelemetryService : ITelemetryService
                     try
                     {
                         _client.SetConsent(state);
+                        if (_consent == TelemetryConsent.Full && consent != TelemetryConsent.Full)
+                        {
+                            _analyticsEpoch++;
+                        }
                         _consent = consent;
                         _observedExternalToken = NormalizeConsentGenerationToken(externalToken);
                         _pendingInitialEnable = false;
@@ -5983,9 +6029,10 @@ public sealed class CoreTelemetryService : ITelemetryService
         TryCompletePendingInitialEnable();
         lock (_gate)
         {
+            var activeEpoch = requiresFull ? _analyticsEpoch : _consentEpoch;
             if (_disposeRequested || _clientDisposed || _consent == TelemetryConsent.Off ||
                 (requiresFull && _consent != TelemetryConsent.Full) ||
-                (expectedEpoch.HasValue && _consentEpoch != expectedEpoch.Value))
+                (expectedEpoch.HasValue && activeEpoch != expectedEpoch.Value))
             {
                 return;
             }
@@ -6010,9 +6057,10 @@ public sealed class CoreTelemetryService : ITelemetryService
             lock (_gate)
             {
                 if (!EnsureExternalConsentLocked(out toCancel)) goto CancelAndReturn;
+                var activeEpoch = requiresFull ? _analyticsEpoch : _consentEpoch;
                 if (_disposeRequested || _clientDisposed || _consent == TelemetryConsent.Off ||
                     (requiresFull && _consent != TelemetryConsent.Full) ||
-                    (expectedEpoch.HasValue && _consentEpoch != expectedEpoch.Value))
+                    (expectedEpoch.HasValue && activeEpoch != expectedEpoch.Value))
                 {
                     return;
                 }
@@ -6036,7 +6084,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         lock (_gate)
         {
             if (_disposeRequested || _clientDisposed || _consent != TelemetryConsent.Full) return;
-            captureEpoch = _consentEpoch;
+            captureEpoch = _analyticsEpoch;
         }
         var safeName = SanitizeLocalPaths(name);
         if (string.IsNullOrWhiteSpace(safeName)) return;
@@ -6062,7 +6110,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         lock (_gate)
         {
             if (_disposeRequested || _clientDisposed || _consent != TelemetryConsent.Full) return;
-            captureEpoch = _consentEpoch;
+            captureEpoch = _analyticsEpoch;
         }
         var safeCode = SanitizeLocalPaths(code);
         if (string.IsNullOrWhiteSpace(safeCode)) return;
@@ -6494,6 +6542,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         _consent = TelemetryConsent.Off;
         _observedExternalToken = null;
         _consentEpoch++;
+        _analyticsEpoch++;
         _revokedFlushesRemaining = _inFlightFlushes;
         toCancel = _flushCts;
         _flushCts = new CancellationTokenSource();
