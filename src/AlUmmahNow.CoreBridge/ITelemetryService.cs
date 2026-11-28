@@ -84,7 +84,7 @@ namespace AlUmmahNow.CoreBridge
         /// Captures the current consent state and analytics epoch synchronously and dispatches a
         /// <c>playback_error</c> event off the caller thread so ingest classifies it as a player error.
         /// </summary>
-        void EnqueueTrackPlaybackError(TelemetryPlaybackErrorKind code, bool fatal = true, string detail = "") { }
+        void EnqueueTrackPlaybackError(TelemetryPlaybackErrorKind code, bool fatal = true, string detail = "");
         void AddBreadcrumb(string category, string message, TelemetryBreadcrumbSeverity level = TelemetryBreadcrumbSeverity.Info);
         void ReportCrash(string kind, string message, string? stack = null, bool fromPreviousSession = false);
         void Persist();

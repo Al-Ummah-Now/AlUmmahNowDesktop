@@ -7468,6 +7468,11 @@ public sealed class CoreTelemetryService : ITelemetryService
                     flushGuard?.Release();
                     return true;
                 }
+                if (!string.IsNullOrWhiteSpace(_activeBufferPath) && !EnsurePrivateBufferDirectory(_activeBufferPath))
+                {
+                    flushGuard?.Release();
+                    return true;
+                }
                 flushEpoch = _consentEpoch;
                 flushBufferPath = _activeBufferPath;
                 _inFlightFlushes++;
@@ -7793,6 +7798,12 @@ public sealed class CoreTelemetryService : ITelemetryService
             UpdatePurgeFailedLocked(!fallbackOk, ref purgeNotify, ref purgeNotifyValue);
             return !_lastPurgeFailed;
         }
+        if (HasSymlinkInBufferDirectory(_activeBufferPath) ||
+            (!ownBufferOnly && HasSymlinkInBufferDirectory(_bufferPath)))
+        {
+            UpdatePurgeFailedLocked(true, ref purgeNotify, ref purgeNotifyValue);
+            return false;
+        }
         try
         {
             _client.SetConsent(TelemetryConsentState.Denied);
@@ -7854,6 +7865,21 @@ public sealed class CoreTelemetryService : ITelemetryService
         return string.IsNullOrEmpty(dir) ? $".{stem}.lock" : Path.Combine(dir, $".{stem}.lock");
     }
 
+    private static FileStream CreatePrivateFileStream(string path, FileMode mode, FileAccess access, FileShare share)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return new FileStream(path, new FileStreamOptions
+            {
+                Mode = mode,
+                Access = access,
+                Share = share,
+                UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite,
+            });
+        }
+        return new FileStream(path, mode, access, share);
+    }
+
     private void EnsureBufferLockFileExists(bool createDirectory = true)
     {
         var lockPath = GetBufferLockPath();
@@ -7864,7 +7890,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             var dir = Path.GetDirectoryName(lockPath);
             if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir) && !File.Exists(lockPath))
             {
-                using var _ = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite);
+                using var _ = CreatePrivateFileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite);
                 RestrictUnixFilePermissions(lockPath);
             }
         }
@@ -7888,7 +7914,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             {
                 try
                 {
-                    var stream = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+                    var stream = CreatePrivateFileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
                     RestrictUnixFilePermissions(lockPath);
                     return stream;
                 }
@@ -8067,8 +8093,8 @@ public sealed class CoreTelemetryService : ITelemetryService
         }
         try
         {
-            EnsurePrivateBufferDirectory(ownerPath);
-            var nextLock = new FileStream(ownerPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            if (!EnsurePrivateBufferDirectory(ownerPath)) return false;
+            var nextLock = CreatePrivateFileStream(ownerPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
             RestrictUnixFilePermissions(ownerPath);
             ReleaseInstanceOwnerLockLocked();
             _instanceOwnerLock = nextLock;
@@ -8105,6 +8131,7 @@ public sealed class CoreTelemetryService : ITelemetryService
 
     private void AdoptOrphanedGenerationBuffersLocked(string targetBufferPath, string generationPrefix)
     {
+        if (!EnsurePrivateBufferDirectory(targetBufferPath)) return;
         var dir = Path.GetDirectoryName(targetBufferPath);
         var ext = Path.GetExtension(targetBufferPath);
         if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return;
@@ -8121,7 +8148,8 @@ public sealed class CoreTelemetryService : ITelemetryService
                 FileStream? ownerLock = null;
                 try
                 {
-                    ownerLock = new FileStream(ownerPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+                    ownerLock = CreatePrivateFileStream(ownerPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+                    RestrictUnixFilePermissions(ownerPath);
                     var mtime = File.GetLastWriteTimeUtc(candidate);
                     orphans.Add((candidate, ownerLock, ownerPath, mtime));
                     ownerLock = null;
@@ -8155,7 +8183,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                         if (mergedEvents.Count > 0 || latestBreadcrumbs.Count > 0)
                         {
                             var tmpPath = Path.Combine(dir, $".{Path.GetFileName(targetBufferPath)}.{Environment.ProcessId}_adopt.tmp");
-                            using (var fs = new FileStream(tmpPath, FileMode.Create, FileAccess.Write, FileShare.None))
+                            using (var fs = CreatePrivateFileStream(tmpPath, FileMode.Create, FileAccess.Write, FileShare.None))
                             using (var writer = new Utf8JsonWriter(fs))
                             {
                                 writer.WriteStartObject();
@@ -8169,6 +8197,7 @@ public sealed class CoreTelemetryService : ITelemetryService
                                 writer.WriteEndArray();
                                 writer.WriteEndObject();
                             }
+                            RestrictUnixFilePermissions(tmpPath);
                             File.Move(tmpPath, targetBufferPath, overwrite: true);
                         }
 

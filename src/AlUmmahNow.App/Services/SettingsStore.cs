@@ -128,11 +128,12 @@ namespace AlUmmahNow.App.Services
             return null;
         }
 
-        private static bool IsHex32(ReadOnlySpan<char> span)
+        private static bool IsHex32(string value, int start, int length)
         {
-            if (span.Length != 32) return false;
-            foreach (var c in span)
+            if (length != 32 || start < 0 || start + length > value.Length) return false;
+            for (var i = 0; i < length; i++)
             {
+                var c = value[start + i];
                 if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))) return false;
             }
             return true;
@@ -142,12 +143,14 @@ namespace AlUmmahNow.App.Services
         {
             if (string.Equals(raw, "enabled", StringComparison.Ordinal)) return true;
             if (raw == null || !raw.StartsWith("enabled:", StringComparison.Ordinal)) return false;
-            var rest = raw.AsSpan("enabled:".Length);
-            var colon = rest.IndexOf(':');
-            if (colon < 0) return IsHex32(rest);
-            var first = rest[..colon];
-            var second = rest[(colon + 1)..];
-            return (first.SequenceEqual("legacy") || IsHex32(first)) && IsHex32(second);
+            const int prefixLen = 8; // "enabled:".Length
+            var colon = raw.IndexOf(':', prefixLen);
+            if (colon < 0) return IsHex32(raw, prefixLen, raw.Length - prefixLen);
+            var firstLen = colon - prefixLen;
+            var secondStart = colon + 1;
+            var secondLen = raw.Length - secondStart;
+            var firstIsLegacy = firstLen == 6 && string.CompareOrdinal(raw, prefixLen, "legacy", 0, 6) == 0;
+            return (firstIsLegacy || IsHex32(raw, prefixLen, firstLen)) && IsHex32(raw, secondStart, secondLen);
         }
 
         private static bool HasPendingPrefixOnNextLine(StreamReader reader)
