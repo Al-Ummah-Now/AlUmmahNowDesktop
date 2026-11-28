@@ -2462,6 +2462,24 @@ public class CoreTelemetryServiceTests
             "Bearer \"hello world\"",
             CoreTelemetryService.SanitizeLocalPaths("Bearer \"hello world\""));
         Assert.Equal(
+            "Bearer Bearer \"[redacted]\"",
+            CoreTelemetryService.SanitizeLocalPaths("Bearer Bearer \"opaqueSecret123\""));
+        Assert.Equal(
+            "Bearer Bearer [redacted]",
+            CoreTelemetryService.SanitizeLocalPaths("Bearer Bearer opaqueSecret123"));
+        Assert.Equal(
+            "Bearer Basic \"[redacted]\"",
+            CoreTelemetryService.SanitizeLocalPaths("Bearer Basic \"dXNlcjpwYXNz\""));
+        Assert.Equal(
+            "Basic Basic \"[redacted]\"",
+            CoreTelemetryService.SanitizeLocalPaths("Basic Basic \"dXNlcjpwYXNz\""));
+        Assert.Equal(
+            "Basic Basic [redacted]",
+            CoreTelemetryService.SanitizeLocalPaths("Basic Basic dXNlcjpwYXNz"));
+        Assert.Equal(
+            "{\"m\":\"Basic Basic \\\"[redacted]\\\"\"}",
+            CoreTelemetryService.SanitizeLocalPaths("{\"m\":\"Basic Basic \\\"dXNlcjpwYXNz\\\"\"}"));
+        Assert.Equal(
             "https://[redacted-email]",
             CoreTelemetryService.SanitizeLocalPaths("https://example.org/users/alice/@example.com"));
         Assert.Equal(
@@ -2501,15 +2519,19 @@ public class CoreTelemetryServiceTests
                 inst1.ReportCrash("InvalidOperationException", "valid crash", "at App.Main()");
             }
 
-            // Seed a malformed sibling orphan with duplicate keys AND temp files.
+            // Seed a malformed sibling orphan with duplicate keys, a lone-surrogate orphan, AND temp files.
             var dupOrphan = Path.Combine(dir, "telemetry-buffer.gen1.dupkey01.json");
             File.WriteAllText(
                 dupOrphan,
                 "{\"events\":[{\"id\":\"bad\",\"kind\":\"crash\",\"name\":\"first\",\"name\":\"second\",\"timestamp_ms\":1,\"session_id\":\"s\"}],\"breadcrumbs\":[]}");
             var dupTmp = Path.Combine(dir, ".telemetry-buffer.gen1.dupkey01.json.999.tmp");
             File.WriteAllText(dupTmp, "{}");
+            var surrogateOrphan = Path.Combine(dir, "telemetry-buffer.gen1.surrog01.json");
+            File.WriteAllText(
+                surrogateOrphan,
+                "{\"events\":[{\"id\":\"bad2\",\"kind\":\"crash\",\"name\":\"\\uD800\",\"timestamp_ms\":1,\"session_id\":\"s\"}],\"breadcrumbs\":[]}");
 
-            // Restarting must adopt the valid crash without letting the duplicate-key orphan poison it.
+            // Restarting must adopt the valid crash without letting malformed orphans throw or poison it.
             using var instA = new CoreTelemetryService(
                 platform: "linux",
                 appVersion: "1.0.0",
@@ -2520,9 +2542,11 @@ public class CoreTelemetryServiceTests
                 initialEnabled: true,
                 externalConsentToken: () => Volatile.Read(ref sharedToken),
                 acquireExternalConsentLock: () => new NoOpDisposable());
+            Assert.Equal(TelemetryConsent.Full, instA.Consent);
             Assert.Equal(1, instA.PendingCount);
             Assert.False(File.Exists(dupOrphan));
             Assert.False(File.Exists(dupTmp));
+            Assert.False(File.Exists(surrogateOrphan));
 
             // Start a second active instance B in the same generation and persist a crash in B's buffer.
             using var instB = new CoreTelemetryService(

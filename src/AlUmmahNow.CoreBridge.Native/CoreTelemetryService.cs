@@ -2558,15 +2558,41 @@ public sealed class CoreTelemetryService : ITelemetryService
         result = RedactBearerTokens(result);
         result = RedactEscapedBearerInBalancedQuotes(result);
         result = RedactEscapedBasicInBalancedQuotes(result);
-        return BasicTokenRegex.Replace(result, match =>
+        return RedactBasicTokens(result);
+    }
+
+    private static string RedactBasicTokens(string text)
+    {
+        if (text.IndexOf("basic", StringComparison.OrdinalIgnoreCase) < 0) return text;
+        StringBuilder? sb = null;
+        var copied = 0;
+        var pos = 0;
+        while (pos < text.Length)
         {
+            var match = BasicTokenRegex.Match(text, pos);
+            if (!match.Success) break;
             var isQuoted = match.Groups[3].Success;
             var token = isQuoted ? match.Groups[3].Value : match.Groups[5].Value;
-            if (!IsBasicCredentialToken(token)) return match.Value;
-            return isQuoted
-                ? $"{match.Groups[1].Value} {match.Groups[2].Value}[redacted]{match.Groups[4].Value}"
-                : $"{match.Groups[1].Value} [redacted]";
-        });
+            if (!IsBasicCredentialToken(token))
+            {
+                pos = match.Index + 5;
+                continue;
+            }
+            sb ??= new StringBuilder(text.Length);
+            sb.Append(text, copied, match.Index - copied);
+            if (isQuoted)
+            {
+                sb.Append(match.Groups[1].Value).Append(' ')
+                    .Append(match.Groups[2].Value).Append("[redacted]").Append(match.Groups[4].Value);
+            }
+            else
+            {
+                sb.Append(match.Groups[1].Value).Append(" [redacted]");
+            }
+            copied = match.Index + match.Length;
+            pos = copied;
+        }
+        return sb == null ? text : sb.Append(text, copied, text.Length - copied).ToString();
     }
 
     private static string RedactBearerTokens(string text)
@@ -2641,6 +2667,11 @@ public sealed class CoreTelemetryService : ITelemetryService
             var wsEnd = i + 6;
             while (wsEnd < text.Length && char.IsWhiteSpace(text[wsEnd])) wsEnd++;
             if (wsEnd >= text.Length) break;
+            if (MatchesBearerOrBasicSchemePrefix(text, wsEnd))
+            {
+                i = wsEnd;
+                continue;
+            }
             var wsCh = text[wsEnd];
             var openQuoteLen = !inEscapedQuote
                 ? (allowLiteralQuoted && (wsCh is '"' or '\'') ? 1 : EscapedDoubleQuoteLen(text, wsEnd))
@@ -2688,6 +2719,10 @@ public sealed class CoreTelemetryService : ITelemetryService
         }
         return ranges;
     }
+
+    private static bool MatchesBearerOrBasicSchemePrefix(string text, int pos) =>
+        (pos + 6 < text.Length && MatchesAsciiIgnoreCase(text, pos, "bearer") && char.IsWhiteSpace(text[pos + 6])) ||
+        (pos + 5 < text.Length && MatchesAsciiIgnoreCase(text, pos, "basic") && char.IsWhiteSpace(text[pos + 5]));
 
     private static bool IsBearerStopPunct(char ch) =>
         ch is '"' or '\'' or ',' or ';' or ')' or ']' or '}';
@@ -2786,27 +2821,31 @@ public sealed class CoreTelemetryService : ITelemetryService
             if (innerStart >= close || text.IndexOf('\\', innerStart, close - innerStart) < 0) continue;
             var (decoded, rawOffsets) = DecodeQuotedSpanWithOffsets(text, innerStart, close);
             if (decoded.IndexOf("basic", StringComparison.OrdinalIgnoreCase) < 0) continue;
-            var match = BasicTokenRegex.Match(decoded);
-            while (match.Success)
+            var pos = 0;
+            while (pos < decoded.Length)
             {
+                var match = BasicTokenRegex.Match(decoded, pos);
+                if (!match.Success) break;
                 var isQuoted = match.Groups[3].Success;
                 var tokenGroup = isQuoted ? match.Groups[3] : match.Groups[5];
-                if (IsBasicCredentialToken(tokenGroup.Value))
+                if (!IsBasicCredentialToken(tokenGroup.Value))
                 {
-                    var targetIndex = isQuoted ? tokenGroup.Index : match.Index;
-                    var targetLength = isQuoted ? tokenGroup.Length : match.Length;
-                    var rawStart = rawOffsets[targetIndex];
-                    var rawEnd = rawOffsets[targetIndex + targetLength];
-                    if (rawStart >= copied)
-                    {
-                        sb ??= new StringBuilder(text.Length);
-                        sb.Append(text, copied, rawStart - copied);
-                        if (isQuoted) sb.Append("[redacted]");
-                        else sb.Append(match.Groups[1].Value).Append(" [redacted]");
-                        copied = rawEnd;
-                    }
+                    pos = match.Index + 5;
+                    continue;
                 }
-                match = match.NextMatch();
+                var targetIndex = isQuoted ? tokenGroup.Index : match.Index;
+                var targetLength = isQuoted ? tokenGroup.Length : match.Length;
+                var rawStart = rawOffsets[targetIndex];
+                var rawEnd = rawOffsets[targetIndex + targetLength];
+                if (rawStart >= copied)
+                {
+                    sb ??= new StringBuilder(text.Length);
+                    sb.Append(text, copied, rawStart - copied);
+                    if (isQuoted) sb.Append("[redacted]");
+                    else sb.Append(match.Groups[1].Value).Append(" [redacted]");
+                    copied = rawEnd;
+                }
+                pos = match.Index + match.Length;
             }
         }
         if (sb == null) return text;
@@ -6612,7 +6651,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             }
             TryDeleteAdoptedOrphanTempFiles(dir, generationPrefix, ext, adoptedNames);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException)
         {
             Log.For("telemetry").Warn("telemetry orphan buffer adoption skipped: " + ex.Message);
         }
@@ -6798,7 +6837,7 @@ public sealed class CoreTelemetryService : ITelemetryService
             }
             return true;
         }
-        catch (JsonException)
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException)
         {
             return true;
         }
@@ -6812,6 +6851,8 @@ public sealed class CoreTelemetryService : ITelemetryService
     {
         parsed = null!;
         if (ev.ValueKind != JsonValueKind.Object) return false;
+        try
+        {
         var seen = new HashSet<string>(StringComparer.Ordinal);
         string? id = null;
         string? kind = null;
@@ -6882,6 +6923,11 @@ public sealed class CoreTelemetryService : ITelemetryService
             Breadcrumbs = crumbs,
         };
         return true;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or FormatException)
+        {
+            return false;
+        }
     }
 
     private static bool TryParsePersistedPropValue(JsonElement value, out AdoptedPropValue parsed)
@@ -6920,6 +6966,8 @@ public sealed class CoreTelemetryService : ITelemetryService
     {
         parsed = null!;
         if (crumb.ValueKind != JsonValueKind.Object) return false;
+        try
+        {
         var seen = new HashSet<string>(StringComparer.Ordinal);
         long timestampMs = 0;
         var hasTimestamp = false;
@@ -6960,6 +7008,11 @@ public sealed class CoreTelemetryService : ITelemetryService
             Level = level,
         };
         return true;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or FormatException)
+        {
+            return false;
+        }
     }
 
     private bool TryDeleteOwnBufferAndGenerationTemps(string? targetPath, string? ownGenerationPrefix)
