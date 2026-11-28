@@ -840,8 +840,12 @@ public sealed class CoreTelemetryService : ITelemetryService
         @"((?:^|/|%2[fF])webhooks?(?:/|%2[fF]))[^\s?#]+",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
-    private static readonly Regex SlackWebhookUrlRegex = new(
-        @"(https?://hooks\.slack(?:-gov)?\.com\.?(?::\d+)?(?:(?:/|%2[fF])[^\s?#]*?)?(?:/|%2[fF])(?:services|workflows|triggers)(?:/|%2[fF]))[^\s?#]+",
+    private static readonly Regex SlackWebhookHostRegex = new(
+        @"https?://hooks\.slack(?:-gov)?\.com\.?(?::\d+)?(?=(?:/|%2[fF]))",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex SlackWebhookRouteRegex = new(
+        @"((?:/|%2[fF])(?:services|workflows|triggers)(?:/|%2[fF]))[^\s?#]+",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex TelegramBotTokenUrlRegex = new(
@@ -851,9 +855,39 @@ public sealed class CoreTelemetryService : ITelemetryService
     private static string RedactUrlPathSecrets(string url)
     {
         var result = ReplaceUrlPathSecret(url, WebhookPathTokenRegex);
-        result = ReplaceUrlPathSecret(result, SlackWebhookUrlRegex);
+        result = RedactSlackWebhookUrl(result);
         result = ReplaceUrlPathSecret(result, TelegramBotTokenUrlRegex);
         return result;
+    }
+
+    private static string RedactSlackWebhookUrl(string url)
+    {
+        string decoded;
+        int[]? origOffsets = null;
+        if (url.IndexOf('%') >= 0)
+        {
+            (decoded, origOffsets) = DecodeUrlForPathSecretMatch(url);
+        }
+        else
+        {
+            decoded = url;
+        }
+        var hostMatch = SlackWebhookHostRegex.Match(decoded);
+        if (!hostMatch.Success) return url;
+        var hostEnd = hostMatch.Index + hostMatch.Length;
+        var pathEnd = hostEnd;
+        while (pathEnd < decoded.Length && !char.IsWhiteSpace(decoded[pathEnd]) && decoded[pathEnd] is not ('?' or '#'))
+        {
+            pathEnd++;
+        }
+        var routeMatch = SlackWebhookRouteRegex.Match(decoded, hostEnd, pathEnd - hostEnd);
+        if (!routeMatch.Success) return url;
+        var g1 = routeMatch.Groups[1];
+        var rawStart = g1.Index + g1.Length;
+        var rawEnd = routeMatch.Index + routeMatch.Length;
+        var secretStart = origOffsets != null ? origOffsets[rawStart] : rawStart;
+        var secretEnd = origOffsets != null ? origOffsets[rawEnd] : rawEnd;
+        return string.Concat(url.AsSpan(0, secretStart), "[redacted]", url.AsSpan(secretEnd));
     }
 
     private static string ReplaceUrlPathSecret(string url, Regex regex)

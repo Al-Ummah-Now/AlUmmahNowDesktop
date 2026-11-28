@@ -2220,6 +2220,13 @@ public class CoreTelemetryServiceTests
             "{\"uri\":\"[redacted-path]\",\"ok\":true}",
             CoreTelemetryService.SanitizeLocalPaths(
                 "{\"uri\":\"content:\\/\\/com.android.externalstorage.documents\\/document\\/primary%3ADownload%2FPrivateAcquisition.mov\",\"ok\":true}"));
+        Assert.Equal(
+            "https://proxy.example.com/https://hooks.slack.com/./services/[redacted]",
+            CoreTelemetryService.SanitizeLocalPaths(
+                "https://proxy.example.com/https://hooks.slack.com/./services/T000/B000/fakeWebhookSecret"));
+        var repeatedSlackHosts =
+            "https://hooks.slack.com" + string.Concat(Enumerable.Repeat("/https://hooks.slack.com", 2000)) + "/x";
+        Assert.Equal(repeatedSlackHosts, CoreTelemetryService.SanitizeLocalPaths(repeatedSlackHosts));
     }
 
     private sealed class CallbackDisposable : IDisposable
