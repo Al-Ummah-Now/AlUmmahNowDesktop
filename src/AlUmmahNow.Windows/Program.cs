@@ -27,8 +27,15 @@ public sealed partial class App : Application
     public App()
     {
         InitializeComponent();
-        UnhandledException += (_, e) => ReportCrash("unhandled: " + e.Message + "\n" + e.Exception);
+        UnhandledException += (_, e) =>
+        {
+            ReportCrash("unhandled: " + e.Message + "\n" + e.Exception);
+            _telemetry.ReportCrash(e.Exception);
+        };
     }
+
+    /// <summary>Opt-in crash reports (Settings → Diagnostics); nothing until OnLaunched starts it.</summary>
+    private static ITelemetryService _telemetry = NullTelemetryService.Instance;
 
     private static void ReportCrash(string text)
     {
@@ -109,7 +116,11 @@ public sealed partial class App : Application
         var updateStore = new UpdateStore(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AlUmmahNow", "updates.json"));
         var updates = updateScene?.Service ?? WindowsInstall.Service("viewer", environment.VideosApi, version, "AlUmmahNowWindows/" + version,
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AlUmmahNow"), updateStore, Environment.GetEnvironmentVariable("AUN_DEMO") == "1", IsBusy, WindowsEnd.Close);
-        var shell = shown = new Shell(catalog, localizer, navigator, player, session, settings, store, auth, live, environment.ShortLinkHost, updates, WindowsEnd.Close);
+        // Demo mode and CI scenarios never report.
+        if (Environment.GetEnvironmentVariable("AUN_DEMO") != "1")
+            _telemetry = CoreTelemetryService.Start(environment.VideosApi, "AlUmmahNowWindows/" + version, version, localizer.Language,
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AlUmmahNow", "telemetry.json"), settings.TelemetryEnabled);
+        var shell = shown = new Shell(catalog, localizer, navigator, player, session, settings, store, auth, live, environment.ShortLinkHost, updates, WindowsEnd.Close, _telemetry);
         var closing = new CancellationTokenSource();
 
         _window = new Window { Title = localizer["app.name"], Content = shell.Root };

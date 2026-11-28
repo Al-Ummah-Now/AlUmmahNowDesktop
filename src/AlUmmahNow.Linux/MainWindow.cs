@@ -32,11 +32,12 @@ public sealed partial class MainWindow
     private string? _watchId;
     private Action? _unbindWatch;
     private readonly UpdateService _updates;
-    private bool _hasSettings;
+    private readonly ITelemetryService _telemetry;
 
-    public MainWindow(Adw.Application app, ICatalogClient catalog, Localizer localizer, Navigator navigator, GstMediaPlayer player, IMediaSession session, HttpClient http, AppSettings settings, SettingsStore store, AuthViewModel auth, ILiveClient live, string shortLinkHost, UpdateService updates)
+    public MainWindow(Adw.Application app, ICatalogClient catalog, Localizer localizer, Navigator navigator, GstMediaPlayer player, IMediaSession session, HttpClient http, AppSettings settings, SettingsStore store, AuthViewModel auth, ILiveClient live, string shortLinkHost, UpdateService updates, ITelemetryService telemetry)
     {
         _updates = updates;
+        _telemetry = telemetry;
         _auth = auth;
         _live = live;
         _shortLinkHost = shortLinkHost;
@@ -78,10 +79,8 @@ public sealed partial class MainWindow
         auth.PropertyChanged += (_, _) => Render();
         updates.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName != nameof(UpdateService.IsSectionVisible) || updates.IsSectionVisible == _hasSettings) return;
-            // The page is gone with the section: the settings have nothing else
-            if (!updates.IsSectionVisible && navigator.Current is Route.Settings) navigator.Back();
-            else Render();
+            // Settings always has Diagnostics; the updates card comes and goes with the server's switch
+            if (e.PropertyName == nameof(UpdateService.IsSectionVisible)) Render();
         };
     }
 
@@ -135,7 +134,6 @@ public sealed partial class MainWindow
         Updates?.Dispose();
         Updates = new UpdateViews(_updates, new UpdateText(_localizer, UpdateApp.Viewer, _updates), _window, UpdateText.Icon(UpdateApp.Viewer), () => _window.GetApplication()?.Quit());
         Updates.ForcedChanged += Render;
-        _hasSettings = _updates.IsSectionVisible;
 
         var root = Gtk.Box.New(Gtk.Orientation.Vertical, 0);
         root.Append(BuildHeader());
@@ -226,7 +224,7 @@ public sealed partial class MainWindow
         header.PackEnd(language);
 
         if (!Updates.IsForced) header.PackEnd(BuildAccount());
-        if (_hasSettings && !Updates.IsForced && _navigator.Current is not Route.Settings)
+        if (!Updates.IsForced && _navigator.Current is not Route.Settings)
         {
             var settings = Gtk.Button.NewFromIconName("emblem-system-symbolic");
             settings.SetTooltipText(_localizer["updates.settings"]);
@@ -293,7 +291,38 @@ public sealed partial class MainWindow
         return box;
     }
 
-    /// <summary>Settings: the updates. Theme and language are in the header.</summary>
+    /// <summary>Diagnostics: off until turned on; turning it off deletes what was kept.</summary>
+    private Gtk.Widget BuildDiagnostics()
+    {
+        var card = Gtk.Box.New(Gtk.Orientation.Vertical, 10);
+        card.AddCssClass("update-card");
+        var heading = Gtk.Label.New(_localizer["settings.telemetry"]);
+        heading.SetHalign(Gtk.Align.Start);
+        heading.AddCssClass("title-4");
+        card.Append(heading);
+        var off = Gtk.CheckButton.NewWithLabel(_localizer["settings.telemetry.off"]);
+        var on = Gtk.CheckButton.NewWithLabel(_localizer["settings.telemetry.on"]);
+        on.SetGroup(off);
+        (_settings.TelemetryEnabled ? on : off).SetActive(true);
+        on.OnToggled += (_, _) =>
+        {
+            if (_settings.TelemetryEnabled == on.GetActive()) return;
+            _settings.TelemetryEnabled = on.GetActive();
+            _store.Save(_settings);
+            _telemetry.SetEnabled(_settings.TelemetryEnabled);
+        };
+        card.Append(off);
+        card.Append(on);
+        var note = Gtk.Label.New(_localizer["settings.telemetry.note"]);
+        note.SetHalign(Gtk.Align.Start);
+        note.SetXalign(0);
+        note.SetWrap(true);
+        note.AddCssClass("dim-label");
+        card.Append(note);
+        return card;
+    }
+
+    /// <summary>Settings: Diagnostics, and the updates while the server's switch is on. Theme and language are in the header.</summary>
     private Gtk.Widget BuildSettings()
     {
         var column = Gtk.Box.New(Gtk.Orientation.Vertical, 18);
@@ -305,14 +334,18 @@ public sealed partial class MainWindow
         title.SetHalign(Gtk.Align.Start);
         title.AddCssClass("title-1");
         column.Append(title);
-        var card = Gtk.Box.New(Gtk.Orientation.Vertical, 14);
-        card.AddCssClass("update-card");
-        card.AddCssClass("update-settings");
-        Updates.SectionActions.SetHalign(Gtk.Align.Start);
-        card.Append(Updates.SectionBody);
-        card.Append(Updates.SectionActions);
-        column.Append(card);
-        Updates.UseSection(card);
+        column.Append(BuildDiagnostics());
+        if (_updates.IsSectionVisible)
+        {
+            var card = Gtk.Box.New(Gtk.Orientation.Vertical, 14);
+            card.AddCssClass("update-card");
+            card.AddCssClass("update-settings");
+            Updates.SectionActions.SetHalign(Gtk.Align.Start);
+            card.Append(Updates.SectionBody);
+            card.Append(Updates.SectionActions);
+            column.Append(card);
+            Updates.UseSection(card);
+        }
         var page = Gtk.ScrolledWindow.New();
         page.SetVexpand(true);
         page.SetChild(column);

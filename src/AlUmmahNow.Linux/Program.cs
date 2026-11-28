@@ -1,3 +1,4 @@
+using AlUmmahNow.CoreBridge;
 using AlUmmahNow.CoreBridge.Logging;
 using AlUmmahNow.App.I18n;
 using AlUmmahNow.App.Media;
@@ -70,6 +71,9 @@ MainWindow? viewer = null;
 bool IsBusy() => viewer?.IsLivePlaying == true;
 var updateScene = UpdateScene.FromEnvironment(localizer, UpdateInstall.Flatpak, IsBusy);
 var version = UpdateText.VersionOf(typeof(MainWindow).Assembly);
+// Opt-in crash reports and diagnostics (Settings → Diagnostics); demo mode never reports.
+var telemetry = isDemo ? NullTelemetryService.Instance
+    : CoreTelemetryService.Start(environment.VideosApi, "AlUmmahNowLinux/" + version, version, localizer.Language, Path.Combine(configHome, "alummahnow", "telemetry.json"), settings.TelemetryEnabled);
 var updateStore = new UpdateStore(Path.Combine(configHome, "alummahnow", "updates.json"));
 var app = Adw.Application.New("net.alummahnow.AlUmmahNow", Gio.ApplicationFlags.NonUnique);
 var exitCode = 0;
@@ -102,7 +106,7 @@ app.OnActivate += async (_, _) =>
         updateStore, updateInstall, version, IsBusy, new DownloadPageDelivery(new ShellBrowserLauncher()));
     var closing = new CancellationTokenSource();
     app.OnShutdown += (_, _) => closing.Cancel();
-    window = new MainWindow(app, catalog, localizer, navigator, player, session, http, settings, store, auth, live, environment.ShortLinkHost, updates);
+    window = new MainWindow(app, catalog, localizer, navigator, player, session, http, settings, store, auth, live, environment.ShortLinkHost, updates, telemetry);
     viewer = window;
     try
     {

@@ -1,5 +1,6 @@
 using AlUmmahNow.App.I18n;
 using AlUmmahNow.App.Services;
+using AlUmmahNow.CoreBridge;
 using AlUmmahNow.CoreBridge.Studio;
 using AlUmmahNow.Studio.Shell;
 using AlUmmahNow.Studio.Upload;
@@ -29,7 +30,7 @@ internal sealed class SettingsPage
     private readonly Func<StudioAccount, Task> _signOut;
 
     public SettingsPage(Localizer l, AppSettings settings, SettingsStore store, StudioShellViewModel shell, UploadsViewModel uploads,
-        Func<Task<string?>> chooseFolder, Func<StudioAccount, Task> signOut, Func<Task> addPasskey, string version, UpdateViews updates, Action restart)
+        Func<Task<string?>> chooseFolder, Func<StudioAccount, Task> signOut, Func<Task> addPasskey, string version, UpdateViews updates, Action restart, ITelemetryService telemetry)
     {
         _l = l;
         _shell = shell;
@@ -68,6 +69,13 @@ internal sealed class SettingsPage
             store.Save(settings);
             Changed();
         }));
+        // Diagnostics: off until turned on; turning it off deletes what was kept.
+        left.Children.Add(Choice(l["settings.telemetry"], new[] { l["settings.telemetry.off"], l["settings.telemetry.on"] }, settings.TelemetryEnabled ? 1 : 0, i =>
+        {
+            settings.TelemetryEnabled = i == 1;
+            store.Save(settings);
+            telemetry.SetEnabled(settings.TelemetryEnabled);
+        }, l["settings.telemetry.note"]));
         // Only while the server's switch is on
         _updatesCard = LanternGlass.Card(updates.SectionBody, updates.SectionActions);
         left.Children.Add(_updatesCard);
@@ -161,7 +169,7 @@ internal sealed class SettingsPage
     }
 
     /// <summary>A card with a heading and one choice among options.</summary>
-    private static FrameworkElement Choice(string title, string[] options, int selected, Action<int> picked)
+    private static FrameworkElement Choice(string title, string[] options, int selected, Action<int> picked, string? note = null)
     {
         var body = new StackPanel { Spacing = 8 };
         body.Children.Add(Heading(title));
@@ -172,6 +180,8 @@ internal sealed class SettingsPage
             if (radios.SelectedIndex >= 0) picked(radios.SelectedIndex);
         };
         body.Children.Add(radios);
+        if (note != null)
+            body.Children.Add(new TextBlock { Text = note, TextWrapping = TextWrapping.Wrap, TextReadingOrder = TextReadingOrder.UseFlowDirection, Opacity = 0.75 });
         return LanternGlass.Card(body);
     }
 

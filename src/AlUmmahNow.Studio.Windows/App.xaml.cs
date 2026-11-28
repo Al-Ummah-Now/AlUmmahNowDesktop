@@ -51,9 +51,13 @@ public sealed partial class App : Application
         {
             Log.For("app").Error("unhandled exception", e.Exception);
             File.AppendAllText(ResultPath + ".crash.txt", LogScrubber.Scrub(e.Exception.ToString()) + "\n");
+            _telemetry.ReportCrash(e.Exception);
         };
 
     }
+
+    /// <summary>Opt-in crash reports (Settings → Diagnostics); nothing until OnLaunched starts it.</summary>
+    private static ITelemetryService _telemetry = NullTelemetryService.Instance;
 
     private static string ResultPath => Environment.GetEnvironmentVariable("AUN_RESULT") ?? "aun-studio-result.txt";
 
@@ -96,6 +100,8 @@ public sealed partial class App : Application
         // The saved language (Settings), Arabic by default; CI and screenshots force one with AUN_LANG.
         var localizer = new Localizer(Environment.GetEnvironmentVariable("AUN_LANG") is { Length: > 0 } l ? l : settings.Language);
         var userAgent = "AlUmmahNowStudioWindows/" + version;
+        // Demo mode and CI scenarios never report.
+        if (!demo) _telemetry = CoreTelemetryService.Start(environment.VideosApi, userAgent, version, localizer.Language, Path.Combine(dataRoot, "telemetry.json"), settings.TelemetryEnabled);
 
         // The passkey sheet is modal to the Studio window; its handle is filled in once it exists.
         var hwnd = IntPtr.Zero;
@@ -198,7 +204,7 @@ public sealed partial class App : Application
         {
             updates.AskRestart();
             WindowsEnd.Close();
-        });
+        }, _telemetry);
         window.AddPage(StudioPages.Settings, localizer["studio.tab.settings"], Symbol.Setting, settingsPage.Root);
         window.UsePages(pages);
         window.SearchRequested += (_, q) => videos.SearchFor(q);
