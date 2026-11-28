@@ -333,7 +333,7 @@ public sealed partial class Shell
             _telemetry.SetEnabled(_settings.TelemetryEnabled);
         };
         body.Children.Add(choice);
-        body.Children.Add(new TextBlock { Text = _localizer["settings.telemetry.note"], TextWrapping = TextWrapping.Wrap, TextReadingOrder = TextReadingOrder.UseFlowDirection, Opacity = 0.75 });
+        body.Children.Add(new TextBlock { Text = _localizer["settings.telemetry.note"], TextWrapping = TextWrapping.Wrap, TextReadingOrder = TextReadingOrder.UseFlowDirection });
         return Updates.Card(body);
     }
 

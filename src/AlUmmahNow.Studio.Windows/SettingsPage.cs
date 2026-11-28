@@ -181,7 +181,7 @@ internal sealed class SettingsPage
         };
         body.Children.Add(radios);
         if (note != null)
-            body.Children.Add(new TextBlock { Text = note, TextWrapping = TextWrapping.Wrap, TextReadingOrder = TextReadingOrder.UseFlowDirection, Opacity = 0.75 });
+            body.Children.Add(new TextBlock { Text = note, TextWrapping = TextWrapping.Wrap, TextReadingOrder = TextReadingOrder.UseFlowDirection, Foreground = LanternGlass.Res("StudioMutedBrush") });
         return LanternGlass.Card(body);
     }
 
