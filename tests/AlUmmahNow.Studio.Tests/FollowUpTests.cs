@@ -153,7 +153,7 @@ public sealed class FollowUpTests
     {
         var demo = new DemoTransport(DemoTransport.FeaturesOff("upload,analytics"));
         var api = new StudioApiClient(demo);
-        var shell = new StudioShellViewModel(new DemoAccounts(), api, new FeaturesClient(demo));
+        var shell = new StudioShellViewModel(new DemoAccounts("en"), api, new FeaturesClient(demo));
         var analytics = new AnalyticsViewModel(shell, api);
         var pages = new StudioPages(shell, analytics, StudioPages.Uploads);
         var videos = new VideosViewModel(shell, api, () => Array.Empty<string>(), _ => { });

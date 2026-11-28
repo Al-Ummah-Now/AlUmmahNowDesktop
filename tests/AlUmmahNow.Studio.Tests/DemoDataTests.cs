@@ -151,9 +151,11 @@ public class DemoDataTests
             Assert.Null(new DemoTransport(null, dir.FullName, language).Avatar);
             var withAvatars = new DemoTransport(null, dir.FullName, language, withAvatars: true);
             Assert.EndsWith("/" + file, withAvatars.Avatar);
-            Assert.All(await new StudioApiClient(withAvatars).ListMyChannelsAsync(), c => Assert.Equal(withAvatars.Avatar, c.AvatarUrl));
-            Assert.All(new DemoAccounts(withAvatars.Avatar).Accounts, a => Assert.Equal(withAvatars.Avatar, a.AvatarUrl));
-            Assert.All(new DemoAccounts().Accounts, a => Assert.Null(a.AvatarUrl));
+            var channels = await new StudioApiClient(withAvatars).ListMyChannelsAsync();
+            Assert.All(channels, c => Assert.Equal(withAvatars.Avatar, c.AvatarUrl));
+            Assert.Equal(channels.Single(c => c.IsMain).Name, new DemoAccounts(language).Active?.DisplayName);
+            Assert.All(new DemoAccounts(language, withAvatars.Avatar).Accounts, a => Assert.Equal(withAvatars.Avatar, a.AvatarUrl));
+            Assert.All(new DemoAccounts(language).Accounts, a => Assert.Null(a.AvatarUrl));
         }
         finally
         {
