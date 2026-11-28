@@ -81,7 +81,7 @@ if (!demo &&
     settings.TelemetryEnabled = false;
     telemetry.SetConsent(AlUmmahNow.CoreBridge.TelemetryConsent.Off);
 }
-_ = Task.Run(() => telemetry.Track("app_open"));
+telemetry.EnqueueTrack("app_open");
 AppDomain.CurrentDomain.UnhandledException += (_, e) =>
 {
     if (e.ExceptionObject is Exception ex) telemetry.ReportCrash(ex.GetType().FullName ?? ex.GetType().Name, ex.GetType().Name, ex.StackTrace);
@@ -211,15 +211,6 @@ app.OnActivate += (_, _) =>
     app.OnShutdown += (_, _) =>
     {
         closing.Cancel();
-        telemetry.Persist();
-        using var exitFlushCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-        try
-        {
-            Task.Run(() => telemetry.FlushAsync(exitFlushCts.Token)).Wait(TimeSpan.FromSeconds(2));
-        }
-        catch
-        {
-        }
         uploadsVm.Dispose();
     };
 
@@ -285,4 +276,15 @@ app.OnActivate += (_, _) =>
 };
 
 var rc = app.RunWithSynchronizationContext(null);
+telemetry.Persist();
+using (var exitFlushCts = new CancellationTokenSource(TimeSpan.FromSeconds(2)))
+{
+    try
+    {
+        Task.Run(() => telemetry.FlushAsync(exitFlushCts.Token)).Wait(TimeSpan.FromSeconds(2));
+    }
+    catch
+    {
+    }
+}
 return rc != 0 ? rc : exitCode;

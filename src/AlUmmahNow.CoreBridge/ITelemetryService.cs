@@ -54,6 +54,18 @@ namespace AlUmmahNow.CoreBridge
         bool SetConsent(TelemetryConsent consent, string? pendingConsentToken, Func<bool>? confirmPendingConsent);
         void Track(string name, IReadOnlyDictionary<string, object>? properties = null);
         void TrackError(string code, IReadOnlyDictionary<string, object>? properties = null);
+        /// <summary>
+        /// Captures the current consent state and analytics epoch synchronously (without disk/lock I/O)
+        /// and dispatches <see cref="Track"/> off the caller thread only if consent was already Full and
+        /// stays in the same epoch. Never records an event that happened before opt-in or across revocation.
+        /// </summary>
+        void EnqueueTrack(string name, IReadOnlyDictionary<string, object>? properties = null);
+        /// <summary>
+        /// Captures the current consent state and analytics epoch synchronously (without disk/lock I/O)
+        /// and dispatches <see cref="TrackError"/> off the caller thread only if consent was already Full and
+        /// stays in the same epoch. Never records an error that happened before opt-in or across revocation.
+        /// </summary>
+        void EnqueueTrackError(string code, IReadOnlyDictionary<string, object>? properties = null);
         void AddBreadcrumb(string category, string message, TelemetryBreadcrumbSeverity level = TelemetryBreadcrumbSeverity.Info);
         void ReportCrash(string kind, string message, string? stack = null, bool fromPreviousSession = false);
         void Persist();
@@ -77,6 +89,8 @@ namespace AlUmmahNow.CoreBridge
         public bool SetConsent(TelemetryConsent consent, string? pendingConsentToken, Func<bool>? confirmPendingConsent) => consent == TelemetryConsent.Off;
         public void Track(string name, IReadOnlyDictionary<string, object>? properties = null) { }
         public void TrackError(string code, IReadOnlyDictionary<string, object>? properties = null) { }
+        public void EnqueueTrack(string name, IReadOnlyDictionary<string, object>? properties = null) { }
+        public void EnqueueTrackError(string code, IReadOnlyDictionary<string, object>? properties = null) { }
         public void AddBreadcrumb(string category, string message, TelemetryBreadcrumbSeverity level = TelemetryBreadcrumbSeverity.Info) { }
         public void ReportCrash(string kind, string message, string? stack = null, bool fromPreviousSession = false) { }
         public void Persist() { }

@@ -131,26 +131,14 @@ app.OnActivate += async (_, _) =>
     _ = mpris.StartAsync();
 
     var player = new GstMediaPlayer(telemetry);
-    _ = Task.Run(() => telemetry.Track("app_open"));
+    telemetry.EnqueueTrack("app_open");
     MainWindow? window = null;
     app.OnShutdown += (_, _) => window?.Close();
     var updates = updateScene?.Service ?? new UpdateService(
         new CoreUpdateChecker(environment.VideosApi, "viewer", "linux", version, "AlUmmahNowLinux/" + version, updateStore.Load().Core),
         updateStore, updateInstall, version, IsBusy, new DownloadPageDelivery(new ShellBrowserLauncher()));
     var closing = new CancellationTokenSource();
-    app.OnShutdown += (_, _) =>
-    {
-        closing.Cancel();
-        telemetry.Persist();
-        using var exitFlushCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-        try
-        {
-            Task.Run(() => telemetry.FlushAsync(exitFlushCts.Token)).Wait(TimeSpan.FromSeconds(2));
-        }
-        catch
-        {
-        }
-    };
+    app.OnShutdown += (_, _) => closing.Cancel();
     window = new MainWindow(app, catalog, localizer, navigator, player, session, http, settings, store, auth, live, environment.ShortLinkHost, updates, telemetry);
     viewer = window;
     try
@@ -219,4 +207,15 @@ app.OnActivate += async (_, _) =>
 };
 
 var rc = app.RunWithSynchronizationContext(null);
+telemetry.Persist();
+using (var exitFlushCts = new CancellationTokenSource(TimeSpan.FromSeconds(2)))
+{
+    try
+    {
+        Task.Run(() => telemetry.FlushAsync(exitFlushCts.Token)).Wait(TimeSpan.FromSeconds(2));
+    }
+    catch
+    {
+    }
+}
 return rc != 0 ? rc : exitCode;

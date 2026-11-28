@@ -199,13 +199,15 @@ public sealed class CoreTelemetryService : ITelemetryService
 
     private TelemetryClient CreateClient(string? bufferPath)
     {
-        EnsurePrivateBufferDirectory(bufferPath);
+        var effectivePath = !string.IsNullOrWhiteSpace(bufferPath) && EnsurePrivateBufferDirectory(bufferPath)
+            ? bufferPath
+            : null;
         var config = new TelemetryClientConfig(
             _app,
             _ingestUrl,
             _userAgent,
             _clientHeader,
-            bufferPath,
+            effectivePath,
             null,
             null);
         return new TelemetryClient(config);
@@ -228,18 +230,19 @@ public sealed class CoreTelemetryService : ITelemetryService
         }
     }
 
-    private static void EnsurePrivateBufferDirectory(string? bufferPath)
+    private static bool EnsurePrivateBufferDirectory(string? bufferPath)
     {
-        if (string.IsNullOrWhiteSpace(bufferPath)) return;
+        if (string.IsNullOrWhiteSpace(bufferPath)) return true;
         var dir = Path.GetDirectoryName(bufferPath);
-        if (string.IsNullOrEmpty(dir)) return;
+        if (string.IsNullOrEmpty(dir)) return true;
         try
         {
             if (OperatingSystem.IsWindows())
             {
                 if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
-                return;
+                return true;
             }
+            if (IsSharedTempDirectory(dir)) return false;
             const UnixFileMode ownerDirMode =
                 UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
             const UnixFileMode nonOwnerMask =
@@ -249,17 +252,17 @@ public sealed class CoreTelemetryService : ITelemetryService
             {
                 Directory.CreateDirectory(dir, ownerDirMode);
             }
-            if (!IsSharedTempDirectory(dir))
+            var current = File.GetUnixFileMode(dir);
+            if ((current & nonOwnerMask) != 0)
             {
-                var current = File.GetUnixFileMode(dir);
-                if ((current & nonOwnerMask) != 0)
-                {
-                    File.SetUnixFileMode(dir, current & ~nonOwnerMask);
-                }
+                File.SetUnixFileMode(dir, current & ~nonOwnerMask);
+                current = File.GetUnixFileMode(dir);
             }
+            return (current & nonOwnerMask) == 0;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
         {
+            return false;
         }
     }
 
@@ -6711,6 +6714,11 @@ public sealed class CoreTelemetryService : ITelemetryService
                 }
                 else
                 {
+                    if (!string.IsNullOrWhiteSpace(_bufferPath) && !EnsurePrivateBufferDirectory(_activeBufferPath))
+                    {
+                        Log.For("telemetry").Warn("refusing to enable telemetry: buffer directory is not private");
+                        return false;
+                    }
                     string? externalToken = null;
                     if (_externalConsentToken != null)
                     {
@@ -6954,6 +6962,35 @@ public sealed class CoreTelemetryService : ITelemetryService
         }, captureEpoch);
     }
 
+    public void EnqueueTrack(string name, IReadOnlyDictionary<string, object>? properties = null)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return;
+        long captureEpoch;
+        lock (_gate)
+        {
+            if (_disposeRequested || _clientDisposed || _consent != TelemetryConsent.Full) return;
+            captureEpoch = _analyticsEpoch;
+        }
+        var snapshot = properties != null ? new Dictionary<string, object>(properties) : null;
+        _ = Task.Run(() =>
+        {
+            var safeName = SanitizePropertyKey(name);
+            if (string.IsNullOrWhiteSpace(safeName)) return;
+            var json = SerializeProperties(snapshot);
+            WithPersistingConsent(requiresFull: true, () =>
+            {
+                try
+                {
+                    _client.Track(safeName, json);
+                }
+                catch (AunException ex)
+                {
+                    Log.For("telemetry").Warn("telemetry track skipped: " + ex.Message);
+                }
+            }, captureEpoch);
+        });
+    }
+
     public void TrackError(string code, IReadOnlyDictionary<string, object>? properties = null)
     {
         if (string.IsNullOrWhiteSpace(code)) return;
@@ -6979,6 +7016,35 @@ public sealed class CoreTelemetryService : ITelemetryService
                 Log.For("telemetry").Warn("telemetry error skipped: " + ex.Message);
             }
         }, captureEpoch);
+    }
+
+    public void EnqueueTrackError(string code, IReadOnlyDictionary<string, object>? properties = null)
+    {
+        if (string.IsNullOrWhiteSpace(code)) return;
+        long captureEpoch;
+        lock (_gate)
+        {
+            if (_disposeRequested || _clientDisposed || _consent != TelemetryConsent.Full) return;
+            captureEpoch = _analyticsEpoch;
+        }
+        var snapshot = properties != null ? new Dictionary<string, object>(properties) : null;
+        _ = Task.Run(() =>
+        {
+            var safeCode = SanitizePropertyKey(code);
+            if (string.IsNullOrWhiteSpace(safeCode)) return;
+            var json = SerializeProperties(snapshot);
+            WithPersistingConsent(requiresFull: true, () =>
+            {
+                try
+                {
+                    _client.TrackError(safeCode, json);
+                }
+                catch (AunException ex)
+                {
+                    Log.For("telemetry").Warn("telemetry error skipped: " + ex.Message);
+                }
+            }, captureEpoch);
+        });
     }
 
     public void AddBreadcrumb(string category, string message, TelemetryBreadcrumbSeverity level = TelemetryBreadcrumbSeverity.Info)
@@ -8577,6 +8643,8 @@ public sealed class CoreTelemetryService : ITelemetryService
 
         public void Track(string name, IReadOnlyDictionary<string, object>? properties = null) { }
         public void TrackError(string code, IReadOnlyDictionary<string, object>? properties = null) { }
+        public void EnqueueTrack(string name, IReadOnlyDictionary<string, object>? properties = null) { }
+        public void EnqueueTrackError(string code, IReadOnlyDictionary<string, object>? properties = null) { }
         public void AddBreadcrumb(string category, string message, TelemetryBreadcrumbSeverity level = TelemetryBreadcrumbSeverity.Info) { }
         public void ReportCrash(string kind, string message, string? stack = null, bool fromPreviousSession = false) { }
         public void Persist() { }

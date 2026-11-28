@@ -121,8 +121,7 @@ public sealed class GstMediaPlayer : IMediaPlayer
                 SetState(PlayerState.Failed);
                 if (_telemetry != null)
                 {
-                    var telemetry = _telemetry;
-                    _ = Task.Run(() => telemetry.TrackError("playback_failed", new Dictionary<string, object> { ["backend"] = "gstreamer" }));
+                    _telemetry.EnqueueTrackError("playback_failed", new Dictionary<string, object> { ["backend"] = "gstreamer" });
                 }
                 break;
         }

@@ -33,11 +33,11 @@ public sealed class WindowsMediaPlayer : IMediaPlayer
             if (telemetry != null)
             {
                 var errorName = e.Error.ToString();
-                _ = Task.Run(() => telemetry.TrackError("playback_failed", new Dictionary<string, object>
+                telemetry.EnqueueTrackError("playback_failed", new Dictionary<string, object>
                 {
                     ["backend"] = "winui",
                     ["error"] = errorName,
-                }));
+                });
             }
         });
         Player.MediaEnded += (_, _) => _ui.TryEnqueue(() => SetState(PlayerState.Ended));

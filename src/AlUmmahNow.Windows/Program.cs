@@ -81,48 +81,14 @@ public sealed partial class App : Application
     {
 
         var environment = AppEnvironment.Resolve(Environment.GetEnvironmentVariable("AUN_ENV"), AppEnvironment.BuildDefault);
-        var store = new SettingsStore(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AlUmmahNow", "settings.json"));
+        var dataRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AlUmmahNow");
+        var store = new SettingsStore(Path.Combine(dataRoot, "settings.json"));
         var settings = store.Load();
         if (Environment.GetEnvironmentVariable("AUN_LANG") is { Length: > 0 } lang) settings.Language = lang;
         if (Enum.TryParse<ThemePreference>(Environment.GetEnvironmentVariable("AUN_THEME"), true, out var theme)) settings.Theme = theme;
         var automation = Environment.GetEnvironmentVariable("AUN_AUTOMATION") ?? "";
         var exitAfter = int.TryParse(Environment.GetEnvironmentVariable("AUN_EXIT_AFTER"), out var s) ? s : 0;
-
-        var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
-        http.DefaultRequestHeaders.UserAgent.ParseAdd("AlUmmahNowWindows/0.1");
-        // AUN_DEMO=1: fixture catalog for the store screenshots (no network, never in a normal launch).
-        ICatalogClient catalog = Environment.GetEnvironmentVariable("AUN_DEMO") == "1"
-            ? new DemoCatalogClient(Environment.GetEnvironmentVariable("AUN_DEMO_THUMBS"), settings.Language)
-            : new HttpCatalogClient(http, environment.VideosApi);
-        // CI's watch scenario plays a local fixture (AUN_FIXTURE_MEDIA), never a remote stream.
-        if (Environment.GetEnvironmentVariable("AUN_FIXTURE_MEDIA") is { Length: > 0 } fixtureMedia) catalog = new FixtureMediaCatalog(catalog, fixtureMedia, settings.Language);
-        var localizer = new Localizer(settings.Language);
-        var navigator = new Navigator();
-        var secureStore = new DpapiSecureStore(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AlUmmahNow", "secure"));
-        IAuthSession authSession = Environment.GetEnvironmentVariable("AUN_DEMO_AUTH") is { Length: > 0 } demoAuth
-            ? new DemoAuthSession(demoAuth == "waiting")
-            : new PkceAuthSession(http, environment.AuthIssuer, environment.ViewerClientId, secureStore, new ShellBrowserLauncher(), localizer["auth.browser.done"]);
-        var auth = new AuthViewModel(authSession);
-        auth.Restore();
-        // AUN_DEMO_LIVE=1: fixture streams for review frames and the live scenarios (no network, never in a normal launch).
-        ILiveClient live = Environment.GetEnvironmentVariable("AUN_DEMO_LIVE") is "1" or "off"
-            ? new DemoLiveClient(Environment.GetEnvironmentVariable("AUN_FIXTURE_MEDIA"), settings.Language,
-                Environment.GetEnvironmentVariable("AUN_DEMO_LIVE") == "off", Environment.GetEnvironmentVariable("AUN_DEMO_REMIND") == "fail")
-            : new HttpLiveClient(http, environment.VideosApi, HttpLiveClient.TokenOf(authSession));
-        var coreVersion = CoreRuntime.VersionOrNone();
-        var ui = DispatcherQueue.GetForCurrentThread();
-        var player = new WindowsMediaPlayer(ui);
-        var session = new SmtcSession(player.Player, ui);
-#if UPDATE_TEST
-        // The test's live stream is a short file
-        player.Player.IsLoopingEnabled = true;
-#endif
-        // The check for a new version: none in a demo, or in a build that is no release.
         var version = UpdateText.VersionOf(typeof(App).Assembly);
-        Shell? shown = null;
-        bool IsBusy() => shown?.IsLivePlaying == true;
-        var updateScene = UpdateScene.FromEnvironment(localizer, UpdateInstall.Msix, IsBusy);
-        var dataRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AlUmmahNow");
         var isDemo = Environment.GetEnvironmentVariable("AUN_DEMO") == "1"
             || Environment.GetEnvironmentVariable("AUN_DEMO_AUTH") is { Length: > 0 }
             || Environment.GetEnvironmentVariable("AUN_DEMO_LIVE") is "1" or "off"
@@ -153,9 +119,41 @@ public sealed partial class App : Application
             settings.TelemetryEnabled = false;
             _telemetry.SetConsent(AlUmmahNow.CoreBridge.TelemetryConsent.Off);
         }
-        player.Telemetry = _telemetry;
-        var startupTelemetry = _telemetry;
-        _ = Task.Run(() => startupTelemetry.Track("app_open"));
+
+        var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        http.DefaultRequestHeaders.UserAgent.ParseAdd("AlUmmahNowWindows/0.1");
+        // AUN_DEMO=1: fixture catalog for the store screenshots (no network, never in a normal launch).
+        ICatalogClient catalog = Environment.GetEnvironmentVariable("AUN_DEMO") == "1"
+            ? new DemoCatalogClient(Environment.GetEnvironmentVariable("AUN_DEMO_THUMBS"), settings.Language)
+            : new HttpCatalogClient(http, environment.VideosApi);
+        // CI's watch scenario plays a local fixture (AUN_FIXTURE_MEDIA), never a remote stream.
+        if (Environment.GetEnvironmentVariable("AUN_FIXTURE_MEDIA") is { Length: > 0 } fixtureMedia) catalog = new FixtureMediaCatalog(catalog, fixtureMedia, settings.Language);
+        var localizer = new Localizer(settings.Language);
+        var navigator = new Navigator();
+        var secureStore = new DpapiSecureStore(Path.Combine(dataRoot, "secure"));
+        IAuthSession authSession = Environment.GetEnvironmentVariable("AUN_DEMO_AUTH") is { Length: > 0 } demoAuth
+            ? new DemoAuthSession(demoAuth == "waiting")
+            : new PkceAuthSession(http, environment.AuthIssuer, environment.ViewerClientId, secureStore, new ShellBrowserLauncher(), localizer["auth.browser.done"]);
+        var auth = new AuthViewModel(authSession);
+        auth.Restore();
+        // AUN_DEMO_LIVE=1: fixture streams for review frames and the live scenarios (no network, never in a normal launch).
+        ILiveClient live = Environment.GetEnvironmentVariable("AUN_DEMO_LIVE") is "1" or "off"
+            ? new DemoLiveClient(Environment.GetEnvironmentVariable("AUN_FIXTURE_MEDIA"), settings.Language,
+                Environment.GetEnvironmentVariable("AUN_DEMO_LIVE") == "off", Environment.GetEnvironmentVariable("AUN_DEMO_REMIND") == "fail")
+            : new HttpLiveClient(http, environment.VideosApi, HttpLiveClient.TokenOf(authSession));
+        var coreVersion = CoreRuntime.VersionOrNone();
+        var ui = DispatcherQueue.GetForCurrentThread();
+        var player = new WindowsMediaPlayer(ui, _telemetry);
+        var session = new SmtcSession(player.Player, ui);
+#if UPDATE_TEST
+        // The test's live stream is a short file
+        player.Player.IsLoopingEnabled = true;
+#endif
+        // The check for a new version: none in a demo, or in a build that is no release.
+        Shell? shown = null;
+        bool IsBusy() => shown?.IsLivePlaying == true;
+        var updateScene = UpdateScene.FromEnvironment(localizer, UpdateInstall.Msix, IsBusy);
+        _telemetry.EnqueueTrack("app_open");
         var updateStore = new UpdateStore(Path.Combine(dataRoot, "updates.json"));
         var updates = updateScene?.Service ?? WindowsInstall.Service("viewer", environment.VideosApi, version, "AlUmmahNowWindows/" + version,
             dataRoot, updateStore, isDemo, IsBusy, WindowsEnd.Close);

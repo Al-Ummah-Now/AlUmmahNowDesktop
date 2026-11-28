@@ -3338,6 +3338,16 @@ public class CoreTelemetryServiceTests
             Assert.Equal(TelemetryConsent.Off, service.Consent);
             service.ReportCrash("SuppressedException", "should not record");
             Assert.Equal(TelemetryConsent.Off, service.Consent);
+
+            // EnqueueTrackError drops events captured while telemetry is off (never recorded after later opt-in).
+            service.EnqueueTrackError("pre_opt_in_error", new Dictionary<string, object> { ["backend"] = "winui" });
+            Volatile.Write(ref suppressed, false);
+            Volatile.Write(ref sharedToken, "enabled:genC");
+            Assert.True(service.SetConsent(TelemetryConsent.Full));
+            Thread.Sleep(100);
+            service.Persist();
+            var afterOptIn = File.ReadAllText(service.ActiveBufferPathForTesting!);
+            Assert.DoesNotContain("pre_opt_in_error", afterOptIn);
         }
         finally
         {
