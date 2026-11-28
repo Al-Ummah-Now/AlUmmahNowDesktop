@@ -8377,6 +8377,8 @@ public sealed class CoreTelemetryService : ITelemetryService
         "dob", "birthdate", "dateofbirth",
         "firstname", "lastname", "fullname", "displayname", "givenname", "familyname",
         "username", "passport", "session", "login",
+        "userid", "accountid", "memberid", "profileid", "customerid",
+        "personid", "subscriberid", "deviceid", "uid", "handle",
     };
 
     private static readonly string[] HighValueKeySubstrings =
@@ -8590,7 +8592,10 @@ public sealed class CoreTelemetryService : ITelemetryService
     private static readonly HashSet<string> MultiWordSensitiveSegments = new(StringComparer.Ordinal)
     {
         "fullname", "displayname", "firstname", "lastname", "givenname", "familyname",
-        "address", "street", "streetaddress", "homeaddress", "passphrase", "pass", "password", "passwd",
+        "username", "login", "address", "street", "streetaddress", "homeaddress",
+        "passphrase", "pass", "password", "passwd", "pwd",
+        "phone", "phonenumber", "mobile", "tel", "telephone",
+        "card", "creditcard", "iban", "ssn", "dob", "birthdate", "dateofbirth", "passport",
     };
 
     private static bool IsMultiWordSensitiveKey(ReadOnlySpan<char> key)
@@ -8604,35 +8609,73 @@ public sealed class CoreTelemetryService : ITelemetryService
         return false;
     }
 
-    private static readonly Regex MultiWordValueRegex = new(
-        @"(?<![A-Za-z0-9_])((?:[A-Za-z0-9_.-]|\\u[0-9A-Fa-f]{4}){2,64})((?:\\?[""']|[\u201D\u2019\u00BB\u300D\u300F])?\s*[=:]\s*)(?![""'\u201C\u2018\u00AB\u201E\u300C\u300E\\])([^\r\n,;}\]]+)",
+    private const string RedactedSentinel = "__AUN_REDACTED__";
+
+    private static readonly Regex MultiWordKeySepRegex = new(
+        @"(?<![A-Za-z0-9_])((?:[A-Za-z0-9_.-]|\\u[0-9A-Fa-f]{4}){2,64})((?:\\?[""']|[\u201D\u2019\u00BB\u300D\u300F])?\s*[=:]\s*)",
         RegexOptions.Compiled);
 
     private static readonly Regex NextKeyValueBoundaryRegex = new(
-        @"\s+(?:[A-Za-z0-9_.-]{2,48}\s*[=:])",
+        @"\G(?:[ \t]+|[,;][ \t]*)(?:[A-Za-z0-9_.-]|\\u[0-9A-Fa-f]{4}){2,48}(?:\\?[""']|[\u201D\u2019\u00BB\u300D\u300F])?\s*[=:]",
         RegexOptions.Compiled);
 
-    private static string ScrubUnquotedMultiWordSensitiveValues(string text, bool quoteReplacement) =>
-        MultiWordValueRegex.Replace(text, m =>
+    private static string ScrubUnquotedMultiWordSensitiveValues(string text, string replacement)
+    {
+        StringBuilder? sb = null;
+        var copied = 0;
+        var searchPos = 0;
+        while (searchPos < text.Length)
         {
-            var decodedKey = DecodeJsonUnicodeEscapes(m.Groups[1].Value);
+            var match = MultiWordKeySepRegex.Match(text, searchPos);
+            if (!match.Success) break;
+            var valStart = match.Index + match.Length;
+            searchPos = valStart;
+            if (valStart >= text.Length) break;
+            var decodedKey = DecodeJsonUnicodeEscapes(match.Groups[1].Value);
             var trimmed = decodedKey.AsSpan().Trim("\"'");
             if (trimmed.Equals("authorization", StringComparison.OrdinalIgnoreCase) ||
-                trimmed.Equals("proxy-authorization", StringComparison.OrdinalIgnoreCase))
+                trimmed.Equals("proxy-authorization", StringComparison.OrdinalIgnoreCase) ||
+                !IsMultiWordSensitiveKey(decodedKey.AsSpan()))
             {
-                return m.Value;
+                continue;
             }
-            if (!IsMultiWordSensitiveKey(decodedKey.AsSpan())) return m.Value;
-            var val = m.Groups[3].Value;
-            if (val.StartsWith("[redacted]", StringComparison.Ordinal)) return m.Value;
-            var boundary = NextKeyValueBoundaryRegex.Match(val);
-            var tail = boundary.Success ? val.Substring(boundary.Index) : string.Empty;
-            var repl = quoteReplacement ? "\"[redacted]\"" : "[redacted]";
-            return m.Groups[1].Value + m.Groups[2].Value + repl + tail;
-        });
+            var first = text[valStart];
+            if (first is '"' or '\'' or '\\' or '\u201C' or '\u2018' or '\u00AB' or '\u201E' or '\u300C' or '\u300E')
+            {
+                continue;
+            }
+            if (text.AsSpan(valStart).StartsWith("[redacted", StringComparison.Ordinal) ||
+                text.AsSpan(valStart).StartsWith(RedactedSentinel, StringComparison.Ordinal))
+            {
+                continue;
+            }
+            var valEnd = valStart;
+            while (valEnd < text.Length)
+            {
+                var ch = text[valEnd];
+                if (ch is '\r' or '\n' or '}' or ']' or '"' or '\'' or '\u201D' or '\u2019' or '\u00BB' or '\u300D' or '\u300F')
+                {
+                    break;
+                }
+                if ((ch is ' ' or '\t' or ',' or ';') && NextKeyValueBoundaryRegex.IsMatch(text, valEnd))
+                {
+                    break;
+                }
+                valEnd++;
+            }
+            if (valEnd <= valStart) continue;
+            sb ??= new StringBuilder(text.Length);
+            sb.Append(text, copied, valStart - copied).Append(replacement);
+            copied = valEnd;
+            searchPos = valEnd;
+        }
+        if (sb == null) return text;
+        sb.Append(text, copied, text.Length - copied);
+        return sb.ToString();
+    }
 
     private static readonly Regex KeyValueCredentialRegex = new(
-        @"(?<![A-Za-z0-9_])((?:[A-Za-z0-9_.-]|\\u[0-9A-Fa-f]{4}){2,64})((?:\\?[""']|[\u201D\u2019\u00BB\u300D\u300F])?\s*[=:]\s*)(\[redacted(?:-[a-z]+)?\]|\\""(?:\\\\.|[^""\\])*\\""|""(?:\\.|[^""\\])*""|'(?:\\.|[^'\\])*'|\u201C[^\u201D\r\n]*\u201D|\u2018[^\u2019\r\n]*\u2019|\u00AB[^\u00BB\r\n]*\u00BB|\u201E[^\u201D\r\n]*\u201D|\u300C[^\u300D\r\n]*\u300D|\u300E[^\u300F\r\n]*\u300F|[^\s,;}\]""'\u201C\u201D\u2018\u2019\u00AB\u00BB\u201E\u300C\u300D\u300E\u300F]+)",
+        @"(?<![A-Za-z0-9_])((?:[A-Za-z0-9_.-]|\\u[0-9A-Fa-f]{4}){2,64})((?:\\?[""']|[\u201D\u2019\u00BB\u300D\u300F])?\s*[=:]\s*)(\[redacted(?:-[a-z]+)?\]|__AUN_REDACTED__|""__AUN_REDACTED__""|\\""(?:\\\\.|[^""\\])*\\""|""(?:\\.|[^""\\])*""|'(?:\\.|[^'\\])*'|\u201C[^\u201D\r\n]*\u201D|\u2018[^\u2019\r\n]*\u2019|\u00AB[^\u00BB\r\n]*\u00BB|\u201E[^\u201D\r\n]*\u201D|\u300C[^\u300D\r\n]*\u300D|\u300E[^\u300F\r\n]*\u300F|[^\s,;}\]""'\u201C\u201D\u2018\u2019\u00AB\u00BB\u201E\u300C\u300D\u300E\u300F]+)",
         RegexOptions.Compiled);
 
     private static string DecodeJsonUnicodeEscapes(string raw)
@@ -8657,7 +8700,7 @@ public sealed class CoreTelemetryService : ITelemetryService
         return sb.ToString();
     }
 
-    private static string ScrubSensitiveKeyValues(string text, bool quoteReplacement) =>
+    private static string ScrubSensitiveKeyValues(string text, string replacement) =>
         KeyValueCredentialRegex.Replace(text, m =>
         {
             var decodedKey = DecodeJsonUnicodeEscapes(m.Groups[1].Value);
@@ -8669,21 +8712,38 @@ public sealed class CoreTelemetryService : ITelemetryService
             }
             if (!IsSensitiveKeyName(decodedKey.AsSpan())) return m.Value;
             var val = m.Groups[3].Value;
-            if (val.StartsWith("[redacted", StringComparison.Ordinal) || val == "\"[redacted]\"") return m.Value;
-            var repl = quoteReplacement ? "\"[redacted]\"" : "[redacted]";
+            if (val.StartsWith("[redacted", StringComparison.Ordinal) ||
+                val == "\"[redacted]\"" ||
+                val == RedactedSentinel ||
+                val == "\"" + RedactedSentinel + "\"")
+            {
+                return m.Value;
+            }
+            var preserveQuotes = val.Length >= 2 && val[0] == '"' && val[val.Length - 1] == '"';
+            var repl = preserveQuotes ? "\"" + replacement + "\"" : replacement;
             return m.Groups[1].Value + m.Groups[2].Value + repl;
         });
+
+    private static readonly Regex WindowsDriveRelativePathRegex = new(
+        @"(?<![A-Za-z0-9_:])[A-Za-z]:(?![/\\])(?!\d+:\d+)[A-Za-z_.][A-Za-z0-9_.\\/-]+",
+        RegexOptions.Compiled);
+
+    private static readonly Regex SpaceDelimitedCredentialRegex = new(
+        @"(?<![A-Za-z0-9_])((?:api[_-]?key|api[_-]?token|access[_-]?token|refresh[_-]?token|id[_-]?token|auth[_-]?token|session[_-]?token|security[_-]?token|client[_-]?secret|private[_-]?key|secret[_-]?key|access[_-]?key|verification[_-]?code|auth[_-]?code|recovery[_-]?code|passphrase|password|passwd|passcode|credential|credentials|token|secret|jwt|otp|pin|pwd)[ \t]+)(?!\[redacted(?:-[a-z]+)?\])(?!""\[redacted\]"")(?:\\""(?:\\\\.|[^""\\])*\\""|""(?:\\.|[^""\\])*""|'(?:\\.|[^'\\])*'|\u201C[^\u201D\r\n]*\u201D|\u2018[^\u2019\r\n]*\u2019|[^\s,;}\]""'=:\u201C\u201D\u2018\u2019]+)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static string SanitizeDiagnosticText(string text)
     {
         var pre = RedactPercentEncodedUrls(text);
-        pre = ScrubUnquotedMultiWordSensitiveValues(pre, quoteReplacement: true);
-        pre = ScrubSensitiveKeyValues(pre, quoteReplacement: true);
-        var safe = SanitizeLocalPaths(pre);
-        safe = ScrubUnquotedMultiWordSensitiveValues(safe, quoteReplacement: false);
-        safe = ScrubSensitiveKeyValues(safe, quoteReplacement: false);
+        pre = ScrubUnquotedMultiWordSensitiveValues(pre, RedactedSentinel);
+        pre = ScrubSensitiveKeyValues(pre, RedactedSentinel);
+        var safe = SanitizeLocalPaths(pre).Replace(RedactedSentinel, "[redacted]", StringComparison.Ordinal);
+        safe = ScrubUnquotedMultiWordSensitiveValues(safe, "[redacted]");
+        safe = ScrubSensitiveKeyValues(safe, "[redacted]");
+        safe = SpaceDelimitedCredentialRegex.Replace(safe, "$1[redacted]");
         safe = Ipv6InKeyRegex.Replace(safe, "[redacted-ip]");
         safe = Ipv4InKeyRegex.Replace(safe, "[redacted-ip]");
+        safe = WindowsDriveRelativePathRegex.Replace(safe, "[redacted-path]");
         safe = ScrubUnicodePhoneNumbers(safe);
         return safe;
     }

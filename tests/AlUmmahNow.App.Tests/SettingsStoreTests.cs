@@ -398,6 +398,29 @@ public class SettingsStoreTests
                 // Once another window opts out, the failure clears.
                 Assert.Equal(SettingsStore.TelemetryOptOutResult.Saved, otherStore.SaveTelemetryOptOut());
                 Assert.False(store.IsTelemetryDisableSaveFailed());
+
+                // Fresh process starts with saved consent, loses directory access before opting out,
+                // and then process B opts out and starts a brand-new opt-in before A checks again:
+                // A cached the startup generation and clears the stale failure once B's newer generation appears.
+                Assert.True(otherStore.SaveTelemetryEnabled(true));
+                var freshStore = new SettingsStore(settingsPath);
+                Assert.True(freshStore.LoadTelemetryEnabled());
+                File.SetUnixFileMode(dir, UnixFileMode.None);
+                try
+                {
+                    Assert.Equal(SettingsStore.TelemetryOptOutResult.SaveFailed, freshStore.SaveTelemetryOptOut());
+                    Assert.True(freshStore.IsTelemetryDisableSaveFailed());
+                }
+                finally
+                {
+                    File.SetUnixFileMode(dir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+                }
+                // Same generation still on disk -> failure stays active.
+                Assert.True(freshStore.IsTelemetryDisableSaveFailed());
+                // Process B opts out and re-enables with a newer generation before A observes Off.
+                Assert.Equal(SettingsStore.TelemetryOptOutResult.Saved, otherStore.SaveTelemetryOptOut());
+                Assert.True(otherStore.SaveTelemetryEnabled(true));
+                Assert.False(freshStore.IsTelemetryDisableSaveFailed());
             }
         }
         finally

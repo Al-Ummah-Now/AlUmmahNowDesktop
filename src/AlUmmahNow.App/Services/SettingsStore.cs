@@ -190,6 +190,10 @@ namespace AlUmmahNow.App.Services
                         }
                     }
                 }
+                if (token is { Length: > 0 } && pendingClaims == null)
+                {
+                    RecordKnownEnabledToken(token);
+                }
             }
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
             {
@@ -282,7 +286,9 @@ namespace AlUmmahNow.App.Services
                 using var reader = new StreamReader(stream);
                 var first = reader.ReadLine()?.Trim();
                 if (!IsValidEnabledToken(first)) return false;
-                return !HasPendingPrefixOnNextLine(reader);
+                if (HasPendingPrefixOnNextLine(reader)) return false;
+                RecordKnownEnabledToken(first);
+                return true;
             }
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
             {

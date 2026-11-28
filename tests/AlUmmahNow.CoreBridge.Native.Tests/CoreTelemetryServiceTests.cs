@@ -3200,8 +3200,10 @@ public class CoreTelemetryServiceTests
 
         var json = CoreTelemetryService.SerializeProperties(new Dictionary<string, object>
         {
-            ["quotedCred"] = "{\"challenge.verificationCode\":\"482731\"} {\"home\\u0041ddress\":\"12 Cedar Rd\"} password=\u201Corchid velvet\u201D pass=\"correct horse battery staple\" {\"pass\":\"multi word phrase\"} pwd=shortsecret token=cobalt-orchard",
-            ["personalText"] = "fullName=\"Alice Wonderland\" displayName=Alice Smith address=\"123 Main St, Apt 4\" phone_2025550123 https://example.test/password%3Dshortcredential https%3A%2F%2Fexample.test%2F%3Fcode%3Dorchid-meadow",
+            ["quotedCred"] = "{\"challenge.verificationCode\":\"482731\"} {\"home\\u0041ddress\":\"12 Cedar Rd\"} status=\"password=first;second\" password=\u201Corchid velvet\u201D pass=\"correct horse battery staple\" {\"pass\":\"multi word phrase\"} pwd=shortsecret token=cobalt-orchard",
+            ["user_id"] = "alice123",
+            ["personalText"] = "fullName=\"Alice Wonderland\" displayName=Alice Smith username=Jane Doe address=\"123 Main St, Apt 4\" phone_2025550123 C:ProjectCodename https://example.test/password%3Dshortcredential https%3A%2F%2Fexample.test%2F%3Fcode%3Dorchid-meadow",
+            ["token violet7"] = "ok",
             ["http://u:p@localhost/x"] = "https://1drv.ms/u/s!Aq82F1ZLPx0K",
             ["algNone"] = "IHsiYWxnIjoibm9uZSJ9.eyJzdWIiOiJhbGljZSJ9.",
             ["longJwt"] = longSignedJwt,
@@ -3213,6 +3215,9 @@ public class CoreTelemetryServiceTests
 
         Assert.NotNull(json);
         Assert.DoesNotContain("482731", json);
+        Assert.DoesNotContain("first;second", json);
+        Assert.DoesNotContain("second", json);
+        Assert.DoesNotContain("alice123", json);
         Assert.DoesNotContain("12 Cedar Rd", json);
         Assert.DoesNotContain("orchid", json);
         Assert.DoesNotContain("velvet", json);
@@ -3226,6 +3231,10 @@ public class CoreTelemetryServiceTests
         Assert.DoesNotContain("Alice", json);
         Assert.DoesNotContain("Wonderland", json);
         Assert.DoesNotContain("Smith", json);
+        Assert.DoesNotContain("Jane", json);
+        Assert.DoesNotContain("Doe", json);
+        Assert.DoesNotContain("ProjectCodename", json);
+        Assert.DoesNotContain("violet7", json);
         Assert.DoesNotContain("orchid-meadow", json);
         Assert.DoesNotContain("Main St", json);
         Assert.DoesNotContain("u:p@localhost", json);
